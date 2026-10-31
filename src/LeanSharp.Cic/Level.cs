@@ -45,13 +45,13 @@ public sealed class Level : IEquatable<Level>
         Lhs = lhs;
         Rhs = rhs;
         ParamName = param;
-        (_hash, HasParam) = kind switch
+        (_hash, HasParam, Depth) = kind switch
         {
-            LevelKind.Zero => (0x5A5A5A5A12345678UL, false),
-            LevelKind.Succ => (Hashing.Mix(11, lhs!._hash), lhs.HasParam),
-            LevelKind.Max => (Hashing.Mix(12, lhs!._hash, rhs!._hash), lhs.HasParam || rhs.HasParam),
-            LevelKind.IMax => (Hashing.Mix(13, lhs!._hash, rhs!._hash), lhs.HasParam || rhs.HasParam),
-            LevelKind.Param => (Hashing.Mix(14, param!.Hash64), true),
+            LevelKind.Zero => (0x5A5A5A5A12345678UL, false, 0),
+            LevelKind.Succ => (Hashing.Mix(11, lhs!._hash), lhs.HasParam, lhs.Depth + 1),
+            LevelKind.Max => (Hashing.Mix(12, lhs!._hash, rhs!._hash), lhs.HasParam || rhs.HasParam, Math.Max(lhs.Depth, rhs.Depth) + 1),
+            LevelKind.IMax => (Hashing.Mix(13, lhs!._hash, rhs!._hash), lhs.HasParam || rhs.HasParam, Math.Max(lhs.Depth, rhs.Depth) + 1),
+            LevelKind.Param => (Hashing.Mix(14, param!.Hash64), true, 0),
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
     }
@@ -70,6 +70,13 @@ public sealed class Level : IEquatable<Level>
 
     /// <summary>Whether a universe parameter occurs in this level.</summary>
     public bool HasParam { get; }
+
+    /// <summary>
+    /// Lean's level depth: 0 for zero and parameters, one more than the operand for <c>succ</c>, one
+    /// more than the deeper operand for <c>max</c>/<c>imax</c>. For an explicit level <c>succⁿ 0</c>
+    /// it is <c>n</c>.
+    /// </summary>
+    public int Depth { get; }
 
     internal ulong Hash64 => _hash;
 
@@ -110,7 +117,7 @@ public sealed class Level : IEquatable<Level>
         {
             return true;
         }
-        if (other is null || _hash != other._hash || Kind != other.Kind)
+        if (other is null || _hash != other._hash || Kind != other.Kind || Depth != other.Depth)
         {
             return false;
         }

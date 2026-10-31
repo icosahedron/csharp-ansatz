@@ -2,9 +2,9 @@
 
 **Machine-checked proofs about ordinary C# code.**
 
-> Status: **milestone 1 of 8.** Lean's CIC term language and a reader and writer
-> for lean4export files are in place; the kernel is next. Start with the
-> [design document](docs/design.md).
+> Status: **milestone 2 of 8.** A C# port of the Lean 4 kernel checks all of
+> Lean's Init subset (init-medium) and rejects the kernel-arena exploits; the
+> C#-to-CIC frontend comes next. Start with the [design document](docs/design.md).
 
 LeanSharp translates selected C# methods into the Calculus of Inductive
 Constructions, the type theory of [Lean 4](https://lean-lang.org/). Proofs
@@ -57,11 +57,13 @@ dotnet test
 |---|---|
 | `src/LeanSharp.Cic` | Names, universe levels, expressions, constants, declarations, environments |
 | `src/LeanSharp.Lean4Export` | Strict reader (formats 3.0.0, 3.1.0) and writer (3.1.0) for lean4export NDJSON |
+| `src/LeanSharp.Kernel` | The type-checking kernel: a port of Lean 4's C++ kernel ([docs/kernel.md](docs/kernel.md)) |
 | `tests/` | Unit tests and the export corpus (`tests/data`, see its README for provenance) |
 
 ## Documents
 
 - [Design](docs/design.md): architecture, semantics, trusted base, milestones, open questions
+- [Kernel](docs/kernel.md): how the port maps to Lean's C++, deliberate differences, results
 - [Design history](docs/history/README.md): the conversations that led here
 
 ## License

@@ -233,7 +233,35 @@ public abstract class Expr : IEquatable<Expr>
         {
             return false;
         }
-        return StructuralEquality.AreEqual(this, other);
+        return StructuralEquality.AreEqual(this, other, strict: true);
+    }
+
+    /// <summary>
+    /// Equality up to binder annotations: binder names (of lambdas, Pis and lets) and binder info are
+    /// ignored; everything else, including metadata, must match. This is the Lean kernel's notion of
+    /// expression equality (its <c>==</c>, <c>is_equal</c>), and Lean's <c>BEq Expr</c>.
+    /// </summary>
+    public bool AlphaEquals(Expr? other)
+    {
+        if (ReferenceEquals(this, other))
+        {
+            return true;
+        }
+        if (other is null || Hash64 != other.Hash64 || Kind != other.Kind)
+        {
+            return false;
+        }
+        return StructuralEquality.AreEqual(this, other, strict: false);
+    }
+
+    /// <summary>A comparer that uses <see cref="AlphaEquals"/>, for kernel caches.</summary>
+    public static IEqualityComparer<Expr> AlphaComparer { get; } = new AlphaEqualityComparer();
+
+    private sealed class AlphaEqualityComparer : IEqualityComparer<Expr>
+    {
+        public bool Equals(Expr? x, Expr? y) => x is null ? y is null : x.AlphaEquals(y);
+
+        public int GetHashCode(Expr obj) => obj.GetHashCode();
     }
 
     /// <inheritdoc/>
@@ -253,7 +281,7 @@ public abstract class Expr : IEquatable<Expr>
     /// Compares the node-local data of two nodes of the same kind and pushes their children.
     /// Returns false on a local mismatch.
     /// </summary>
-    private protected abstract bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending);
+    private protected abstract bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict);
 
     private static class StructuralEquality
     {
@@ -267,7 +295,7 @@ public abstract class Expr : IEquatable<Expr>
         [ThreadStatic]
         private static HashSet<(Expr, Expr)>? s_visited;
 
-        public static bool AreEqual(Expr a, Expr b)
+        public static bool AreEqual(Expr a, Expr b, bool strict)
         {
             var pending = s_pending ?? new Stack<(Expr, Expr)>();
             s_pending = null; // guard against reentrancy: a nested call allocates its own
@@ -296,7 +324,7 @@ public abstract class Expr : IEquatable<Expr>
                             continue;
                         }
                     }
-                    if (!x.LocalEquals(y, pending))
+                    if (!x.LocalEquals(y, pending, strict))
                     {
                         return false;
                     }
@@ -464,7 +492,7 @@ public sealed class BVarExpr : Expr
         return index;
     }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending) =>
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict) =>
         Index == ((BVarExpr)other).Index;
 }
 
@@ -477,7 +505,7 @@ public sealed class FVarExpr : Expr
     /// <summary>The variable's identity.</summary>
     public FVarId Id { get; }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending) =>
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict) =>
         Id == ((FVarExpr)other).Id;
 }
 
@@ -490,7 +518,7 @@ public sealed class SortExpr : Expr
     /// <summary>The universe level.</summary>
     public Level Level { get; }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending) =>
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict) =>
         Level.Equals(((SortExpr)other).Level);
 }
 
@@ -510,7 +538,7 @@ public sealed class ConstExpr : Expr
     /// <summary>The universe arguments.</summary>
     public EquatableArray<Level> Levels { get; }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending)
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict)
     {
         var o = (ConstExpr)other;
         return Name.Equals(o.Name) && Levels.Equals(o.Levels);
@@ -538,7 +566,7 @@ public sealed class AppExpr : Expr
     /// <summary>The argument.</summary>
     public Expr Arg { get; }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending)
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict)
     {
         var o = (AppExpr)other;
         pending.Push((Arg, o.Arg));
@@ -576,10 +604,10 @@ public abstract class BindingExpr : Expr
     /// <summary>How the argument is supplied.</summary>
     public BinderInfo BinderInfo { get; }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending)
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict)
     {
         var o = (BindingExpr)other;
-        if (BinderInfo != o.BinderInfo || !BinderName.Equals(o.BinderName))
+        if (strict && (BinderInfo != o.BinderInfo || !BinderName.Equals(o.BinderName)))
         {
             return false;
         }
@@ -643,10 +671,10 @@ public sealed class LetExpr : Expr
     /// <summary>Lean's <c>nonDep</c> flag: the body's type does not depend on the value.</summary>
     public bool NonDependent { get; }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending)
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict)
     {
         var o = (LetExpr)other;
-        if (NonDependent != o.NonDependent || !BinderName.Equals(o.BinderName))
+        if (NonDependent != o.NonDependent || (strict && !BinderName.Equals(o.BinderName)))
         {
             return false;
         }
@@ -684,7 +712,7 @@ public sealed class NatLitExpr : Expr
         return h;
     }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending) =>
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict) =>
         Value == ((NatLitExpr)other).Value;
 }
 
@@ -697,7 +725,7 @@ public sealed class StrLitExpr : Expr
     /// <summary>The value.</summary>
     public string Value { get; }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending) =>
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict) =>
         string.Equals(Value, ((StrLitExpr)other).Value, StringComparison.Ordinal);
 }
 
@@ -722,7 +750,7 @@ public sealed class MDataExpr : Expr
     /// <summary>The annotated expression.</summary>
     public Expr Expr { get; }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending)
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict)
     {
         var o = (MDataExpr)other;
         if (!Data.Equals(o.Data))
@@ -765,7 +793,7 @@ public sealed class ProjExpr : Expr
         return index;
     }
 
-    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending)
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict)
     {
         var o = (ProjExpr)other;
         if (Index != o.Index || !TypeName.Equals(o.TypeName))

@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 
 namespace LeanSharp.Cic;
 
@@ -7,6 +8,7 @@ namespace LeanSharp.Cic;
 /// An immutable array with structural equality, so records containing arrays compare by value.
 /// </summary>
 /// <typeparam name="T">The element type.</typeparam>
+[CollectionBuilder(typeof(EquatableArray), nameof(EquatableArray.Create))]
 public readonly struct EquatableArray<T> : IEquatable<EquatableArray<T>>, IReadOnlyList<T>
 {
     private readonly ImmutableArray<T> _items;

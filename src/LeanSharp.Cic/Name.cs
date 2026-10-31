@@ -180,6 +180,63 @@ public sealed class Name : IEquatable<Name>, IComparable<Name>
         return result;
     }
 
+    /// <summary>
+    /// Lean's <c>Name.appendAfter</c>: appends <paramref name="suffix"/> to the last string component
+    /// (<c>n</c> → <c>n_ih</c>), or adds a string component if the last component is numeric.
+    /// </summary>
+    /// <remarks>Lean first strips macro scopes (hygiene suffixes); those are not modelled yet.</remarks>
+    public Name AppendAfter(string suffix) =>
+        Kind == NameKind.Str ? Str(Prefix!, _string + suffix) : Str(this, suffix);
+
+    /// <summary>Lean's <c>Name.appendIndexAfter</c>: <c>motive</c> → <c>motive_1</c>.</summary>
+    public Name AppendIndexAfter(int index) =>
+        AppendAfter("_" + index.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// Lean's <c>Name.replacePrefix</c>: replaces the prefix <paramref name="prefix"/> by
+    /// <paramref name="newPrefix"/> (<c>Nat.zero</c> with <c>Nat</c> → anonymous gives <c>zero</c>).
+    /// Returns this name unchanged if <paramref name="prefix"/> is not a prefix.
+    /// </summary>
+    public Name ReplacePrefix(Name prefix, Name newPrefix)
+    {
+        ArgumentNullException.ThrowIfNull(prefix);
+        ArgumentNullException.ThrowIfNull(newPrefix);
+        if (Equals(prefix))
+        {
+            return newPrefix;
+        }
+        if (IsAnonymous)
+        {
+            return this;
+        }
+        var p = Prefix!.ReplacePrefix(prefix, newPrefix);
+        if (ReferenceEquals(p, Prefix))
+        {
+            return this;
+        }
+        return Kind == NameKind.Str ? Str(p, _string!) : Num(p, _number);
+    }
+
+    /// <summary>Concatenation: <c>Nat ++ add.comm = Nat.add.comm</c> (Lean's <c>name + name</c>).</summary>
+    public static Name operator +(Name left, Name right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+        if (right.IsAnonymous)
+        {
+            return left;
+        }
+        if (left.IsAnonymous)
+        {
+            return right;
+        }
+        var prefix = left + right.Prefix!;
+        return right.Kind == NameKind.Str ? Str(prefix, right._string!) : Num(prefix, right._number);
+    }
+
+    /// <summary>Concatenation (see <see cref="op_Addition"/>).</summary>
+    public static Name Add(Name left, Name right) => left + right;
+
     /// <summary>Whether <paramref name="prefix"/> is a (non-strict) prefix of this name.</summary>
     public bool StartsWith(Name prefix)
     {

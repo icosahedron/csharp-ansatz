@@ -440,6 +440,9 @@ nested inductives.
   (`{s, d, l, r, res, by}`), so that definitional-equality traces can be
   diffed against Ansatz and Ansatz's instrumented Lean kernel.
 - The kernel depends only on `LeanSharp.Cic`: no I/O, no Roslyn, no store.
+- `LeanSharp.Cic.Expr` has no metavariable kind today. Whether `LeanSharp.Meta`
+  adds one to the shared type (as Lean does, with the kernel rejecting it) or
+  keeps its own representation is decided at M4.
 
 ### 7.2 Import (lean4export NDJSON)
 
@@ -452,7 +455,8 @@ nested inductives.
   - **Verified import:** re-check every declaration with our kernel. This is
     the default for CI on the semantics bundle, and is the main kernel test.
 - Bundles shipped with LeanSharp: Init (Ansatz ships an `init-medium` subset
-  of 2,997 declarations, 3.3 MB gzipped) and the LeanSharp semantics library.
+  of Lean 4.33.1's Init: 5,118 constants in 4,631 declaration records, 3.3 MB
+  gzipped) and the LeanSharp semantics library.
   Mathlib (707,508 declarations at v4.33.1) is optional and downloaded.
 
 ### 7.3 Store
@@ -569,7 +573,7 @@ cache (with recheck), the importer in verified mode, and the Roslyn analyzer.
 
 1. **Kernel corpus.** In order: `Nat.add_succ.ndjson` → arena cases
    (positive, and negative such as `002_badDef`, `141_falseFromUnsafe`) →
-   init-medium (2,997) → full Init (54,335) → Mathlib v4.33.1 (707,508; Ansatz
+   init-medium (5,118 constants) → full Init (54,335) → Mathlib v4.33.1 (707,508; Ansatz
    checks all of them in about 80 minutes on 4 workers). Every discrepancy
    becomes a regression test.
 2. **Cross-kernel harness.** Export our certificates (§7.4) and check them
@@ -595,9 +599,9 @@ cache (with recheck), the importer in verified mode, and the Roslyn analyzer.
 
 | # | Milestone | Exit criterion |
 |---|---|---|
-| M0 | Repository, license, design doc, history | This document merged. |
-| M1 | `LeanSharp.Cic` (Name, Level, Expr, ConstantInfo, Env) and the NDJSON importer | `Nat.add_succ` and init-medium import; import → export → import yields an identical environment. |
-| M2 | `LeanSharp.Kernel` | All 2,997 init-medium declarations pass; arena negatives are rejected; then full Init. |
+| M0 | Repository, license, design doc, history | This document merged. ✅ |
+| M1 | `LeanSharp.Cic` (Name, Level, Expr, ConstantInfo, Env), the NDJSON reader (formats 3.0.0 and 3.1.0) and writer (3.1.0) | `Nat.add_succ`, init-medium and the arena files import; import → export → import yields identical constants; export is idempotent. ✅ |
+| M2 | `LeanSharp.Kernel` | All 5,118 init-medium constants pass; arena negatives are rejected; then full Init. |
 | M3 | Exporter, cross-kernel harness, FsCheck property tests, store v1 | Certificates check in at least one external kernel. Mathlib is a stretch goal. |
 | M4 | VIR, extraction of the pure subset (`int`/`long`/`bool`, records, `if`/`switch`, recursion), semantics library v0, translation, differential testing | `[Verified]` pure methods translate, and differential tests pass. Theorems closed by `rfl`/`decide`. |
 | M5 | `LeanSharp.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `simp`, `omega`), server, MSBuild task, CLI | First end-to-end result: a false theorem fails the build with its goal shown. |
@@ -651,7 +655,7 @@ conversation:
 | Claim | Finding |
 |---|---|
 | Kernel IR has 11 node types including `MVar` | 12 kinds including `Proj` and split Nat/String literals; no `MVar` (`doc/kernel.md`). |
-| `test-data/init-medium.ndjson`, ~10 MB | `resources/ansatz/init-medium.ndjson.gz`, 3.3 MB gzipped, 2,997 declarations. |
+| `test-data/init-medium.ndjson`, ~10 MB | `resources/ansatz/init-medium.ndjson.gz`, 3.3 MB gzipped. Ansatz's docs call it 2,997 declarations; LeanSharp's reader counts 5,118 constants in 4,631 declaration records (cross-checked with an independent script), so Ansatz evidently counts a different unit. |
 | ~648k Mathlib declarations, 210k theorems | 707,508 declarations (504,824 theorems) at Mathlib v4.33.1, **all verified** by the Java kernel (`doc/kernel-validation.md`). |
 | Import via lean4export NDJSON | Correct; lean4export format 3.0/3.1. |
 | Exports proofs to Lean 4 | Correct (Lean 4 syntax export). |

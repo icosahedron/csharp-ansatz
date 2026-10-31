@@ -2,7 +2,8 @@
 
 **Machine-checked proofs about ordinary C# code.**
 
-> Status: **design phase.** There is no code yet. Start with the
+> Status: **milestone 1 of 8.** Lean's CIC term language and a reader and writer
+> for lean4export files are in place; the kernel is next. Start with the
 > [design document](docs/design.md).
 
 LeanSharp translates selected C# methods into the Calculus of Inductive
@@ -42,6 +43,21 @@ static Proof ValidImpliesPositive(Payment p) =>
 ```
 
 *(Target syntax under discussion; see [design §5](docs/design.md#5-the-c-surface).)*
+
+## Building
+
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+
+```sh
+dotnet build
+dotnet test
+```
+
+| Project | Contents |
+|---|---|
+| `src/LeanSharp.Cic` | Names, universe levels, expressions, constants, declarations, environments |
+| `src/LeanSharp.Lean4Export` | Strict reader (formats 3.0.0, 3.1.0) and writer (3.1.0) for lean4export NDJSON |
+| `tests/` | Unit tests and the export corpus (`tests/data`, see its README for provenance) |
 
 ## Documents
 

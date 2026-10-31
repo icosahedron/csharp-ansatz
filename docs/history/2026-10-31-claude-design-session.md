@@ -19,7 +19,8 @@ checked ChatGPT's claims against the source and documentation. Findings
   Nat/String literals. There is **no `MVar`** at kernel level. ChatGPT listed
   `MVar` and omitted `Proj`.
 - `init-medium` ships as `resources/ansatz/init-medium.ndjson.gz` (3.3 MB
-  gzipped, 2,997 declarations), not under `test-data/`. The full Init export
+  gzipped, "2,997 declarations" per Ansatz's docs; LeanSharp later counted 5,118
+  constants in 4,631 declaration records), not under `test-data/`. The full Init export
   has 54,335 declarations.
 - Ansatz verifies **all 707,508** Mathlib v4.33.1 declarations (504,824
   theorems), in about 80 minutes on 4 workers. ChatGPT cited older or lower

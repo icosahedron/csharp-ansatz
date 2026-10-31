@@ -1,0 +1,27 @@
+LeanSharp
+Copyright 2026 The LeanSharp Authors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+---
+
+LeanSharp's kernel type checker is a reimplementation in C# of the Lean 4
+kernel type-checking algorithm, informed by the following works:
+
+  Lean 4 (https://github.com/leanprover/lean4)
+  Copyright (c) Microsoft Corporation
+  Licensed under the Apache License, Version 2.0
+  The original Lean 4 kernel was authored by Leonardo de Moura.
+
+  Ansatz (https://github.com/replikativ/ansatz)
+  Copyright 2026 Christian Weilbach
+  Licensed under the Apache License, Version 2.0
+  A Java reimplementation of the Lean 4 kernel, used as a reference
+  for this port.
+
+Lean libraries (Init, Std, Mathlib) imported via lean4export
+(https://github.com/leanprover/lean4export) remain under their own licenses.

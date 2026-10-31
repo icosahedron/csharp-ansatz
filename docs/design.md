@@ -602,7 +602,7 @@ cache (with recheck), the importer in verified mode, and the Roslyn analyzer.
 |---|---|---|
 | M0 | Repository, license, design doc, history | This document merged. ✅ |
 | M1 | `LeanSharp.Cic` (Name, Level, Expr, ConstantInfo, Env), the NDJSON reader (formats 3.0.0 and 3.1.0) and writer (3.1.0) | `Nat.add_succ`, init-medium and the arena files import; import → export → import yields identical constants; export is idempotent. ✅ |
-| M2 | `LeanSharp.Kernel` | All 5,118 init-medium constants pass; arena negatives are rejected; then full Init. ✅ init-medium and arena (see [kernel.md](kernel.md)); full Init pending an export |
+| M2 | `LeanSharp.Kernel` | All 5,118 init-medium constants pass; arena negatives are rejected; then full Init. ✅ full Init (57,977 declarations), init-medium and arena (see [kernel.md](kernel.md)) |
 | M3 | Exporter, cross-kernel harness, FsCheck property tests, store v1 | Certificates check in at least one external kernel. Mathlib is a stretch goal. |
 | M4 | VIR, extraction of the pure subset (`int`/`long`/`bool`, records, `if`/`switch`, recursion), semantics library v0, translation, differential testing | `[Verified]` pure methods translate, and differential tests pass. Theorems closed by `rfl`/`decide`. |
 | M5 | `LeanSharp.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `simp`, `omega`), server, MSBuild task, CLI | First end-to-end result: a false theorem fails the build with its goal shown. |

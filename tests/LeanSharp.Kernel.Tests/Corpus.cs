@@ -45,3 +45,15 @@ public sealed class InitMediumFixture
 
     public Declaration DeclarationOf(Name name) => Declarations.First(d => d.Constants.Any(c => c.Name == name));
 }
+
+/// <summary>A fact that is skipped unless the named environment variable is set.</summary>
+public sealed class FactRequiringEnvAttribute : FactAttribute
+{
+    public FactRequiringEnvAttribute(string variable)
+    {
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(variable)))
+        {
+            Skip = $"set {variable} to run";
+        }
+    }
+}

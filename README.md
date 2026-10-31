@@ -2,9 +2,9 @@
 
 **Machine-checked proofs about ordinary C# code.**
 
-> Status: **milestone 2 of 8.** A C# port of the Lean 4 kernel checks all of
-> Lean's Init subset (init-medium) and rejects the kernel-arena exploits; the
-> C#-to-CIC frontend comes next. Start with the [design document](docs/design.md).
+> Status: **milestone 2 of 8.** A C# port of the Lean 4 kernel checks Lean's
+> entire Init library (57,977 declarations) and rejects the kernel-arena
+> exploits; the C#-to-CIC frontend comes next. Start with the [design document](docs/design.md).
 
 LeanSharp translates selected C# methods into the Calculus of Inductive
 Constructions, the type theory of [Lean 4](https://lean-lang.org/). Proofs

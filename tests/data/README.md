@@ -13,6 +13,10 @@ Several arena files contain declarations a kernel **must reject** (for example
 `002_badDef`, whose value does not have its declared type). The reader accepts
 them, because they are well-formed; rejecting them is the kernel's job (milestone 2).
 
+The full Init export (348 MB) is not committed. Reproduce it with
+`scripts/export-lean-library.sh` and run the opt-in kernel test with
+`LEANSHARP_INIT_EXPORT=<path> dotnet test --filter AcceptsFullInit`.
+
 ## Expected counts
 
 Computed independently of LeanSharp, with a short Python script over the raw

@@ -15,6 +15,20 @@ public class CorpusTests(InitMediumFixture initMedium) : IClassFixture<InitMediu
         Assert.True(initMedium.Env.IsQuotInitialized);
     }
 
+    /// <summary>
+    /// The full Init library (≈58k declarations, a 348 MB export, too large to commit). Produce it
+    /// with <c>scripts/export-lean-library.sh</c> and point <c>LEANSHARP_INIT_EXPORT</c> at it.
+    /// </summary>
+    [FactRequiringEnv("LEANSHARP_INIT_EXPORT")]
+    public void AcceptsFullInit()
+    {
+        var path = Environment.GetEnvironmentVariable("LEANSHARP_INIT_EXPORT")!;
+        var (env, results) = Corpus.CheckAll(Lean4Export.Lean4Export.ReadFile(path).Declarations);
+        var rejected = results.Where(r => !r.Accepted).Take(20).Select(r => $"{r.Name}: {r.Error}").ToList();
+        Assert.Empty(rejected);
+        Assert.True(env.Count > 50_000, $"only {env.Count} constants");
+    }
+
     [Fact]
     public void AcceptsNatAddSucc()
     {

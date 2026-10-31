@@ -58,6 +58,7 @@ lean4export lists *constants*, while the kernel admits *declarations*.
 
 | Corpus | Result | Time |
 |---|---|---|
+| **full Init** (Lean 4.33.1): 57,977 declarations, 59,433 constants (348 MB export) | **all accepted** | ≈73 s |
 | init-medium (Lean 4.33.1 Init subset): 4,631 declarations, 5,118 constants | all accepted | ≈3 s |
 | lean4export `Nat.add_succ` example (format 3.0.0) | all accepted | <0.1 s |
 | arena `001_basicDef`, `sparse-name-index` | accepted | |
@@ -73,6 +74,10 @@ missing recursor, wrong field counts and a forged quotient constant. Each must b
 rejected for the expected reason, and each has a positive control that must be
 accepted.
 
-**Not yet run:** the full Init export (54,335 declarations) and Mathlib
-(707,508). Neither ships with Ansatz as NDJSON, and producing them needs the Lean
-toolchain and lean4export to run.
+The full Init export is too large to commit. `scripts/export-lean-library.sh`
+reproduces it (Lean 4.33.1, lean4export `15f6055`), and the opt-in test
+`AcceptsFullInit` checks it when `LEANSHARP_INIT_EXPORT` points to the file.
+(Ansatz's documentation quotes 54,335 declarations for an earlier Init export.)
+
+**Not yet run:** Mathlib (707,508 declarations at v4.33.1). The same script can
+export it from a Mathlib checkout.

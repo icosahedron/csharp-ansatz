@@ -81,3 +81,47 @@ reproduces it (Lean 4.33.1, lean4export `15f6055`), and the opt-in test
 
 **Not yet run:** Mathlib (707,508 declarations at v4.33.1). The same script can
 export it from a Mathlib checkout.
+
+## Cross-kernel checks (milestone 3)
+
+LeanSharp's verdicts are compared with **Lean's own kernel**, using
+[`tools/lean-replay`](../tools/lean-replay/README.md): lean4export's parser plus
+`Lean.Environment.replay`. Run everything with `scripts/cross-check.sh`.
+
+| Check | Result |
+|---|---|
+| Lean's verdict on each corpus file vs LeanSharp's | identical on every file: both accept init-medium, `001_basicDef` and `sparse-name-index`, and both reject `badDef`, `falseFromUnsafe`, `PR14806Subst.observe` and `Issue.forallFalse` with the same reasons |
+| Lean re-checks what LeanSharp admitted (`leansharp export`), corpus | accepted for every file, including our 3.0.0 → 3.1.0 conversion of `Nat.add_succ` |
+| Lean re-checks what LeanSharp admitted, full Init | all 59,433 constants accepted (≈71 s in Lean; ≈88 s for LeanSharp to check and export) |
+| Lean re-checks declarations built from scratch in C# (`CrossCheckFixtures.cs`) | all accepted: recursive, mutual (`Even`/`Odd`), nested through `List` (`Rose`, with `Rose.rec_1`), structure with eta, universe-polymorphic (`Box`, motive universe `u_1`), K-like (`IsZero`), a definition by recursion and theorems needing iota and struct eta |
+| The harness detects divergence | flipping the K flag of one LeanSharp-generated recursor makes Lean reject the file ("Invalid recursor test.IsZero.rec") |
+
+Replay requires every recursor in the file to be `==` to the one Lean generates,
+so these runs check LeanSharp's recursor generation against Lean's, not just
+type correctness.
+
+## Property-based tests (milestone 3)
+
+`tests/LeanSharp.Kernel.Tests/PropertyTests.cs` uses FsCheck to compare the kernel
+with an independent meaning on random inputs:
+
+- **Universe levels vs. evaluation** (all assignments of 0–3 to `u`, `v`, `w`):
+  normalization preserves value; `IsEquivalent` and `IsGeq` are sound;
+  `mk_max`/`mk_imax` and instantiation match their meaning; equivalence is
+  reflexive and symmetric.
+- **Expression operations**: abstraction/instantiation and lift/lower are inverse;
+  instantiating removes the variable; alpha-equality, equality and hashing agree;
+  random terms survive the export round trip.
+- **Nat arithmetic vs. BigInteger**: random closed expressions over `Nat.succ`,
+  `add`, `mul`, `sub`, `div`, `mod`, `max`, `min` reduce to their value, and
+  definitional equality between them is symmetric and matches value equality.
+- **A small typed language** (`Nat`, `Bool`, `List Nat`, `Nat × Bool`, with
+  `cond`, list functions, pairs and beta-redexes) generated from its typing rules:
+  every generated term is accepted with its type, reduction preserves types, and
+  applying `Nat.succ` to a non-`Nat` term is rejected.
+
+**Finding:** Lean's level normalization is not idempotent. Its `imax` case
+rebuilds an unsorted `max`, so `IsEquivalent(l, Normalize(l))` can be false even
+though both sides always evaluate equal. This is incompleteness, not unsoundness.
+LeanSharp matches the C++ exactly, and
+`NormalizationIsNotIdempotentExactlyAsInLean` pins the behaviour.

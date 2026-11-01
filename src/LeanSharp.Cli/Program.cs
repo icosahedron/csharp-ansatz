@@ -17,24 +17,33 @@ internal static class Cli
         usage:
           leansharp check <export.ndjson[.gz]> [--fuel N] [--admit-rejected] [--quiet]
           leansharp stats <export.ndjson[.gz]>
+          leansharp export <export.ndjson[.gz]> <output.ndjson> [--fuel N] [--quiet]
 
         check   re-checks every declaration with the kernel (exit 0 accept, 1 reject, 2 decline)
                 --fuel N          step budget per type checker (default 100000000)
                 --admit-rejected  keep going after a rejection by admitting it unchecked
                 --quiet           print only the summary
         stats   prints record counts without checking
+        export  checks the file, then writes what the kernel admitted (its own generated
+                constructors, recursors and quotient constants) as lean4export 3.1.0, so another
+                kernel can re-check exactly what LeanSharp accepted
         """;
 
     public static int Run(string[] args)
     {
-        if (args.Length < 2 || args[0] is not ("check" or "stats"))
+        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export") || (args[0] == "export" && args.Length < 3))
         {
             Console.Error.WriteLine(Usage);
             return 2;
         }
         try
         {
-            return args[0] == "stats" ? Stats(args[1]) : Check(args[1], args.Skip(2).ToArray());
+            return args[0] switch
+            {
+                "stats" => Stats(args[1]),
+                "export" => Check(args[1], args.Skip(3).ToArray(), output: args[2]),
+                _ => Check(args[1], args.Skip(2).ToArray()),
+            };
         }
         catch (Exception ex) when (ex is Lean4ExportFormatException or IOException or UnauthorizedAccessException or FormatException)
         {
@@ -56,7 +65,7 @@ internal static class Cli
         return 0;
     }
 
-    private static int Check(string path, string[] options)
+    private static int Check(string path, string[] options, string? output = null)
     {
         long fuel = KernelLimits.Corpus.Fuel;
         bool admitRejected = false, quiet = false;
@@ -67,7 +76,7 @@ internal static class Cli
                 case "--fuel" when i + 1 < options.Length:
                     fuel = long.Parse(options[++i], NumberStyles.None, CultureInfo.InvariantCulture);
                     break;
-                case "--admit-rejected":
+                case "--admit-rejected" when output is null:
                     admitRejected = true;
                     break;
                 case "--quiet":
@@ -109,6 +118,12 @@ internal static class Cli
             }
         });
         Console.WriteLine($"accepted {accepted:N0}, rejected {rejected:N0}, declined {declined:N0}; {env.Count:N0} constants in {sw.Elapsed.TotalSeconds:F1}s");
+        if (output is not null)
+        {
+            using var writer = new Lean4ExportWriter(File.Create(output), reader.Metadata);
+            writer.WriteAll(checker.Admitted);
+            Console.WriteLine($"wrote {checker.Admitted.Count:N0} admitted declarations to {output}");
+        }
         if (firstFailure is null)
         {
             return 0;

@@ -1,0 +1,12 @@
+name = "lean-replay"
+defaultTargets = ["lean-replay"]
+
+# lean4export's NDJSON parser, pinned to the last commit built for Lean v4.33.
+[[require]]
+name = "lean4export"
+git = "https://github.com/leanprover/lean4export"
+rev = "15f6055e299ad5b89345e533cc2192f4cc00f659"
+
+[[lean_exe]]
+name = "lean-replay"
+root = "Main"

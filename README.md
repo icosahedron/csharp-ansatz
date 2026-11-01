@@ -2,9 +2,9 @@
 
 **Machine-checked proofs about ordinary C# code.**
 
-> Status: **milestone 2 of 8.** A C# port of the Lean 4 kernel checks Lean's
-> entire Init library (57,977 declarations) and rejects the kernel-arena
-> exploits; the C#-to-CIC frontend comes next. Start with the [design document](docs/design.md).
+> Status: **milestone 3 of 8.** A C# port of the Lean 4 kernel checks Lean's
+> entire Init library (57,977 declarations), and Lean's own kernel re-checks
+> everything it admits; the C#-to-CIC frontend comes next. Start with the [design document](docs/design.md).
 
 LeanSharp translates selected C# methods into the Calculus of Inductive
 Constructions, the type theory of [Lean 4](https://lean-lang.org/). Proofs
@@ -58,7 +58,8 @@ dotnet test
 | `src/LeanSharp.Cic` | Names, universe levels, expressions, constants, declarations, environments |
 | `src/LeanSharp.Lean4Export` | Strict reader (formats 3.0.0, 3.1.0) and writer (3.1.0) for lean4export NDJSON |
 | `src/LeanSharp.Kernel` | The type-checking kernel: a port of Lean 4's C++ kernel ([docs/kernel.md](docs/kernel.md)) |
-| `src/LeanSharp.Cli` | `leansharp check <export>`: re-check a lean4export file with the kernel |
+| `src/LeanSharp.Cli` | `leansharp check <export>` / `export <in> <out>`: re-check a lean4export file; write what the kernel admitted |
+| `tools/lean-replay` | Lean program used by `scripts/cross-check.sh` to re-check files with Lean's own kernel |
 | `tests/` | Unit tests and the export corpus (`tests/data`, see its README for provenance) |
 
 To check an export file with the kernel:

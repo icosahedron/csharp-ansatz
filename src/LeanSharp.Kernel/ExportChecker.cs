@@ -32,6 +32,7 @@ public sealed class ExportChecker
 {
     private readonly KernelLimits _limits;
     private readonly Dictionary<Name, DefinitionInfo> _pendingMutual = [];
+    private readonly List<Declaration> _admitted = [];
 
     /// <summary>Creates a checker that admits into <paramref name="env"/>.</summary>
     /// <param name="env">The environment to extend.</param>
@@ -52,6 +53,14 @@ public sealed class ExportChecker
 
     /// <summary>Whether rejected declarations are admitted anyway (see the constructor).</summary>
     public bool AdmitRejected { get; }
+
+    /// <summary>
+    /// The declarations the kernel accepted, in admission order, as the kernel holds them: for
+    /// inductive types and quotients these are the constants the kernel generated itself, not the
+    /// exported ones. Writing them out (see <c>Lean4ExportWriter</c>) lets another kernel re-check
+    /// exactly what LeanSharp admitted. Declarations admitted unchecked are not included.
+    /// </summary>
+    public IReadOnlyList<Declaration> Admitted => _admitted;
 
     /// <summary>Checks every declaration on a large-stack thread, in order.</summary>
     public IReadOnlyList<CheckResult> CheckAll(IEnumerable<Declaration> declarations, Action<CheckResult>? onResult = null)
@@ -90,13 +99,22 @@ public sealed class ExportChecker
         try
         {
             var fork = Env.Fork();
+            Func<IEnumerable<Declaration>> admittedForm;
             switch (declaration)
             {
                 case InductiveDeclaration ind:
                     CheckInductive(fork, ind);
+                    admittedForm = () =>
+                    [
+                        new InductiveDeclaration(
+                            ind.Types.Select(t => (InductiveInfo)Env.Get(t.Name)).ToEquatableArray(),
+                            ind.Constructors.Select(c => (ConstructorInfo)Env.Get(c.Name)).ToEquatableArray(),
+                            ind.Recursors.Select(r => (RecursorInfo)Env.Get(r.Name)).ToEquatableArray()),
+                    ];
                     break;
                 case ConstantDeclaration { Constant: QuotInfo q }:
                     CheckQuot(fork, q);
+                    admittedForm = () => [new ConstantDeclaration(Env.Get(q.Name))];
                     break;
                 case ConstantDeclaration { Constant: DefinitionInfo { Safety: not DefinitionSafety.Safe, All.Count: > 1 } def }:
                     if (!AddToMutualBlock(fork, def))
@@ -104,14 +122,17 @@ public sealed class ExportChecker
                         return null;
                     }
                     name = def.All[0];
+                    admittedForm = () => def.All.Select(n => (Declaration)new ConstantDeclaration(Env.Get(n)));
                     break;
                 case ConstantDeclaration { Constant: var c }:
                     Kernel.Add(fork, ToKernelDeclaration(c), _limits);
+                    admittedForm = () => [new ConstantDeclaration(Env.Get(c.Name))];
                     break;
                 default:
                     throw new ArgumentException($"Unsupported declaration {declaration.GetType().Name}.", nameof(declaration));
             }
             fork.Commit();
+            _admitted.AddRange(admittedForm());
             return new CheckResult(name, true, null, false, sw.Elapsed);
         }
         catch (KernelException ex)

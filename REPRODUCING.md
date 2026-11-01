@@ -75,6 +75,23 @@ continued in a Claude Code cloud session
 5. **Go past the committed corpus.** Lean 4.33.1's full `Init` library was
    exported with lean4export and checked: all 57,977 declarations are accepted.
 
+### Milestone 3: cross-checking
+
+1. **Run Lean's own kernel on the same data.** `tools/lean-replay` combines
+   lean4export's parser with `Lean.Environment.replay`, the routine lean4checker
+   uses. Lean's verdicts on the corpus match LeanSharp's exactly.
+2. **Have Lean re-check what LeanSharp admitted.** `leansharp export` writes the
+   kernel's own generated constructors and recursors. Replay demands they equal
+   Lean's, so this checks the recursor generation itself. It holds for the
+   corpus, full Init, and new types built in C# (mutual, nested, structure,
+   universe-polymorphic, K-like). Tampering with one recursor makes Lean reject
+   the file, which shows the harness can fail.
+3. **Property-based tests** (FsCheck) compare the kernel with independent
+   meanings: level evaluation, BigInteger arithmetic, and the typing rules of a
+   small generated language. They found that Lean's level normalization isn't
+   idempotent (incomplete but sound, and matched exactly); see
+   [docs/kernel.md](docs/kernel.md#property-based-tests-milestone-3).
+
 ### Notes on the environment
 
 - The cloud container had no .NET; the SDK was installed with Microsoft's
@@ -117,9 +134,11 @@ dotnet build
 dotnet test
 ```
 
-Expected result: **136 tests pass and one is skipped** (`AcceptsFullInit`, which
-needs the full Init export; see step 5). That's 31 Cic, 42 Lean4Export and 64
-Kernel tests, with the whole suite taking well under a minute.
+Expected result: **153 tests pass and two are skipped**. The skipped ones are
+opt-in tests that need external files: `AcceptsFullInit` (step 5) and
+`WritesFixturesForLean` (step 6). That's 31 Cic, 42 Lean4Export and 80 Kernel
+tests, including the FsCheck property tests; the whole suite takes about a
+minute.
 
 ### 3. Run the kernel on the committed corpus
 
@@ -203,7 +222,42 @@ The script runs code downloaded from GitHub (the Lean toolchain, lean4export), s
 review it before running. In a Claude Code session, auto mode may block it;
 approve it in **Accept edits** mode.
 
-### 6. Re-derive the port from its sources (optional)
+### 6. Cross-check against Lean's own kernel
+
+```sh
+scripts/cross-check.sh
+LEANSHARP_INIT_EXPORT=$PWD/init.ndjson scripts/cross-check.sh   # include full Init
+```
+
+The script uses the same Lean 4.33.1 toolchain (downloaded if needed; set
+`LEAN_TOOLCHAIN_BIN` to reuse one) and builds
+[`tools/lean-replay`](tools/lean-replay/README.md), a small Lean program that
+checks an NDJSON file with Lean's kernel. For every corpus file it compares Lean's
+verdict with LeanSharp's. It then has Lean re-check what LeanSharp admitted
+(`leansharp export`), and the declarations built from scratch in C#
+(`CrossCheckFixtures.cs`). Expected output ends with:
+
+```
+FILE                         LEAN      LEANSHARP LEAN(EXPORT)   RESULT
+init-medium.ndjson.gz        accept    accept    accept         ok
+Nat.add_succ.ndjson          decline   accept    accept         ok
+001_basicDef.ndjson          accept    accept    accept         ok
+002_badDef.ndjson            reject    reject    accept         ok
+141_falseFromUnsafe.ndjson   reject    reject    accept         ok
+proj-of-subst-prop.ndjson    reject    reject    accept         ok
+rec-of-subst-prop.ndjson     reject    reject    accept         ok
+sparse-name-index.ndjson     accept    accept    accept         ok
+C# fixtures                  -         accept    accept         ok
+
+all verdicts agree
+```
+
+Lean declines the original `Nat.add_succ` only because its parser reads format
+3.1.0. LeanSharp's export of it is 3.1.0, and Lean accepts that. With the full
+Init export included, Lean accepts all 59,433 constants LeanSharp writes (about
+70 s).
+
+### 7. Re-derive the port from its sources (optional)
 
 To compare the kernel with the C++ it was ported from:
 
@@ -216,7 +270,7 @@ git -C lean4 sparse-checkout set src/kernel
 lists the deliberate differences: fuel, no native reduction, a large-stack
 thread, and macro scopes in generated names not being modelled.
 
-### 7. Mathlib (not yet done)
+### 8. Mathlib (not yet done)
 
 The same export script should work from a Mathlib checkout pinned to v4.33.1.
 For example, run `lake env <path>/lean4export Mathlib > mathlib.ndjson` inside
@@ -233,7 +287,8 @@ export, and memory use that has not been measured at that scale.
 | `src/LeanSharp.Cic` | CIC terms: names, levels, expressions, constants, declarations |
 | `src/LeanSharp.Lean4Export` | lean4export reader (3.0.0, 3.1.0) and writer (3.1.0) |
 | `src/LeanSharp.Kernel` | the type-checking kernel and the export checker |
-| `src/LeanSharp.Cli` | the `leansharp` tool (`check`, `stats`) |
+| `src/LeanSharp.Cli` | the `leansharp` tool (`check`, `stats`, `export`) |
+| `tools/lean-replay` | Lean program: check an NDJSON file with Lean's own kernel |
 | `tests/` | unit, corpus and soundness tests; `tests/data` is the corpus |
-| `scripts/` | `export-lean-library.sh`, `count-export.py` |
+| `scripts/` | `export-lean-library.sh`, `cross-check.sh`, `count-export.py`, shared `lib/lean-toolchain.sh` |
 | `docs/` | design, kernel notes, conversation history |

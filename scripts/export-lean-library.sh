@@ -7,22 +7,14 @@
 # Then run the kernel over it:
 #   LEANSHARP_INIT_EXPORT=$PWD/init.ndjson dotnet test --filter AcceptsFullInit
 set -euo pipefail
+source "$(dirname "$0")/lib/lean-toolchain.sh"
 
 MODULE="${1:-Init}"
 OUTPUT="$(realpath -m "${2:-init.ndjson}")"
-WORKDIR="$(realpath -m "${3:-${TMPDIR:-/tmp}/leansharp-export}")"
-LEAN_VERSION="4.33.1"
-LEAN4EXPORT_COMMIT="15f6055"   # last lean4export commit pinned to Lean v4.33.x
+WORKDIR="$(realpath -m "${3:-${TMPDIR:-/tmp}/leansharp-lean}")"
 
-mkdir -p "$WORKDIR"
+ensure_lean_toolchain "$WORKDIR"
 cd "$WORKDIR"
-
-if [ ! -x "lean-$LEAN_VERSION-linux/bin/lean" ]; then
-  curl -sSfL -o lean.zip "https://github.com/leanprover/lean4/releases/download/v$LEAN_VERSION/lean-$LEAN_VERSION-linux.zip"
-  unzip -q lean.zip && rm lean.zip
-fi
-export PATH="$WORKDIR/lean-$LEAN_VERSION-linux/bin:$PATH"
-
 if [ ! -d lean4export ]; then
   git clone -q https://github.com/leanprover/lean4export lean4export
 fi

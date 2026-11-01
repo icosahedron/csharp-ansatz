@@ -462,6 +462,9 @@ nested inductives.
 
 ### 7.3 Store
 
+> Scheduled with the verification server (M5): the store's layout depends on how the server
+> caches checked environments, and at Init scale loading NDJSON is not a bottleneck.
+
 We don't port Ansatz's datahike/konserve store. Instead, a versioned on-disk
 binary format:
 
@@ -603,9 +606,9 @@ cache (with recheck), the importer in verified mode, and the Roslyn analyzer.
 | M0 | Repository, license, design doc, history | This document merged. ✅ |
 | M1 | `LeanSharp.Cic` (Name, Level, Expr, ConstantInfo, Env), the NDJSON reader (formats 3.0.0 and 3.1.0) and writer (3.1.0) | `Nat.add_succ`, init-medium and the arena files import; import → export → import yields identical constants; export is idempotent. ✅ |
 | M2 | `LeanSharp.Kernel` | All 5,118 init-medium constants pass; arena negatives are rejected; then full Init. ✅ full Init (57,977 declarations), init-medium and arena (see [kernel.md](kernel.md)) |
-| M3 | Exporter, cross-kernel harness, FsCheck property tests, store v1 | Certificates check in at least one external kernel. Mathlib is a stretch goal. |
+| M3 | Exporter, cross-kernel harness, FsCheck property tests | Certificates check in at least one external kernel. Mathlib is a stretch goal. ✅ Lean's kernel re-checks everything LeanSharp admits, including full Init and C#-built types (see [kernel.md](kernel.md)); the store moved to M5 |
 | M4 | VIR, extraction of the pure subset (`int`/`long`/`bool`, records, `if`/`switch`, recursion), semantics library v0, translation, differential testing | `[Verified]` pure methods translate, and differential tests pass. Theorems closed by `rfl`/`decide`. |
-| M5 | `LeanSharp.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `simp`, `omega`), server, MSBuild task, CLI | First end-to-end result: a false theorem fails the build with its goal shown. |
+| M5 | `LeanSharp.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `simp`, `omega`), server, store v1, MSBuild task, CLI | First end-to-end result: a false theorem fails the build with its goal shown. |
 | M6 | Contracts: `Spec.Requires`/`Ensures`, contract classes, effect monad (exceptions, null, overflow), VC generation, assumption reports | Pure parts of the payment example verified, and `ProcessPayment` verified with the store as a hypothesis. |
 | M7 | Regions, loops with invariants, heap model for mutable objects, `decimal`, strings | The payment example verified without restructuring into records. |
 | M8 | Live IDE feedback (language server / extension), `grind`, typed Mathlib handles, performance work | |

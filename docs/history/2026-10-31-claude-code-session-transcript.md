@@ -786,3 +786,165 @@ I'll link the guide, the CLI and the transcript from the README and the history 
 The numbers match the guide: 136 pass and one is skipped. I'll re-render the transcript so it includes this request, then commit and push:
 
 - **Bash**: Re-render transcript, commit and push
+
+The conversation and the reproduction guide are committed (`5168052`) and pushed to `claude/ansatz-csharp-design-00846r`.
+
+**The conversation** is in `docs/history/2026-10-31-claude-code-session-transcript.md`, linked from the history index:
+- Every message from you and every reply from me is included word for word.
+- Each tool call is shortened to one line, such as the command's description or the file touched. Command output and my internal reasoning are left out.
+- Your account details aren't in it; I checked. It runs up to this request.
+- The ChatGPT conversation and the design summary were already in `docs/history/`.
+
+**The guide** is a new top-level `REPRODUCING.md`, linked from the README. It has two parts:
+- **How it was done:**
+  - checking ChatGPT's claims against the Ansatz source before building on them
+  - the big design decision (verify existing C#)
+  - milestone 1: the export format's two versions, and test numbers computed independently of LeanSharp
+  - milestone 2: porting against the exact Lean version that produced the data, matching Lean's equality rules, and rebuilding declarations from the export instead of trusting it
+  - the tampering tests and the full-Init check
+  - notes on the cloud environment
+- **How to duplicate it:** the commands, with expected results, for:
+  - installing .NET and running the tests (136 pass, one skipped)
+  - checking the test files with the kernel, with the expected verdict for each
+  - verifying the test data with checksums and an independent count
+  - exporting and checking the full Init library
+  - fetching the Lean source the kernel was ported from
+
+  It ends with an outline for Mathlib, noting that we haven't run it yet.
+
+**Two small additions the guide depends on:**
+- `leansharp` command-line tool (`src/LeanSharp.Cli`), so you can check any export directly:
+  ```sh
+  dotnet run -c Release --project src/LeanSharp.Cli -- check tests/data/init-medium.ndjson.gz
+  ```
+  It exits with 0 if everything is accepted, 1 if something is rejected, and 2 if the input can't be read or a limit is hit.
+- `scripts/count-export.py`, the script that independently produces the numbers the tests check against.
+
+## User
+
+Let's start milestone 3.
+
+## Claude
+
+I'll set up tracking for milestone 3. The design defines it as: an exporter, a cross-kernel harness, property-based tests of the kernel, and a first version of the declaration store. The exit criterion is that **our output checks in at least one external kernel**.
+
+- **Task created**: Find a way to run Lean's kernel on NDJSON
+- **Task created**: Build the cross-kernel harness
+- **Task created**: Add property-based kernel tests
+- **Task created**: Decide and implement store v1 scope
+- **Task 8** → in_progress
+- **Bash**: Inspect lean4export's NDJSON parser and test driver
+- **Bash**: Find parser entry point and Lean's Replay module
+- **Bash**: Read lean4export lakefile and Replay entry point
+- **Bash**: Create the lean-replay Lean tool
+- **Bash**: Build lean-replay with the Lean 4.33.1 toolchain
+
+It builds. Now Lean's own verdicts on the original corpus files:
+
+- **Bash**: Run Lean's kernel (via lean-replay) on the original corpus
+- **Read**: `src/LeanSharp.Kernel/ExportChecker.cs`
+- **Bash**: Record admitted declarations in ExportChecker
+
+Next, a `leansharp export` command: check a file, then write what the kernel admitted.
+
+- **Bash**: Add export command; re-export corpus and check with Lean
+- **Task 8** → completed
+- **Task 9** → in_progress
+- **Bash**: Re-export full Init with LeanSharp and replay it in Lean
+- **Write**: `tests/LeanSharp.Kernel.Tests/CrossCheckFixtures.cs`
+- **Write**: `tests/LeanSharp.Kernel.Tests/CrossCheckTests.cs`
+- **Bash**: Admit fixtures, write them, and replay in Lean's kernel
+- **Bash**: Read how Lean's replay checks recursors and constructors
+- **Bash**: Tamper a recursor in the export and confirm Lean rejects it
+
+The harness catches the tampering: Lean rejects it with "Invalid recursor test.IsZero.rec". Now one script to run the whole cross-check, sharing the toolchain setup with the export script:
+
+- **Bash**: Write cross-check script and run it end to end
+- **Task 9** → completed
+- **Task 10** → in_progress
+- **Bash**: Add FsCheck.Xunit to the kernel tests
+- **Bash**: Check which constants are available for typed term generation
+
+My first check also counted names that appear inside expressions. Rechecking against declaration lines only:
+
+- **Bash**: Recheck available constants using declaration lines only
+- **Bash**: Recheck constants, skipping the metadata line
+- **Bash**: Inspect FsCheck 3 fluent C# API names
+- **Bash**: Look up ForAll, Check and Config signatures
+- **Bash**: Find ForAll and property-checking entry points
+- **Bash**: Scan FsCheck.dll metadata for runner method names
+
+`Prop.ForAll` and the `Check`/`QuickCheckThrowOnFailure` runners exist, so I'll use FsCheck's runner, which shrinks failing cases to minimal counterexamples. Writing the generators and properties:
+
+- **Write**: `tests/LeanSharp.Kernel.Tests/PropertyTests.cs`
+- **Bash**: Build property tests
+
+FsCheck's C# `Gen.Zip` returns reference tuples and has no three-way form. I'll add two small local `Zip` helpers that return value tuples, which the code was already written against:
+
+- **Bash**: Add tuple helpers and rebuild property tests
+
+Two type-inference snags: single-argument `Expr.App` returns `AppExpr`, which doesn't unify with `Expr` inside a generator. Adding casts:
+
+- **Bash**: Cast application results and rebuild
+- **Bash**: Run the property tests
+
+The property run is taking longer than expected. I'll check what it has printed so far:
+
+- **Bash**: Check interim property test output
+- **Read**: `/tmp/claude-0/-home-user-csharp-ansatz/a39a2e3d-f457-56b0-bd3e-f6a0fef71270/tasks/bsw0jdyk8.output`
+
+The output is buffered until the run ends, so I can't see which property is slow. I'll stop it and time each property on its own instead:
+
+- **TaskStop**
+- **Bash**: Time each level/expression property test separately
+
+`pkill -f testhost` matched the command line of my own shell and killed it. Rerunning without it:
+
+- **Bash**: Time each level/expression property test separately
+- **TaskStop**
+- **Bash**: Get the counterexample for the failing level property
+- **Bash**: Print the failing level pair
+
+FsCheck found the counterexample at test 14 and then couldn't shrink it (I didn't give it a shrinker for levels). I'll evaluate the parts of the property on it directly:
+
+- **Bash**: Probe normalization idempotence on the counterexample
+- **Bash**: Make generators lazy, fix the level property, pin Lean's behaviour
+
+An extra closing brace from my insertion. I'll look at the spot:
+
+- **Read**: `tests/LeanSharp.Kernel.Tests/PropertyTests.cs`
+- **Edit**: `tests/LeanSharp.Kernel.Tests/PropertyTests.cs`
+- **Bash**: Rebuild and time each remaining property test
+- **Write**: `tools/lean-replay/README.md`
+- **Read**: `/tmp/claude-0/-home-user-csharp-ansatz/a39a2e3d-f457-56b0-bd3e-f6a0fef71270/tasks/bsu9g8hlo.output`
+- **Edit**: `tests/LeanSharp.Kernel.Tests/PropertyTests.cs`
+- **Read**: `/tmp/claude-0/-home-user-csharp-ansatz/a39a2e3d-f457-56b0-bd3e-f6a0fef71270/tasks/bsu9g8hlo.output`
+
+The expression properties now run in seconds. While the type-checker properties finish, I'll update the design doc's milestone table, since the store is moving:
+
+- **Bash**: Find milestone and store lines in the design doc
+- **Bash**: Move the store to M5 in the design doc
+- **Task 11** → completed
+- **Read**: `/tmp/claude-0/-home-user-csharp-ansatz/a39a2e3d-f457-56b0-bd3e-f6a0fef71270/tasks/bsu9g8hlo.output`
+
+I'll draft the milestone 3 section of `docs/kernel.md` while the type-checker properties run:
+
+- **Bash**: List kernel.md sections
+- **Bash**: Draft milestone 3 sections in kernel.md
+- **Read**: `/tmp/claude-0/-home-user-csharp-ansatz/a39a2e3d-f457-56b0-bd3e-f6a0fef71270/tasks/bsu9g8hlo.output`
+- **Edit**: `tests/LeanSharp.Kernel.Tests/PropertyTests.cs`
+- **Read**: `/tmp/claude-0/-home-user-csharp-ansatz/a39a2e3d-f457-56b0-bd3e-f6a0fef71270/tasks/bsu9g8hlo.output`
+
+Every other property passes; the exit code 1 came from a `grep` in my loop, not from a test. Now the full suite with both fixes:
+
+- **Bash**: Run the full test suite
+
+All pass: 153, with 2 skipped (the two opt-in tests that need external files). One final cross-check run with the finished code:
+
+- **Bash**: Rerun the cross-kernel harness end to end
+- **Task 10** → completed
+- **Bash**: Update reproduction guide and README for milestone 3
+
+I'll confirm Lean's build output stays out of git, refresh the transcript, then commit and push:
+
+- **Bash**: Check ignores, refresh transcript, stage changes

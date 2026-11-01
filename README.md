@@ -58,13 +58,24 @@ dotnet test
 | `src/LeanSharp.Cic` | Names, universe levels, expressions, constants, declarations, environments |
 | `src/LeanSharp.Lean4Export` | Strict reader (formats 3.0.0, 3.1.0) and writer (3.1.0) for lean4export NDJSON |
 | `src/LeanSharp.Kernel` | The type-checking kernel: a port of Lean 4's C++ kernel ([docs/kernel.md](docs/kernel.md)) |
+| `src/LeanSharp.Cli` | `leansharp check <export>`: re-check a lean4export file with the kernel |
 | `tests/` | Unit tests and the export corpus (`tests/data`, see its README for provenance) |
+
+To check an export file with the kernel:
+
+```sh
+dotnet run -c Release --project src/LeanSharp.Cli -- check tests/data/init-medium.ndjson.gz
+```
+
+[REPRODUCING.md](REPRODUCING.md) explains how everything here was done and how to
+reproduce every result, including exporting and checking Lean's full Init library.
 
 ## Documents
 
 - [Design](docs/design.md): architecture, semantics, trusted base, milestones, open questions
 - [Kernel](docs/kernel.md): how the port maps to Lean's C++, deliberate differences, results
-- [Design history](docs/history/README.md): the conversations that led here
+- [Reproducing](REPRODUCING.md): how the work was done and how to duplicate it
+- [Design history](docs/history/README.md): the conversations that led here, including the full session transcript
 
 ## License
 

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>leansharp</AssemblyName>
+    <Description>Command-line tool: check lean4export files with the LeanSharp kernel.</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LeanSharp.Lean4Export\LeanSharp.Lean4Export.csproj" />
+    <ProjectReference Include="..\LeanSharp.Kernel\LeanSharp.Kernel.csproj" />
+  </ItemGroup>
+</Project>

@@ -19,8 +19,8 @@ The full Init export (348 MB) is not committed. Reproduce it with
 
 ## Expected counts
 
-Computed independently of LeanSharp, with a short Python script over the raw
-JSON. These are the values asserted in `ReaderCorpusTests`.
+Computed independently of LeanSharp by `scripts/count-export.py`, which reads
+the raw JSON. These are the values asserted in `ReaderCorpusTests`.
 
 | File | Names | Levels | Exprs | Decl. lines | Constants (axiom/def/thm/opaque/quot/induct/ctor/rec) |
 |---|---|---|---|---|---|

@@ -192,6 +192,14 @@ Proof terms
 Verdict + certificate (NDJSON) + assumption report
 ```
 
+Warrant **never generates Lean source text**. Where this document says C# is
+translated "to Lean" or into "Lean definitions", it means CIC terms: the core
+language that Lean source is elaborated into and that the kernel checks.
+Warrant builds those terms directly, as C# objects (`Warrant.Cic`), and checks
+them with its own kernel. Lean the language and toolchain is needed only to
+write and export the semantics library (D10), and to cross-check certificates
+(§7.4). Neither is needed at verification time.
+
 Roslyn has already resolved types, overloads, implicit conversions, operator
 methods, and flow, so Warrant needs **much less elaboration than Ansatz**.
 Ansatz must infer binder types and implicit arguments from untyped
@@ -223,7 +231,7 @@ VIR has a canonical binary and JSON encoding, and every unit has a content hash.
 ### 4.2 Translation to CIC (Warrant.Semantics)
 
 - **Pure units** (no heap writes, no external calls) become plain Lean
-  definitions, a *shallow embedding*. `if` becomes `ite`/`dite`, `switch`
+  definitions (CIC terms, not `.lean` source), a *shallow embedding*. `if` becomes `ite`/`dite`, `switch`
   becomes a match, locals become `let`, and recursion becomes well-founded
   recursion with a `Spec.Decreases` measure (or structural recursion when
   detectable).

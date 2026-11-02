@@ -2,8 +2,8 @@
 
 Checks a lean4export NDJSON file (format 3.1.0) with **Lean's own kernel**.
 
-It parses the file with lean4export's parser (pinned to commit `15f6055`, the last
-one built for Lean v4.33) and replays every constant into an empty environment
+It parses the file with lean4export's parser (pinned to commit `5a9a355`, the one
+built for Lean v4.35.0) and replays every constant into an empty environment
 with `Lean.Environment.replay`, the routine lean4checker uses. Replay sends each
 declaration to the official kernel. For inductive types it admits only the
 types and constructors, then requires every constructor and recursor in the file
@@ -16,7 +16,7 @@ Warrant admits.
 
 ## Build and run
 
-You need the Lean 4.33.1 toolchain on `PATH`. `scripts/lib/lean-toolchain.sh`
+You need the Lean 4.35.0 toolchain on `PATH`. `scripts/lib/lean-toolchain.sh`
 downloads it.
 
 ```sh

@@ -10,7 +10,7 @@ You may obtain a copy of the License at
 ---
 
 Warrant's kernel (src/Warrant.Kernel) is a C# port of the Lean 4 kernel
-(src/kernel/ at Lean v4.33.1), informed by the following works:
+(src/kernel/ at Lean v4.33.1, re-diffed against v4.35.0), informed by the following works:
 
   Lean 4 (https://github.com/leanprover/lean4)
   Copyright (c) Microsoft Corporation

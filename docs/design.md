@@ -608,7 +608,7 @@ cache (with recheck), the importer in verified mode, and the Roslyn analyzer.
 
 1. **Kernel corpus.** In order: `Nat.add_succ.ndjson` → arena cases
    (positive, and negative such as `002_badDef`, `141_falseFromUnsafe`) →
-   init-medium (5,118 constants) → full Init (57,977 declarations, 59,433 constants) → Mathlib v4.33.1 (707,508; Ansatz
+   init-medium (5,118 constants) → full Init (57,919 declarations, 59,349 constants at Lean 4.35.0) → Mathlib (707,508 at v4.33.1; Ansatz
    checks all of them in about 80 minutes on 4 workers). Every discrepancy
    becomes a regression test.
 2. **Cross-kernel harness.** Export our certificates (§7.4) and check them
@@ -684,9 +684,12 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
    wait for M6.
 9. **CI trust policy.** Always recheck certificates, or trust signed caches?
    Decide when M5a starts: its MSBuild task is authoritative for CI.
-10. **Lean version pin.** Pinned for now to Lean v4.33.1 and lean4export
-    `15f6055` (`scripts/lib/lean-toolchain.sh`), the version the kernel was
-    ported against. Changing it means re-diffing the kernel port.
+10. **Lean version pin.** Pinned to Lean v4.35.0 and lean4export `5a9a355`
+    (`scripts/lib/lean-toolchain.sh`). The kernel was ported against v4.33.1
+    and re-diffed against v4.35.0: the only kernel change in between removes
+    native reduction (`Lean.reduceBool`/`reduceNat`), which Warrant never
+    supported. Each later upgrade means re-diffing `src/kernel/` and re-running
+    `scripts/cross-check.sh` with a fresh Init export.
 11. **Nullable annotations.** Treat them as assumptions (current proposal) or
     verify them?
 12. **Name.** *Decided (D3):* Warrant, chosen before M4 publishes the user API

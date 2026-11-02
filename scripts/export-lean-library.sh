@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Export a Lean library (default: Init) to lean4export NDJSON, using the same
-# toolchain as the committed test corpus (Lean 4.33.1, lean4export 3.1.0).
+# toolchain pinned in lib/lean-toolchain.sh (lean4export format 3.1.0).
 #
 #   scripts/export-lean-library.sh [MODULE] [OUTPUT] [WORKDIR]
 #
@@ -21,5 +21,7 @@ fi
 cd lean4export
 git checkout -q "$LEAN4EXPORT_COMMIT"
 lake build
-lake env .lake/build/bin/lean4export "$MODULE" > "$OUTPUT"
+exe="$PWD/.lake/build/bin/lean4export"
+if [ -f "$exe.exe" ]; then exe="$(cygpath -m "$exe.exe")"; fi   # Windows: lake env needs a native path
+lake env "$exe" "$MODULE" > "$OUTPUT"
 echo "wrote $OUTPUT"

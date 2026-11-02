@@ -3,7 +3,7 @@
 **Machine-checked proofs about ordinary C# code.**
 
 > Status: **milestone 3 of 8.** A C# port of the Lean 4 kernel checks Lean's
-> entire Init library (57,977 declarations), and Lean's own kernel re-checks
+> entire Init library (57,919 declarations at Lean 4.35.0), and Lean's own kernel re-checks
 > everything it admits; the C#-to-CIC frontend comes next. Start with the [design document](docs/design.md).
 
 Warrant translates selected C# methods into the Calculus of Inductive

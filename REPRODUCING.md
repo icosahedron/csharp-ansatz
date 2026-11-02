@@ -207,14 +207,22 @@ python3 scripts/count-export.py tests/data/Nat.add_succ.ndjson tests/data/init-m
 scripts/export-lean-library.sh Init init.ndjson
 ```
 
-The script downloads the Lean 4.33.1 toolchain (about 900 MB as a zip), builds
-lean4export at commit `15f6055` (the last one pinned to Lean v4.33), and runs
-`lean4export Init`. The export takes about 20 seconds and produces a 348 MB file
-with 57,977 declaration records.
+The script downloads the Lean 4.35.0 toolchain, builds lean4export at commit
+`5a9a355` (the one built for Lean v4.35.0), and runs `lean4export Init`. The
+export takes about 15 seconds and produces a 346 MB file with 57,919
+declaration records.
+
+On Windows, run the scripts from Git Bash and point them at a toolchain
+installed with elan instead of the Linux download:
 
 ```sh
-python3 scripts/count-export.py init.ndjson     # 59,433 constants
-warrant check init.ndjson --quiet             # accepted 57,977, rejected 0 (about 75 s)
+elan toolchain install leanprover/lean4:v4.35.0
+export LEAN_TOOLCHAIN_BIN="$(cygpath -u "$(lean +leanprover/lean4:v4.35.0 --print-prefix)")/bin"
+```
+
+```sh
+python3 scripts/count-export.py init.ndjson     # 59,349 constants
+warrant check init.ndjson --quiet             # accepted 57,919, rejected 0 (about 45 s)
 WARRANT_INIT_EXPORT=$PWD/init.ndjson dotnet test --filter AcceptsFullInit
 ```
 
@@ -229,7 +237,7 @@ scripts/cross-check.sh
 WARRANT_INIT_EXPORT=$PWD/init.ndjson scripts/cross-check.sh   # include full Init
 ```
 
-The script uses the same Lean 4.33.1 toolchain (downloaded if needed; set
+The script uses the same Lean 4.35.0 toolchain (downloaded if needed; set
 `LEAN_TOOLCHAIN_BIN` to reuse one) and builds
 [`tools/lean-replay`](tools/lean-replay/README.md), a small Lean program that
 checks an NDJSON file with Lean's kernel. For every corpus file it compares Lean's
@@ -254,8 +262,7 @@ all verdicts agree
 
 Lean declines the original `Nat.add_succ` only because its parser reads format
 3.1.0. Warrant's export of it is 3.1.0, and Lean accepts that. With the full
-Init export included, Lean accepts all 59,433 constants Warrant writes (about
-70 s).
+Init export included, Lean accepts all 59,349 constants Warrant writes.
 
 ### 7. Re-derive the port from its sources (optional)
 
@@ -264,6 +271,8 @@ To compare the kernel with the C++ it was ported from:
 ```sh
 git clone --depth 1 --branch v4.33.1 --filter=blob:none --sparse https://github.com/leanprover/lean4
 git -C lean4 sparse-checkout set src/kernel
+git -C lean4 fetch --depth 1 origin tag v4.35.0
+git -C lean4 diff v4.33.1 v4.35.0 -- src/kernel   # what changed since the port
 ```
 
 [docs/kernel.md](docs/kernel.md) maps each C++ file to its C# counterpart and
@@ -272,7 +281,7 @@ thread, and macro scopes in generated names not being modelled.
 
 ### 8. Mathlib (not yet done)
 
-The same export script should work from a Mathlib checkout pinned to v4.33.1.
+The same export script should work from a Mathlib checkout pinned to the same Lean version (v4.35.0).
 For example, run `lake env <path>/lean4export Mathlib > mathlib.ndjson` inside
 `mathlib4` after `lake exe cache get`. Ansatz reports 707,508 declarations, all
 verified by its kernel. Warrant has not run this yet; expect a multi-gigabyte

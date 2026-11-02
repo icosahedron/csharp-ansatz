@@ -3,7 +3,9 @@
 `src/Warrant.Kernel` is a port of the Lean 4 kernel (`src/kernel/` in
 [leanprover/lean4](https://github.com/leanprover/lean4)), made against tag
 **v4.33.1** (commit `819816b`), the toolchain that produced the init-medium test
-export. Ansatz's Java kernel was a second reference. The port follows the C++
+export, and re-diffed against **v4.35.0**, the current pin. The only kernel
+change between the two removes native reduction (`Lean.reduceBool` and
+`Lean.reduceNat`), which Warrant never supported, so the port is unchanged. Ansatz's Java kernel was a second reference. The port follows the C++
 closely, function by function, so that each part can be compared directly with
 the original.
 
@@ -59,6 +61,7 @@ lean4export lists *constants*, while the kernel admits *declarations*.
 | Corpus | Result | Time |
 |---|---|---|
 | **full Init** (Lean 4.33.1): 57,977 declarations, 59,433 constants (348 MB export) | **all accepted** | ≈73 s |
+| **full Init** (Lean 4.35.0): 57,919 declarations, 59,349 constants (346 MB export) | **all accepted** | ≈41 s |
 | init-medium (Lean 4.33.1 Init subset): 4,631 declarations, 5,118 constants | all accepted | ≈3 s |
 | lean4export `Nat.add_succ` example (format 3.0.0) | all accepted | <0.1 s |
 | arena `001_basicDef`, `sparse-name-index` | accepted | |
@@ -75,11 +78,11 @@ rejected for the expected reason, and each has a positive control that must be
 accepted.
 
 The full Init export is too large to commit. `scripts/export-lean-library.sh`
-reproduces it (Lean 4.33.1, lean4export `15f6055`), and the opt-in test
+reproduces it (Lean 4.35.0, lean4export `5a9a355`), and the opt-in test
 `AcceptsFullInit` checks it when `WARRANT_INIT_EXPORT` points to the file.
 (Ansatz's documentation quotes 54,335 declarations for an earlier Init export.)
 
-**Not yet run:** Mathlib (707,508 declarations at v4.33.1). The same script can
+**Not yet run:** Mathlib (Ansatz reports 707,508 declarations at v4.33.1). The same script can
 export it from a Mathlib checkout.
 
 ## Cross-kernel checks (milestone 3)
@@ -92,7 +95,7 @@ Warrant's verdicts are compared with **Lean's own kernel**, using
 |---|---|
 | Lean's verdict on each corpus file vs Warrant's | identical on every file: both accept init-medium, `001_basicDef` and `sparse-name-index`, and both reject `badDef`, `falseFromUnsafe`, `PR14806Subst.observe` and `Issue.forallFalse` with the same reasons |
 | Lean re-checks what Warrant admitted (`warrant export`), corpus | accepted for every file, including our 3.0.0 → 3.1.0 conversion of `Nat.add_succ` |
-| Lean re-checks what Warrant admitted, full Init | all 59,433 constants accepted (≈71 s in Lean; ≈88 s for Warrant to check and export) |
+| Lean re-checks what Warrant admitted, full Init | all 59,433 constants accepted at Lean 4.33.1 (≈71 s in Lean; ≈88 s for Warrant to check and export); all 59,349 accepted at Lean 4.35.0 |
 | Lean re-checks declarations built from scratch in C# (`CrossCheckFixtures.cs`) | all accepted: recursive, mutual (`Even`/`Odd`), nested through `List` (`Rose`, with `Rose.rec_1`), structure with eta, universe-polymorphic (`Box`, motive universe `u_1`), K-like (`IsZero`), a definition by recursion and theorems needing iota and struct eta |
 | The harness detects divergence | flipping the K flag of one Warrant-generated recursor makes Lean reject the file ("Invalid recursor test.IsZero.rec") |
 

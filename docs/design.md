@@ -339,6 +339,34 @@ the main pitfall: a postcondition that holds only on the fall-through path. A
 region's contract must say what holds on each exit, and the verifier must
 reject contracts that ignore early exits.
 
+The M7 target is the payment example as it is commonly written, without
+restructuring into records: a mutable class, a loop with an invariant, and a
+region with an early return. The region syntax below is a placeholder (§12 Q4).
+
+```csharp
+public sealed class Payment
+{
+    public int Id { get; init; }
+    public decimal Amount { get; set; }
+    public PaymentStatus Status { get; set; }
+}
+
+public void PayInInstallments(Payment p, int count, decimal installment)   // not verified
+{
+    using (Verify.Region(ensures: () => p.Amount >= 0))
+    {
+        for (int i = 0; i < count; i++)
+        {
+            Spec.Invariant(p.Amount >= 0);
+            Spec.Decreases(count - i);
+            if (p.Amount < installment) return;   // early exit: the contract must cover it
+            p.Amount -= installment;
+        }
+    }
+    p.Status = PaymentStatus.Processed;
+}
+```
+
 ---
 
 ## 6. Semantics: modelling C# honestly
@@ -462,7 +490,7 @@ nested inductives.
 
 ### 7.3 Store
 
-> Scheduled with the verification server (M5): the store's layout depends on how the server
+> Scheduled with the verification server (M5b): the store's layout depends on how the server
 > caches checked environments, and at Init scale loading NDJSON is not a bottleneck.
 
 We don't port Ansatz's datahike/konserve store. Instead, a versioned on-disk
@@ -577,7 +605,7 @@ cache (with recheck), the importer in verified mode, and the Roslyn analyzer.
 
 1. **Kernel corpus.** In order: `Nat.add_succ.ndjson` → arena cases
    (positive, and negative such as `002_badDef`, `141_falseFromUnsafe`) →
-   init-medium (5,118 constants) → full Init (54,335) → Mathlib v4.33.1 (707,508; Ansatz
+   init-medium (5,118 constants) → full Init (57,977 declarations, 59,433 constants) → Mathlib v4.33.1 (707,508; Ansatz
    checks all of them in about 80 minutes on 4 workers). Every discrepancy
    becomes a regression test.
 2. **Cross-kernel harness.** Export our certificates (§7.4) and check them
@@ -606,12 +634,19 @@ cache (with recheck), the importer in verified mode, and the Roslyn analyzer.
 | M0 | Repository, license, design doc, history | This document merged. ✅ |
 | M1 | `LeanSharp.Cic` (Name, Level, Expr, ConstantInfo, Env), the NDJSON reader (formats 3.0.0 and 3.1.0) and writer (3.1.0) | `Nat.add_succ`, init-medium and the arena files import; import → export → import yields identical constants; export is idempotent. ✅ |
 | M2 | `LeanSharp.Kernel` | All 5,118 init-medium constants pass; arena negatives are rejected; then full Init. ✅ full Init (57,977 declarations), init-medium and arena (see [kernel.md](kernel.md)) |
-| M3 | Exporter, cross-kernel harness, FsCheck property tests | Certificates check in at least one external kernel. Mathlib is a stretch goal. ✅ Lean's kernel re-checks everything LeanSharp admits, including full Init and C#-built types (see [kernel.md](kernel.md)); the store moved to M5 |
-| M4 | VIR, extraction of the pure subset (`int`/`long`/`bool`, records, `if`/`switch`, recursion), semantics library v0, translation, differential testing | `[Verified]` pure methods translate, and differential tests pass. Theorems closed by `rfl`/`decide`. |
-| M5 | `LeanSharp.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `simp`, `omega`), server, store v1, MSBuild task, CLI | First end-to-end result: a false theorem fails the build with its goal shown. |
-| M6 | Contracts: `Spec.Requires`/`Ensures`, contract classes, effect monad (exceptions, null, overflow), VC generation, assumption reports | Pure parts of the payment example verified, and `ProcessPayment` verified with the store as a hypothesis. |
-| M7 | Regions, loops with invariants, heap model for mutable objects, `decimal`, strings | The payment example verified without restructuring into records. |
-| M8 | Live IDE feedback (language server / extension), `grind`, typed Mathlib handles, performance work | |
+| M3 | Exporter, cross-kernel harness, FsCheck property tests | Certificates check in at least one external kernel. Mathlib is a stretch goal. ✅ Lean's kernel re-checks everything LeanSharp admits, including full Init and C#-built types (see [kernel.md](kernel.md)); the store moved to M5b |
+| M4 | VIR, extraction of the pure subset (`int`/`long`/`bool`, enums, records, `if`/`switch`; theorems are parameterless `[Theorem]` methods returning `Prove.That(bool)`; recursion is rejected until M5a, and `/`, `%` and checked arithmetic are rejected with a diagnostic until M6, and non-null record parameters are recorded as assumptions), semantics library v0 with CLR-agreement tests (§10.6), translation, differential testing | A fixed corpus (`tests/corpus/m4/`) translates, including a `Validate`-shaped method over records and enums (`int` in place of `decimal`), and every rejected construct has a corpus method that is rejected with the diagnostic. Differential tests pass; null-record inputs check that .NET throws and that the non-null assumption is recorded. CLR-agreement tests pass for every modelled operation. Theorems without free parameters are closed by `rfl`/`decide` proof terms the translator emits. The translated corpus, exported with its Init + semantics closure, passes a new translated-output step in `scripts/cross-check.sh`. |
+| M5a | `LeanSharp.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `simp`, `omega`), quantified theorems and `Prove.That(...).By(...)`, structural recursion and well-founded recursion with `Spec.Decreases`, translator-generated equation lemmas for recursive definitions, a development-time export of simp, instance and reducibility attributes for Init and the semantics library next to the NDJSON bundle (untrusted tactic input; Std is added in M6), `Int32`/`Int64` → `Int` bridging lemmas and an omega-prep simp set (§6.2), in-process `leansharp verify` (§3.2), a thin MSBuild task that runs `leansharp verify` as a child process (the net10.0 engine cannot load in .NET Framework MSBuild) | First end-to-end result: `Increment(x) > x` fails the build with its goal shown under `dotnet build` and Visual Studio's MSBuild; `ValidImpliesPositive` (`int`), a well-founded method whose decrease needs `omega`, and a quantified theorem over a translated `int` method closed by `simp` then `omega` pass. Differential tests pass for a well-founded unit, evaluated with its equation lemmas. The certificate of a verified C# theorem passes the translated-output step of `scripts/cross-check.sh`. |
+| M5b | Server, content-addressed cache, store v1 (trusted and verified import), CLI verbs, analyzers | The M5a result through the server. A second build is served from the cache without running tactics, `LeanSharpRecheck=true` re-checks cached certificates with the kernel alone, and the Init + semantics store passes `leansharp check-store` in verified mode. `cancel` aborts a running verify, a unit over its fuel or wall-clock budget reports a timeout, and analyzer output is identical across runs. Baseline per-unit verification latency and server memory are recorded for M8. Store v1 waits for the Mathlib run's memory figure. |
+| M6 | Contracts: `Spec.Requires`/`Ensures`, contract classes, effect monad (exceptions, null, overflow, `/` and `%`), VC generation with `@[spec]` lemmas in the attribute sidecar, assumption reports, a minimal `decimal` model (96-bit mantissa and scale, comparisons, add/subtract without overflow; `==` is numeric equality, so `1.0m == 1.00m`, also inside records). Readonly fields whose type has a contract become theorem parameters (other field access waits for M7). First step: the Std closure the library imports is kernel-checked and cross-checked | Pure parts of the payment example verified, and `ProcessPayment` verified with the store as a hypothesis. Differential tests with contract-satisfying mocked externals pass, every new model operation (including the minimal `decimal`) passes CLR-agreement tests, generators include zero divisors, `MinValue / -1` and equal `decimal`s with different scales, and `ProcessPayment`'s certificate passes `scripts/cross-check.sh`. |
+| M7 | Regions, loops with invariants, heap model for mutable objects, full `decimal` arithmetic and rounding, strings | The payment example verified without restructuring into records (the target code in §5.3). CLR-agreement tests pass for the `decimal`, string and heap models. |
+| M8 | Live IDE feedback (language server / extension), `grind`, typed Mathlib handles (after the Mathlib run), performance work | Not defined yet (§12 Q15). Define one before starting. |
+
+Work deferred from M2/M3 (the Mathlib run with memory measurement, Ansatz and
+arena cross-checks, trace diffing, and the §10.3 property tests not yet
+covered) is tracked on its own tickets. The Ansatz/arena cross-checks and the
+property tests must be done before M5a closes. The Mathlib run must finish
+before M5b's store v1 work and M8's typed handles.
 
 Porting sources: the **Lean 4 sources are authoritative** (`src/kernel/` for
 the kernel, `src/Lean/Meta/` for tactics). **Ansatz is the second reference**
@@ -621,32 +656,107 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
 
 ## 12. Open questions
 
-1. **`decimal`.** What precision and rounding model should we use, and which
-   operations come first (comparisons and add/subtract without overflow)?
-   Payments make this urgent.
+1. **`decimal`.** What precision and rounding model should we use? The first
+   operations (comparisons and add/subtract without overflow) are scheduled
+   in M6, because the payment example needs them; full arithmetic and
+   rounding come in M7.
 2. **Strings.** Is a full UTF-16 model needed early, or can strings be opaque
    (equality only) at first?
 3. **Enums.** Should they be open by default (integer-backed), with an opt-in
-   `[Closed]`?
+   `[Closed]`? Decide in M4, which adds enums.
 4. **Region syntax.** `using (Verify.Region(...)) { }`, a local function with
-   `[Verified]`, or something else? How are exit paths specified?
+   `[Verified]`, or something else? How are exit paths specified? Decide
+   before M7 starts.
 5. **Specifications about external effects.** For example, "`SavePayment` was
    called exactly once with a processed payment." This needs a trace of
    external calls in the monad and a spec vocabulary over it.
 6. **Heap model** for mutable classes: dynamic frames, separation logic, or
-   ownership (records only until M7)?
+   ownership (records only until M7)? Decide before M7 starts.
 7. **IDE feedback.** A language server, a VS Code / Rider / Visual Studio
    extension, or an analyzer that reads a results file? The last one conflicts
    with analyzer determinism.
 8. **Automation defaults.** Which tactic pipeline, and what fuel and time
-   budgets per unit?
+   budgets per unit? Decide the budgets when M5a starts (in-process
+   `leansharp verify` enforces them until M5b's server does); the pipeline can
+   wait for M6.
 9. **CI trust policy.** Always recheck certificates, or trust signed caches?
-10. **Lean version pin.** Follow Ansatz's pin (Lean and Mathlib v4.33.1) for
-    corpus compatibility?
+   Decide when M5a starts: its MSBuild task is authoritative for CI.
+10. **Lean version pin.** Pinned for now to Lean v4.33.1 and lean4export
+    `15f6055` (`scripts/lib/lean-toolchain.sh`), the version the kernel was
+    ported against. Changing it means re-diffing the kernel port.
 11. **Nullable annotations.** Treat them as assumptions (current proposal) or
     verify them?
-12. **Name.** LeanSharp is provisional.
-13. **Target framework.** Confirm net10.0 for the server and core (D8).
+12. **Name.** LeanSharp is provisional. Decide before M4 publishes the user API
+    package, since a rename later breaks every user's attributes and namespaces.
+13. **Target framework.** Confirm net10.0 for the server and core (D8) before
+    M4 starts.
+14. **Collections, generics and other integer types.** §6.1 maps
+    `IReadOnlyList<T>`/`ImmutableArray<T>`, generics, and unsigned and small
+    integers, but no milestone schedules them. Schedule them (M6 already
+    extends the semantics library) or record them as non-goals? Without them
+    most existing business code stays outside the subset. Decide before M6
+    starts.
+15. **M8 exit criterion.** What latency and memory budget makes live IDE
+    feedback good enough, and should M8's four items (IDE, `grind`, typed
+    handles, performance) be separate tickets? M5b's recorded baselines are the
+    starting point. Define it before M8 starts.
+
+Questions 16 to 20 came from rewriting ten functions of a production C#
+codebase (the claims modules of an insurance platform) in the §5 surface, one
+or two per milestone from M4 to M7.
+
+16. **Closed-set classes.** Many codebases use the "smart enum" pattern instead
+    of C# `enum`: a sealed class with a private constructor and static
+    instances, compared by reference (for example
+    `AssignmentOutcome.Matched`, backed by a `StringClosedSetBase<T>`). §6.1 has no row for it, so
+    every method that touches one is outside the M4 subset. Proposal: Q3's
+    `[Closed]` also applies to such classes, recognised by shape (sealed,
+    private constructors, static get-only instances of the type itself); they
+    translate to an `inductive` with `DecidableEq`, and the analyzer rejects a
+    `[Closed]` class that doesn't have that shape. Decide with Q3, in M4.
+17. **Specs on expression-bodied members.** `Spec.Ensures` is a statement, so
+    it needs a block body. Most small pure methods and properties are
+    expression-bodied (`=> a && b`), so specifying them means rewriting the
+    body. Options: accept the rewrite (a code fix can do it); let a companion
+    `[ProofFor(nameof(M))]` method carry the contract; or read a leading
+    `Spec.Ensures` from a `Spec.Contract(() => ...)` wrapper. Decide before M6
+    adds `Spec.Ensures`.
+18. **Collections and case-insensitive strings come before contracts in
+    practice.** The most valuable specs in the reviewed code (queue matching,
+    adjuster eligibility) call `IReadOnlyList<T>.Contains`, LINQ `Any`/`Where`,
+    and `string.Equals(..., OrdinalIgnoreCase)`. Without Q14 (collections) and
+    at least opaque strings with equality and a case-insensitive comparison
+    (Q2), M6 can verify `ProcessPayment` but not the code that motivated this
+    review. This argues for scheduling Q14 and a minimal string model in M6.
+19. **A source dependency for specifications.** The §5 surface needs the
+    `LeanSharp` package referenced by the code being verified. Teams that
+    can't take that dependency yet (one existing in-house translator chose
+    `//@` comments for exactly this reason) need a route that doesn't touch the
+    project file: a spec sidecar file keyed by method signature, holding the
+    same C# expressions. Decide whether sidecars are supported, and in which
+    milestone, before M6.
+20. **Smaller gaps found in the same review.**
+    - `Guid` (and `Guid?`) has no model. An opaque type with decidable equality
+      is enough for every use seen.
+    - `Math.Abs` on `decimal` is missing from M6's minimal `decimal` list.
+    - M5a's tactics have no `decide` over finite domains and no `split` for
+      `if`/ternaries. A theorem quantified over several `bool` or closed-set
+      parameters then needs a nested `cases` per parameter.
+    - Most dependencies arrive through primary-constructor parameters, which
+      are not `readonly` fields, so M6's rule "readonly fields whose type has a
+      contract become theorem parameters" doesn't cover them. Extend the rule
+      to captured parameters that are never assigned (the analyzer can check
+      this).
+    - Logging calls (`LogDebug($"...")`) in verified methods drag in string
+      interpolation. They need a standard contract that says "no effect on
+      verified state", listed in the assumption report.
+    - A `static readonly` array used as a constant table is a heap object.
+      Treat it as a constant when nothing writes to it, or require
+      `ImmutableArray<T>`.
+    - Vocabulary §5 doesn't have yet: where exceptions may come from
+      (`Spec.ThrowsOnlyFrom`), how often an external was called (Q5),
+      frame conditions (`Spec.Modifies`), and a ghost iteration counter for
+      `foreach` invariants (§5.3 shows only `for`).
 
 ---
 

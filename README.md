@@ -42,7 +42,9 @@ static Proof ValidImpliesPositive(Payment p) =>
          .By(Tactic.Unfold(nameof(Validate)), Tactic.Simp());
 ```
 
-*(Target syntax under discussion; see [design §5](docs/design.md#5-the-c-surface).)*
+*(Target syntax under discussion; see [design §5](docs/design.md#5-the-c-surface).
+A developer guide to writing proofs, written ahead of the implementation, is in
+[docs/proving](docs/proving/README.md).)*
 
 ## Building
 

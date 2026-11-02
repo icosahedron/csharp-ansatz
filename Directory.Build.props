@@ -7,7 +7,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
-    <Authors>The LeanSharp Authors</Authors>
+    <Authors>The Warrant Authors</Authors>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/icosahedron/csharp-ansatz</RepositoryUrl>
   </PropertyGroup>

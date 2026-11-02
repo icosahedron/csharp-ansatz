@@ -15,11 +15,11 @@ them, because they are well-formed; rejecting them is the kernel's job (mileston
 
 The full Init export (348 MB) is not committed. Reproduce it with
 `scripts/export-lean-library.sh` and run the opt-in kernel test with
-`LEANSHARP_INIT_EXPORT=<path> dotnet test --filter AcceptsFullInit`.
+`WARRANT_INIT_EXPORT=<path> dotnet test --filter AcceptsFullInit`.
 
 ## Expected counts
 
-Computed independently of LeanSharp by `scripts/count-export.py`, which reads
+Computed independently of Warrant by `scripts/count-export.py`, which reads
 the raw JSON. These are the values asserted in `ReaderCorpusTests`.
 
 | File | Names | Levels | Exprs | Decl. lines | Constants (axiom/def/thm/opaque/quot/induct/ctor/rec) |

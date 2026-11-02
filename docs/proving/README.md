@@ -1,4 +1,4 @@
-# Writing proofs with LeanSharp
+# Writing proofs with Warrant
 
 > Status: **written ahead of the implementation.** Everything here describes the
 > target surface in [design §5](../design.md#5-the-c-surface). Nothing in it runs
@@ -9,7 +9,7 @@
 
 This guide is for C# developers who want to prove things about their own code.
 You don't need to know Lean. You do need to be comfortable writing a unit test,
-since a LeanSharp theorem plays the same role for every input at once.
+since a Warrant theorem plays the same role for every input at once.
 
 The guide follows the [Divio documentation system](https://docs.divio.com/documentation-system/),
 in four parts that answer four different needs:
@@ -19,7 +19,7 @@ in four parts that answer four different needs:
 | **Tutorial** | new, and want to see it work end to end | [Your first proofs](tutorial.md) |
 | **How-to guides** | trying to get a specific thing done | [How-to guides](how-to.md) |
 | **Reference** | looking up an attribute, a `Spec` method, a tactic or a diagnostic | [Reference](reference.md) |
-| **Explanation** | wondering why it works this way | [How LeanSharp thinks about your code](explanation.md) |
+| **Explanation** | wondering why it works this way | [How Warrant thinks about your code](explanation.md) |
 
 If you only read one page, read the tutorial. If a proof is failing and you don't
 know why, start with [Reading a failed proof](how-to.md#read-a-failed-proof).

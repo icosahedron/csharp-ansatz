@@ -1,6 +1,6 @@
-# The LeanSharp kernel
+# The Warrant kernel
 
-`src/LeanSharp.Kernel` is a port of the Lean 4 kernel (`src/kernel/` in
+`src/Warrant.Kernel` is a port of the Lean 4 kernel (`src/kernel/` in
 [leanprover/lean4](https://github.com/leanprover/lean4)), made against tag
 **v4.33.1** (commit `819816b`), the toolchain that produced the init-medium test
 export. Ansatz's Java kernel was a second reference. The port follows the C++
@@ -9,7 +9,7 @@ the original.
 
 ## File map
 
-| Lean 4 (C++) | LeanSharp (C#) | Contents |
+| Lean 4 (C++) | Warrant (C#) | Contents |
 |---|---|---|
 | `level.cpp` | `LevelOps.cs` | `mk_max`/`mk_imax`, `normalize`, `is_equivalent`, `is_geq`, instantiate |
 | `instantiate.cpp`, `abstract.cpp`, `replace_fn.cpp`, `expr.cpp` (part) | `ExprOps.cs` | bound-variable substitution, abstraction, lift/lower, level-parameter instantiation, beta, `infer_implicit` |
@@ -25,15 +25,15 @@ the original.
 
 The C++ kernel's `==` on expressions (`is_equal`) ignores binder names and binder
 info. Its caches and quick checks are keyed on that equality, and so are
-LeanSharp's (`Expr.AlphaEquals`, `Expr.AlphaComparer`). `Expr.Equals` is exact
+Warrant's (`Expr.AlphaEquals`, `Expr.AlphaComparer`). `Expr.Equals` is exact
 equality, which the export round-trip tests need.
 
 ## Deliberate differences from Lean
 
-| Lean 4 | LeanSharp | Why |
+| Lean 4 | Warrant | Why |
 |---|---|---|
 | No step limit (only heartbeats/recursion depth from the caller) | **Fuel**: each call of the core procedures costs a step; 20M interactive, 100M for corpora. Running out rejects as a *resource limit*, never as a type error | Checking must terminate inside a build server. |
-| `Lean.reduceBool`/`Lean.reduceNat` run compiled code | **Not supported**: they never reduce, so declarations relying on them (`native_decide`) are rejected | LeanSharp has no compiler, and trusting one would enlarge the trusted base. |
+| `Lean.reduceBool`/`Lean.reduceNat` run compiled code | **Not supported**: they never reduce, so declarations relying on them (`native_decide`) are rejected | Warrant has no compiler, and trusting one would enlarge the trusted base. |
 | Recursion on large native stacks | Recursion on a 512 MB-stack thread (`KernelThread`); stack exhaustion becomes a resource limit | Same algorithm, no stack-overflow crash. |
 | The local context is restored after leaving a binder | Free-variable declarations accumulate for the life of a type checker | Names are globally unique, so this is unobservable; it avoids copying. |
 | `Name.appendAfter` strips macro scopes first | Not modelled | Only affects generated binder names, which are compared up to alpha-equivalence. |
@@ -76,7 +76,7 @@ accepted.
 
 The full Init export is too large to commit. `scripts/export-lean-library.sh`
 reproduces it (Lean 4.33.1, lean4export `15f6055`), and the opt-in test
-`AcceptsFullInit` checks it when `LEANSHARP_INIT_EXPORT` points to the file.
+`AcceptsFullInit` checks it when `WARRANT_INIT_EXPORT` points to the file.
 (Ansatz's documentation quotes 54,335 declarations for an earlier Init export.)
 
 **Not yet run:** Mathlib (707,508 declarations at v4.33.1). The same script can
@@ -84,25 +84,25 @@ export it from a Mathlib checkout.
 
 ## Cross-kernel checks (milestone 3)
 
-LeanSharp's verdicts are compared with **Lean's own kernel**, using
+Warrant's verdicts are compared with **Lean's own kernel**, using
 [`tools/lean-replay`](../tools/lean-replay/README.md): lean4export's parser plus
 `Lean.Environment.replay`. Run everything with `scripts/cross-check.sh`.
 
 | Check | Result |
 |---|---|
-| Lean's verdict on each corpus file vs LeanSharp's | identical on every file: both accept init-medium, `001_basicDef` and `sparse-name-index`, and both reject `badDef`, `falseFromUnsafe`, `PR14806Subst.observe` and `Issue.forallFalse` with the same reasons |
-| Lean re-checks what LeanSharp admitted (`leansharp export`), corpus | accepted for every file, including our 3.0.0 → 3.1.0 conversion of `Nat.add_succ` |
-| Lean re-checks what LeanSharp admitted, full Init | all 59,433 constants accepted (≈71 s in Lean; ≈88 s for LeanSharp to check and export) |
+| Lean's verdict on each corpus file vs Warrant's | identical on every file: both accept init-medium, `001_basicDef` and `sparse-name-index`, and both reject `badDef`, `falseFromUnsafe`, `PR14806Subst.observe` and `Issue.forallFalse` with the same reasons |
+| Lean re-checks what Warrant admitted (`warrant export`), corpus | accepted for every file, including our 3.0.0 → 3.1.0 conversion of `Nat.add_succ` |
+| Lean re-checks what Warrant admitted, full Init | all 59,433 constants accepted (≈71 s in Lean; ≈88 s for Warrant to check and export) |
 | Lean re-checks declarations built from scratch in C# (`CrossCheckFixtures.cs`) | all accepted: recursive, mutual (`Even`/`Odd`), nested through `List` (`Rose`, with `Rose.rec_1`), structure with eta, universe-polymorphic (`Box`, motive universe `u_1`), K-like (`IsZero`), a definition by recursion and theorems needing iota and struct eta |
-| The harness detects divergence | flipping the K flag of one LeanSharp-generated recursor makes Lean reject the file ("Invalid recursor test.IsZero.rec") |
+| The harness detects divergence | flipping the K flag of one Warrant-generated recursor makes Lean reject the file ("Invalid recursor test.IsZero.rec") |
 
 Replay requires every recursor in the file to be `==` to the one Lean generates,
-so these runs check LeanSharp's recursor generation against Lean's, not just
+so these runs check Warrant's recursor generation against Lean's, not just
 type correctness.
 
 ## Property-based tests (milestone 3)
 
-`tests/LeanSharp.Kernel.Tests/PropertyTests.cs` uses FsCheck to compare the kernel
+`tests/Warrant.Kernel.Tests/PropertyTests.cs` uses FsCheck to compare the kernel
 with an independent meaning on random inputs:
 
 - **Universe levels vs. evaluation** (all assignments of 0–3 to `u`, `v`, `w`):
@@ -123,5 +123,5 @@ with an independent meaning on random inputs:
 **Finding:** Lean's level normalization is not idempotent. Its `imax` case
 rebuilds an unsorted `max`, so `IsEquivalent(l, Normalize(l))` can be false even
 though both sides always evaluate equal. This is incompleteness, not unsoundness.
-LeanSharp matches the C++ exactly, and
+Warrant matches the C++ exactly, and
 `NormalizationIsNotIdempotentExactlyAsInLean` pins the behaviour.

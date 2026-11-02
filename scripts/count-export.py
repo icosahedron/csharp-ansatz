@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Count the records in a lean4export NDJSON file (formats 3.0.0 and 3.1.0).
 
-Independent of LeanSharp: this is the oracle for the expected counts in the
+Independent of Warrant: this is the oracle for the expected counts in the
 tests (see tests/data/README.md).  Usage: count-export.py FILE [FILE ...]
 """
 import sys, json, gzip, collections

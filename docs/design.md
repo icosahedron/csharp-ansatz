@@ -1,10 +1,10 @@
-# LeanSharp Design
+# Warrant Design
 
 > Status: **draft, design phase** · Started 2026-10-31
 > History: [ChatGPT conversation](history/2026-10-31-chatgpt-recommend-csharp-frontend.md) ·
 > [Claude design session](history/2026-10-31-claude-design-session.md)
 
-LeanSharp verifies properties of ordinary C# code with machine-checked proofs.
+Warrant verifies properties of ordinary C# code with machine-checked proofs.
 C# methods are translated into terms of the Calculus of Inductive Constructions
 (CIC), the type theory of Lean 4. Proofs about those terms are checked by a
 C# port of the Lean 4 kernel, and the existing Lean libraries (Init, Std,
@@ -12,7 +12,7 @@ Mathlib) are available as imported, already-elaborated declarations.
 
 The project is inspired by [Ansatz](https://github.com/replikativ/ansatz), which
 does the same for Clojure. Ansatz is a Lean 4 kernel in Java with an elaborator,
-tactics, and a Clojure surface language. LeanSharp keeps Ansatz's foundations
+tactics, and a Clojure surface language. Warrant keeps Ansatz's foundations
 (kernel, lean4export import, independent re-checking) but takes the opposite
 direction at the surface: **it verifies existing C# rather than generating code
 from verified definitions.** See §2.
@@ -25,15 +25,17 @@ from verified definitions.** See §2.
 |---|---|---|
 | D1 | **Verify existing C# (direction B).** Translate C# into a CIC model and prove properties of the model. Do not generate C# from verified terms (direction A). | Decided |
 | D2 | Verification runs in a **long-lived verification server**, not in the IDE's analyzer process. | Decided |
-| D3 | Working name **LeanSharp** (to be revisited). | Decided |
+| D3 | Name **Warrant**: in logic, a warrant is what justifies a claim, and every proof comes with the assumptions it rests on. Replaces the working name LeanSharp, which named the project after Lean rather than what it does (§12 Q12). | Decided |
 | D4 | License **Apache 2.0**, with NOTICE attribution to Lean 4 and Ansatz. | Decided |
 | D5 | **Port the kernel** to C#. Don't bridge to Ansatz's JVM kernel. | Proposed, not objected to |
 | D6 | Cross-check by **exporting lean4export NDJSON**, not by pretty-printing Lean source. | Proposed, not objected to |
 | D7 | Map C# types to **faithful Lean models** (`int` → `Int32` with wrap-around, not unbounded `Int`). | Proposed, not objected to |
-| D8 | Target **net10.0** for the server and core libraries. Components loaded by Roslyn or MSBuild target **netstandard2.0**. | Default, unconfirmed |
+| D8 | Target **net10.0** for the server and core libraries. Components loaded by Roslyn or MSBuild, and the user API package, target **netstandard2.0**, so projects on older frameworks can be verified. | Decided |
 | D9 | External dependencies (databases, services) are **hypotheses in the theorem**, never global axioms. | Proposed |
-| D10 | The C# semantic model is a **Lean 4 library written and proved in real Lean**, exported to NDJSON, and shipped with LeanSharp. | Proposed |
+| D10 | The C# semantic model is a **Lean 4 library written and proved in real Lean**, exported to NDJSON, and shipped with Warrant. | Proposed |
 | D11 | Verification-condition generation is **proof-producing (a tactic)**, so it is outside the trusted base. | Proposed |
+| D12 | Enums are **open by default**: modelled as their underlying integer, so proofs cover unnamed values. `[Closed]` opts in to modelling exactly the named values; that is an assumption, listed in the report, and the analyzer warns on integer casts to the type (§12 Q3). | Decided |
+| D13 | `[Closed]` also applies to **closed-set classes**, recognised **by shape**: sealed, private constructors only, and static get-only instances of the type itself. They translate to an `inductive` with `DecidableEq`; a `[Closed]` class without that shape is an error. Adjust the shape rule if real code needs it (§12 Q16). | Decided |
 
 ---
 
@@ -75,14 +77,14 @@ In Ansatz, `a/defn` elaborates a Clojure form into a CIC term, the kernel
 checks it, and the **executable Clojure function is compiled from the checked
 term**. What runs is derived from what was proved.
 
-LeanSharp inverts this. The developer's C# is the source of truth, it runs as
-written, and LeanSharp proves properties of a **model** of it. Only this
+Warrant inverts this. The developer's C# is the source of truth, it runs as
+written, and Warrant proves properties of a **model** of it. Only this
 direction covers the motivating example: an existing method that validates
 input, reads from a database, applies more logic, and writes back, where we
 want to prove the logic and assume the database behaves.
 
 The cost is a **faithfulness gap**: a proof about the model is only as good as
-the translation. LeanSharp addresses this in three ways:
+the translation. Warrant addresses this in three ways:
 
 1. **Honest models.** C# `int` is Lean `Int32` (two's-complement wrap-around),
    not mathematical `Int`. Under the faithful model, the classic false theorem
@@ -105,28 +107,28 @@ the translation. LeanSharp addresses this in three ways:
  │                                                                            │
  │  C# project                                                                │
  │     │                                                                      │
- │     ├──► Roslyn compiler ──► LeanSharp.Analyzers   (pure, fast checks:     │
+ │     ├──► Roslyn compiler ──► Warrant.Analyzers   (pure, fast checks:     │
  │     │                         unsupported constructs, malformed specs)     │
  │     │                                                                      │
- │     └──► MSBuild: LeanSharp.Build task (after CoreCompile)                 │
+ │     └──► MSBuild: Warrant.Build task (after CoreCompile)                 │
  │             │  builds a CSharpCompilation from the Csc inputs              │
- │             │  LeanSharp.Extraction: IOperation / CFG ──► VIR units        │
+ │             │  Warrant.Extraction: IOperation / CFG ──► VIR units        │
  │             ▼                                                              │
  │        JSON-RPC over named pipe / Unix socket                              │
  │             │                                                              │
- │  ┌──────────▼──────────── leansharp-server (net10.0) ──────────────────┐   │
+ │  ┌──────────▼──────────── warrant-server (net10.0) ──────────────────┐   │
  │  │  Result cache (content-addressed: verdicts + proof certificates)    │   │
  │  │      │ miss                                                         │   │
  │  │      ▼                                                              │   │
- │  │  LeanSharp.Semantics   VIR ──► CIC model (over the LeanSharp Lean   │   │
+ │  │  Warrant.Semantics   VIR ──► CIC model (over the Warrant Lean   │   │
  │  │                        library) + goals                             │   │
  │  │      ▼                                                              │   │
- │  │  LeanSharp.Meta / Tactics   VC generation, simp, omega, … ──►       │   │
+ │  │  Warrant.Meta / Tactics   VC generation, simp, omega, … ──►       │   │
  │  │                             proof terms   (untrusted)               │   │
  │  │      ▼                                                              │   │
- │  │  LeanSharp.Kernel      type-checks every proof term   (trusted)     │   │
+ │  │  Warrant.Kernel      type-checks every proof term   (trusted)     │   │
  │  │      ▲                                                              │   │
- │  │  LeanSharp.Store       Init / Std / Mathlib / LeanSharp semantics,  │   │
+ │  │  Warrant.Store       Init / Std / Mathlib / Warrant semantics,  │   │
  │  │                        lazily loaded, from lean4export NDJSON       │   │
  │  └─────────────────────────────────────────────────────────────────────┘   │
  │             │                                                              │
@@ -156,13 +158,13 @@ the translation. LeanSharp addresses this in three ways:
 
 | Component | Runs in | Target | Responsibility |
 |---|---|---|---|
-| `LeanSharp` (user API) | user app | netstandard2.0 | Attributes, `Spec.*`, `Prove`, `Tactic.*`. No runtime behaviour (§5). |
-| `LeanSharp.Analyzers` | compiler / IDE | netstandard2.0 | Deterministic checks only: supported subset, spec well-formedness, calling `[Theorem]` methods, missing contracts on externals. No I/O. |
-| `LeanSharp.Extraction` | analyzer + build task | netstandard2.0 | Roslyn `IOperation` / `ControlFlowGraph` → VIR. Shared, so the analyzer and the build agree on what is supported. |
-| `LeanSharp.Vir` | everywhere | netstandard2.0 | The **Verification IR** and its canonical serialization. This is the wire protocol between extraction and the server. |
-| `LeanSharp.Build` | MSBuild | netstandard2.0 | After `CoreCompile`: extract, send to the server (starting it if needed), report diagnostics, write reports. Authoritative for builds and CI. |
-| `leansharp-server` | own process | net10.0 | Cache, translation, tactics, kernel, store. Stays free of Roslyn: it only sees VIR. |
-| `leansharp` CLI | own process | net10.0 | `verify`, `check-store`, `import`, `export`, `explain`; runs the engine in-process for CI without a daemon. |
+| `Warrant` (user API) | user app | netstandard2.0 | Attributes, `Spec.*`, `Prove`, `Tactic.*`. No runtime behaviour (§5). |
+| `Warrant.Analyzers` | compiler / IDE | netstandard2.0 | Deterministic checks only: supported subset, spec well-formedness, calling `[Theorem]` methods, missing contracts on externals. No I/O. |
+| `Warrant.Extraction` | analyzer + build task | netstandard2.0 | Roslyn `IOperation` / `ControlFlowGraph` → VIR. Shared, so the analyzer and the build agree on what is supported. |
+| `Warrant.Vir` | everywhere | netstandard2.0 | The **Verification IR** and its canonical serialization. This is the wire protocol between extraction and the server. |
+| `Warrant.Build` | MSBuild | netstandard2.0 | After `CoreCompile`: extract, send to the server (starting it if needed), report diagnostics, write reports. Authoritative for builds and CI. |
+| `warrant-server` | own process | net10.0 | Cache, translation, tactics, kernel, store. Stays free of Roslyn: it only sees VIR. |
+| `warrant` CLI | own process | net10.0 | `verify`, `check-store`, `import`, `export`, `explain`; runs the engine in-process for CI without a daemon. |
 
 Keeping Roslyn out of the server means the server's input (VIR) is small,
 canonical, and hashable. That is what makes the cache (§8.2) reliable.
@@ -176,24 +178,24 @@ C# method
   │  Roslyn: binding, overload resolution, types, nullable analysis   (free)
   ▼
 IOperation tree + ControlFlowGraph
-  │  LeanSharp.Extraction
+  │  Warrant.Extraction
   ▼
 VIR unit   (typed, structured, explicit effects; one per method / region / theorem)
-  │  LeanSharp.Semantics   (part of the trusted base: see §9)
+  │  Warrant.Semantics   (part of the trusted base: see §9)
   ▼
-CIC definitions over the LeanSharp Lean library  +  goals (CIC Props)
-  │  LeanSharp.Tactics: VC generation (mvcgen-style), simp, omega, …   (untrusted)
+CIC definitions over the Warrant Lean library  +  goals (CIC Props)
+  │  Warrant.Tactics: VC generation (mvcgen-style), simp, omega, …   (untrusted)
   ▼
 Proof terms
-  │  LeanSharp.Kernel   (trusted)
+  │  Warrant.Kernel   (trusted)
   ▼
 Verdict + certificate (NDJSON) + assumption report
 ```
 
 Roslyn has already resolved types, overloads, implicit conversions, operator
-methods, and flow, so LeanSharp needs **much less elaboration than Ansatz**.
+methods, and flow, so Warrant needs **much less elaboration than Ansatz**.
 Ansatz must infer binder types and implicit arguments from untyped
-s-expressions. For LeanSharp, translation is mostly a direct mapping. The
+s-expressions. For Warrant, translation is mostly a direct mapping. The
 elaborator machinery (metavariables, unification, instance synthesis) exists
 mainly to serve tactics.
 
@@ -218,14 +220,14 @@ VIR is a small, language-level IR of the supported C# subset. It is not CIC.
 
 VIR has a canonical binary and JSON encoding, and every unit has a content hash.
 
-### 4.2 Translation to CIC (LeanSharp.Semantics)
+### 4.2 Translation to CIC (Warrant.Semantics)
 
 - **Pure units** (no heap writes, no external calls) become plain Lean
   definitions, a *shallow embedding*. `if` becomes `ite`/`dite`, `switch`
   becomes a match, locals become `let`, and recursion becomes well-founded
   recursion with a `Spec.Decreases` measure (or structural recursion when
   detectable).
-- **Effectful units** become programs in a LeanSharp monad defined in the Lean
+- **Effectful units** become programs in a Warrant monad defined in the Lean
   library (§6.2), with state for the heap, `Except` for exceptions, and
   external calls as specified operations. Their contracts become Hoare triples
   in the style of Lean's `Std.Do` framework.
@@ -242,12 +244,12 @@ in the untrusted tactics.
 > All code in this section is **target syntax for discussion**, not a settled API.
 
 Everything is valid C#. Spec methods are marked
-`[Conditional("LEANSHARP_CONTRACTS")]`, so the compiler drops the calls from
+`[Conditional("WARRANT_CONTRACTS")]`, so the compiler drops the calls from
 emitted IL by default. They remain fully bound in Roslyn's semantic model and
-`IOperation` tree, which is all LeanSharp needs.
+`IOperation` tree, which is all Warrant needs.
 
 C# attribute arguments must be compile-time constants, so
-`[Ensures(r => r > 0)]` is impossible. String specs would be untyped. LeanSharp
+`[Ensures(r => r > 0)]` is impossible. String specs would be untyped. Warrant
 therefore puts specs in **method-body calls** (the Code Contracts tradition)
 and in **companion contract classes** for interfaces and external code.
 
@@ -380,23 +382,24 @@ public void PayInInstallments(Payment p, int count, decimal installment)   // no
 | `byte` `ushort` `uint` `ulong` | `UInt8` … `UInt64` | |
 | `checked(...)` arithmetic | `Except OverflowException` | Also the default when the project enables `CheckForOverflowUnderflow`. |
 | `System.Numerics.BigInteger` | `Int` | |
-| `LeanSharp.Nat` / `LeanSharp.Integer` | `Nat` / `Int` | Runtime structs for code written mathematically. |
-| `decimal` | LeanSharp model (96-bit mantissa, scale) | **Open question.** Central for business code (§12). |
+| `Warrant.Nat` / `Warrant.Integer` | `Nat` / `Int` | Runtime structs for code written mathematically. |
+| `decimal` | Warrant model (96-bit mantissa, scale) | **Open question.** Central for business code (§12). |
 | `float` `double` | not supported | Lean's `Float` is opaque to the kernel. |
-| `string` `char` | LeanSharp model over UTF-16 code units | Lean's `String` is a sequence of Unicode scalar values, so `Length` would differ for surrogate pairs. |
+| `string` `char` | Warrant model over UTF-16 code units | Lean's `String` is a sequence of Unicode scalar values, so `Length` would differ for surrogate pairs. |
 | `T?` (reference, nullable) / `Nullable<T>` | `Option T` | Non-nullable reference annotations are assumptions, listed in the report, not facts. |
 | `record` / `readonly record struct` | Lean `structure` | `with` becomes structure update. Value equality is generated. |
-| `enum` | underlying integer + named constants | C# enums are open (any value can be cast), so they aren't modelled as closed inductive types unless marked `[Closed]`. |
+| `enum` | underlying integer + named constants | C# enums are open (any value can be cast), so they aren't modelled as closed inductive types unless marked `[Closed]` (D12). |
+| `[Closed]` sealed class with static instances | `inductive` with `DecidableEq` | The "smart enum" pattern, recognised by shape (D13). |
 | Generics | universe-polymorphic parameters | Constraints become type-class instances later. |
 | `IReadOnlyList<T>`, `ImmutableArray<T>` | `List T` / `Array T` models | |
 | Exceptions | `Except` branch of the monad | |
 | Mutable classes and fields | heap model (§6.2) | Not in the first effectful milestone. |
 | `async`/`await` | sequencing in the monad | Supported only when awaiting external or verified calls. |
 
-### 6.2 The LeanSharp Lean library (D10)
+### 6.2 The Warrant Lean library (D10)
 
 The semantic model is **written in Lean 4 and proved in Lean 4**, in
-`lean/LeanSharp/` inside this repository:
+`lean/Warrant/` inside this repository:
 
 - models for C# numeric operations, conversions, `decimal`, UTF-16 strings,
   `Option` and `Except` helpers
@@ -433,7 +436,7 @@ rendering of these hypotheses plus the global trust assumptions.
 
 ## 7. Kernel, store, import and export
 
-### 7.1 LeanSharp.Kernel
+### 7.1 Warrant.Kernel
 
 The kernel is a port of the Lean 4 kernel, using Ansatz's Java kernel as a
 second reference. Ansatz's version is about 11k lines: `TypeChecker` 3.2k,
@@ -442,7 +445,7 @@ nested inductives.
 
 - **Expressions:** 12 kinds, `BVar`, `FVar`, `Sort`, `Const`, `App`, `Lam`,
   `Forall`, `Let`, `NatLit`, `StrLit`, `MData`, `Proj`. **There is no `MVar` in
-  the kernel**; metavariables live in `LeanSharp.Meta`. (ChatGPT's list
+  the kernel**; metavariables live in `Warrant.Meta`. (ChatGPT's list
   wrongly included `MVar` and omitted `Proj`.)
 - Each expression caches its hash and flags at construction (loose bound
   variable range, has free variables, has universe parameters), as Lean does.
@@ -467,9 +470,9 @@ nested inductives.
 - **Tracing** in the same NDJSON format as Ansatz's `checkConstantTraced`
   (`{s, d, l, r, res, by}`), so that definitional-equality traces can be
   diffed against Ansatz and Ansatz's instrumented Lean kernel.
-- The kernel depends only on `LeanSharp.Cic`: no I/O, no Roslyn, no store.
+- The kernel depends only on `Warrant.Cic`: no I/O, no Roslyn, no store.
 - Status and the exact list of deliberate differences from Lean: [kernel.md](kernel.md).
-- `LeanSharp.Cic.Expr` has no metavariable kind today. Whether `LeanSharp.Meta`
+- `Warrant.Cic.Expr` has no metavariable kind today. Whether `Warrant.Meta`
   adds one to the shared type (as Lean does, with the kernel rejecting it) or
   keeps its own representation is decided at M4.
 
@@ -483,9 +486,9 @@ nested inductives.
     fast, and suitable for development.
   - **Verified import:** re-check every declaration with our kernel. This is
     the default for CI on the semantics bundle, and is the main kernel test.
-- Bundles shipped with LeanSharp: Init (Ansatz ships an `init-medium` subset
+- Bundles shipped with Warrant: Init (Ansatz ships an `init-medium` subset
   of Lean 4.33.1's Init: 5,118 constants in 4,631 declaration records, 3.3 MB
-  gzipped) and the LeanSharp semantics library.
+  gzipped) and the Warrant semantics library.
   Mathlib (707,508 declarations at v4.33.1) is optional and downloaded.
 
 ### 7.3 Store
@@ -521,7 +524,7 @@ Lean rendering is still useful, but as a separate debugging feature.
 
 ### 8.1 Process and protocol
 
-- `leansharp-server` is a net10.0 process, one per user and machine, with
+- `warrant-server` is a net10.0 process, one per user and machine, with
   per-solution sessions. The build task starts it on demand, and it shuts down
   after an idle timeout.
 - Transport: JSON-RPC (StreamJsonRpc) over a named pipe on Windows or a Unix
@@ -541,21 +544,21 @@ Lean rendering is still useful, but as a separate debugging feature.
   the environment and store hashes, and the kernel version.
 - **Value:** the verdict, the **proof certificate** (proof terms as NDJSON),
   diagnostics, and the assumption report.
-- Stored on disk per project (`obj/leansharp/`) and in a per-user shared cache.
+- Stored on disk per project (`obj/warrant/`) and in a per-user shared cache.
 - **Proof replay:** a cached certificate can be re-checked by the kernel alone,
   without re-running tactics. That is cheap compared with proof search, so CI
-  can run with `LeanSharpRecheck=true`. CI then trusts only the kernel, not the
+  can run with `WarrantRecheck=true`. CI then trusts only the kernel, not the
   cache contents.
 
 ### 8.3 Build integration
 
-`LeanSharp.Build` runs after `CoreCompile`. It recreates the
+`Warrant.Build` runs after `CoreCompile`. It recreates the
 `CSharpCompilation` from the same inputs Csc received (sources, references,
 defines, `LangVersion`, overflow-checking setting), extracts VIR, calls the
 server, and emits errors such as:
 
 ```text
-Payments.cs(42,5): error LSV0001: Postcondition of 'ProcessPayment' could not be verified.
+Payments.cs(42,5): error WRT0001: Postcondition of 'ProcessPayment' could not be verified.
   Path: paymentId > 0, GetPayment returned some p, Validate(p) = Valid
   Unsolved goal:
     ⊢ r ≠ Result.Success ∨ paymentId > 0
@@ -572,13 +575,13 @@ The report is produced for every verified unit, as Markdown and JSON alongside
 the build output:
 
 ```text
-ProcessPayment            VERIFIED   (kernel: LeanSharp 0.1, cert 3f9a…)
+ProcessPayment            VERIFIED   (kernel: Warrant 0.1, cert 3f9a…)
   Assumed (contracts):
     - IPaymentStore.GetPayment returns null or a payment with the requested Id
   Assumed (global):
     - No concurrent modification between GetPayment and SavePayment
     - Non-nullable reference annotations on Payment hold
-    - Semantics bundle leansharp-semantics 0.1 models C# 12 faithfully
+    - Semantics bundle warrant-semantics 0.1 models C# 12 faithfully
   Proved:
     - Result.Success implies paymentId > 0
 ```
@@ -589,10 +592,10 @@ ProcessPayment            VERIFIED   (kernel: LeanSharp 0.1, cert 3f9a…)
 
 | Trusted | Why | Mitigation |
 |---|---|---|
-| `LeanSharp.Kernel` | Accepts or rejects proof terms. | Arena negatives, init/Mathlib corpus, cross-kernel export, property tests, trace diffs (§10). |
-| `LeanSharp.Semantics` (VIR → CIC) | The faithfulness gap. | Small and syntax-directed; differential testing against compiled .NET. |
-| `LeanSharp.Extraction` (C# → VIR) | Same gap, one layer earlier. | Same differential tests, end to end. |
-| Semantic-model *definitions* in `lean/LeanSharp` | The claim that "this models C#". | Reviewed; tested against .NET behaviour (for example exhaustively for 8- and 16-bit types, sampled for 32/64-bit). |
+| `Warrant.Kernel` | Accepts or rejects proof terms. | Arena negatives, init/Mathlib corpus, cross-kernel export, property tests, trace diffs (§10). |
+| `Warrant.Semantics` (VIR → CIC) | The faithfulness gap. | Small and syntax-directed; differential testing against compiled .NET. |
+| `Warrant.Extraction` (C# → VIR) | Same gap, one layer earlier. | Same differential tests, end to end. |
+| Semantic-model *definitions* in `lean/Warrant` | The claim that "this models C#". | Reviewed; tested against .NET behaviour (for example exhaustively for 8- and 16-bit types, sampled for 32/64-bit). |
 | Declared contracts and global assumptions | By design. | Listed in every assumption report. |
 | Trusted-mode imports | Lean already checked them. | Verified import mode removes this. |
 
@@ -632,12 +635,12 @@ cache (with recheck), the importer in verified mode, and the Roslyn analyzer.
 | # | Milestone | Exit criterion |
 |---|---|---|
 | M0 | Repository, license, design doc, history | This document merged. ✅ |
-| M1 | `LeanSharp.Cic` (Name, Level, Expr, ConstantInfo, Env), the NDJSON reader (formats 3.0.0 and 3.1.0) and writer (3.1.0) | `Nat.add_succ`, init-medium and the arena files import; import → export → import yields identical constants; export is idempotent. ✅ |
-| M2 | `LeanSharp.Kernel` | All 5,118 init-medium constants pass; arena negatives are rejected; then full Init. ✅ full Init (57,977 declarations), init-medium and arena (see [kernel.md](kernel.md)) |
-| M3 | Exporter, cross-kernel harness, FsCheck property tests | Certificates check in at least one external kernel. Mathlib is a stretch goal. ✅ Lean's kernel re-checks everything LeanSharp admits, including full Init and C#-built types (see [kernel.md](kernel.md)); the store moved to M5b |
+| M1 | `Warrant.Cic` (Name, Level, Expr, ConstantInfo, Env), the NDJSON reader (formats 3.0.0 and 3.1.0) and writer (3.1.0) | `Nat.add_succ`, init-medium and the arena files import; import → export → import yields identical constants; export is idempotent. ✅ |
+| M2 | `Warrant.Kernel` | All 5,118 init-medium constants pass; arena negatives are rejected; then full Init. ✅ full Init (57,977 declarations), init-medium and arena (see [kernel.md](kernel.md)) |
+| M3 | Exporter, cross-kernel harness, FsCheck property tests | Certificates check in at least one external kernel. Mathlib is a stretch goal. ✅ Lean's kernel re-checks everything Warrant admits, including full Init and C#-built types (see [kernel.md](kernel.md)); the store moved to M5b |
 | M4 | VIR, extraction of the pure subset (`int`/`long`/`bool`, enums, records, `if`/`switch`; theorems are parameterless `[Theorem]` methods returning `Prove.That(bool)`; recursion is rejected until M5a, and `/`, `%` and checked arithmetic are rejected with a diagnostic until M6, and non-null record parameters are recorded as assumptions), semantics library v0 with CLR-agreement tests (§10.6), translation, differential testing | A fixed corpus (`tests/corpus/m4/`) translates, including a `Validate`-shaped method over records and enums (`int` in place of `decimal`), and every rejected construct has a corpus method that is rejected with the diagnostic. Differential tests pass; null-record inputs check that .NET throws and that the non-null assumption is recorded. CLR-agreement tests pass for every modelled operation. Theorems without free parameters are closed by `rfl`/`decide` proof terms the translator emits. The translated corpus, exported with its Init + semantics closure, passes a new translated-output step in `scripts/cross-check.sh`. |
-| M5a | `LeanSharp.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `simp`, `omega`), quantified theorems and `Prove.That(...).By(...)`, structural recursion and well-founded recursion with `Spec.Decreases`, translator-generated equation lemmas for recursive definitions, a development-time export of simp, instance and reducibility attributes for Init and the semantics library next to the NDJSON bundle (untrusted tactic input; Std is added in M6), `Int32`/`Int64` → `Int` bridging lemmas and an omega-prep simp set (§6.2), in-process `leansharp verify` (§3.2), a thin MSBuild task that runs `leansharp verify` as a child process (the net10.0 engine cannot load in .NET Framework MSBuild) | First end-to-end result: `Increment(x) > x` fails the build with its goal shown under `dotnet build` and Visual Studio's MSBuild; `ValidImpliesPositive` (`int`), a well-founded method whose decrease needs `omega`, and a quantified theorem over a translated `int` method closed by `simp` then `omega` pass. Differential tests pass for a well-founded unit, evaluated with its equation lemmas. The certificate of a verified C# theorem passes the translated-output step of `scripts/cross-check.sh`. |
-| M5b | Server, content-addressed cache, store v1 (trusted and verified import), CLI verbs, analyzers | The M5a result through the server. A second build is served from the cache without running tactics, `LeanSharpRecheck=true` re-checks cached certificates with the kernel alone, and the Init + semantics store passes `leansharp check-store` in verified mode. `cancel` aborts a running verify, a unit over its fuel or wall-clock budget reports a timeout, and analyzer output is identical across runs. Baseline per-unit verification latency and server memory are recorded for M8. Store v1 waits for the Mathlib run's memory figure. |
+| M5a | `Warrant.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `simp`, `omega`), quantified theorems and `Prove.That(...).By(...)`, structural recursion and well-founded recursion with `Spec.Decreases`, translator-generated equation lemmas for recursive definitions, a development-time export of simp, instance and reducibility attributes for Init and the semantics library next to the NDJSON bundle (untrusted tactic input; Std is added in M6), `Int32`/`Int64` → `Int` bridging lemmas and an omega-prep simp set (§6.2), in-process `warrant verify` (§3.2), a thin MSBuild task that runs `warrant verify` as a child process (the net10.0 engine cannot load in .NET Framework MSBuild) | First end-to-end result: `Increment(x) > x` fails the build with its goal shown under `dotnet build` and Visual Studio's MSBuild; `ValidImpliesPositive` (`int`), a well-founded method whose decrease needs `omega`, and a quantified theorem over a translated `int` method closed by `simp` then `omega` pass. Differential tests pass for a well-founded unit, evaluated with its equation lemmas. The certificate of a verified C# theorem passes the translated-output step of `scripts/cross-check.sh`. |
+| M5b | Server, content-addressed cache, store v1 (trusted and verified import), CLI verbs, analyzers | The M5a result through the server. A second build is served from the cache without running tactics, `WarrantRecheck=true` re-checks cached certificates with the kernel alone, and the Init + semantics store passes `warrant check-store` in verified mode. `cancel` aborts a running verify, a unit over its fuel or wall-clock budget reports a timeout, and analyzer output is identical across runs. Baseline per-unit verification latency and server memory are recorded for M8. Store v1 waits for the Mathlib run's memory figure. |
 | M6 | Contracts: `Spec.Requires`/`Ensures`, contract classes, effect monad (exceptions, null, overflow, `/` and `%`), VC generation with `@[spec]` lemmas in the attribute sidecar, assumption reports, a minimal `decimal` model (96-bit mantissa and scale, comparisons, add/subtract without overflow; `==` is numeric equality, so `1.0m == 1.00m`, also inside records). Readonly fields whose type has a contract become theorem parameters (other field access waits for M7). First step: the Std closure the library imports is kernel-checked and cross-checked | Pure parts of the payment example verified, and `ProcessPayment` verified with the store as a hypothesis. Differential tests with contract-satisfying mocked externals pass, every new model operation (including the minimal `decimal`) passes CLR-agreement tests, generators include zero divisors, `MinValue / -1` and equal `decimal`s with different scales, and `ProcessPayment`'s certificate passes `scripts/cross-check.sh`. |
 | M7 | Regions, loops with invariants, heap model for mutable objects, full `decimal` arithmetic and rounding, strings | The payment example verified without restructuring into records (the target code in §5.3). CLR-agreement tests pass for the `decimal`, string and heap models. |
 | M8 | Live IDE feedback (language server / extension), `grind`, typed Mathlib handles (after the Mathlib run), performance work | Not defined yet (§12 Q15). Define one before starting. |
@@ -662,8 +665,8 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
    rounding come in M7.
 2. **Strings.** Is a full UTF-16 model needed early, or can strings be opaque
    (equality only) at first?
-3. **Enums.** Should they be open by default (integer-backed), with an opt-in
-   `[Closed]`? Decide in M4, which adds enums.
+3. **Enums.** *Decided (D12):* open by default (integer-backed), with an
+   opt-in `[Closed]`.
 4. **Region syntax.** `using (Verify.Region(...)) { }`, a local function with
    `[Verified]`, or something else? How are exit paths specified? Decide
    before M7 starts.
@@ -677,7 +680,7 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
    with analyzer determinism.
 8. **Automation defaults.** Which tactic pipeline, and what fuel and time
    budgets per unit? Decide the budgets when M5a starts (in-process
-   `leansharp verify` enforces them until M5b's server does); the pipeline can
+   `warrant verify` enforces them until M5b's server does); the pipeline can
    wait for M6.
 9. **CI trust policy.** Always recheck certificates, or trust signed caches?
    Decide when M5a starts: its MSBuild task is authoritative for CI.
@@ -686,10 +689,10 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
     ported against. Changing it means re-diffing the kernel port.
 11. **Nullable annotations.** Treat them as assumptions (current proposal) or
     verify them?
-12. **Name.** LeanSharp is provisional. Decide before M4 publishes the user API
+12. **Name.** *Decided (D3):* Warrant, chosen before M4 publishes the user API
     package, since a rename later breaks every user's attributes and namespaces.
-13. **Target framework.** Confirm net10.0 for the server and core (D8) before
-    M4 starts.
+13. **Target framework.** *Decided (D8):* net10.0 for the server and core,
+    netstandard2.0 for the user API package and anything Roslyn or MSBuild loads.
 14. **Collections, generics and other integer types.** §6.1 maps
     `IReadOnlyList<T>`/`ImmutableArray<T>`, generics, and unsigned and small
     integers, but no milestone schedules them. Schedule them (M6 already
@@ -713,7 +716,8 @@ or two per milestone from M4 to M7.
     `[Closed]` also applies to such classes, recognised by shape (sealed,
     private constructors, static get-only instances of the type itself); they
     translate to an `inductive` with `DecidableEq`, and the analyzer rejects a
-    `[Closed]` class that doesn't have that shape. Decide with Q3, in M4.
+    `[Closed]` class that doesn't have that shape. *Decided (D13):* as proposed,
+    in M4; revisit the shape rule if real code doesn't fit it.
 17. **Specs on expression-bodied members.** `Spec.Ensures` is a statement, so
     it needs a block body. Most small pure methods and properties are
     expression-bodied (`=> a && b`), so specifying them means rewriting the
@@ -729,7 +733,7 @@ or two per milestone from M4 to M7.
     (Q2), M6 can verify `ProcessPayment` but not the code that motivated this
     review. This argues for scheduling Q14 and a minimal string model in M6.
 19. **A source dependency for specifications.** The §5 surface needs the
-    `LeanSharp` package referenced by the code being verified. Teams that
+    `Warrant` package referenced by the code being verified. Teams that
     can't take that dependency yet (one existing in-house translator chose
     `//@` comments for exactly this reason) need a route that doesn't touch the
     project file: a spec sidecar file keyed by method signature, holding the
@@ -769,7 +773,7 @@ conversation:
 | Claim | Finding |
 |---|---|
 | Kernel IR has 11 node types including `MVar` | 12 kinds including `Proj` and split Nat/String literals; no `MVar` (`doc/kernel.md`). |
-| `test-data/init-medium.ndjson`, ~10 MB | `resources/ansatz/init-medium.ndjson.gz`, 3.3 MB gzipped. Ansatz's docs call it 2,997 declarations; LeanSharp's reader counts 5,118 constants in 4,631 declaration records (cross-checked with an independent script), so Ansatz evidently counts a different unit. |
+| `test-data/init-medium.ndjson`, ~10 MB | `resources/ansatz/init-medium.ndjson.gz`, 3.3 MB gzipped. Ansatz's docs call it 2,997 declarations; Warrant's reader counts 5,118 constants in 4,631 declaration records (cross-checked with an independent script), so Ansatz evidently counts a different unit. |
 | ~648k Mathlib declarations, 210k theorems | 707,508 declarations (504,824 theorems) at Mathlib v4.33.1, **all verified** by the Java kernel (`doc/kernel-validation.md`). |
 | Import via lean4export NDJSON | Correct; lean4export format 3.0/3.1. |
 | Exports proofs to Lean 4 | Correct (Lean 4 syntax export). |

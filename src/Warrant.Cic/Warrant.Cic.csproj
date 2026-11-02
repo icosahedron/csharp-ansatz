@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Calculus of Inductive Constructions terms (names, universe levels, expressions, declarations) shared by every Warrant component.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Warrant.Cic.Tests" />
+  </ItemGroup>
+</Project>

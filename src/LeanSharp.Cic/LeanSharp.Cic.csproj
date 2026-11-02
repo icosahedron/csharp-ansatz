@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <Description>Calculus of Inductive Constructions terms (names, universe levels, expressions, declarations) shared by every LeanSharp component.</Description>
-  </PropertyGroup>
-  <ItemGroup>
-    <InternalsVisibleTo Include="LeanSharp.Cic.Tests" />
-  </ItemGroup>
-</Project>

@@ -1,4 +1,4 @@
-# Reproducing LeanSharp's results
+# Reproducing Warrant's results
 
 This guide covers two things:
 
@@ -62,7 +62,7 @@ continued in a Claude Code cloud session
    `inductive.cpp` → `Inductive.cs`, …). Ansatz's Java kernel served as a second
    reference.
 2. **Match Lean's notion of equality.** The C++ kernel's `==` ignores binder
-   names and binder info, so LeanSharp's caches and comparisons do too
+   names and binder info, so Warrant's caches and comparisons do too
    (`Expr.AlphaEquals`).
 3. **Rebuild declarations from the export instead of trusting it.** The
    checker admits inductive types from their types and constructors only, then
@@ -79,8 +79,8 @@ continued in a Claude Code cloud session
 
 1. **Run Lean's own kernel on the same data.** `tools/lean-replay` combines
    lean4export's parser with `Lean.Environment.replay`, the routine lean4checker
-   uses. Lean's verdicts on the corpus match LeanSharp's exactly.
-2. **Have Lean re-check what LeanSharp admitted.** `leansharp export` writes the
+   uses. Lean's verdicts on the corpus match Warrant's exactly.
+2. **Have Lean re-check what Warrant admitted.** `warrant export` writes the
    kernel's own generated constructors and recursors. Replay demands they equal
    Lean's, so this checks the recursor generation itself. It holds for the
    corpus, full Init, and new types built in C# (mutual, nested, structure,
@@ -142,17 +142,17 @@ minute.
 
 ### 3. Run the kernel on the committed corpus
 
-The `leansharp` command-line tool checks any lean4export file. Its exit codes
+The `warrant` command-line tool checks any lean4export file. Its exit codes
 follow the Lean Kernel Arena convention: 0 means everything was accepted, 1 means
 something was rejected, and 2 means the input was unreadable or a resource limit
 was hit.
 
 ```sh
-alias leansharp='dotnet run -c Release --project src/LeanSharp.Cli --'
+alias warrant='dotnet run -c Release --project src/Warrant.Cli --'
 
-leansharp stats tests/data/init-medium.ndjson.gz
-leansharp check tests/data/init-medium.ndjson.gz --quiet     # exit 0
-leansharp check tests/data/arena/002_badDef.ndjson           # exit 1
+warrant stats tests/data/init-medium.ndjson.gz
+warrant check tests/data/init-medium.ndjson.gz --quiet     # exit 0
+warrant check tests/data/arena/002_badDef.ndjson           # exit 1
 ```
 
 Expected verdicts:
@@ -214,8 +214,8 @@ with 57,977 declaration records.
 
 ```sh
 python3 scripts/count-export.py init.ndjson     # 59,433 constants
-leansharp check init.ndjson --quiet             # accepted 57,977, rejected 0 (about 75 s)
-LEANSHARP_INIT_EXPORT=$PWD/init.ndjson dotnet test --filter AcceptsFullInit
+warrant check init.ndjson --quiet             # accepted 57,977, rejected 0 (about 75 s)
+WARRANT_INIT_EXPORT=$PWD/init.ndjson dotnet test --filter AcceptsFullInit
 ```
 
 The script runs code downloaded from GitHub (the Lean toolchain, lean4export), so
@@ -226,19 +226,19 @@ approve it in **Accept edits** mode.
 
 ```sh
 scripts/cross-check.sh
-LEANSHARP_INIT_EXPORT=$PWD/init.ndjson scripts/cross-check.sh   # include full Init
+WARRANT_INIT_EXPORT=$PWD/init.ndjson scripts/cross-check.sh   # include full Init
 ```
 
 The script uses the same Lean 4.33.1 toolchain (downloaded if needed; set
 `LEAN_TOOLCHAIN_BIN` to reuse one) and builds
 [`tools/lean-replay`](tools/lean-replay/README.md), a small Lean program that
 checks an NDJSON file with Lean's kernel. For every corpus file it compares Lean's
-verdict with LeanSharp's. It then has Lean re-check what LeanSharp admitted
-(`leansharp export`), and the declarations built from scratch in C#
+verdict with Warrant's. It then has Lean re-check what Warrant admitted
+(`warrant export`), and the declarations built from scratch in C#
 (`CrossCheckFixtures.cs`). Expected output ends with:
 
 ```
-FILE                         LEAN      LEANSHARP LEAN(EXPORT)   RESULT
+FILE                         LEAN      WARRANT LEAN(EXPORT)   RESULT
 init-medium.ndjson.gz        accept    accept    accept         ok
 Nat.add_succ.ndjson          decline   accept    accept         ok
 001_basicDef.ndjson          accept    accept    accept         ok
@@ -253,8 +253,8 @@ all verdicts agree
 ```
 
 Lean declines the original `Nat.add_succ` only because its parser reads format
-3.1.0. LeanSharp's export of it is 3.1.0, and Lean accepts that. With the full
-Init export included, Lean accepts all 59,433 constants LeanSharp writes (about
+3.1.0. Warrant's export of it is 3.1.0, and Lean accepts that. With the full
+Init export included, Lean accepts all 59,433 constants Warrant writes (about
 70 s).
 
 ### 7. Re-derive the port from its sources (optional)
@@ -275,7 +275,7 @@ thread, and macro scopes in generated names not being modelled.
 The same export script should work from a Mathlib checkout pinned to v4.33.1.
 For example, run `lake env <path>/lean4export Mathlib > mathlib.ndjson` inside
 `mathlib4` after `lake exe cache get`. Ansatz reports 707,508 declarations, all
-verified by its kernel. LeanSharp has not run this yet; expect a multi-gigabyte
+verified by its kernel. Warrant has not run this yet; expect a multi-gigabyte
 export, and memory use that has not been measured at that scale.
 
 ---
@@ -284,10 +284,10 @@ export, and memory use that has not been measured at that scale.
 
 | Path | Contents |
 |---|---|
-| `src/LeanSharp.Cic` | CIC terms: names, levels, expressions, constants, declarations |
-| `src/LeanSharp.Lean4Export` | lean4export reader (3.0.0, 3.1.0) and writer (3.1.0) |
-| `src/LeanSharp.Kernel` | the type-checking kernel and the export checker |
-| `src/LeanSharp.Cli` | the `leansharp` tool (`check`, `stats`, `export`) |
+| `src/Warrant.Cic` | CIC terms: names, levels, expressions, constants, declarations |
+| `src/Warrant.Lean4Export` | lean4export reader (3.0.0, 3.1.0) and writer (3.1.0) |
+| `src/Warrant.Kernel` | the type-checking kernel and the export checker |
+| `src/Warrant.Cli` | the `warrant` tool (`check`, `stats`, `export`) |
 | `tools/lean-replay` | Lean program: check an NDJSON file with Lean's own kernel |
 | `tests/` | unit, corpus and soundness tests; `tests/data` is the corpus |
 | `scripts/` | `export-lean-library.sh`, `cross-check.sh`, `count-export.py`, shared `lib/lean-toolchain.sh` |

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>warrant</AssemblyName>
+    <Description>Command-line tool: check lean4export files with the Warrant kernel.</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Warrant.Lean4Export\Warrant.Lean4Export.csproj" />
+    <ProjectReference Include="..\Warrant.Kernel\Warrant.Kernel.csproj" />
+  </ItemGroup>
+</Project>

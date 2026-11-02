@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Keep signatures parallel to the C++ kernel rather than narrowing return types. -->
+    <NoWarn>$(NoWarn);CA1859</NoWarn>
+    <Description>The Warrant type-checking kernel: a C# port of the Lean 4 kernel (Calculus of Inductive Constructions).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Warrant.Cic\Warrant.Cic.csproj" />
+    <InternalsVisibleTo Include="Warrant.Kernel.Tests" />
+  </ItemGroup>
+</Project>

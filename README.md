@@ -1,4 +1,4 @@
-# LeanSharp
+# Warrant
 
 **Machine-checked proofs about ordinary C# code.**
 
@@ -6,14 +6,14 @@
 > entire Init library (57,977 declarations), and Lean's own kernel re-checks
 > everything it admits; the C#-to-CIC frontend comes next. Start with the [design document](docs/design.md).
 
-LeanSharp translates selected C# methods into the Calculus of Inductive
+Warrant translates selected C# methods into the Calculus of Inductive
 Constructions, the type theory of [Lean 4](https://lean-lang.org/). Proofs
 about them are checked by a C# port of the Lean 4 kernel. Lean's libraries,
 including Mathlib, are available as imported declarations, and no Lean
 toolchain is needed at verification time.
 
 The project is inspired by [Ansatz](https://github.com/replikativ/ansatz), which
-brings Lean 4's kernel to Clojure. LeanSharp's focus is different: it verifies
+brings Lean 4's kernel to Clojure. Warrant's focus is different: it verifies
 **existing** C#, opt-in and incrementally:
 
 - **Pure functions:** prove properties of business logic.
@@ -57,17 +57,17 @@ dotnet test
 
 | Project | Contents |
 |---|---|
-| `src/LeanSharp.Cic` | Names, universe levels, expressions, constants, declarations, environments |
-| `src/LeanSharp.Lean4Export` | Strict reader (formats 3.0.0, 3.1.0) and writer (3.1.0) for lean4export NDJSON |
-| `src/LeanSharp.Kernel` | The type-checking kernel: a port of Lean 4's C++ kernel ([docs/kernel.md](docs/kernel.md)) |
-| `src/LeanSharp.Cli` | `leansharp check <export>` / `export <in> <out>`: re-check a lean4export file; write what the kernel admitted |
+| `src/Warrant.Cic` | Names, universe levels, expressions, constants, declarations, environments |
+| `src/Warrant.Lean4Export` | Strict reader (formats 3.0.0, 3.1.0) and writer (3.1.0) for lean4export NDJSON |
+| `src/Warrant.Kernel` | The type-checking kernel: a port of Lean 4's C++ kernel ([docs/kernel.md](docs/kernel.md)) |
+| `src/Warrant.Cli` | `warrant check <export>` / `export <in> <out>`: re-check a lean4export file; write what the kernel admitted |
 | `tools/lean-replay` | Lean program used by `scripts/cross-check.sh` to re-check files with Lean's own kernel |
 | `tests/` | Unit tests and the export corpus (`tests/data`, see its README for provenance) |
 
 To check an export file with the kernel:
 
 ```sh
-dotnet run -c Release --project src/LeanSharp.Cli -- check tests/data/init-medium.ndjson.gz
+dotnet run -c Release --project src/Warrant.Cli -- check tests/data/init-medium.ndjson.gz
 ```
 
 [REPRODUCING.md](REPRODUCING.md) explains how everything here was done and how to

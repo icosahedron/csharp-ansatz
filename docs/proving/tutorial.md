@@ -3,7 +3,7 @@
 > Target syntax; see the [status note](README.md). Part 1 needs M5a, part 2 needs M6.
 
 In this tutorial you will take a small insurance payout calculation, prove three
-things about it, watch LeanSharp refuse a fourth claim that looks obviously true,
+things about it, watch Warrant refuse a fourth claim that looks obviously true,
 fix the claim, and then verify a method that reads from a database. It takes
 about 30 minutes.
 
@@ -11,17 +11,17 @@ You will need the .NET 10 SDK and an empty class library.
 
 ## Part 1: a pure method
 
-### Step 1: add LeanSharp
+### Step 1: add Warrant
 
 ```sh
 dotnet new classlib -n Payouts
 cd Payouts
-dotnet add package LeanSharp
-dotnet add package LeanSharp.Build
+dotnet add package Warrant
+dotnet add package Warrant.Build
 ```
 
-`LeanSharp` holds the attributes and the `Spec`, `Prove` and `Tactic` classes.
-None of them do anything at run time. `LeanSharp.Build` runs the verifier after
+`Warrant` holds the attributes and the `Spec`, `Prove` and `Tactic` classes.
+None of them do anything at run time. `Warrant.Build` runs the verifier after
 every build.
 
 ### Step 2: write the method
@@ -29,7 +29,7 @@ every build.
 Replace `Class1.cs` with `Payouts.cs`:
 
 ```csharp
-using LeanSharp;
+using Warrant;
 
 namespace Payouts;
 
@@ -46,19 +46,19 @@ public static class PayoutRules
 }
 ```
 
-`[Verified]` tells LeanSharp to translate this method into its logic. Build:
+`[Verified]` tells Warrant to translate this method into its logic. Build:
 
 ```sh
 dotnet build
 ```
 
-The build succeeds and prints one line from LeanSharp:
+The build succeeds and prints one line from Warrant:
 
 ```text
-LeanSharp: 1 verified unit, 0 theorems.
+Warrant: 1 verified unit, 0 theorems.
 ```
 
-Nothing has been proved yet. LeanSharp has only checked that the method is
+Nothing has been proved yet. Warrant has only checked that the method is
 inside the supported subset and translated it.
 
 ### Step 3: prove a fact about one input
@@ -81,7 +81,7 @@ static class PayoutTheorems
 Build again:
 
 ```text
-LeanSharp: 1 verified unit, 2 theorems proved.
+Warrant: 1 verified unit, 2 theorems proved.
 ```
 
 These look like unit tests, and for now they are: each one checks one input.
@@ -105,7 +105,7 @@ Add:
 let `omega` (a decision procedure for integer arithmetic) finish. Build:
 
 ```text
-Payouts.cs(31,5): error LSV0001: Theorem 'PayoutIsNeverNegative' could not be proved.
+Payouts.cs(31,5): error WRT0001: Theorem 'PayoutIsNeverNegative' could not be proved.
   omega found a counterexample:
     loss = 1, deductible = 0, limit = -1
   Unsolved goal:
@@ -139,7 +139,7 @@ counterexample this time is less obvious:
 ```
 
 `loss - deductible` is `int.MaxValue + 1`, which wraps around to
-`int.MinValue` in C#. LeanSharp models `int` the way the CLR runs it, so it
+`int.MinValue` in C#. Warrant models `int` the way the CLR runs it, so it
 finds the overflow that a proof about mathematical integers would have missed.
 Put the condition back.
 
@@ -156,7 +156,7 @@ Try it without, and read the counterexample if it fails.)
 Add `Approvals.cs`:
 
 ```csharp
-using LeanSharp;
+using Warrant;
 
 namespace Payouts;
 
@@ -189,10 +189,10 @@ public sealed class Approvals(IPolicyStore store)
 the loss was positive. Build:
 
 ```text
-Approvals.cs(21,40): error LSV0005: 'IPolicyStore.GetPolicy' is called from a verified method but has no contract.
+Approvals.cs(21,40): error WRT0005: 'IPolicyStore.GetPolicy' is called from a verified method but has no contract.
 ```
 
-LeanSharp doesn't know what the database returns, and it won't guess.
+Warrant doesn't know what the database returns, and it won't guess.
 
 ### Step 8: write the contract
 
@@ -211,10 +211,10 @@ file abstract class PolicyStoreContract : IPolicyStore
 ```
 
 This is an **assumption**: "the store returns the policy asked for, and stored
-policies have non-negative deductibles and limits". Nothing checks it. LeanSharp
+policies have non-negative deductibles and limits". Nothing checks it. Warrant
 proves that `Approve` is correct for every store that keeps this promise.
 
-Build. It passes, and a report appears at `obj/leansharp/report.md`:
+Build. It passes, and a report appears at `obj/warrant/report.md`:
 
 ```text
 Approvals.Approve         VERIFIED
@@ -255,6 +255,6 @@ Next:
 
 - The [how-to guides](how-to.md) cover loops, closed sets, mutable objects and
   what to do when tactics give up.
-- [How LeanSharp thinks about your code](explanation.md) explains why `int`
+- [How Warrant thinks about your code](explanation.md) explains why `int`
   wraps, why contracts are hypotheses, and what the kernel does and doesn't
   promise.

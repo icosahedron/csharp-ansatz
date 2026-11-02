@@ -22,24 +22,24 @@
 
 | Package | Target | Add to | Contents |
 |---|---|---|---|
-| `LeanSharp` | netstandard2.0 | the project being verified | Attributes, `Spec`, `Prove`, `Tactic`, `Lean`, `Verify`. No run-time behaviour. |
-| `LeanSharp.Build` | netstandard2.0 | the project being verified | MSBuild task and analyzers. Development dependency. |
-| `leansharp` | net10.0 | a dotnet tool | The CLI and verification engine. |
+| `Warrant` | netstandard2.0 | the project being verified | Attributes, `Spec`, `Prove`, `Tactic`, `Lean`, `Verify`. No run-time behaviour. |
+| `Warrant.Build` | netstandard2.0 | the project being verified | MSBuild task and analyzers. Development dependency. |
+| `warrant` | net10.0 | a dotnet tool | The CLI and verification engine. |
 
 ## Attributes
 
 | Attribute | On | Since | Meaning |
 |---|---|---|---|
 | `[Verified]` | method, property, local function | M4 | Translate this member and check its specs. Its callees must be `[Verified]`, have a contract, or be in the semantics library. |
-| `[Theorem]` | static method returning `Proof` | M4 | A claim to prove. Parameters are universally quantified (M5a). Never executed; calling one is error LSV0003. |
+| `[Theorem]` | static method returning `Proof` | M4 | A claim to prove. Parameters are universally quantified (M5a). Never executed; calling one is error WRT0003. |
 | `[Closed]` | `enum` | M4 | The enum has only its named values. Casts from integers are reported. |
-| `[Closed]` | sealed class with static instances | *proposed, Q16* | The same for closed-set ("smart enum") classes. |
+| `[Closed]` | sealed class with static instances | M4 | The same for closed-set ("smart enum") classes, recognised by shape: sealed, only private constructors, static get-only instances of the type. Any other shape is an error. |
 | `[ContractFor(typeof(T))]` | abstract class implementing `T` | M6 | Assumed behaviour of `T`'s members. Never verified; always reported. |
 | `[ProofFor(nameof(M))]` | static method | M6 | Supplies tactic hints for the obligations of member `M`. |
 
 ## `Spec`: specifications
 
-All `Spec` methods are `[Conditional("LEANSHARP_CONTRACTS")]` and disappear
+All `Spec` methods are `[Conditional("WARRANT_CONTRACTS")]` and disappear
 from the compiled IL. In specs, `&&`, `||`, `!` and `==` read as logical
 and, or, not and equality.
 
@@ -76,7 +76,7 @@ static Proof Name(T1 x1, T2 x2) =>
 
 ## `Tactic`: proof scripts
 
-Tactics run in the untrusted part of LeanSharp and produce proof terms. Only
+Tactics run in the untrusted part of Warrant and produce proof terms. Only
 the kernel's check of those terms is trusted, so a tactic bug can make a proof
 fail but cannot make a false theorem pass.
 
@@ -138,7 +138,7 @@ exit the block contains.
 | Loops, mutable classes, `decimal` `*` `/` and rounding, strings | M7 | |
 | Collections (`IReadOnlyList<T>`, LINQ), generics, other integer types | *unscheduled, Q14/Q18* | |
 | `Guid` | *proposed, Q20* | Opaque, with equality. |
-| `float`, `double`, `unsafe`, `dynamic`, reflection, threads | never | Error LSV0002. |
+| `float`, `double`, `unsafe`, `dynamic`, reflection, threads | never | Error WRT0002. |
 
 ## Type mapping
 
@@ -155,6 +155,7 @@ Summary of [design §6.1](../design.md#61-type-mapping).
 | `T?` | `Option T`; non-nullable annotations are assumptions |
 | `record` | structure, value equality |
 | `enum` | integer with named constants; closed if `[Closed]` |
+| `[Closed]` class | `inductive` with one constructor per static instance |
 | exceptions | the error branch of the effect monad |
 
 ## Diagnostics
@@ -163,21 +164,21 @@ Numbers are provisional.
 
 | Code | Severity | Raised by | Meaning |
 |---|---|---|---|
-| LSV0001 | error | build task | A theorem, postcondition, precondition at a call site, invariant or assertion could not be proved. Shows the goal and any counterexample. |
-| LSV0002 | error | analyzer | Construct outside the supported subset in a `[Verified]` member. Names the construct. |
-| LSV0003 | error | analyzer | Call to a `[Theorem]` method. |
-| LSV0004 | error | analyzer | Malformed spec: `Spec` call outside its allowed position, or a side effect inside a spec. |
-| LSV0005 | error | analyzer | Call from a verified member to a member with no contract and no `[Verified]`. |
-| LSV0006 | error | build task | Verification ran out of fuel or time. Treated as a failure, never as success. |
-| LSV0007 | error | analyzer | A region contract has no clause for one of the region's exits. |
-| LSV0008 | warning | analyzer | `[Closed]` type is cast from an integer. |
+| WRT0001 | error | build task | A theorem, postcondition, precondition at a call site, invariant or assertion could not be proved. Shows the goal and any counterexample. |
+| WRT0002 | error | analyzer | Construct outside the supported subset in a `[Verified]` member. Names the construct. |
+| WRT0003 | error | analyzer | Call to a `[Theorem]` method. |
+| WRT0004 | error | analyzer | Malformed spec: `Spec` call outside its allowed position, or a side effect inside a spec. |
+| WRT0005 | error | analyzer | Call from a verified member to a member with no contract and no `[Verified]`. |
+| WRT0006 | error | build task | Verification ran out of fuel or time. Treated as a failure, never as success. |
+| WRT0007 | error | analyzer | A region contract has no clause for one of the region's exits. |
+| WRT0008 | warning | analyzer | `[Closed]` type is cast from an integer. |
 
 ## MSBuild properties
 
 | Property | Default | Meaning |
 |---|---|---|
-| `LeanSharpRecheck` | `false` | Re-check cached proof certificates with the kernel alone. Recommended in CI. |
-| `CheckForOverflowUnderflow` | `false` | The standard C# setting. LeanSharp models arithmetic the same way. |
+| `WarrantRecheck` | `false` | Re-check cached proof certificates with the kernel alone. Recommended in CI. |
+| `CheckForOverflowUnderflow` | `false` | The standard C# setting. Warrant models arithmetic the same way. |
 
 Other properties (fuel, time limits, report paths) depend on §12 Q8.
 
@@ -185,18 +186,18 @@ Other properties (fuel, time limits, report paths) depend on §12 Q8.
 
 | Command | Since | Purpose |
 |---|---|---|
-| `leansharp verify <project>` | M5a | Verify in-process, without the server. |
-| `leansharp explain <unit>` | M5b | Print goals, hypotheses and the tactic trace. |
-| `leansharp export --unit <unit> --out <file>` | M5a | Write the unit's certificate as lean4export NDJSON. |
-| `leansharp check-store` | M5b | Re-check every declaration in the store. |
-| `leansharp import` | M5b | Add an NDJSON bundle to the store. |
+| `warrant verify <project>` | M5a | Verify in-process, without the server. |
+| `warrant explain <unit>` | M5b | Print goals, hypotheses and the tactic trace. |
+| `warrant export --unit <unit> --out <file>` | M5a | Write the unit's certificate as lean4export NDJSON. |
+| `warrant check-store` | M5b | Re-check every declaration in the store. |
+| `warrant import` | M5b | Add an NDJSON bundle to the store. |
 
 ## Assumption report
 
-Written to `obj/leansharp/report.md` and `report.json` on every build.
+Written to `obj/warrant/report.md` and `report.json` on every build.
 
 ```text
-<Type>.<Member>          VERIFIED | FAILED | TIMEOUT   (kernel: LeanSharp <version>, cert <hash>)
+<Type>.<Member>          VERIFIED | FAILED | TIMEOUT   (kernel: Warrant <version>, cert <hash>)
   Assumed (contracts):    one line per contract clause the proof used
   Assumed (global):       non-null annotations, no concurrent modification, the semantics library
   Proved:                 one line per spec or theorem

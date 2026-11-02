@@ -57,7 +57,7 @@ negative ones and `int.MaxValue`.
 A failed proof is a build error with up to three parts:
 
 ```text
-Pricing.cs(40,5): error LSV0001: Theorem 'DiscountNeverIncreasesPrice' could not be proved.
+Pricing.cs(40,5): error WRT0001: Theorem 'DiscountNeverIncreasesPrice' could not be proved.
   omega found a counterexample:
     price = 0, discount = -1
   Unsolved goal:
@@ -81,7 +81,7 @@ Pricing.cs(40,5): error LSV0001: Theorem 'DiscountNeverIncreasesPrice' could not
 - **No counterexample, goal looks true.** The tactics weren't strong enough.
   See the next guide.
 
-`leansharp explain <unit>` prints the same goal with every intermediate step of
+`warrant explain <unit>` prints the same goal with every intermediate step of
 the tactic script.
 
 ## Get a proof through when the tactics give up
@@ -130,7 +130,7 @@ public static int Installment(int total, int count)
 - `Spec.Ensures<T>(r => ...)` must hold on every normal return; `r` is the
   return value. For `void` methods use `Spec.Ensures(() => ...)`. For `async`
   methods, `T` is the awaited type.
-- The calls are `[Conditional("LEANSHARP_CONTRACTS")]`: they don't exist in the
+- The calls are `[Conditional("WARRANT_CONTRACTS")]`: they don't exist in the
   compiled IL and cost nothing at run time.
 
 ## Verify a method that calls a database or service
@@ -159,7 +159,7 @@ file abstract class ClaimStoreContract : IClaimStore
 ```
 
 4. Inject the dependency through a constructor. A dependency stored in a
-   `readonly` field becomes a parameter of the theorem LeanSharp generates.
+   `readonly` field becomes a parameter of the theorem Warrant generates.
    Primary-constructor parameters that are never assigned are *proposed* to
    count too (§12 Q20).
 5. Build, then read the "Assumed (contracts)" section of the report. Every line
@@ -171,9 +171,9 @@ something unrelated; it only weakens the proofs that use it.
 
 ## Work with enums and closed sets
 
-*M4 for `enum`. Proposed for closed-set classes (§12 Q16).*
+*M4.*
 
-C# enums are open: `(Status)42` is a valid value. LeanSharp models them that
+C# enums are open: `(Status)42` is a valid value. Warrant models them that
 way, so a `switch` without a default case is not exhaustive. If your code never
 casts integers to the enum, mark it `[Closed]`:
 
@@ -185,8 +185,26 @@ public enum ClaimStatus { Open, Paid, Denied }
 Now `Tactic.Cases(status)` gives exactly three goals, and the analyzer reports
 any cast to `ClaimStatus` from an integer.
 
-For the "smart enum" pattern (a sealed class with a private constructor and
-static instances), `[Closed]` on the class is *proposed* to work the same way.
+`[Closed]` works the same way on the "smart enum" pattern: a sealed class with
+only private constructors, whose static get-only instances are its only values.
+
+```csharp
+[Closed]
+public sealed class Outcome
+{
+    public static Outcome Matched { get; } = new("Matched");
+    public static Outcome NoMatch { get; } = new("NoMatch");
+
+    private Outcome(string name) => Name = name;
+    public string Name { get; }
+}
+```
+
+Warrant recognises the class by that shape, not by its base class. If a
+`[Closed]` class doesn't have the shape (a public constructor, say), the
+analyzer reports an error instead of guessing. Classes like this are more
+reliably closed than enums: without reflection, no code can create another
+instance.
 
 ## Deal with overflow
 
@@ -204,7 +222,7 @@ counterexample near `int.MaxValue` or `int.MinValue`, choose one:
   has to allow it.
 
 In a project with `<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>`,
-all arithmetic is checked, and LeanSharp follows the project setting.
+all arithmetic is checked, and Warrant follows the project setting.
 
 `decimal` (M6) doesn't wrap: `a - b` throws when the result is out of range.
 Proofs about `decimal` subtraction therefore usually need a bound on the inputs.
@@ -333,7 +351,7 @@ vocabulary depends on the heap model (§12 Q6).
 
 *M7. Syntax is a placeholder (§12 Q4).*
 
-When a method uses things LeanSharp can't model (reflection, networking types,
+When a method uses things Warrant can't model (reflection, networking types,
 caches), you can still verify the part that matters:
 
 ```csharp
@@ -359,18 +377,18 @@ describes the fall-through path, because early exits are where these bugs live.
 
 *M5a for the task, M5b for the cache.*
 
-`LeanSharp.Build` fails the build when a required proof fails, so a normal
+`Warrant.Build` fails the build when a required proof fails, so a normal
 `dotnet build` in CI is enough. Two settings matter:
 
 ```xml
 <PropertyGroup>
   <!-- Re-check cached certificates with the kernel instead of trusting the cache. -->
-  <LeanSharpRecheck>true</LeanSharpRecheck>
+  <WarrantRecheck>true</WarrantRecheck>
 </PropertyGroup>
 ```
 
 Recheck runs only the kernel, not the tactics, so it costs little compared with
-proving from scratch. Turn it on in CI. Publish `obj/leansharp/report.md` as a
+proving from scratch. Turn it on in CI. Publish `obj/warrant/report.md` as a
 build artifact so reviewers can read the assumptions.
 
 ## Have another kernel check your proofs
@@ -378,9 +396,9 @@ build artifact so reviewers can read the assumptions.
 *M5a.*
 
 ```sh
-leansharp export --unit Approvals.Approve --out approve.ndjson
+warrant export --unit Approvals.Approve --out approve.ndjson
 ```
 
 The file holds the translated method, the theorem and its proof, with every
 declaration they depend on, in lean4export format. Lean's own kernel (or any
-kernel in the Lean kernel arena) can check it without trusting LeanSharp.
+kernel in the Lean kernel arena) can check it without trusting Warrant.

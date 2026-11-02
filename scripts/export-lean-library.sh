@@ -5,13 +5,13 @@
 #   scripts/export-lean-library.sh [MODULE] [OUTPUT] [WORKDIR]
 #
 # Then run the kernel over it:
-#   LEANSHARP_INIT_EXPORT=$PWD/init.ndjson dotnet test --filter AcceptsFullInit
+#   WARRANT_INIT_EXPORT=$PWD/init.ndjson dotnet test --filter AcceptsFullInit
 set -euo pipefail
 source "$(dirname "$0")/lib/lean-toolchain.sh"
 
 MODULE="${1:-Init}"
 OUTPUT="$(realpath -m "${2:-init.ndjson}")"
-WORKDIR="$(realpath -m "${3:-${TMPDIR:-/tmp}/leansharp-lean}")"
+WORKDIR="$(realpath -m "${3:-${TMPDIR:-/tmp}/warrant-lean}")"
 
 ensure_lean_toolchain "$WORKDIR"
 cd "$WORKDIR"

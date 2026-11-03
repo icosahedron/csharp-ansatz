@@ -1,1 +1,1 @@
-{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":3,"timestamp":1793681981,"nonce":"8RQE6e0HyIjJKohbDNOqMWJogSU=","message":"The throwing-constructor item above is now ticket `c644d7d`.","files":null}]}
+{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":3,"timestamp":1793683059,"nonce":"raDLYx7xPMw8ZDRlJgXAi0vQMK4=","message":"Includes `f3a8a1c` (generated-program differential testing for extraction and translation), covering the constructs this milestone adds.","files":null}]}

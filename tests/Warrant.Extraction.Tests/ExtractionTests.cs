@@ -130,6 +130,8 @@ public class ExtractionTests
     [InlineData("public sealed class K { public static K A { get; } = new(); public static K B { get; } = A; private K() { } }", "static instance that is not an initialised get-only auto-property or readonly field")]
     [InlineData("public sealed class K { public static K A { get; } = new(); private K() { } public static K Make() => new(); }", "constructor called outside the static instances")]
     [InlineData("public sealed class K { private K() { } }", "no static instances")]
+    [InlineData("public sealed class K { public static readonly K A = new(); public static readonly K B = new(); static K() { B = A; } private K() { } }", "static constructor")]
+    [InlineData("public sealed class K { public static K A { get; } = new(); static K() { } private K() { } }", "static constructor")]
     public void ClosedClassFailingAStepIsWrt0009NamingIt(string declaration, string step)
     {
         var result = Extract("[Closed]\n" + declaration);
@@ -204,6 +206,7 @@ public class ExtractionTests
     [InlineData("public record R(int X);", "unsealed record")]
     [InlineData("public sealed record R { public int X { get; init; } }", "record that is not positional")]
     [InlineData("public sealed record R(string X);", "string")]
+    [InlineData("public sealed record R(int X) { private R(R original) { X = original.X + 100; } }", "record with its own copy constructor")]
     public void RecordShapeIsChecked(string declaration, string construct)
     {
         var result = Extract(declaration + """
@@ -257,6 +260,13 @@ public class ExtractionTests
                 public static Phase Unbox(object o) => (Phase)o;
                 public static System.Func<int, Phase> InLambda() => x => (Phase)x;
                 public static Phase Named() => Phase.Open;
+                public static Phase Add(Phase p) => p + 1;
+                public static Phase Or(Phase p) => p | Phase.Open;
+                public static Phase Complement(Phase p) => ~p;
+                public static Phase Increment(Phase p) { p++; return p; }
+                public static Phase Compound(Phase p) { p += 1; return p; }
+                public static int Difference(Phase a, Phase b) => a - b;
+                public static bool Compare(Phase a, Phase b) => a < b;
             }
             """);
         Assert.Equal("WRT0008 | integer cast to a closed enum", Only(result, "M:C.Cast(System.Int32)"));
@@ -264,6 +274,12 @@ public class ExtractionTests
         Assert.Equal("WRT0008 | integer cast to a closed enum", Only(result, "M:C.InLambda"));
         Assert.Equal("WRT0008 | closed enum without a member valued 0", Only(result, "T:NoZero"));
         Assert.Empty(result.DiagnosticsFor("M:C.Named"));
+        foreach (var key in new[] { "M:C.Add(Phase)", "M:C.Or(Phase)", "M:C.Complement(Phase)", "M:C.Increment(Phase)", "M:C.Compound(Phase)" })
+        {
+            Assert.Equal("WRT0008 | arithmetic on a closed enum", Only(result, key));
+        }
+        Assert.Empty(result.DiagnosticsFor("M:C.Difference(Phase,Phase)"));
+        Assert.Empty(result.DiagnosticsFor("M:C.Compare(Phase,Phase)"));
         Assert.All(result.Diagnostics, d => Assert.Equal(ExtractionSeverity.Warning, d.Severity));
     }
 
@@ -426,5 +442,62 @@ public class ExtractionTests
         Assert.Empty(result.DiagnosticsFor("M:C.Full(Phase)"));
         Assert.Equal("WRT0002 | non-exhaustive switch expression", Only(result, "M:C.Partial(Phase)"));
         Assert.Equal("WRT0002 | non-exhaustive switch over an open enum", Only(result, "M:C.Open(Light)"));
+    }
+
+    [Fact]
+    public void EnumsWithValuesBeyondLongAreRejectedNotCrashed()
+    {
+        var result = Extract("""
+            [Closed] public enum Big : ulong { Zero = 0, Max = ulong.MaxValue }
+            public enum Huge : ulong { Max = ulong.MaxValue }
+            public static class C
+            {
+                [Verified] public static Huge Get() => Huge.Max;
+            }
+            """);
+        Assert.Equal("WRT0002 | enum with an underlying type other than int or long", Only(result, "T:Big"));
+        Assert.Equal("WRT0002 | enum with an underlying type other than int or long", Only(result, "T:Huge"));
+        Assert.Equal("WRT0002 | depends on a rejected unit", Only(result, "M:C.Get"));
+        Assert.Empty(result.Units);
+    }
+
+    [Fact]
+    public void APreprocessorConditionalStopsTranslation()
+    {
+        var result = Extract("""
+            public static class C
+            {
+                [Verified] public static int Plain(int x) => x;
+
+                [Verified]
+                public static int F()
+                {
+            #if DEBUG
+                    return 1;
+            #else
+                    return 2;
+            #endif
+                }
+            }
+            """);
+        Assert.False(result.HasCompileErrors);
+        Assert.Empty(result.Units);
+        var error = Assert.Single(result.Diagnostics);
+        Assert.Equal(("WRT0002", "preprocessor conditional", ExtractionSeverity.Error), (error.Id, error.Construct, error.Severity));
+        Assert.Equal(9, error.Location!.StartLine); // the #if, after Inline's using line
+    }
+
+    // Each of these is unsound to ignore: the model would drop the guard or the write.
+    [Theory]
+    [InlineData("public static int F(int n) { switch (n) { case 1 when n > 0: return 1; default: return 0; } }", "case guard")]
+    [InlineData("public static int F(int n) { switch (n) { case > 1 when n < 5: return 1; default: return 0; } }", "case guard")]
+    [InlineData("public static int F(int n) => n switch { > 0 when n < 5 => 1, _ => 0 };", "switch arm guard")]
+    [InlineData("public static int F(int n) { n = 1; return n; }", "assignment to a parameter")]
+    [InlineData("public static int F(int n) { n += 1; return n; }", "assignment to a parameter")]
+    [InlineData("public static int F(int n) { n++; return n; }", "assignment to a parameter")]
+    public void SoundnessCriticalConstructsAreRejected(string member, string construct)
+    {
+        var result = Extract("public static class C { [Verified] " + member + " }");
+        Assert.Equal("WRT0002 | " + construct, Only(result, "M:C.F(System.Int32)"));
     }
 }

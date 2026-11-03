@@ -128,7 +128,12 @@ internal static class Symbols
             _ => VirType.Int64,
         };
 
-    public static long ToInt64(object value) => Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    /// <summary>
+    /// A constant as a long. A ulong above long.MaxValue wraps instead of throwing: only enums use such values, and an
+    /// enum whose underlying type is not int or long is rejected when its type unit is built.
+    /// </summary>
+    public static long ToInt64(object value) =>
+        value is ulong u ? unchecked((long)u) : Convert.ToInt64(value, CultureInfo.InvariantCulture);
 
     /// <summary>The span of a syntax node; lines and columns one-based, end exclusive.</summary>
     public static VirSpan Span(SyntaxNode node) => Span(node.GetLocation())!;

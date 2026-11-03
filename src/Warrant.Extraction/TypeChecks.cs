@@ -105,6 +105,15 @@ internal static class TypeChecks
         {
             throw Reject(type, "record with its own equality");
         }
+
+        // `with` runs the copy constructor; the model copies the fields, which only the compiler's copy constructor does.
+        bool ownCopy = type.InstanceConstructors.Any(c => !c.IsImplicitlyDeclared
+            && c.Parameters.Length == 1
+            && SymbolEqualityComparer.Default.Equals(c.Parameters[0].Type, type));
+        if (ownCopy)
+        {
+            throw Reject(type, "record with its own copy constructor");
+        }
         var properties = Symbols.PositionalProperties(type, primary)
             ?? throw Reject(type, "positional property that is not the compiler's auto-property");
 
@@ -214,6 +223,12 @@ internal static class TypeChecks
             }
             allowed.Add((creation.SyntaxTree, creation.SpanStart, creation.Span.Length));
             instances.Add(member);
+        }
+
+        //    A static constructor runs after the initialisers and could make two instances one object, or throw.
+        if (type.StaticConstructors.Any(c => !c.IsImplicitlyDeclared))
+        {
+            throw Reject(type, "static constructor", DiagnosticIds.NotClosedShape);
         }
 
         // 4. The constructors are called nowhere else.

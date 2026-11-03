@@ -18,6 +18,8 @@ public static class Extractor
 
     private const string DependsOnRejected = "depends on a rejected unit";
 
+    private const string PreprocessorConditional = "preprocessor conditional";
+
     /// <summary>The Roslyn version recorded in <c>facts</c>: the loaded compiler's assembly version, as <c>major.minor.build</c>.</summary>
     public static string RoslynVersion
     {
@@ -49,6 +51,24 @@ public static class Extractor
         if (errors.Count > 0)
         {
             return new ExtractionResult([], Sort(errors), hasCompileErrors: true);
+        }
+
+        // The compilation is parsed without the defines of a real build, which M5a takes from Csc, so code under #if
+        // could be the code no build runs. Until then nothing in a compilation with a conditional is translated.
+        var conditionals = compilation.SyntaxTrees
+            .SelectMany(t => t.GetRoot(cancellationToken).DescendantTrivia())
+            .Where(t => t.IsKind(SyntaxKind.IfDirectiveTrivia))
+            .Select(t => new ExtractionDiagnostic(
+                DiagnosticIds.Unsupported,
+                ExtractionSeverity.Error,
+                PreprocessorConditional,
+                null,
+                Symbols.Span(t.GetLocation()),
+                $"M4 does not support {PreprocessorConditional}: the defines of the real build are not known until M5a."))
+            .ToList();
+        if (conditionals.Count > 0)
+        {
+            return new ExtractionResult([], Sort(conditionals), hasCompileErrors: false);
         }
         return new Run(compilation, cancellationToken).Execute();
     }
@@ -185,9 +205,9 @@ public static class Extractor
             }
 
             // WRT0008 anywhere in the compilation (KTD18).
-            foreach (var (conversion, construct, member) in scan.ClosedEnumConversions)
+            foreach (var (operation, construct, member) in scan.UnnamedClosedValues)
             {
-                Warn(member, construct, conversion.Syntax.GetLocation());
+                Warn(member, construct, operation.Syntax.GetLocation());
             }
             foreach (var type in types.Where(t => Symbols.Shape(t) == TypeShape.ClosedEnum && !TypeChecks.HasZero(t)))
             {

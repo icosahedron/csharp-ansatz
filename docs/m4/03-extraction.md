@@ -19,6 +19,7 @@ For the corpus it sets:
 
 These options decide what the C# means, so they are trusted input, like extraction itself (KTD22).
 M5a's build task will not use the corpus settings: it takes the references, defines, `LangVersion` and overflow setting from the inputs `Csc` received (design §8.3).
+Until then no defines are known, so code under `#if` could be code that no real build runs: a compilation containing any `#if` gives WRT0002 `preprocessor conditional` at each one and no units.
 MSBuildWorkspace is not used: it would add an MSBuild dependency to the tests for no benefit while the inputs are a fixed corpus.
 
 The factory and extraction are separate assemblies because they have different Roslyn constraints:
@@ -37,7 +38,7 @@ It never translates code that does not compile.
 A unit is a member marked `[Verified]` or `[Theorem]`, or a type that such a member uses: a record, an open enum or a closed type (KTD21).
 Types are units of their own so that each one is translated once, from one place, and so that a change to a record changes the closure hash of every unit that depends on it (chapter 4).
 
-Extraction also scans the *whole* compilation, not only verified members, for integer casts and unboxing conversions to `[Closed]` enums: each one is warning WRT0008, because such a conversion can produce a value the closed model says cannot exist.
+Extraction also scans the *whole* compilation, not only verified members, for integer casts and unboxing conversions to `[Closed]` enums, and for arithmetic whose result is one (`p + 1`, `p++`, `p | Phase.Open`): each one is warning WRT0008, because it can produce a value the closed model says cannot exist.
 
 Calls between verified members, and uses of types, form a graph.
 A cycle of calls is recursion, which M4 rejects (WRT0002, construct "recursion").
@@ -97,10 +98,12 @@ Extraction checks that:
 - `Equals(T)`, `GetHashCode`, `EqualityContract` and the `==` operator are all implicitly declared;
 - each positional property is the compiler's auto-property;
 - the record declares no other instance field, and no other property with a backing field.
+- the copy constructor is the compiler's, because `with` runs it and the model copies the fields.
 
 A user-written `Equals` would make `==` mean something other than field-by-field equality, and an unsealed record can be compared with a subclass instance whose `EqualityContract` differs.
 Extra instance state is subtler: the generated `Equals` compares *every* instance field, so a record with `public int Extra { get; init; }` beside its positional properties is equal to another only if `Extra` matches too, while a model built from the primary constructor would ignore it (KTD10).
-All three are rejected.
+A user-written copy constructor can set the copy's properties to anything, so `(r with { }).X` need not be `r.X`.
+All four are rejected.
 Computed properties such as `public bool IsLarge => Amount > 1000;` have no backing field, so they are fine, and they can be `[Verified]` instance members.
 
 Field order is the primary constructor's parameter order, which is also the order of the generated `Equals`.
@@ -121,6 +124,7 @@ A `[Closed]` class is accepted if it has the closed shape (design D13), checked 
 1. The class is `sealed`.
 2. Every instance constructor is `private`, and the class has no primary constructor.
 3. Every `static` member whose type is the class itself is either a get-only auto-property with an initialiser (`{ get; } = new(...)`) or a `static readonly` field with an initialiser, and the initialiser is a `new` of the class itself. A property with a getter body or an expression body (`=> new(...)`) fails this step, because it returns a new instance on every read. So does an initialiser that is not a `new`: with `public static Outcome B { get; } = A;`, `A` and `B` are one object, but the model would make them two constructors that the kernel proves different.
+   A static constructor also fails this step: it runs after the initialisers and can assign `B = A` itself (or throw).
 4. The private constructors are called nowhere else, so no other instance can be created without reflection.
 5. There is at least one such member.
 
@@ -157,7 +161,7 @@ M4 has no analyzer (M5b), so extraction raises the analyzer's checks itself; the
 | WRT0003 | error | A call to a `[Theorem]` method. |
 | WRT0004 | error | `Spec.Implies` or `Prove.That` used outside a theorem statement. |
 | WRT0005 | error | A call from verified code to a member that is neither verified nor modelled. |
-| WRT0008 | warning | Anywhere in the compilation: an integer cast or unboxing conversion to a `[Closed]` enum, or a `[Closed]` enum with no member valued 0. |
+| WRT0008 | warning | Anywhere in the compilation: an integer cast or unboxing conversion to a `[Closed]` enum, arithmetic producing one, or a `[Closed]` enum with no member valued 0. |
 | WRT0009 | error | A `[Closed]` class without the closed shape, naming the failed step. New in M4. |
 
 WRT0001 (not proved) and WRT0006 (out of fuel) come from checking, not extraction (chapter 6).

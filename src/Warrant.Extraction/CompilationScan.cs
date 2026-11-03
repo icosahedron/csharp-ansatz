@@ -59,8 +59,8 @@ internal sealed class ExtractionContext
 }
 
 /// <summary>
-/// One pass over every operation in the compilation, verified or not: casts and unboxing to <c>[Closed]</c> enums
-/// (WRT0008, KTD18), and every object creation, for the closed shape's fourth step.
+/// One pass over every operation in the compilation, verified or not: casts, unboxing and arithmetic that can give a
+/// <c>[Closed]</c> enum an unnamed value (WRT0008, KTD18), and every object creation, for the closed shape's fourth step.
 /// </summary>
 internal sealed class CompilationScan
 {
@@ -68,8 +68,8 @@ internal sealed class CompilationScan
     {
     }
 
-    /// <summary>Conversions that can give a <c>[Closed]</c> enum an unnamed value, with their construct, in source order.</summary>
-    public List<(IConversionOperation Conversion, string Construct, ISymbol Member)> ClosedEnumConversions { get; } = [];
+    /// <summary>Operations that can give a <c>[Closed]</c> enum an unnamed value, with their construct, in source order.</summary>
+    public List<(IOperation Operation, string Construct, ISymbol Member)> UnnamedClosedValues { get; } = [];
 
     /// <summary>Every object creation, in source order.</summary>
     public List<IObjectCreationOperation> Creations { get; } = [];
@@ -121,7 +121,11 @@ internal sealed class CompilationScan
                     switch (d)
                     {
                         case IConversionOperation conversion when Classify(conversion) is { } construct:
-                            scan.ClosedEnumConversions.Add((conversion, construct, EnclosingMember(model, d.Syntax)));
+                            scan.UnnamedClosedValues.Add((conversion, construct, EnclosingMember(model, d.Syntax)));
+                            break;
+                        case IBinaryOperation or IUnaryOperation or ICompoundAssignmentOperation or IIncrementOrDecrementOperation
+                            when Symbols.IsClosedEnum(Symbols.UnwrapNullable(d.Type)):
+                            scan.UnnamedClosedValues.Add((d, "arithmetic on a closed enum", EnclosingMember(model, d.Syntax)));
                             break;
                         case IObjectCreationOperation creation:
                             scan.Creations.Add(creation);
@@ -130,7 +134,7 @@ internal sealed class CompilationScan
                 }
             }
         }
-        scan.ClosedEnumConversions.Sort((a, b) => CompareSyntax(a.Conversion.Syntax, b.Conversion.Syntax));
+        scan.UnnamedClosedValues.Sort((a, b) => CompareSyntax(a.Operation.Syntax, b.Operation.Syntax));
         scan.Creations.Sort((a, b) => CompareSyntax(a.Syntax, b.Syntax));
         return scan;
     }

@@ -186,6 +186,8 @@ diagnostic message uses.
 | `closed class instance member` | WRT0002 | The model keeps only which instance a value is. |
 | `switch section mixing default with case labels` | WRT0002 | `case 1: default:`. Write the `case` as its own section. |
 | `unsealed record`, `record struct`, `record with its own equality`, `record with other instance state`, `record with a base record`, `record that is not positional` | WRT0002 | `==` on a record must be field-by-field over its positional properties. |
+| `record with its own copy constructor` | WRT0002 | `with` runs the copy constructor, and the model copies the fields, as only the compiler's copy constructor does. |
+| `preprocessor conditional` | WRT0002 | Any `#if` in the compilation stops translation, because M4 does not know the defines of the real build. M5a takes them from `Csc`. |
 | `cyclic record types` | WRT0002 | Without `null`, no value of such a type can be built. |
 | `reserved member name` | WRT0002 | A member of a record or closed type named `rec`, `recOn`, `casesOn`, `noConfusion`, `noConfusionType`, `below`, `brecOn`, `ctorIdx` or `injEq`. |
 | `instance member of a class` | WRT0002 | Only records may have verified instance members. |
@@ -195,8 +197,8 @@ diagnostic message uses.
 | A call to a `[Theorem]` | WRT0003 | |
 | `Spec.Implies outside a theorem statement`, `Prove.That outside a theorem statement` | WRT0004 | |
 | A call to a member that is neither `[Verified]` nor modelled | WRT0005 | For example `System.Math.Abs(int)`. |
-| `integer cast to a closed enum`, `unboxing to a closed enum`, `closed enum without a member valued 0` | WRT0008 (warning) | Anywhere in the compilation, verified or not. |
-| A `[Closed]` class without the closed shape | WRT0009 | Names the failed step: `not sealed`, `constructor that is not private`, `static instance that is not an initialised get-only auto-property or readonly field`, `constructor called outside the static instances`, or `no static instances`. |
+| `integer cast to a closed enum`, `unboxing to a closed enum`, `arithmetic on a closed enum`, `closed enum without a member valued 0` | WRT0008 (warning) | Anywhere in the compilation, verified or not. |
+| A `[Closed]` class without the closed shape | WRT0009 | Names the failed step: `not sealed`, `constructor that is not private`, `static instance that is not an initialised get-only auto-property or readonly field`, `static constructor`, `constructor called outside the static instances`, or `no static instances`. |
 
 ## Type mapping
 

@@ -42,6 +42,18 @@ public sealed class Factory
     public static Factory Make() => new();
 }
 
+// Step 3: a static constructor runs after the initialisers and here makes Second the same object as First.
+[Closed]
+public sealed class Reassigned
+{
+    public static readonly Reassigned First = new();
+    public static readonly Reassigned Second = new();
+
+    static Reassigned() => Second = First;
+
+    private Reassigned() { }
+}
+
 // Step 5: no instances at all.
 [Closed]
 public sealed class Empty

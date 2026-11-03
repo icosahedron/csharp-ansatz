@@ -16,6 +16,10 @@ public enum Aliased { First = 0, Second = 0, Third = 1 }
 [Closed]
 public enum Starting { One = 1, Two = 2 }
 
+// Only int and long underlying types are modelled; this one has a value no long holds.
+[Closed]
+public enum Wide : ulong { Zero = 0, Max = ulong.MaxValue }
+
 public static class Enums
 {
     // .NET throws SwitchExpressionException for an unnamed value; exceptions are M6.
@@ -61,4 +65,7 @@ public static class Enums
     public static Phase CastInUnverifiedCode(int x) => (Phase)x;
 
     public static Phase UnboxInUnverifiedCode(object o) => (Phase)o;
+
+    // So is arithmetic, which can step past the last member.
+    public static Phase NextInUnverifiedCode(Phase p) => p + 1;
 }

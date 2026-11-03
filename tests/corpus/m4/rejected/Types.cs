@@ -18,6 +18,12 @@ public sealed record ExtraState(int X)
     public int Extra { get; init; }
 }
 
+// `with` runs this constructor, so (r with { }).X is X + 100, not the field-by-field copy the model makes.
+public sealed record OwnCopy(int X)
+{
+    private OwnCopy(OwnCopy original) => X = original.X + 100;
+}
+
 public readonly record struct Pair(int A, int B);
 
 public sealed record Left(Right Other);
@@ -47,6 +53,9 @@ public static class Types
 
     [Verified]
     public static int UsesExtraState(ExtraState e) => e.X;
+
+    [Verified]
+    public static int UsesOwnCopy(OwnCopy r) => (r with { }).X;
 
     [Verified]
     public static int UsesRecordStruct(Pair p) => p.A;

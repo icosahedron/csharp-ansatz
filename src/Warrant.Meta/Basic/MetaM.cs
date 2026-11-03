@@ -4,8 +4,8 @@ using Warrant.Kernel;
 
 namespace Warrant.Meta;
 
-/// <summary>Meta's configuration (the subset of Lean's <c>Meta.Config</c> that this layer reads so far).</summary>
-public sealed record MetaConfig
+/// <summary>Meta's configuration (Lean's <c>Meta.Config</c>); the reduction fields are in <c>Reduce/Transparency.cs</c>.</summary>
+public sealed partial record MetaConfig
 {
     /// <summary>The defaults.</summary>
     public static MetaConfig Default { get; } = new();
@@ -27,12 +27,19 @@ public sealed record MetaContext(LocalContext LCtx, ImmutableArray<LocalInstance
     public static MetaContext Empty { get; } = new(LocalContext.Empty, [], MetaConfig.Default);
 }
 
+/// <summary>A universe constraint <c>Lhs =?= Rhs</c> that unification postponed (Lean's <c>PostponedEntry</c>).</summary>
+/// <param name="Lhs">The left-hand side.</param>
+/// <param name="Rhs">The right-hand side.</param>
+public sealed record PostponedEntry(Level Lhs, Level Rhs);
+
 /// <summary>The backtrackable state of <see cref="MetaM"/> (Lean's <c>Meta.SavedState</c>).</summary>
 /// <param name="MCtx">The metavariable context.</param>
+/// <param name="Postponed">The postponed universe constraints.</param>
 /// <remarks>
-/// As in Lean, the name generator is not restored, so names created after a save stay unique.
+/// As in Lean, the name generator and the caches are not restored, so names created after a save
+/// stay unique.
 /// </remarks>
-public sealed record SavedState(MetavarContext MCtx);
+public sealed record SavedState(MetavarContext MCtx, ImmutableList<PostponedEntry> Postponed);
 
 /// <summary>
 /// The Meta monad: the environment, the metavariable context, the current local context and the
@@ -107,14 +114,18 @@ public sealed partial class MetaM : IMonadMCtx
     /// <summary>A fresh universe-metavariable id.</summary>
     public LMVarId MkFreshLMVarId() => new(_ngen.Next());
 
+    /// <summary>The universe constraints unification postponed (Lean's <c>State.postponed</c>).</summary>
+    public ImmutableList<PostponedEntry> Postponed { get; set; } = [];
+
     /// <summary>Saves the backtrackable state (Lean's <c>saveState</c>); O(1).</summary>
-    public SavedState SaveState() => new(MCtx);
+    public SavedState SaveState() => new(MCtx, Postponed);
 
     /// <summary>Restores a saved state (Lean's <c>SavedState.restore</c>).</summary>
     public void Restore(SavedState saved)
     {
         ArgumentNullException.ThrowIfNull(saved);
         MCtx = saved.MCtx;
+        Postponed = saved.Postponed;
     }
 
     /// <summary>Runs <paramref name="k"/> in the scope <c>f(Context)</c>, then restores the scope (Lean's <c>withReader</c>).</summary>
@@ -251,8 +262,19 @@ public sealed partial class MetaM : IMonadMCtx
     /// <summary>Whether <paramref name="mvarId"/> is delayed-assigned.</summary>
     public bool IsDelayedAssigned(MVarId mvarId) => MCtx.IsDelayedAssigned(mvarId);
 
-    /// <summary>Records <c>?mvarId := val</c> with no checks (Lean's <c>MVarId.assign</c>); see <see cref="CheckedAssign"/>.</summary>
-    public void Assign(MVarId mvarId, Expr val) => MCtx = MCtx.Assign(mvarId, val);
+    /// <summary>
+    /// Records <c>?mvarId := val</c> with no checks (Lean's <c>MVarId.assign</c>); see
+    /// <see cref="CheckedAssign"/>. With <see cref="DebugCheckAssignments"/>, a ground value is first
+    /// checked by the kernel against the metavariable's type.
+    /// </summary>
+    public void Assign(MVarId mvarId, Expr val)
+    {
+        if (DebugCheckAssignments)
+        {
+            DebugCheckAssignment(mvarId, val);
+        }
+        MCtx = MCtx.Assign(mvarId, val);
+    }
 
     /// <summary>Records <c>?mvarId := val</c> for a universe metavariable, with no checks (Lean's <c>assignLevelMVar</c>).</summary>
     public void AssignLevelMVar(LMVarId mvarId, Level val) => MCtx = MCtx.AssignLevelMVar(mvarId, val);

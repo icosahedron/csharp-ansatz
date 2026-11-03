@@ -109,21 +109,21 @@ public static class AssumptionReports
             {
                 claim = sourceText(span);
             }
-            var (status, name, by, detail) = outcome switch
+            var (status, by, detail) = outcome switch
             {
-                TranslatedOutcome => (ReportStatus.Translated, "translated", (string?)null, (string?)null),
-                ProvedOutcome p => (ReportStatus.Verified, "proved", ProofName(p.By), null),
-                FalseOutcome => (ReportStatus.Failed, "false", null, $"the claim is false ({FalseOutcome.Code})"),
-                UndecidedOutcome u => (ReportStatus.Failed, "undecided", null, $"the claim was not decided ({UndecidedOutcome.Code}): {u.Reason}"),
-                FailedOutcome f => (ReportStatus.Failed, "failed", null, f.Reason),
-                SkippedOutcome s => (ReportStatus.Failed, "skipped", null, s.Reason),
+                TranslatedOutcome => (ReportStatus.Translated, (string?)null, (string?)null),
+                ProvedOutcome p => (ReportStatus.Verified, ProofName(p.By), null),
+                FalseOutcome => (ReportStatus.Failed, null, $"the claim is false ({FalseOutcome.Code})"),
+                UndecidedOutcome u => (ReportStatus.Failed, null, $"the claim was not decided ({UndecidedOutcome.Code}): {u.Reason}"),
+                FailedOutcome f => (ReportStatus.Failed, null, f.Reason),
+                SkippedOutcome s => (ReportStatus.Failed, null, s.Reason),
                 _ => throw new InvalidOperationException($"Unknown outcome {outcome.GetType().Name}."),
             };
             var assumptions = outcome.Assumptions
                 .Select(a => Render(a, outcome.Key, Name))
                 .OrderBy(a => a.Inherited)
                 .ToImmutableArray();
-            reports.Add(new UnitReport(outcome.Key, outcome.UnitKind, outcome.DisplayName, status, name, by, claim, detail, assumptions));
+            reports.Add(new UnitReport(outcome.Key, outcome.UnitKind, outcome.DisplayName, status, OutcomeName(outcome), by, claim, detail, assumptions));
         }
 
         var global = ImmutableArray.Create(settings.CheckOverflow ? Throws : Wraps, BundleModels);
@@ -155,6 +155,21 @@ public static class AssumptionReports
     /// <param name="kind">The proof.</param>
     /// <returns><c>rfl</c> or <c>decide</c>.</returns>
     public static string ProofName(ProofKind kind) => kind == ProofKind.Rfl ? "rfl" : "decide";
+
+    /// <summary>The outcome's name as reports and the CLI print it.</summary>
+    /// <param name="outcome">The outcome.</param>
+    /// <returns><c>translated</c>, <c>proved</c>, <c>false</c>, <c>undecided</c>, <c>failed</c> or <c>skipped</c>.</returns>
+    /// <exception cref="InvalidOperationException">The outcome is of an unknown kind.</exception>
+    public static string OutcomeName(UnitOutcome outcome) => outcome switch
+    {
+        TranslatedOutcome => "translated",
+        ProvedOutcome => "proved",
+        FalseOutcome => "false",
+        UndecidedOutcome => "undecided",
+        FailedOutcome => "failed",
+        SkippedOutcome => "skipped",
+        _ => throw new InvalidOperationException($"Unknown outcome {outcome?.GetType().Name}."),
+    };
 
     private static ReportAssumption Render(UnitAssumption assumption, string unitKey, Func<string, string> name)
     {

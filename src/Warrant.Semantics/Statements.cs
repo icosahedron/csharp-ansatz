@@ -25,7 +25,6 @@ internal sealed partial class BodyTranslator
         {
             // `return e` is `e`; extraction rejects anything after it as unreachable.
             ReturnStmt r => Value(r.Value, env),
-            // `var x = e; rest` and `x = e; rest` are `let x := e; rest`.
             DeclStmt d => Let(d.Local, Value(d.Init, env), env, rest),
             AssignStmt a => Let(a.Local, Value(a.Value, env), env, rest),
             BlockStmt b => Statements(b.Stmts, 0, env, rest),

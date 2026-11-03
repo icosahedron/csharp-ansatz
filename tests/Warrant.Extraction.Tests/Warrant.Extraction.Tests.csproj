@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\Warrant\Warrant.csproj" />
     <ProjectReference Include="..\..\src\Warrant.Frontend\Warrant.Frontend.csproj" />
     <ProjectReference Include="..\..\src\Warrant.Extraction\Warrant.Extraction.csproj" />
+    <ProjectReference Include="..\Warrant.TestSupport\Warrant.TestSupport.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- The corpus is compiled in memory from these copies (docs/m4/02). -->

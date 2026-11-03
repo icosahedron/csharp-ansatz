@@ -66,7 +66,6 @@ public class KernelEnvironmentTests(InitMediumFixture initMedium) : IClassFixtur
         Assert.NotNull(b.Find(N("test.b")));
         Assert.Null(b.Find(N("test.a")));
 
-        // The same name may be admitted independently in each fork.
         Add(a, Axiom("test.shared"));
         Add(b, Axiom("test.shared"));
         Assert.Equal(3, a.Count);
@@ -94,7 +93,6 @@ public class KernelEnvironmentTests(InitMediumFixture initMedium) : IClassFixtur
             Assert.Equal(AdmittedDeclarations.Of(copy, d), admitted);
             if (d is InductiveDecl ind)
             {
-                // Looking recursors up by name finds exactly the ones a scan of the environment finds.
                 var typeNames = ind.Types.Select(t => t.Name).ToEquatableArray();
                 var scanned = copy.Constants.OfType<RecursorInfo>().Where(r => r.All.Equals(typeNames)).OrderBy(r => r.Name);
                 Assert.Equal(scanned, ((InductiveDeclaration)admitted).Recursors.OrderBy(r => r.Name));

@@ -377,7 +377,6 @@ public class ExtractionTests
         int sub = nodes.ToList().FindIndex(n => n is BinaryExpr { Op: BinaryOp.Sub });
         Assert.True(unit.Spans.TryGetSpan(sub, out var span));
 
-        // `loss - deductible` on line 12 of accepted/PayoutRules.cs.
         Assert.Equal(new VirSpan("accepted/PayoutRules.cs", 12, 23, 12, 40), span);
         Assert.Equal(nodes.Count, unit.Spans.Count);
         Assert.Equal(new VirSpan("accepted/PayoutRules.cs", 9, 23, 9, 29), unit.Location);

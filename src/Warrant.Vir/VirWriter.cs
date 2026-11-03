@@ -539,7 +539,6 @@ public static class VirWriter
         {
             if (_afterName)
             {
-                // A field's value follows its name directly.
                 _afterName = false;
                 return;
             }

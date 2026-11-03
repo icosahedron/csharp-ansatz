@@ -21,7 +21,7 @@ public sealed class DifferentialFixture : IDisposable
 {
     public DifferentialFixture()
     {
-        Bundle = SemanticsBundle.Load(TestData.Path(SemanticsBundle.FileName));
+        Bundle = EngineFixture.SharedBundle.Value;
         Compilation = EngineCorpus.Compile("accepted");
         Extraction = EngineCorpus.Extract(Compilation);
         Run = Pipeline.Run(EngineCorpus.Inputs(Extraction), Bundle, KernelLimits.Corpus);

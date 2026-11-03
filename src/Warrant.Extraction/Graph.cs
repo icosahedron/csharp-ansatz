@@ -25,8 +25,10 @@ internal static class Graph
             index[v] = low[v] = next++;
             stack.Push(v);
             onStack.Add(v);
+            bool selfLoop = false;
             foreach (var w in Successors(v))
             {
+                selfLoop |= string.Equals(w, v, StringComparison.Ordinal);
                 if (!index.TryGetValue(w, out int wIndex))
                 {
                     Connect(w);
@@ -48,7 +50,7 @@ internal static class Graph
                     component.Add(w);
                 }
                 while (w != v);
-                if (component.Count > 1 || Successors(v).Contains(v, StringComparer.Ordinal))
+                if (component.Count > 1 || selfLoop)
                 {
                     result.UnionWith(component);
                 }

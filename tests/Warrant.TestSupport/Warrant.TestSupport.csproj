@@ -1,14 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsPackable>false</IsPackable>
-    <Description>Helpers shared by the Warrant test projects: opt-in facts, test-data paths and the checked semantics bundle.</Description>
+    <Description>Helpers shared by the Warrant test projects: opt-in facts, test-data paths, the checked semantics bundle and the M4 corpus compilations.</Description>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="FsCheck" Version="3.6.0" />
+    <PackageReference Include="xunit.assert" Version="2.9.3" />
     <PackageReference Include="xunit.extensibility.core" Version="2.9.3" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Warrant.Kernel\Warrant.Kernel.csproj" />
     <ProjectReference Include="..\..\src\Warrant.Lean4Export\Warrant.Lean4Export.csproj" />
+    <!-- Frontend embeds the Warrant package rather than copying Warrant.dll (KTD4); it brings Microsoft.CodeAnalysis. -->
+    <ProjectReference Include="..\..\src\Warrant.Frontend\Warrant.Frontend.csproj" />
+    <ProjectReference Include="..\..\src\Warrant.Extraction\Warrant.Extraction.csproj" />
   </ItemGroup>
 </Project>

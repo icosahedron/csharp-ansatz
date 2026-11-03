@@ -3,8 +3,6 @@ using System.Globalization;
 using Warrant.Kernel;
 using Warrant.Lean4Export;
 
-// warrant — check lean4export files with the Warrant kernel, and translate C# to CIC.
-//
 // Exit codes follow the Lean Kernel Arena convention:
 //   0  every declaration accepted
 //   1  a declaration was rejected (a type error)

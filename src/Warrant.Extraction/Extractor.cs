@@ -158,7 +158,6 @@ public static class Extractor
                 .OrderBy(Symbols.Key, StringComparer.Ordinal)
                 .ToList();
 
-            // Members, in key order.
             var members = types
                 .SelectMany(t => t.GetMembers())
                 .Where(m => m is IMethodSymbol { MethodKind: not MethodKind.PropertyGet and not MethodKind.PropertySet } or IPropertySymbol)
@@ -509,11 +508,12 @@ public static class Extractor
         /// <summary>A unit that depends on a rejected unit is rejected too, until nothing changes.</summary>
         private void RejectDependents()
         {
+            var ordered = _candidates.Values.OrderBy(c => c.Key, StringComparer.Ordinal).ToList();
             bool changed = true;
             while (changed)
             {
                 changed = false;
-                foreach (var c in _candidates.Values.OrderBy(c => c.Key, StringComparer.Ordinal))
+                foreach (var c in ordered)
                 {
                     if (c.Rejection is not null)
                     {

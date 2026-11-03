@@ -165,7 +165,7 @@ internal static class TranslateCommand
             output.WriteLine($"wrote the assumption report to {reportPath}");
         }
 
-        var counts = result.Units.GroupBy(Outcome).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        var counts = result.Units.GroupBy(AssumptionReports.OutcomeName).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         int Count(string outcome) => counts.TryGetValue(outcome, out var n) ? n : 0;
         output.WriteLine(string.Create(
             CultureInfo.InvariantCulture,
@@ -177,22 +177,12 @@ internal static class TranslateCommand
         return clean ? 0 : 1;
     }
 
-    private static string Outcome(UnitOutcome unit) => unit switch
-    {
-        TranslatedOutcome => "translated",
-        ProvedOutcome => "proved",
-        FalseOutcome => "false",
-        UndecidedOutcome => "undecided",
-        FailedOutcome => "failed",
-        _ => "skipped",
-    };
-
     private static string Describe(UnitOutcome unit) => unit switch
     {
         ProvedOutcome p => $"proved ({AssumptionReports.ProofName(p.By)})",
         FailedOutcome f => $"failed: {f.Reason}",
         SkippedOutcome s => $"skipped: {s.Reason}",
-        _ => Outcome(unit),
+        _ => AssumptionReports.OutcomeName(unit),
     };
 
     private static string Severity(ExtractionSeverity severity) => severity == ExtractionSeverity.Error ? "error" : "warning";

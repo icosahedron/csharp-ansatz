@@ -1,0 +1,9 @@
+# The Warrant semantics library (design D10): Lean definitions that model C#,
+# and CLR facts about them proved in Lean. Exported to NDJSON by
+# scripts/export-semantics.sh and committed as tests/data/warrant-semantics.ndjson.gz.
+name = "warrant-semantics"
+version = "0.1.0"
+defaultTargets = ["Warrant"]
+
+[[lean_lib]]
+name = "Warrant"

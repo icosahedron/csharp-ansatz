@@ -1,0 +1,95 @@
+# Roots of the semantics bundle (plan KTD2). scripts/export-semantics.sh passes these
+# names to lean4export, which writes them and their whole dependency closure.
+# Every constant the translator or the engine can emit must be listed here
+# (docs/m4/05, operator and condition tables); a test checks that it is.
+# Names with characters outside Lean identifiers must be written with «».
+
+# Types and logic
+Bool
+Bool.true
+Bool.false
+Nat
+Nat.beq
+Int32
+Int64
+Eq
+Eq.refl
+Not
+And
+Or
+ite
+Decidable.decide
+of_decide_eq_true
+forall_prop_decidable
+instDecidableNot
+instDecidableAnd
+instDecidableOr
+instDecidableEqBool
+instDecidableEqInt32
+instDecidableEqInt64
+
+# Literals
+OfNat.ofNat
+Int32.instOfNat
+Int64.instOfNat
+Neg.neg
+Int32.instNeg
+Int64.instNeg
+Int32.minValue
+Int32.maxValue
+Int64.minValue
+Int64.maxValue
+
+# Arithmetic
+HAdd.hAdd
+HSub.hSub
+HMul.hMul
+instHAdd
+instHSub
+instHMul
+instAddInt32
+instSubInt32
+instMulInt32
+instAddInt64
+instSubInt64
+instMulInt64
+
+# Comparisons
+LT.lt
+LE.le
+instLTInt32
+instLEInt32
+instLTInt64
+instLEInt64
+Int32.decLt
+Int32.decLe
+Int64.decLt
+Int64.decLe
+
+# Conversions
+Int32.toInt64
+Int64.toInt32
+
+# Booleans
+Bool.and
+Bool.or
+Bool.not
+Bool.xor
+
+# Read-back (docs/m4/06): BitVec.toNat of a value's bit vector
+BitVec.toNat
+Int32.toBitVec
+Int64.toBitVec
+
+# The library's own theorems
+Warrant.Clr.Int32.maxValue_add_one
+Warrant.Clr.Int32.minValue_sub_one
+Warrant.Clr.Int32.neg_minValue
+Warrant.Clr.Int32.minValue_mul_neg_one
+Warrant.Clr.Int32.neg_one_lt_one
+Warrant.Clr.Int32.toInt64_toInt32
+Warrant.Clr.Int64.maxValue_add_one
+Warrant.Clr.Int64.neg_minValue
+Warrant.Clr.Int64.toInt32_three_billion
+Warrant.Clr.Bool.xor_true_true
+Warrant.Clr.Bool.xor_true_false

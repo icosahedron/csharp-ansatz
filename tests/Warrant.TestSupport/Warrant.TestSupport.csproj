@@ -1,9 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsPackable>false</IsPackable>
-    <Description>Helpers shared by the Warrant test projects: opt-in facts and test-data paths.</Description>
+    <Description>Helpers shared by the Warrant test projects: opt-in facts, test-data paths and the checked semantics bundle.</Description>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="xunit.extensibility.core" Version="2.9.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Warrant.Kernel\Warrant.Kernel.csproj" />
+    <ProjectReference Include="..\..\src\Warrant.Lean4Export\Warrant.Lean4Export.csproj" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="FsCheck.Xunit" Version="3.6.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Warrant.TestSupport" />
+    <ProjectReference Include="..\..\src\Warrant.Kernel\Warrant.Kernel.csproj" />
+    <ProjectReference Include="..\..\src\Warrant.Lean4Export\Warrant.Lean4Export.csproj" />
+    <ProjectReference Include="..\Warrant.TestSupport\Warrant.TestSupport.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\data\warrant-semantics.ndjson.gz" LinkBase="data" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\lean\bundle-roots.txt" Link="data\bundle-roots.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

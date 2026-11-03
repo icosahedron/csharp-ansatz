@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using Warrant.Cic;
@@ -13,6 +14,13 @@ namespace Warrant.Kernel;
 /// <param name="MaxNatBytes">The largest natural-number literal (in bytes) the kernel will compute.</param>
 public sealed record KernelLimits(long Fuel, long MaxNatBytes)
 {
+    /// <summary>
+    /// An optional wall-clock deadline. A type checker that is still working when it passes throws a
+    /// <see cref="KernelResourceException"/>, as when fuel runs out, so a deadline can only reject a
+    /// declaration, never admit one. <see langword="null"/> (the default) means no deadline.
+    /// </summary>
+    public DateTimeOffset? Deadline { get; init; }
+
     /// <summary>Defaults for interactive use: 20M steps, 128 MB numerals (Lean's default size limit).</summary>
     public static KernelLimits Interactive { get; } = new(20_000_000, 128L * 1024 * 1024);
 
@@ -50,6 +58,8 @@ public sealed partial class TypeChecker
     private EquatableArray<Name>? _lparams;
     private bool _eagerReduce;
     private long _fuel;
+    private readonly long _deadlineTimestamp;
+    private int _ticksUntilClockCheck;
 
     /// <summary>Creates a type checker over <paramref name="env"/>.</summary>
     /// <param name="env">The environment of admitted constants.</param>
@@ -68,6 +78,7 @@ public sealed partial class TypeChecker
         _safety = safety;
         _limits = limits ?? KernelLimits.Interactive;
         _fuel = _limits.Fuel;
+        _deadlineTimestamp = DeadlineTimestamp(_limits.Deadline);
         LocalContext = localContext is null ? new LocalContext() : new LocalContext(localContext);
     }
 
@@ -156,14 +167,46 @@ public sealed partial class TypeChecker
 
     // ------------------------------------------------------------------ inference
 
+    // Reading the clock costs more than a step, so a deadline is checked on the first step and then
+    // once every ClockCheckInterval steps.
+    private const int ClockCheckInterval = 1024;
+
     private void Tick()
     {
         if (--_fuel < 0)
         {
             throw new KernelResourceException($"kernel fuel exhausted ({_limits.Fuel:N0} steps)");
         }
+        if (_deadlineTimestamp != long.MaxValue && --_ticksUntilClockCheck < 0)
+        {
+            _ticksUntilClockCheck = ClockCheckInterval - 1;
+            if (Stopwatch.GetTimestamp() >= _deadlineTimestamp)
+            {
+                throw new KernelResourceException($"kernel deadline passed ({_limits.Deadline:O})");
+            }
+        }
         RuntimeHelpers.EnsureSufficientExecutionStack();
     }
+
+    /// <summary>
+    /// The deadline as a <see cref="Stopwatch"/> timestamp, so that later checks use the monotonic
+    /// clock; <see cref="long.MaxValue"/> when there is none.
+    /// </summary>
+    private static long DeadlineTimestamp(DateTimeOffset? deadline)
+    {
+        if (deadline is not { } d)
+        {
+            return long.MaxValue;
+        }
+        long now = Stopwatch.GetTimestamp();
+        double remainingTicks = (d - DateTimeOffset.UtcNow).TotalSeconds * Stopwatch.Frequency;
+        return remainingTicks <= 0 ? now
+            : remainingTicks >= long.MaxValue - now ? long.MaxValue - 1
+            : now + (long)remainingTicks;
+    }
+
+    /// <summary>The kernel never computes with a metavariable (Lean's wording).</summary>
+    private static KernelException MVarUnsupported() => new("kernel type checker does not support meta variables");
 
     private Expr InferTypeCore(Expr e, bool inferOnly)
     {
@@ -190,6 +233,7 @@ public sealed partial class TypeChecker
             ForallExpr p => InferPi(p, inferOnly),
             AppExpr a => InferApp(a, inferOnly),
             LetExpr l => InferLet(l, inferOnly),
+            MVarExpr => throw MVarUnsupported(),
             _ => throw new KernelException($"unexpected expression kind {e.Kind}"),
         };
         cache[e] = r;

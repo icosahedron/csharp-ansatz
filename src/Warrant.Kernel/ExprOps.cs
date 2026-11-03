@@ -42,6 +42,7 @@ public static class ExprOps
                 LetExpr l => UpdateLet(l, Apply(l.BinderType, offset), Apply(l.Value, offset), Apply(l.Body, offset + 1)),
                 MDataExpr m => UpdateMData(m, Apply(m.Expr, offset)),
                 ProjExpr p => UpdateProj(p, Apply(p.Struct, offset)),
+                MVarExpr => e, // a hole is a leaf: substitution passes it through
                 _ => e,
             };
             if (compound)
@@ -80,6 +81,7 @@ public static class ExprOps
             LetExpr l => FindCore(l.BinderType, offset, pred, visited) ?? FindCore(l.Value, offset, pred, visited) ?? FindCore(l.Body, offset + 1, pred, visited),
             MDataExpr m => FindCore(m.Expr, offset, pred, visited),
             ProjExpr p => FindCore(p.Struct, offset, pred, visited),
+            MVarExpr => null,
             _ => null,
         };
     }
@@ -125,6 +127,8 @@ public static class ExprOps
                 break;
             case ProjExpr p:
                 ForEachCore(p.Struct, offset, visit, visited);
+                break;
+            case MVarExpr:
                 break;
         }
     }
@@ -317,6 +321,7 @@ public static class ExprOps
             {
                 ConstExpr c => UpdateConst(c, c.Levels.Select(l => LevelOps.Instantiate(l, names, levels)).ToEquatableArray()),
                 SortExpr s => UpdateSort(s, LevelOps.Instantiate(s.Level, names, levels)),
+                MVarExpr => m,
                 _ => null,
             };
         });

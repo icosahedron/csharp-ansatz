@@ -85,6 +85,18 @@ public static class Kernel
         fork.Commit();
     }
 
+    /// <summary>
+    /// Rejects a declaration term with an expression or universe metavariable, as Lean's
+    /// <c>check_no_metavar</c> does before any type checking. The flags are cached, so this is O(1).
+    /// </summary>
+    internal static void CheckNoMVar(Name name, Expr e)
+    {
+        if (e.HasExprMVar || e.HasLevelMVar)
+        {
+            throw new KernelException($"declaration has metavariables '{name}'");
+        }
+    }
+
     internal static void CheckNoFVar(Name name, Expr e)
     {
         if (e.HasFVar)
@@ -111,6 +123,7 @@ public static class Kernel
     {
         env.CheckName(v.Name);
         CheckDuplicatedUnivParams(v.LevelParams);
+        CheckNoMVar(v.Name, v.Type);
         CheckNoFVar(v.Name, v.Type);
         var sort = checker.Check(v.Type, v.LevelParams);
         checker.EnsureSort(sort, v.Type);
@@ -118,6 +131,7 @@ public static class Kernel
 
     private static void CheckValue(TypeChecker checker, ConstantInfo v, Expr value)
     {
+        CheckNoMVar(v.Name, value);
         CheckNoFVar(v.Name, value);
         var valType = checker.Check(value, v.LevelParams);
         if (!checker.IsDefEq(valType, v.Type))

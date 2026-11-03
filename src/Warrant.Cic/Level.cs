@@ -19,11 +19,25 @@ public enum LevelKind : byte
 
     /// <summary>A universe parameter of the enclosing declaration.</summary>
     Param,
+
+    /// <summary>
+    /// A universe metavariable: a hole for the Meta layer to fill. The kernel rejects any declaration
+    /// that contains one.
+    /// </summary>
+    MVar,
+}
+
+/// <summary>The identity of a universe metavariable (Lean's <c>LMVarId</c>).</summary>
+/// <param name="Name">A name unique within the metavariable context.</param>
+public readonly record struct LMVarId(Name Name)
+{
+    /// <inheritdoc/>
+    public override string ToString() => Name.ToString();
 }
 
 /// <summary>
-/// A universe level, mirroring the kernel fragment of Lean 4's <c>Lean.Level</c>
-/// (universe metavariables are an elaborator concept and are not represented here).
+/// A universe level, mirroring Lean 4's <c>Lean.Level</c>. Universe metavariables
+/// (<see cref="LevelKind.MVar"/>) exist for the Meta layer; the kernel rejects them.
 /// </summary>
 /// <remarks>
 /// Levels are immutable and compared structurally (not up to the level algebra; normalization and
@@ -32,26 +46,28 @@ public enum LevelKind : byte
 public sealed class Level : IEquatable<Level>
 {
     /// <summary>Level 0.</summary>
-    public static readonly Level Zero = new(LevelKind.Zero, null, null, null);
+    public static readonly Level Zero = new(LevelKind.Zero, null, null, null, null);
 
     /// <summary>Level 1.</summary>
     public static readonly Level One = Succ(Zero);
 
     private readonly ulong _hash;
 
-    private Level(LevelKind kind, Level? lhs, Level? rhs, Name? param)
+    private Level(LevelKind kind, Level? lhs, Level? rhs, Name? param, LMVarId? mvar)
     {
         Kind = kind;
         Lhs = lhs;
         Rhs = rhs;
         ParamName = param;
-        (_hash, HasParam, Depth) = kind switch
+        MVarId = mvar;
+        (_hash, HasParam, HasMVar, Depth) = kind switch
         {
-            LevelKind.Zero => (0x5A5A5A5A12345678UL, false, 0),
-            LevelKind.Succ => (Hashing.Mix(11, lhs!._hash), lhs.HasParam, lhs.Depth + 1),
-            LevelKind.Max => (Hashing.Mix(12, lhs!._hash, rhs!._hash), lhs.HasParam || rhs.HasParam, Math.Max(lhs.Depth, rhs.Depth) + 1),
-            LevelKind.IMax => (Hashing.Mix(13, lhs!._hash, rhs!._hash), lhs.HasParam || rhs.HasParam, Math.Max(lhs.Depth, rhs.Depth) + 1),
-            LevelKind.Param => (Hashing.Mix(14, param!.Hash64), true, 0),
+            LevelKind.Zero => (0x5A5A5A5A12345678UL, false, false, 0),
+            LevelKind.Succ => (Hashing.Mix(11, lhs!._hash), lhs.HasParam, lhs.HasMVar, lhs.Depth + 1),
+            LevelKind.Max => (Hashing.Mix(12, lhs!._hash, rhs!._hash), lhs.HasParam || rhs.HasParam, lhs.HasMVar || rhs.HasMVar, Math.Max(lhs.Depth, rhs.Depth) + 1),
+            LevelKind.IMax => (Hashing.Mix(13, lhs!._hash, rhs!._hash), lhs.HasParam || rhs.HasParam, lhs.HasMVar || rhs.HasMVar, Math.Max(lhs.Depth, rhs.Depth) + 1),
+            LevelKind.Param => (Hashing.Mix(14, param!.Hash64), true, false, 0),
+            LevelKind.MVar => (Hashing.Mix(15, mvar!.Value.Name.Hash64), false, true, 0),
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
     }
@@ -68,11 +84,17 @@ public sealed class Level : IEquatable<Level>
     /// <summary>The parameter name of a <see cref="LevelKind.Param"/> level.</summary>
     public Name? ParamName { get; }
 
+    /// <summary>The identity of a <see cref="LevelKind.MVar"/> level.</summary>
+    public LMVarId? MVarId { get; }
+
     /// <summary>Whether a universe parameter occurs in this level.</summary>
     public bool HasParam { get; }
 
+    /// <summary>Whether a universe metavariable occurs in this level.</summary>
+    public bool HasMVar { get; }
+
     /// <summary>
-    /// Lean's level depth: 0 for zero and parameters, one more than the operand for <c>succ</c>, one
+    /// Lean's level depth: 0 for zero, parameters and metavariables, one more than the operand for <c>succ</c>, one
     /// more than the deeper operand for <c>max</c>/<c>imax</c>. For an explicit level <c>succⁿ 0</c>
     /// it is <c>n</c>.
     /// </summary>
@@ -84,7 +106,7 @@ public sealed class Level : IEquatable<Level>
     public static Level Succ(Level l)
     {
         ArgumentNullException.ThrowIfNull(l);
-        return new Level(LevelKind.Succ, l, null, null);
+        return new Level(LevelKind.Succ, l, null, null, null);
     }
 
     /// <summary><c>max l r</c>.</summary>
@@ -92,7 +114,7 @@ public sealed class Level : IEquatable<Level>
     {
         ArgumentNullException.ThrowIfNull(l);
         ArgumentNullException.ThrowIfNull(r);
-        return new Level(LevelKind.Max, l, r, null);
+        return new Level(LevelKind.Max, l, r, null, null);
     }
 
     /// <summary><c>imax l r</c>.</summary>
@@ -100,14 +122,21 @@ public sealed class Level : IEquatable<Level>
     {
         ArgumentNullException.ThrowIfNull(l);
         ArgumentNullException.ThrowIfNull(r);
-        return new Level(LevelKind.IMax, l, r, null);
+        return new Level(LevelKind.IMax, l, r, null, null);
     }
 
     /// <summary>The universe parameter <paramref name="name"/>.</summary>
     public static Level Param(Name name)
     {
         ArgumentNullException.ThrowIfNull(name);
-        return new Level(LevelKind.Param, null, null, name);
+        return new Level(LevelKind.Param, null, null, name, null);
+    }
+
+    /// <summary>The universe metavariable <paramref name="id"/>.</summary>
+    public static Level MVar(LMVarId id)
+    {
+        ArgumentNullException.ThrowIfNull(id.Name, nameof(id));
+        return new Level(LevelKind.MVar, null, null, null, id);
     }
 
     /// <inheritdoc/>
@@ -127,6 +156,7 @@ public sealed class Level : IEquatable<Level>
             LevelKind.Succ => Lhs!.Equals(other.Lhs),
             LevelKind.Max or LevelKind.IMax => Lhs!.Equals(other.Lhs) && Rhs!.Equals(other.Rhs),
             LevelKind.Param => ParamName!.Equals(other.ParamName),
+            LevelKind.MVar => MVarId == other.MVarId,
             _ => false,
         };
     }
@@ -178,6 +208,9 @@ public sealed class Level : IEquatable<Level>
         {
             case LevelKind.Param:
                 sb.Append(b.ParamName);
+                break;
+            case LevelKind.MVar:
+                sb.Append('?').Append(b.MVarId);
                 break;
             case LevelKind.Max:
             case LevelKind.IMax:

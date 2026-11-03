@@ -4,6 +4,7 @@
     <Description>Helpers shared by the Warrant test projects: opt-in facts, test-data paths and the checked semantics bundle.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="FsCheck" Version="3.6.0" />
     <PackageReference Include="xunit.extensibility.core" Version="2.9.3" />
   </ItemGroup>
   <ItemGroup>

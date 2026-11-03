@@ -1,0 +1,107 @@
+using System.Text.Json;
+using Warrant.Extraction;
+using Warrant.Vir;
+
+namespace Warrant.Extraction.Tests;
+
+/// <summary>Every member of every corpus compilation gets the outcome expected.json gives it (docs/m4/02).</summary>
+public class CorpusTests
+{
+    public static TheoryData<string> Compilations => new(Corpus.CompilationNames);
+
+    public static TheoryData<string, string> Members
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var name in Corpus.CompilationNames)
+            {
+                foreach (var (key, _) in Corpus.Members(name))
+                {
+                    data.Add(name, key);
+                }
+            }
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Compilations))]
+    public void CompilesWithoutErrors(string compilation)
+    {
+        var result = Corpus.Extract(compilation);
+        Assert.False(result.HasCompileErrors, string.Join("\n", result.Diagnostics.Select(d => d.Message)));
+    }
+
+    [Theory]
+    [MemberData(nameof(Members))]
+    public void MemberHasItsExpectedOutcome(string compilation, string key)
+    {
+        var result = Corpus.Extract(compilation);
+        var expected = Corpus.Member(compilation, key);
+        var outcome = expected.GetProperty("outcome").GetString();
+        var unit = result.Find(key);
+        var diagnostics = result.DiagnosticsFor(key);
+        switch (outcome)
+        {
+            case "translated" or "proved" or "false":
+                Assert.Empty(diagnostics);
+                Assert.NotNull(unit);
+                if (outcome != "translated")
+                {
+                    Assert.Equal(VirUnitKind.Theorem, unit.Unit.Kind);
+                }
+                Assert.Equal(Strings(expected, "assumeNonNull"), Subjects(unit.Unit, VirAssumptionKind.NonNull));
+                bool identity = expected.TryGetProperty("assumeIdentityEquality", out var ie) && ie.GetBoolean();
+                Assert.Equal(identity, unit.Unit.Assumptions.Contains(new VirAssumption(VirAssumptionKind.ClosedEquality, key)));
+                break;
+            case "rejected" or "warning":
+                if (outcome == "rejected")
+                {
+                    Assert.Null(unit);
+                }
+                var wanted = expected.GetProperty("diagnostics").EnumerateArray()
+                    .Select(d => d.GetProperty("id").GetString() + " | " + d.GetProperty("construct").GetString())
+                    .OrderBy(s => s, StringComparer.Ordinal);
+                var got = diagnostics.Select(d => d.Id + " | " + d.Construct).OrderBy(s => s, StringComparer.Ordinal);
+                Assert.Equal(wanted, got);
+                foreach (var d in diagnostics)
+                {
+                    var severity = d.Id == DiagnosticIds.UnnamedClosedValue ? ExtractionSeverity.Warning : ExtractionSeverity.Error;
+                    Assert.Equal(severity, d.Severity);
+                    Assert.NotNull(d.Location);
+                }
+                break;
+            default:
+                Assert.Fail($"Unknown outcome '{outcome}'.");
+                break;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Compilations))]
+    public void NoDiagnosticIsUnexpected(string compilation)
+    {
+        var keys = Corpus.Members(compilation).Select(m => m.Key).ToHashSet(StringComparer.Ordinal);
+        var unexpected = Corpus.Extract(compilation).Diagnostics.Where(d => d.MemberKey is null || !keys.Contains(d.MemberKey));
+        Assert.Empty(unexpected);
+    }
+
+    [Theory]
+    [MemberData(nameof(Compilations))]
+    public void UnitsComeAfterTheirDependencies(string compilation)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var unit in Corpus.Extract(compilation).Units)
+        {
+            Assert.All(unit.Unit.Deps, d => Assert.Contains(d, seen));
+            seen.Add(unit.Key);
+        }
+    }
+
+    private static List<string> Strings(JsonElement member, string property) =>
+        member.TryGetProperty(property, out var list) ? list.EnumerateArray().Select(e => e.GetString()!).ToList() : [];
+
+    private static List<string> Subjects(VirUnit unit, VirAssumptionKind kind) =>
+        unit.Assumptions.Where(a => a.Kind == kind).Select(a => a.Subject).ToList();
+}

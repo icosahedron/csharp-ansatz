@@ -11,5 +11,12 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <ProjectReference Include="..\..\src\Warrant\Warrant.csproj" />
+    <ProjectReference Include="..\..\src\Warrant.Frontend\Warrant.Frontend.csproj" />
+    <ProjectReference Include="..\..\src\Warrant.Extraction\Warrant.Extraction.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The corpus is compiled in memory from these copies (docs/m4/02). -->
+    <None Include="..\corpus\m4\**\*" LinkBase="corpus\m4" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Warrant.Vir.Tests\golden\payout.json" Link="golden\payout.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

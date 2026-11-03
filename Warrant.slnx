@@ -3,6 +3,8 @@
     <Project Path="src/Warrant/Warrant.csproj" />
     <Project Path="src/Warrant.Cic/Warrant.Cic.csproj" />
     <Project Path="src/Warrant.Cli/Warrant.Cli.csproj" />
+    <Project Path="src/Warrant.Extraction/Warrant.Extraction.csproj" />
+    <Project Path="src/Warrant.Frontend/Warrant.Frontend.csproj" />
     <Project Path="src/Warrant.Kernel/Warrant.Kernel.csproj" />
     <Project Path="src/Warrant.Lean4Export/Warrant.Lean4Export.csproj" />
     <Project Path="src/Warrant.Vir/Warrant.Vir.csproj" />

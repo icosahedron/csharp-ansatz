@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>The compilation factory: the references, language version and options that decide what the C# extraction reads means (KTD4).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    <PackageReference Include="Basic.Reference.Assemblies.Net100" Version="1.8.14" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      The Warrant package is referenced by compilations as an image embedded here, never as a file: a copied
+      Warrant.dll would land next to the CLI's warrant.dll, and assembly names compare case-insensitively (KTD4).
+      This reference only orders the build; EmbedWarrantPackage embeds its output.
+    -->
+    <ProjectReference Include="..\Warrant\Warrant.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+  <Target Name="EmbedWarrantPackage" BeforeTargets="AssignTargetPaths" DependsOnTargets="ResolveProjectReferences">
+    <MSBuild Projects="..\Warrant\Warrant.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_WarrantPackageAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <EmbeddedResource Include="@(_WarrantPackageAssembly)" LogicalName="Warrant.dll" />
+    </ItemGroup>
+  </Target>
+</Project>

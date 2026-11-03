@@ -37,7 +37,7 @@
       "M:Claims.ClaimStatuses.DeniedIsFinal": { "outcome": "proved", "by": "rfl" },
       "M:Claims.ClaimStatuses.OpenIsNotFinal": { "outcome": "proved", "by": "decide" },
 
-      "T:Claims.Outcome": { "outcome": "translated", "assumeIdentityEquality": true },
+      "T:Claims.Outcome": { "outcome": "translated" },
       "M:Claims.Outcomes.Code(Claims.Outcome)": { "outcome": "translated", "assumeNonNull": ["o"] },
       "M:Claims.Outcomes.Same(Claims.Outcome,Claims.Outcome)": { "outcome": "translated", "assumeNonNull": ["a", "b"] },
       "M:Claims.Outcomes.MatchedIsOne": { "outcome": "proved", "by": "rfl" },

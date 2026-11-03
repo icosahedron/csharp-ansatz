@@ -109,6 +109,7 @@
       "M:Corpus.Rejected.Statements.TryCatch(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "try" }] },
       "M:Corpus.Rejected.Statements.LocalFunction(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "local function" }] },
       "M:Corpus.Rejected.Statements.Unreachable(System.Boolean)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "unreachable code" }] },
+      "M:Corpus.Rejected.Statements.MixedDefault(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "switch section mixing default with case labels" }] },
       "M:Corpus.Rejected.Statements.Strings(System.String)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "string" }] },
       "M:Corpus.Rejected.Statements.Decimals(System.Decimal)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "decimal" }] },
       "M:Corpus.Rejected.Statements.Doubles(System.Double)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "floating point" }] },
@@ -129,6 +130,8 @@
       "M:Corpus.Rejected.Enums.DefaultPhase": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "default of a closed enum" }] },
       "M:Corpus.Rejected.Enums.UsesAliased(Corpus.Rejected.Aliased)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Enums.Relational(Corpus.Rejected.Phase)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "relational pattern over a closed type" }] },
+      "M:Corpus.Rejected.Enums.NotPattern(Corpus.Rejected.Phase)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "and/not pattern over a closed type" }] },
+      "M:Corpus.Rejected.Enums.RelationalComparison(Corpus.Rejected.Phase)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "relational comparison over a closed type" }] },
       "M:Corpus.Rejected.Enums.CastInUnverifiedCode(System.Int32)": { "outcome": "warning", "diagnostics": [{ "id": "WRT0008", "construct": "integer cast to a closed enum" }] },
       "M:Corpus.Rejected.Enums.UnboxInUnverifiedCode(System.Object)": { "outcome": "warning", "diagnostics": [{ "id": "WRT0008", "construct": "unboxing to a closed enum" }] },
 
@@ -155,7 +158,8 @@
       "M:Corpus.Rejected.Types.UsesCyclicRecords(Corpus.Rejected.Left)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.UsesReservedName(Corpus.Rejected.Reserved)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.NullableParameter(Corpus.Rejected.Point)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "nullable type" }] },
-      "M:Corpus.Rejected.Types.ReturnsNull": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "nullable type" }] }
+      "M:Corpus.Rejected.Types.ReturnsNull": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "nullable type" }] },
+      "M:Corpus.Rejected.Types.ComparesWithNull(Corpus.Rejected.Point)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "null" }] }
     },
     "checked-project": {
       "M:Corpus.Rejected.CheckedProject.Checked.Add(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "checked arithmetic" }] },

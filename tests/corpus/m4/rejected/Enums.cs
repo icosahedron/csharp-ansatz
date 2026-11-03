@@ -46,6 +46,17 @@ public static class Enums
         _ => 0,
     };
 
+    // A switch over a closed type is its recursor, so only constants, `or` and `_` can be placed.
+    [Verified]
+    public static int NotPattern(Phase p) => p switch
+    {
+        not Phase.Draft => 1,
+        _ => 0,
+    };
+
+    [Verified]
+    public static bool RelationalComparison(Phase p) => p > Phase.Draft;
+
     // Unverified code: integer casts and unboxing to a [Closed] enum are warnings (WRT0008).
     public static Phase CastInUnverifiedCode(int x) => (Phase)x;
 

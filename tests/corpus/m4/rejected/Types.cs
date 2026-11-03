@@ -62,6 +62,9 @@ public static class Types
 
     [Verified]
     public static Point? ReturnsNull() => null;
+
+    [Verified]
+    public static bool ComparesWithNull(Point p) => p == null;
 }
 
 public sealed record Point(int X, int Y);

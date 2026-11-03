@@ -948,6 +948,11 @@ internal sealed class Walker
                     };
                     return Track(new RelationalPattern(op, Constant(r.Value)), syntax);
                 }
+            case IBinaryPatternOperation { OperatorKind: BinaryOperatorKind.And } when Symbols.IsClosed(pattern.InputType):
+            case INegatedPatternOperation when Symbols.IsClosed(pattern.InputType):
+                // A switch over a closed type is its recursor: each arm names constructors, so only
+                // constants, `or` of constants and `_` can be placed (docs/m4/05).
+                throw Reject("and/not pattern over a closed type", syntax);
             case IBinaryPatternOperation b:
                 {
                     var l = Pattern(b.LeftPattern);

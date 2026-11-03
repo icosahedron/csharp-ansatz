@@ -71,6 +71,20 @@ public static class Statements
 #pragma warning restore CS0162
     }
 
+    // Translation places default last, which a section shared with case labels cannot express.
+    [Verified]
+    public static int MixedDefault(int n)
+    {
+        switch (n)
+        {
+            case 1:
+            default:
+                return 0;
+            case 2:
+                return 5;
+        }
+    }
+
     [Verified]
     public static int Strings(string s) => s.Length;
 

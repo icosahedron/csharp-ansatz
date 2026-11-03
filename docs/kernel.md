@@ -123,6 +123,33 @@ with an independent meaning on random inputs:
   every generated term is accepted with its type, reduction preserves types, and
   applying `Nat.succ` to a non-`Nat` term is rejected.
 
+The design's §10.3 properties (M5a, KTD28) build on the same generators:
+
+- **Definitional equality is an equivalence** on the typed language.
+  `DefinitionalEqualityIsReflexive`, `DefinitionalEqualityIsSymmetric` and
+  `DefinitionalEqualityIsTransitive` pair each generated term with terms one to
+  three known reductions away. A reduction is applied at a random subterm, in
+  either direction: beta (contract a redex, or wrap a subterm in one), delta
+  (unfold a definition at its levels) and Nat literals (`n` to `succ (n-1)` or
+  `k + (n-k)`, and back). Symmetry and transitivity also use independent terms of
+  the same type, so both verdicts occur. Transitivity requires every reduction
+  chain `a → b → c` to be accepted, and given `a ≡ b`, it requires `b ≡ c`
+  exactly when `a ≡ c`.
+- **Substitution and instantiation preserve typing.** A body is generated in a
+  context of one or two variables, with closed arguments of the variables' types.
+  `InstantiationPreservesTyping` binds the variables as de Bruijn indices: the
+  instantiated body checks, and its type is the body type from the kernel's Pi
+  type, instantiated. `SubstitutionPreservesTyping` binds them as free variables
+  of a local context, and the substituted term has the substituted type.
+- **Universe instantiation preserves well-typedness.**
+  `UniverseInstantiationPreservesWellTypedness` generates definitions
+  `fun (α : Sort U) (β : Type V) (a : α) (b : β) => t` over parameters `u`, `v`
+  and `w`. Here `t` is built by the typing rules of a small polymorphic language
+  with `id`, `cond`, `List`, `PProd` (whose projections are `Proj` terms) and
+  beta-redexes. The kernel admits each definition, and it also admits the
+  definition with its parameters instantiated at random levels, including
+  `imax` and `0`.
+
 **Finding:** Lean's level normalization is not idempotent. Its `imax` case
 rebuilds an unsorted `max`, so `IsEquivalent(l, Normalize(l))` can be false even
 though both sides always evaluate equal. This is incompleteness, not unsoundness.

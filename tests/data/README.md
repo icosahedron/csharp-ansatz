@@ -9,6 +9,7 @@ lean4export NDJSON files used by the reader, writer and (later) kernel tests.
 | `arena/001_basicDef`, `002_badDef`, `141_falseFromUnsafe`, `proj-of-subst-prop`, `rec-of-subst-prop` | 3.1.0 | [leanprover/lean-kernel-arena](https://github.com/leanprover/lean-kernel-arena), via Ansatz `test-data/arena/` | Apache-2.0 |
 | `arena/sparse-name-index.ndjson` | 3.1.0 | Hand-written by Ansatz (`test-data/arena/`): non-contiguous table indices | Apache-2.0 |
 | `warrant-semantics.ndjson.gz` | 3.1.0 | Exported from this repository's `lean/` by `scripts/export-semantics.sh` with Lean 4.35.0 and lean4export `5a9a355`: the semantics library and its 74 roots (`lean/bundle-roots.txt`) with their dependency closure. The M4 tests load it instead of init-medium, which is a Lean 4.33.1 subset without `Int32` or `Int64`. | Apache-2.0 (Lean 4, Warrant) |
+| `warrant-attributes.ndjson.gz` | sidecar 1 | Exported by `scripts/export-attributes.sh` (`tools/warrant-attrs/Main.lean`) with Lean 4.35.0 from `Init` and `lean/`: the simp, congr, instance, reducibility, defeq, matcher and class entries of the bundle's constants (plan KTD9, docs/m5a/05). Not a lean4export file. | Apache-2.0 (Lean 4, Warrant) |
 
 Several arena files contain declarations a kernel **must reject** (for example
 `002_badDef`, whose value does not have its declared type). The reader accepts
@@ -37,3 +38,24 @@ the raw JSON. These are the values asserted in `ReaderCorpusTests`.
 
 Regenerate `warrant-semantics.ndjson.gz` with `scripts/export-semantics.sh` after changing `lean/`.
 The export is deterministic: an unchanged library gives a byte-identical file.
+
+## The attribute sidecar
+
+`warrant-attributes.ndjson.gz` holds the Lean attributes of the constants in
+`warrant-semantics.ndjson.gz`, which lean4export does not carry. Its first line is a
+header with the format version, the Lean githash and the SHA-256 of the bundle
+`.gz` file it was made for; every other line is one entry, and every name in it is a
+constant of the bundle. `tools/warrant-attrs/Main.lean` documents each kind's fields.
+
+| Kind | Entries |
+|---|---|
+| `simp` (default simp set, with priority, direction, `←` and Lean's keys) | 271 |
+| `congr` | 2 |
+| `instance` (with class, priority and declaration order) | 128 |
+| `reducibility` (every status other than semireducible) | 538 |
+| `defeq` | 44 |
+| `matcher` | 302 |
+| `class` (with out-parameter positions) | 53 |
+
+Regenerate it with `scripts/export-attributes.sh` after regenerating the bundle.
+The export is deterministic: an unchanged library and bundle give a byte-identical file.

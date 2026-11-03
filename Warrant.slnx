@@ -8,6 +8,7 @@
     <Project Path="src/Warrant.Frontend/Warrant.Frontend.csproj" />
     <Project Path="src/Warrant.Kernel/Warrant.Kernel.csproj" />
     <Project Path="src/Warrant.Lean4Export/Warrant.Lean4Export.csproj" />
+    <Project Path="src/Warrant.Meta/Warrant.Meta.csproj" />
     <Project Path="src/Warrant.Semantics/Warrant.Semantics.csproj" />
     <Project Path="src/Warrant.Vir/Warrant.Vir.csproj" />
   </Folder>
@@ -18,6 +19,7 @@
     <Project Path="tests/Warrant.Extraction.Tests/Warrant.Extraction.Tests.csproj" />
     <Project Path="tests/Warrant.Kernel.Tests/Warrant.Kernel.Tests.csproj" />
     <Project Path="tests/Warrant.Lean4Export.Tests/Warrant.Lean4Export.Tests.csproj" />
+    <Project Path="tests/Warrant.Meta.Tests/Warrant.Meta.Tests.csproj" />
     <Project Path="tests/Warrant.Semantics.Tests/Warrant.Semantics.Tests.csproj" />
     <Project Path="tests/Warrant.TestSupport/Warrant.TestSupport.csproj" />
     <Project Path="tests/Warrant.Vir.Tests/Warrant.Vir.Tests.csproj" />

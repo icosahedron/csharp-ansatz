@@ -1,0 +1,162 @@
+namespace Warrant.Vir;
+
+/// <summary>Traversal of a unit's nodes, which defines node IDs.</summary>
+public static class VirTree
+{
+    /// <summary>
+    /// The unit's nodes in pre-order: the body, then the statement. A node's ID is its index in this sequence.
+    /// Children are visited in encoding field order.
+    /// </summary>
+    /// <param name="unit">The unit.</param>
+    /// <returns>The nodes, parents before children.</returns>
+    public static IReadOnlyList<VirNode> PreOrder(VirUnit unit)
+    {
+        var nodes = new List<VirNode>();
+        if (unit.Body is { } body)
+        {
+            Visit(body, nodes);
+        }
+        if (unit.Statement is { } statement)
+        {
+            Visit(statement, nodes);
+        }
+        return nodes;
+    }
+
+    /// <summary>The direct children of a node, in encoding field order.</summary>
+    /// <param name="node">The node.</param>
+    /// <returns>The children.</returns>
+    public static IEnumerable<VirNode> Children(VirNode node)
+    {
+        switch (node)
+        {
+            case LitExpr or ParamExpr or LocalExpr or SelfExpr or MemberExpr or DiscardPattern:
+                break;
+            case UnaryExpr e:
+                yield return e.Operand;
+                break;
+            case BinaryExpr e:
+                yield return e.L;
+                yield return e.R;
+                break;
+            case LogicalExpr e:
+                yield return e.L;
+                yield return e.R;
+                break;
+            case NotExpr e:
+                yield return e.Operand;
+                break;
+            case CompareExpr e:
+                yield return e.L;
+                yield return e.R;
+                break;
+            case ConvertExpr e:
+                yield return e.Operand;
+                break;
+            case CondExpr e:
+                yield return e.C;
+                yield return e.Then;
+                yield return e.Else;
+                break;
+            case CallExpr e:
+                foreach (var a in e.Args)
+                {
+                    yield return a;
+                }
+                break;
+            case NewExpr e:
+                foreach (var a in e.Args)
+                {
+                    yield return a;
+                }
+                break;
+            case GetExpr e:
+                yield return e.Target;
+                break;
+            case WithExpr e:
+                yield return e.Base;
+                foreach (var u in e.Updates)
+                {
+                    yield return u.Value;
+                }
+                break;
+            case SwitchExpr e:
+                yield return e.Scrutinee;
+                foreach (var arm in e.Arms)
+                {
+                    yield return arm.Pattern;
+                    yield return arm.Value;
+                }
+                break;
+            case ImpliesExpr e:
+                yield return e.A;
+                yield return e.B;
+                break;
+            case DeclStmt s:
+                yield return s.Init;
+                break;
+            case AssignStmt s:
+                yield return s.Value;
+                break;
+            case IfStmt s:
+                yield return s.C;
+                yield return s.Then;
+                if (s.Else is { } e2)
+                {
+                    yield return e2;
+                }
+                break;
+            case SwitchStmt s:
+                yield return s.Scrutinee;
+                foreach (var section in s.Sections)
+                {
+                    foreach (var label in section.Labels)
+                    {
+                        yield return label;
+                    }
+                    foreach (var st in section.Body)
+                    {
+                        yield return st;
+                    }
+                }
+                break;
+            case ReturnStmt s:
+                yield return s.Value;
+                break;
+            case BlockStmt s:
+                foreach (var st in s.Stmts)
+                {
+                    yield return st;
+                }
+                break;
+            case ConstPattern p:
+                yield return p.Value;
+                break;
+            case RelationalPattern p:
+                yield return p.Value;
+                break;
+            case AndPattern p:
+                yield return p.L;
+                yield return p.R;
+                break;
+            case OrPattern p:
+                yield return p.L;
+                yield return p.R;
+                break;
+            case NotPattern p:
+                yield return p.Operand;
+                break;
+            default:
+                throw new ArgumentException($"Unknown VIR node {node.GetType().Name}.", nameof(node));
+        }
+    }
+
+    private static void Visit(VirNode node, List<VirNode> nodes)
+    {
+        nodes.Add(node);
+        foreach (var child in Children(node))
+        {
+            Visit(child, nodes);
+        }
+    }
+}

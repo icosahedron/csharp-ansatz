@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>The verification IR between extraction and translation: the typed model, its canonical encoding, and its unit and closure hashes.</Description>
+    <!-- Directory.Build.props sets TargetFramework; this project multi-targets instead (KTD3). -->
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>netstandard2.0;net10.0</TargetFrameworks>
+    <!-- CA1720: Int32, Int64 and Int name VIR's own types (docs/m4/04), as the encoding spells them. -->
+    <NoWarn>$(NoWarn);CA1720</NoWarn>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <!-- The reader is for the engine and the server only (docs/m4/04). -->
+    <Compile Remove="VirReader.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' != 'netstandard2.0'">
+    <Compile Remove="IsExternalInit.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Warrant.Vir.Tests" />
+  </ItemGroup>
+</Project>

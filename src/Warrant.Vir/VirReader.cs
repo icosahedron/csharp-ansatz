@@ -1,0 +1,231 @@
+using System.Globalization;
+using System.Text.Json;
+
+namespace Warrant.Vir;
+
+/// <summary>
+/// Reads the canonical encoding back into a <see cref="VirUnit"/>. Built for net10.0 only and based on the in-box
+/// System.Text.Json; reading is not where the bytes are decided (docs/m4/04, "Encoding").
+/// </summary>
+public static class VirReader
+{
+    /// <summary>Reads a unit from its UTF-8 encoding.</summary>
+    /// <param name="utf8">The encoded unit.</param>
+    /// <returns>The unit.</returns>
+    /// <exception cref="FormatException">The input is not a VIR unit.</exception>
+    public static VirUnit Read(ReadOnlyMemory<byte> utf8)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(utf8);
+            return Unit(doc.RootElement);
+        }
+        catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or OverflowException)
+        {
+            throw new FormatException($"Not a VIR unit: {e.Message}", e);
+        }
+    }
+
+    private static VirUnit Unit(JsonElement e)
+    {
+        var kind = Parse<VirUnitKind>(Str(e, "kind"), VirSpelling.Of);
+        VirNode? body = null;
+        if (e.TryGetProperty("body", out var b))
+        {
+            body = Kind(b).Name == "block" ? Stmt(b) : Expr(b);
+        }
+        return new VirUnit(
+            e.GetProperty("vir").GetInt32(),
+            Str(e, "key"),
+            kind,
+            e.TryGetProperty("self", out var self) ? self.GetString()! : null,
+            e.TryGetProperty("params", out var ps) ? List(ps, p => new VirParam(Str(p, "name"), Type(p.GetProperty("type")))) : null,
+            e.TryGetProperty("returns", out var r) ? Type(r) : null,
+            body,
+            e.TryGetProperty("statement", out var s) ? Expr(s) : null,
+            e.TryGetProperty("definition", out var d) ? Definition(d) : null,
+            List(e.GetProperty("assumptions"), a => new VirAssumption(
+                Parse<VirAssumptionKind>(Str(a, "kind"), VirSpelling.Of),
+                Str(a, "subject"))),
+            Facts(e.GetProperty("facts")),
+            List(e.GetProperty("deps"), x => x.GetString()!));
+    }
+
+    private static VirFacts Facts(JsonElement e) => new(
+        Parse<VirOverflow>(Str(e, "overflow"), VirSpelling.Of),
+        Str(e, "language"),
+        Str(e, "extractor"),
+        Str(e, "roslyn"));
+
+    private static VirType Type(JsonElement e)
+    {
+        if (e.ValueKind == JsonValueKind.String)
+        {
+            return new PrimitiveType(Parse<VirPrimitive>(e.GetString()!, VirSpelling.Of));
+        }
+        var (name, value) = Kind(e);
+        return name == "ref" ? new RefType(value.GetString()!) : throw new FormatException($"Unknown VIR type '{name}'.");
+    }
+
+    private static VirDefinition Definition(JsonElement e)
+    {
+        var (name, v) = Kind(e);
+        return name switch
+        {
+            "record" => new RecordDefinition(List(v, f => new VirField(Str(f, "name"), Type(f.GetProperty("type"))))),
+            "enum" => new EnumDefinition(
+                Type(v.GetProperty("underlying")),
+                List(v.GetProperty("members"), m => new VirEnumMember(Str(m, "name"), Long(Str(m, "value"))))),
+            "closed" => new ClosedDefinition(List(v, m => new VirClosedMember(
+                Str(m, "name"),
+                m.TryGetProperty("value", out var x) ? Long(x.GetString()!) : null))),
+            _ => throw new FormatException($"Unknown VIR definition '{name}'."),
+        };
+    }
+
+    private static VirStmt Stmt(JsonElement e)
+    {
+        var (name, v) = Kind(e);
+        return name switch
+        {
+            "decl" => new DeclStmt(v.GetProperty("local").GetInt32(), Str(v, "name"), Expr(v.GetProperty("init"))),
+            "assign" => new AssignStmt(v.GetProperty("local").GetInt32(), Expr(v.GetProperty("value"))),
+            "if" => new IfStmt(
+                Expr(v.GetProperty("c")),
+                Stmt(v.GetProperty("then")),
+                v.TryGetProperty("else", out var otherwise) ? Stmt(otherwise) : null),
+            "switch" => new SwitchStmt(
+                Expr(v.GetProperty("scrutinee")),
+                List(v.GetProperty("sections"), s => new SwitchSection(
+                    List(s.GetProperty("labels"), Pattern),
+                    List(s.GetProperty("body"), Stmt)))),
+            "return" => new ReturnStmt(Expr(v)),
+            "block" => new BlockStmt(List(v, Stmt)),
+            _ => throw new FormatException($"Unknown VIR statement '{name}'."),
+        };
+    }
+
+    private static VirExpr Expr(JsonElement e)
+    {
+        var (name, v) = Kind(e);
+        var type = Type(v.GetProperty("type"));
+        return name switch
+        {
+            "lit" => new LitExpr(type, LitValue(type, Str(v, "value"))),
+            "param" => new ParamExpr(type, v.GetProperty("index").GetInt32()),
+            "local" => new LocalExpr(type, v.GetProperty("id").GetInt32()),
+            "self" => new SelfExpr(type),
+            "unary" => new UnaryExpr(
+                type,
+                Parse<UnaryOp>(Str(v, "op"), VirSpelling.Of),
+                Overflow(v),
+                Expr(v.GetProperty("operand"))),
+            "binary" => new BinaryExpr(
+                type,
+                Parse<BinaryOp>(Str(v, "op"), VirSpelling.Of),
+                Overflow(v),
+                Expr(v.GetProperty("l")),
+                Expr(v.GetProperty("r"))),
+            "logical" => Typed(type, new LogicalExpr(
+                Parse<LogicalOp>(Str(v, "op"), VirSpelling.Of),
+                Expr(v.GetProperty("l")),
+                Expr(v.GetProperty("r")))),
+            "not" => Typed(type, new NotExpr(Expr(v.GetProperty("operand")))),
+            "compare" => Typed(type, new CompareExpr(
+                Parse<CompareOp>(Str(v, "op"), VirSpelling.Of),
+                Parse<CompareKind>(Str(v, "kind"), VirSpelling.Of),
+                Expr(v.GetProperty("l")),
+                Expr(v.GetProperty("r")))),
+            "convert" => Typed(type, new ConvertExpr(
+                Type(v.GetProperty("from")),
+                Type(v.GetProperty("to")),
+                Overflow(v),
+                Expr(v.GetProperty("operand")))),
+            "cond" => new CondExpr(type, Expr(v.GetProperty("c")), Expr(v.GetProperty("then")), Expr(v.GetProperty("else"))),
+            "call" => new CallExpr(type, Str(v, "target"), List(v.GetProperty("args"), Expr)),
+            "new" => new NewExpr(type, List(v.GetProperty("args"), Expr)),
+            "get" => new GetExpr(type, Str(v, "field"), Expr(v.GetProperty("target"))),
+            "with" => new WithExpr(
+                type,
+                Expr(v.GetProperty("base")),
+                List(v.GetProperty("updates"), u => new WithUpdate(Str(u, "field"), Expr(u.GetProperty("value"))))),
+            "member" => new MemberExpr(type, Str(v, "name")),
+            "switch" => new SwitchExpr(
+                type,
+                Expr(v.GetProperty("scrutinee")),
+                List(v.GetProperty("arms"), a => new SwitchArm(Pattern(a.GetProperty("pattern")), Expr(a.GetProperty("value"))))),
+            "implies" => Typed(type, new ImpliesExpr(Expr(v.GetProperty("a")), Expr(v.GetProperty("b")))),
+            _ => throw new FormatException($"Unknown VIR expression '{name}'."),
+        };
+    }
+
+    private static VirPattern Pattern(JsonElement e)
+    {
+        var (name, v) = Kind(e);
+        return name switch
+        {
+            "const" => new ConstPattern(Expr(v)),
+            "discard" => new DiscardPattern(),
+            "relational" => new RelationalPattern(Parse<RelationalOp>(Str(v, "op"), VirSpelling.Of), Expr(v.GetProperty("value"))),
+            "and" => new AndPattern(Pattern(v.GetProperty("l")), Pattern(v.GetProperty("r"))),
+            "or" => new OrPattern(Pattern(v.GetProperty("l")), Pattern(v.GetProperty("r"))),
+            "not" => new NotPattern(Pattern(v)),
+            _ => throw new FormatException($"Unknown VIR pattern '{name}'."),
+        };
+    }
+
+    /// <summary>A node kind whose type is fixed by its constructor must agree with the encoded <c>type</c>.</summary>
+    private static VirExpr Typed(VirType encoded, VirExpr expr) =>
+        expr.Type == encoded ? expr : throw new FormatException($"A {expr.GetType().Name} cannot have type {encoded}.");
+
+    private static VirOverflow Overflow(JsonElement e) => Parse<VirOverflow>(Str(e, "overflow"), VirSpelling.Of);
+
+    private static long LitValue(VirType type, string text)
+    {
+        if (type == VirType.Bool)
+        {
+            return text switch
+            {
+                "false" => 0,
+                "true" => 1,
+                _ => throw new FormatException($"Not a bool literal: '{text}'."),
+            };
+        }
+        return Long(text);
+    }
+
+    private static T Parse<T>(string text, Func<T, string> spell)
+        where T : struct, Enum
+    {
+        foreach (var value in Enum.GetValues<T>())
+        {
+            if (spell(value) == text)
+            {
+                return value;
+            }
+        }
+        throw new FormatException($"Unknown {typeof(T).Name} '{text}'.");
+    }
+
+    private static long Long(string text) => long.Parse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
+
+    private static (string Name, JsonElement Value) Kind(JsonElement e)
+    {
+        using var props = e.EnumerateObject();
+        if (!props.MoveNext())
+        {
+            throw new FormatException("A VIR node is an object with one field.");
+        }
+        var first = props.Current;
+        if (props.MoveNext())
+        {
+            throw new FormatException("A VIR node is an object with one field.");
+        }
+        return (first.Name, first.Value);
+    }
+
+    private static string Str(JsonElement e, string name) =>
+        e.GetProperty(name).GetString() ?? throw new FormatException($"'{name}' is null.");
+
+    private static VirList<T> List<T>(JsonElement e, Func<JsonElement, T> item) => new(e.EnumerateArray().Select(item).ToList());
+}

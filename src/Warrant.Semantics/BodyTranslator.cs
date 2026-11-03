@@ -1,0 +1,251 @@
+using System.Collections.Immutable;
+using Warrant.Cic;
+using Warrant.Kernel;
+using Warrant.Vir;
+
+namespace Warrant.Semantics;
+
+/// <summary>
+/// Translates one unit's body or statement. Terms are built with named free variables from a <see cref="LocalContext"/>
+/// and closed into de Bruijn form with <see cref="LocalContext.MkLambda(IReadOnlyList{Expr}, Expr, bool)"/>, never by
+/// counting indices. Each VIR node has one rule; this file holds the expression and condition rules, and
+/// <c>Statements.cs</c> and <c>Switches.cs</c> the others.
+/// </summary>
+internal sealed partial class BodyTranslator
+{
+    private readonly TypeTable _types;
+    private readonly LocalContext _lctx = new();
+    private readonly NameGenerator _ngen = new(Name.From("_warrant"));
+    private readonly Dictionary<int, DeclStmt> _locals = [];
+    private readonly List<Expr> _params = [];
+    private Expr? _self;
+
+    public BodyTranslator(TypeTable types) => _types = types;
+
+    /// <summary>A function unit's type (<c>∀</c> over <c>self</c> and the parameters) and value (<c>fun</c> over the same).</summary>
+    public (Expr Type, Expr Value) Function(VirUnit unit)
+    {
+        var binders = new List<Expr>();
+        if (unit.Self is { } self)
+        {
+            _self = _lctx.MkLocalDecl(_ngen, Name.From("self"), _types.Cic(VirType.Ref(self)));
+            binders.Add(_self);
+        }
+        foreach (var p in unit.Params ?? VirList<VirParam>.Empty)
+        {
+            var fvar = _lctx.MkLocalDecl(_ngen, Name.From(p.Name), _types.Cic(p.Type));
+            _params.Add(fvar);
+            binders.Add(fvar);
+        }
+        var returns = _types.Cic(unit.Returns ?? throw new TranslationException(unit.Key, "a function has no return type."));
+        Expr body;
+        switch (unit.Body)
+        {
+            case BlockStmt block:
+                CollectLocals(block);
+                body = Statements(block.Stmts, 0, Env.Empty, new Unreachable(returns));
+                break;
+            case VirExpr e:
+                CollectLocals(e);
+                body = Value(e, Env.Empty);
+                break;
+            default:
+                throw new TranslationException(unit.Key, "a function has no body.");
+        }
+        return (_lctx.MkPi(binders, returns), _lctx.MkLambda(binders, body));
+    }
+
+    /// <summary>A theorem's statement, translated as a condition (docs/m4/06, "The statement").</summary>
+    public Condition Statement(VirExpr statement) => Cond(statement, Env.Empty);
+
+    // ---- Values ----
+
+    /// <summary>An expression as a value (docs/m4/05): a <c>bool</c> expression becomes a <c>Bool</c>.</summary>
+    private Expr Value(VirExpr e, Env env)
+    {
+        switch (e)
+        {
+            case LitExpr l:
+                return Literals.Of(_types.Underlying(l.Type), l.Value);
+            case ParamExpr p:
+                return p.Index >= 0 && p.Index < _params.Count ? _params[p.Index] : throw new TranslationException(null, $"no parameter {p.Index}.");
+            case LocalExpr l:
+                return env.Get(l.Id);
+            case SelfExpr:
+                return _self ?? throw new TranslationException(null, "self outside an instance member.");
+            case UnaryExpr { Op: UnaryOp.Neg } u:
+                RequireWrap(u.Overflow);
+                return Operators.Neg(_types.Underlying(u.Type), Value(u.Operand, env));
+            case UnaryExpr { Op: UnaryOp.Plus } u:
+                return Value(u.Operand, env);
+            case BinaryExpr b:
+                RequireWrap(b.Overflow);
+                return Operators.Binary(b.Op, _types.Underlying(b.Type), Value(b.L, env), Value(b.R, env));
+            case LogicalExpr { Op: LogicalOp.And or LogicalOp.AndEager } l:
+                return Operators.And(Value(l.L, env), Value(l.R, env));
+            case LogicalExpr { Op: LogicalOp.Or or LogicalOp.OrEager } l:
+                return Operators.Or(Value(l.L, env), Value(l.R, env));
+            case LogicalExpr { Op: LogicalOp.Xor } l:
+                return Operators.Xor(Value(l.L, env), Value(l.R, env));
+            case NotExpr n:
+                return Operators.Not(Value(n.Operand, env));
+            case CompareExpr c:
+                return Operators.Decide(Compare(c, env));
+            case ConvertExpr c:
+                return Convert(c, env);
+            case CondExpr c:
+                return Operators.Ite(_types.Cic(c.Type), Cond(c.C, env), Value(c.Then, env), Value(c.Else, env));
+            case CallExpr c:
+                return Expr.App(Expr.Const(LeanNames.ForKey(c.Target)), [.. c.Args.Select(a => Value(a, env))]);
+            case NewExpr n:
+                return Expr.App(Expr.Const(LeanNames.Constructor(Key(n.Type))), [.. n.Args.Select(a => Value(a, env))]);
+            case GetExpr g:
+                return Expr.Proj(LeanNames.ForKey(Key(g.Target.Type)), _types.FieldIndex(g.Target.Type, g.Field), Value(g.Target, env));
+            case WithExpr w:
+                return With(w, env);
+            case MemberExpr m:
+                return Expr.Const(LeanNames.Member(Key(m.Type), m.Name));
+            case SwitchExpr s:
+                return Switch(s, env);
+            case ImpliesExpr:
+                throw new TranslationException(null, "Spec.Implies is valid only in a theorem statement.");
+            default:
+                throw new TranslationException(null, $"unsupported expression {e.GetType().Name}.");
+        }
+    }
+
+    /// <summary>
+    /// <c>(long)a</c> is <c>Int32.toInt64 a</c>, <c>(int)a</c> on a <c>long</c> is <c>Int64.toInt32 a</c>, and a cast between an
+    /// open enum and its underlying type is free. Narrowing must wrap; checked narrowing needs exceptions (M6).
+    /// </summary>
+    private Expr Convert(ConvertExpr c, Env env)
+    {
+        var from = _types.Underlying(c.From);
+        var to = _types.Underlying(c.To);
+        if (c.Overflow == VirOverflow.Checked && from == VirPrimitive.Int64 && to == VirPrimitive.Int32)
+        {
+            throw new TranslationException(null, "a checked narrowing conversion needs exceptions.");
+        }
+        return Operators.Convert(from, to, Value(c.Operand, env));
+    }
+
+    /// <summary><c>r with { F = x }</c> is <c>$mk</c> applied to the updated fields and the base's projections of the others.</summary>
+    private Expr With(WithExpr w, Env env)
+    {
+        var fields = _types.Record(w.Type).Fields;
+        foreach (var update in w.Updates)
+        {
+            _types.FieldIndex(w.Type, update.Field); // throws for a field the record does not have
+        }
+        var name = LeanNames.ForKey(Key(w.Type));
+        var @base = Value(w.Base, env);
+        var args = new Expr[fields.Count];
+        for (int i = 0; i < fields.Count; i++)
+        {
+            var update = w.Updates.LastOrDefault(u => string.Equals(u.Field, fields[i].Name, StringComparison.Ordinal));
+            args[i] = update is null ? Expr.Proj(name, i, @base) : Value(update.Value, env);
+        }
+        return Expr.App(Expr.Const(LeanNames.Constructor(Key(w.Type))), args);
+    }
+
+    // ---- Conditions ----
+
+    /// <summary>A <c>bool</c> expression as a condition (docs/m4/05): a proposition and its fixed <c>Decidable</c> instance.</summary>
+    private Condition Cond(VirExpr e, Env env) => e switch
+    {
+        CompareExpr c => Compare(c, env),
+        LogicalExpr { Op: LogicalOp.And or LogicalOp.AndEager } l => Conditions.And(Cond(l.L, env), Cond(l.R, env)),
+        LogicalExpr { Op: LogicalOp.Or or LogicalOp.OrEager } l => Conditions.Or(Cond(l.L, env), Cond(l.R, env)),
+        NotExpr n => Conditions.Not(Cond(n.Operand, env)),
+        ImpliesExpr i => Conditions.Implies(Cond(i.A, env), Cond(i.B, env)),
+        _ => Conditions.IsTrue(Value(e, env)),
+    };
+
+    /// <summary>
+    /// A comparison as a condition. Integers and open enums (at the underlying type) use the order and equality rows; records
+    /// compare with <c>R.$eq r s = true</c>, closed types with <c>Nat.beq (T.$index r) (T.$index s) = true</c> (KTD10).
+    /// </summary>
+    private Condition Compare(CompareExpr c, Env env)
+    {
+        var a = Value(c.L, env);
+        var b = Value(c.R, env);
+        Condition eq;
+        switch (c.Kind)
+        {
+            case CompareKind.Int or CompareKind.Enum:
+                {
+                    var t = _types.Underlying(c.L.Type);
+                    switch (c.Op)
+                    {
+                        case CompareOp.Lt: return Conditions.Lt(t, a, b);
+                        case CompareOp.Le: return Conditions.Le(t, a, b);
+                        case CompareOp.Gt: return Conditions.Lt(t, b, a);
+                        case CompareOp.Ge: return Conditions.Le(t, b, a);
+                    }
+                    eq = Conditions.Eq(t, a, b);
+                    break;
+                }
+            case CompareKind.Bool:
+                eq = Conditions.Eq(VirPrimitive.Bool, a, b);
+                break;
+            case CompareKind.Record:
+                eq = Conditions.IsTrue(Expr.App(Expr.Const(LeanNames.Equality(Key(c.L.Type))), a, b));
+                break;
+            case CompareKind.Closed:
+                {
+                    var index = Expr.Const(LeanNames.Index(Key(c.L.Type)));
+                    eq = Conditions.IsTrue(Operators.NatBeq(Expr.App(index, a), Expr.App(index, b)));
+                    break;
+                }
+            default:
+                throw new TranslationException(null, $"unsupported comparison kind {c.Kind}.");
+        }
+        return c.Op switch
+        {
+            CompareOp.Eq => eq,
+            CompareOp.Ne => Conditions.Not(eq),
+            _ => throw new TranslationException(null, $"{c.Op} is not defined on {c.Kind} values."),
+        };
+    }
+
+    // ---- Helpers ----
+
+    /// <summary>Checks that arithmetic wraps; checked arithmetic that can overflow needs exceptions (M6).</summary>
+    private static void RequireWrap(VirOverflow overflow)
+    {
+        if (overflow != VirOverflow.Wrap)
+        {
+            throw new TranslationException(null, "checked arithmetic needs exceptions.");
+        }
+    }
+
+    private static string Key(VirType type) =>
+        type is RefType r ? r.Key : throw new TranslationException(null, $"{type} is not a record, enum or closed type.");
+
+    private void CollectLocals(VirNode node)
+    {
+        if (node is DeclStmt d && !_locals.TryAdd(d.Local, d))
+        {
+            throw new TranslationException(null, $"the local {d.Local} is declared twice.");
+        }
+        foreach (var child in VirTree.Children(node))
+        {
+            CollectLocals(child);
+        }
+    }
+
+    /// <summary>What each C# local currently holds: a free variable bound by a parameter, a <c>let</c> or a join point.</summary>
+    private sealed class Env
+    {
+        public static readonly Env Empty = new(ImmutableDictionary<int, Expr>.Empty);
+
+        private readonly ImmutableDictionary<int, Expr> _values;
+
+        private Env(ImmutableDictionary<int, Expr> values) => _values = values;
+
+        public Expr Get(int local) =>
+            _values.TryGetValue(local, out var v) ? v : throw new TranslationException(null, $"the local {local} is read before it is assigned.");
+
+        public Env Set(int local, Expr value) => new(_values.SetItem(local, value));
+    }
+}

@@ -84,6 +84,71 @@ public static class CompilationFactory
         return Create(sources, checkOverflow, assemblyName);
     }
 
+    /// <summary>
+    /// Builds the compilation the compiler builds, from <c>@(CscCommandLineArgs)</c> written one argument per line
+    /// (KTD21; docs/m5a/07, "Reproducing the compilation"). Roslyn's own parser reads the arguments, so the parse options
+    /// (defines, language version, features), compilation options (checked, nullable, unsafe, warnings), sources,
+    /// references and analyzer configuration are exactly the compiler's. Analyzers and source generators are not run.
+    /// Each tree's path is its path relative to <paramref name="projectDirectory"/>, with forward slashes; sources keep
+    /// the compiler's order.
+    /// </summary>
+    /// <param name="argsFile">The argument file, e.g. <c>obj/warrant.csc.args</c>.</param>
+    /// <param name="projectDirectory">The directory relative paths in the arguments are relative to (<c>$(MSBuildProjectDirectory)</c>).</param>
+    /// <returns>The compilation, which may have errors: see <see cref="Failure"/>.</returns>
+    /// <exception cref="InvalidDataException">The arguments are not valid compiler arguments.</exception>
+    public static CSharpCompilation FromCscArgs(string argsFile, string projectDirectory)
+    {
+        var fullProject = Path.GetFullPath(projectDirectory);
+        var lines = File.ReadAllLines(argsFile, Encoding.UTF8).Where(l => l.Length > 0).ToArray();
+        var args = CSharpCommandLineParser.Default.Parse(lines, fullProject, sdkDirectory: null);
+        var errors = args.Errors.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        if (errors.Count > 0)
+        {
+            throw new InvalidDataException(
+                $"{argsFile}: " + string.Join("; ", errors.Select(d => d.GetMessage(System.Globalization.CultureInfo.InvariantCulture))));
+        }
+
+        var trees = args.SourceFiles.Select(file =>
+        {
+            using var stream = File.OpenRead(file.Path);
+            var text = SourceText.From(stream, args.Encoding, args.ChecksumAlgorithm);
+            var path = Path.GetRelativePath(fullProject, file.Path).Replace('\\', '/');
+            return CSharpSyntaxTree.ParseText(text, args.ParseOptions, path);
+        }).ToList();
+        var references = args.MetadataReferences.Select(r =>
+            (MetadataReference)MetadataReference.CreateFromFile(Path.GetFullPath(Path.Combine(fullProject, r.Reference)), r.Properties));
+
+        var options = args.CompilationOptions;
+        if (args.AnalyzerConfigPaths.Length > 0)
+        {
+            var configs = args.AnalyzerConfigPaths
+                .Select(p => Path.GetFullPath(Path.Combine(fullProject, p)))
+                .Select(p => AnalyzerConfig.Parse(SourceText.From(File.ReadAllText(p, Encoding.UTF8)), p))
+                .ToList();
+            var set = AnalyzerConfigSet.Create(configs);
+            var treeOptions = trees.ToDictionary(
+                t => t.FilePath,
+                t => set.GetOptionsForSourcePath(Path.GetFullPath(Path.Combine(fullProject, t.FilePath))),
+                StringComparer.Ordinal);
+            options = options.WithSyntaxTreeOptionsProvider(new AnalyzerConfigTreeOptions(set.GlobalConfigOptions, treeOptions));
+        }
+        return CSharpCompilation.Create(args.CompilationName, trees, references, options);
+    }
+
+    /// <summary>
+    /// Why a compilation does not compile, or null if it has no errors. Source generators run only inside Csc, so a
+    /// compilation from <see cref="FromCscArgs"/> that needs generated code fails here, naming what it is missing (WRT0012).
+    /// </summary>
+    /// <param name="compilation">The compilation.</param>
+    /// <param name="cancellationToken">Cancels the check.</param>
+    /// <returns>The failure, or null.</returns>
+    public static CompilationFailure? Failure(CSharpCompilation compilation, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(compilation);
+        var errors = compilation.GetDiagnostics(cancellationToken).Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        return errors.Count == 0 ? null : new CompilationFailure(errors);
+    }
+
     private static PortableExecutableReference LoadWarrant()
     {
         using var stream = typeof(CompilationFactory).Assembly.GetManifestResourceStream(WarrantResource)

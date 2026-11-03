@@ -34,22 +34,41 @@ public static class Extractor
     }
 
     /// <summary>
-    /// Extracts every <c>[Verified]</c> member, <c>[Theorem]</c>, and record, enum or closed type they use.
+    /// Extracts every <c>[Verified]</c> member, <c>[Theorem]</c>, and record, enum or closed type they use, comparing every
+    /// combination of the <c>#if</c> symbols (M4's settings, for a compilation without a build's defines).
     /// A compilation with errors gives no units, only its errors.
     /// </summary>
     /// <param name="compilation">The compilation, normally from <c>Warrant.Frontend.CompilationFactory</c>.</param>
     /// <param name="cancellationToken">Cancels the extraction.</param>
     /// <returns>The units in dependency order, and the diagnostics.</returns>
-    public static ExtractionResult Extract(CSharpCompilation compilation, CancellationToken cancellationToken = default)
+    public static ExtractionResult Extract(CSharpCompilation compilation, CancellationToken cancellationToken = default) =>
+        Extract(compilation, null, cancellationToken);
+
+    /// <summary>
+    /// Extracts every <c>[Verified]</c> member, <c>[Theorem]</c>, and record, enum or closed type they use.
+    /// A compilation with errors gives no units, only its errors.
+    /// </summary>
+    /// <param name="compilation">The compilation, normally from <c>Warrant.Frontend.CompilationFactory</c>.</param>
+    /// <param name="options">Whether the compilation has a build's defines, and whether to compare <c>#if</c> combinations anyway; null for M4's settings.</param>
+    /// <param name="cancellationToken">Cancels the extraction.</param>
+    /// <returns>The units in dependency order, and the diagnostics.</returns>
+    public static ExtractionResult Extract(CSharpCompilation compilation, ExtractionOptions? options, CancellationToken cancellationToken = default)
     {
         if (compilation is null)
         {
             throw new ArgumentNullException(nameof(compilation));
         }
-        // The compilation is parsed without the defines of a real build, which M5a takes from Csc. Code under #if could
-        // therefore be code no build runs, or could add an overload or a type that changes what other code binds to.
-        // So every combination of the symbols the #if conditions test is extracted, and a unit is kept only if its VIR is
-        // the same in every combination that compiles. A combination that does not compile is not a real build.
+        options ??= ExtractionOptions.Default;
+        // With a build's defines (from Csc, KTD21), the code is translated under that build's configuration only.
+        if (options.BuildDefines && !options.KeepConditionalCheck)
+        {
+            return ExtractOne(compilation, cancellationToken);
+        }
+        // Otherwise code under #if could be code no build runs, or could add an overload or a type that changes what
+        // other code binds to. So every combination of the symbols the #if conditions test is extracted, and a unit is
+        // kept only if its VIR is the same in every combination that compiles. A combination that does not compile is
+        // not a real build. A multi-targeted build keeps the check, so code that differs between its target frameworks
+        // is rejected rather than verified for one; the symbols no condition tests keep the build's values.
         var symbols = ConditionalSymbols(compilation, cancellationToken);
         if (symbols.Count == 0)
         {
@@ -70,12 +89,23 @@ public static class Extractor
             return new ExtractionResult([], [tooMany], hasCompileErrors: false);
         }
 
-        var results = new List<ExtractionResult>();
-        ExtractionResult? firstFailure = null;
+        // The compilation as given comes first, so it is the reference the kept units are taken from.
+        var given = Defined(compilation, symbols);
+        var combinations = new List<List<string>> { given };
         for (int mask = 0; mask < 1 << symbols.Count; mask++)
         {
             var defined = symbols.Where((_, i) => (mask & (1 << i)) != 0).ToList();
-            var result = ExtractOne(mask == 0 ? compilation : WithSymbols(compilation, defined, cancellationToken), cancellationToken);
+            if (!defined.SequenceEqual(given, StringComparer.Ordinal))
+            {
+                combinations.Add(defined);
+            }
+        }
+        var results = new List<ExtractionResult>();
+        ExtractionResult? firstFailure = null;
+        foreach (var defined in combinations)
+        {
+            var result = ExtractOne(
+                ReferenceEquals(defined, given) ? compilation : WithSymbols(compilation, symbols, defined, cancellationToken), cancellationToken);
             if (result.HasCompileErrors)
             {
                 firstFailure ??= result;
@@ -114,13 +144,28 @@ public static class Extractor
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
 
-    /// <summary>The compilation with every tree parsed again with <paramref name="defined"/> added to its symbols.</summary>
-    private static CSharpCompilation WithSymbols(CSharpCompilation compilation, List<string> defined, CancellationToken cancellationToken)
+    /// <summary>The tested symbols the compilation's trees define, sorted ordinally.</summary>
+    private static List<string> Defined(CSharpCompilation compilation, List<string> symbols)
+    {
+        var names = new HashSet<string>(
+            compilation.SyntaxTrees.SelectMany(t => ((CSharpParseOptions)t.Options).PreprocessorSymbolNames), StringComparer.Ordinal);
+        return symbols.Where(names.Contains).ToList();
+    }
+
+    /// <summary>
+    /// The compilation with every tree parsed again so that, of the tested <paramref name="symbols"/>, exactly
+    /// <paramref name="defined"/> are defined; the symbols no condition tests keep the build's values.
+    /// </summary>
+    private static CSharpCompilation WithSymbols(
+        CSharpCompilation compilation, List<string> symbols, List<string> defined, CancellationToken cancellationToken)
     {
         var trees = compilation.SyntaxTrees.Select(t =>
         {
             var options = (CSharpParseOptions)t.Options;
-            var names = options.PreprocessorSymbolNames.Concat(defined).Distinct(StringComparer.Ordinal);
+            var names = options.PreprocessorSymbolNames
+                .Where(n => !symbols.Contains(n, StringComparer.Ordinal))
+                .Concat(defined)
+                .Distinct(StringComparer.Ordinal);
             return CSharpSyntaxTree.ParseText(t.GetText(cancellationToken), options.WithPreprocessorSymbols(names), t.FilePath, cancellationToken);
         });
         return compilation.RemoveAllSyntaxTrees().AddSyntaxTrees(trees);

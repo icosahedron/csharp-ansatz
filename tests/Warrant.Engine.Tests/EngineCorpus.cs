@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.CodeAnalysis.CSharp;
 using Warrant.Extraction;
 using Warrant.Frontend;
 using Warrant.Kernel;
@@ -42,7 +43,18 @@ internal static class EngineCorpus
     public static IEnumerable<string> Compilations =>
         Expected.GetProperty("compilations").EnumerateArray().Select(c => c.GetProperty("name").GetString()!);
 
-    public static ExtractionResult Extract(string name)
+    public static ExtractionResult Extract(string name) => Extract(Compile(name));
+
+    /// <summary>Extracts a compilation, which must compile without errors.</summary>
+    public static ExtractionResult Extract(CSharpCompilation compilation)
+    {
+        var result = Extractor.Extract(compilation);
+        Assert.False(result.HasCompileErrors, string.Join("\n", result.Diagnostics.Select(d => d.Message)));
+        return result;
+    }
+
+    /// <summary>The compilation extraction reads for a named corpus compilation (expected.json).</summary>
+    public static CSharpCompilation Compile(string name)
     {
         var spec = Expected.GetProperty("compilations").EnumerateArray().Single(c => c.GetProperty("name").GetString() == name);
         var excluded = spec.TryGetProperty("exclude", out var ex) ? ex.EnumerateArray().Select(e => e.GetString()!).ToHashSet() : [];
@@ -55,9 +67,7 @@ internal static class EngineCorpus
                 .Where(f => !excluded.Contains(f)));
         }
         files.Sort(StringComparer.Ordinal);
-        var result = Extractor.Extract(CompilationFactory.FromFiles(Root, files, spec.GetProperty("checkOverflow").GetBoolean()));
-        Assert.False(result.HasCompileErrors, string.Join("\n", result.Diagnostics.Select(d => d.Message)));
-        return result;
+        return CompilationFactory.FromFiles(Root, files, spec.GetProperty("checkOverflow").GetBoolean());
     }
 
     /// <summary>Compiles and extracts one in-memory source file, which must extract without diagnostics.</summary>

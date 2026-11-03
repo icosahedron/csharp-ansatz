@@ -33,7 +33,7 @@ public class RoundTripTests
             .Where(t => !t.IsAbstract && typeof(VirNode).IsAssignableFrom(t))
             .ToList();
 
-        Assert.Equal(30, all.Count); // 18 expression, 6 statement and 6 pattern kinds
+        Assert.Equal(34, all.Count); // 20 expression, 7 statement and 6 pattern kinds, and the tactic node
         Assert.Empty(all.Where(t => !used.Contains(t)).Select(t => t.Name));
     }
 

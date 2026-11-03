@@ -255,6 +255,10 @@ public static class Extractor
 
         public VirExpr? Statement { get; set; }
 
+        public VirList<TacticNode>? Script { get; set; }
+
+        public VirBudget? Budget { get; set; }
+
         public TypeBuild? Type { get; set; }
     }
 
@@ -419,6 +423,8 @@ public static class Extractor
             {
                 candidate.Rejection = e.Rejection;
             }
+            // A call to itself is recursion, which RejectCycles checks through Calls; it is not a dependency.
+            candidate.Deps.Remove(candidate.Key);
             return candidate;
         }
 
@@ -426,12 +432,12 @@ public static class Extractor
             new(new Rejection(
                 DiagnosticIds.Unsupported, construct, Symbols.FirstLocation(member), $"{Symbols.Display(member)}: M4 does not support {construct}."));
 
+        /// <summary>
+        /// A theorem: <c>Prove.That(claim)</c>, optionally followed by <c>.By(...)</c>. Its parameters are universally
+        /// quantified (KTD17), and <c>[Theorem(...)]</c>'s named arguments are its budgets (KTD24).
+        /// </summary>
         private void Theorem(Candidate candidate, Walker walker, IMethodSymbol method)
         {
-            if (method.Parameters.Length > 0)
-            {
-                throw Reject(method, "theorem with parameters");
-            }
             if (method.IsGenericMethod || method.ContainingType.IsGenericType)
             {
                 throw Reject(method, "generic member");
@@ -440,13 +446,62 @@ public static class Extractor
             {
                 throw Reject(method, "theorem that is not static");
             }
+            Parameters(candidate, walker, method, method.Parameters);
             var value = ReturnedExpression(method)
                 ?? throw Reject(method, "theorem that is not Prove.That");
+            IInvocationOperation? by = null;
+            if (value is IInvocationOperation { Instance: { } proof } script && Symbols.IsNamed(script.TargetMethod, "Warrant.Proof", "By"))
+            {
+                by = script;
+                value = proof;
+            }
             if (value is not IInvocationOperation call || !Symbols.IsNamed(call.TargetMethod, "Warrant.Prove", "That") || call.Arguments.Length != 1)
             {
                 throw Reject(method, "theorem that is not Prove.That");
             }
             candidate.Statement = walker.Expr(call.Arguments[0].Value);
+            candidate.Script = by is null ? null : walker.Script(by);
+            candidate.Budget = Budget(method);
+        }
+
+        /// <summary>The budget overrides of <c>[Theorem(...)]</c>, or null when it sets none (zero means the project's).</summary>
+        private static VirBudget? Budget(IMethodSymbol method)
+        {
+            var attribute = method.GetAttributes().First(a => a.AttributeClass?.ToDisplayString() == Symbols.TheoremAttribute);
+            int timeout = 0;
+            long tacticFuel = 0, kernelFuel = 0;
+            foreach (var named in attribute.NamedArguments)
+            {
+                switch (named.Key)
+                {
+                    case "TimeoutSeconds":
+                        timeout = (int)named.Value.Value!;
+                        break;
+                    case "TacticFuel":
+                        tacticFuel = (long)named.Value.Value!;
+                        break;
+                    case "KernelFuel":
+                        kernelFuel = (long)named.Value.Value!;
+                        break;
+                }
+            }
+            return timeout == 0 && tacticFuel == 0 && kernelFuel == 0 ? null : new VirBudget(timeout, tacticFuel, kernelFuel);
+        }
+
+        private static void Parameters(Candidate candidate, Walker walker, ISymbol member, ImmutableArray<IParameterSymbol> parameters)
+        {
+            foreach (var p in parameters)
+            {
+                if (p.RefKind != RefKind.None)
+                {
+                    throw Reject(member, "ref parameter");
+                }
+                var at = p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
+                var ptype = walker.MapType(p.Type, p.NullableAnnotation == NullableAnnotation.Annotated, at);
+                walker.AddParameter(p, candidate.Params.Count);
+                candidate.Params.Add(new VirParam(p.Name, ptype));
+                candidate.ParameterSymbols.Add(p);
+            }
         }
 
         private void Function(Candidate candidate, Walker walker, ISymbol member)
@@ -473,19 +528,7 @@ public static class Extractor
                 throw Reject(member, "instance member of a class");
             }
 
-            var parameters = member is IMethodSymbol m ? m.Parameters : ImmutableArray<IParameterSymbol>.Empty;
-            foreach (var p in parameters)
-            {
-                if (p.RefKind != RefKind.None)
-                {
-                    throw Reject(member, "ref parameter");
-                }
-                var at = p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
-                var ptype = walker.MapType(p.Type, p.NullableAnnotation == NullableAnnotation.Annotated, at);
-                walker.AddParameter(p, candidate.Params.Count);
-                candidate.Params.Add(new VirParam(p.Name, ptype));
-                candidate.ParameterSymbols.Add(p);
-            }
+            Parameters(candidate, walker, member, member is IMethodSymbol m ? m.Parameters : ImmutableArray<IParameterSymbol>.Empty);
             var (returnType, annotated, byRef) = member switch
             {
                 IMethodSymbol method => (method.ReturnType, method.ReturnNullableAnnotation == NullableAnnotation.Annotated, method.ReturnsByRef || method.ReturnsByRefReadonly),
@@ -506,7 +549,7 @@ public static class Extractor
             candidate.Body = body switch
             {
                 IMethodBodyOperation { ExpressionBody: { } e } => ExpressionBody(walker, member, e),
-                IMethodBodyOperation { BlockBody: { } b } => walker.Block(b),
+                IMethodBodyOperation { BlockBody: { } b } => walker.Body(b),
                 IBlockOperation b when IsArrow(b) => ExpressionBody(walker, member, b),
                 _ => throw Reject(member, "member without a body"),
             };
@@ -580,20 +623,64 @@ public static class Extractor
                     $"{Symbols.Display(c.Symbol)}: M4 does not support cyclic record types; without null no value of the type can be built.");
             }
 
+            // Direct self-recursion with a leading Spec.Decreases is accepted (KTD14); anything else on a cycle is not.
             var functions = _candidates.Values
                 .Where(c => c.Kind != VirUnitKind.Type && c.Rejection is null)
                 .ToDictionary(c => c.Key, StringComparer.Ordinal);
+            var mutual = Graph.OnCycles(functions.Keys, k => functions[k].Calls.Where(callee => !string.Equals(callee, k, StringComparison.Ordinal)));
             foreach (var key in Graph.OnCycles(functions.Keys, k => functions[k].Calls))
             {
                 var c = functions[key];
-                var at = FirstCall(c, functions);
-                c.Rejection = new Rejection(
-                    DiagnosticIds.Unsupported,
-                    "recursion",
-                    at ?? Symbols.FirstLocation(c.Symbol),
-                    $"{Symbols.Display(c.Symbol)}: M4 does not support recursion.");
+                var name = Symbols.Display(c.Symbol);
+                var at = FirstCall(c, functions) ?? Symbols.FirstLocation(c.Symbol);
+                if (c.Kind == VirUnitKind.Theorem)
+                {
+                    c.Rejection = new Rejection(
+                        DiagnosticIds.MalformedSpec, "theorem used in its own proof", Symbols.FirstLocation(c.Symbol), $"{name}: a theorem cannot be used in its own proof script.");
+                }
+                else if (mutual.Contains(key))
+                {
+                    c.Rejection = new Rejection(
+                        DiagnosticIds.Unsupported, "mutual recursion", at, $"{name}: mutual recursion is not supported; only a method that calls itself can recurse.");
+                }
+                else if (!(c.Body is BlockStmt { Stmts.Count: > 0 } block && block.Stmts[0] is DecreasesStmt))
+                {
+                    c.Rejection = new Rejection(
+                        DiagnosticIds.Unsupported,
+                        "recursion without Spec.Decreases",
+                        at,
+                        $"{name}: a recursive method states its measure with Spec.Decreases as the first statement of a block body.");
+                }
+                else if (NestedCall(c) is { } nested)
+                {
+                    c.Rejection = new Rejection(
+                        DiagnosticIds.Unsupported,
+                        "nested recursion",
+                        c.Walker!.SyntaxOf(nested)?.GetLocation() ?? at,
+                        $"{name}: a recursive call inside another recursive call's argument is not supported.");
+                }
             }
         }
+
+        /// <summary>A call from a unit to itself inside the arguments of another such call, if there is one.</summary>
+        private static CallExpr? NestedCall(Candidate c)
+        {
+            foreach (var node in VirTreeNodes(c))
+            {
+                if (node is CallExpr outer && outer.Target == c.Key)
+                {
+                    var inner = outer.Args.SelectMany(Descendants).OfType<CallExpr>().FirstOrDefault(call => call.Target == c.Key);
+                    if (inner is not null)
+                    {
+                        return inner;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static IEnumerable<VirNode> Descendants(VirNode node) =>
+            new[] { node }.Concat(VirTree.Children(node).SelectMany(Descendants));
 
         /// <summary>The location of the first call from a member to another member on its cycle, for the diagnostic.</summary>
         private static Location? FirstCall(Candidate c, Dictionary<string, Candidate> functions)
@@ -620,6 +707,7 @@ public static class Extractor
             {
                 roots.Add(s);
             }
+            roots.AddRange(c.Script ?? VirList<TacticNode>.Empty);
             var stack = new Stack<VirNode>(roots.AsEnumerable().Reverse());
             while (stack.Count > 0)
             {
@@ -667,7 +755,8 @@ public static class Extractor
             var unit = c.Kind switch
             {
                 VirUnitKind.Function => VirUnit.Function(c.Key, new VirList<VirParam>(c.Params), c.Returns!, c.Body!, assumptions, _context.Facts, deps, c.Self),
-                VirUnitKind.Theorem => VirUnit.Theorem(c.Key, c.Statement!, assumptions, _context.Facts, deps),
+                VirUnitKind.Theorem => VirUnit.Theorem(
+                    c.Key, c.Statement!, assumptions, _context.Facts, deps, new VirList<VirParam>(c.Params), c.Script, c.Budget),
                 _ => VirUnit.TypeUnit(c.Key, c.Type!.Definition!, assumptions, _context.Facts, deps),
             };
             var walker = c.Walker;

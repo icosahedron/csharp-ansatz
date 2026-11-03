@@ -152,6 +152,53 @@ internal static class Samples
         Facts,
         VirList.Of(PaymentKey, StatusKey));
 
+    public const string SumKey = "M:Payouts.Recursion.Sum(System.Int32)";
+    public const string QuantifiedKey = "M:Payouts.PayoutRules.Quantified(System.Int32)";
+
+    /// <summary>A recursive function whose body starts with its measure (M5a).</summary>
+    public static VirUnit Sum() => VirUnit.Function(
+        SumKey,
+        VirList.Of(new VirParam("n", VirType.Int32)),
+        VirType.Int32,
+        new BlockStmt(VirList.Of<VirStmt>(
+            new DecreasesStmt(P(0)),
+            new IfStmt(
+                new CompareExpr(CompareOp.Le, CompareKind.Int, P(0), LitExpr.Int32(0)),
+                new BlockStmt(VirList.Of<VirStmt>(new ReturnStmt(LitExpr.Int32(0)))),
+                null),
+            new ReturnStmt(new BinaryExpr(
+                VirType.Int32,
+                BinaryOp.Add,
+                VirOverflow.Wrap,
+                P(0),
+                new CallExpr(VirType.Int32, SumKey, VirList.Of<VirExpr>(new BinaryExpr(VirType.Int32, BinaryOp.Sub, VirOverflow.Wrap, P(0), LitExpr.Int32(1)))))))),
+        VirList<VirAssumption>.Empty,
+        Facts,
+        VirList<string>.Empty);
+
+    /// <summary>A theorem with a parameter, both quantifiers, a script using every argument kind, and a budget (M5a).</summary>
+    public static VirUnit Quantified() => VirUnit.Theorem(
+        QuantifiedKey,
+        new ForAllExpr(0, "y", VirType.Int32, new ExistsExpr(1, "b", VirType.Bool, new CompareExpr(
+            CompareOp.Eq,
+            CompareKind.Int,
+            new BinaryExpr(VirType.Int32, BinaryOp.Add, VirOverflow.Wrap, P(0), L(0)),
+            new CallExpr(VirType.Int32, SumKey, VirList.Of<VirExpr>(L(0)))))),
+        VirList<VirAssumption>.Empty,
+        Facts,
+        VirList.Of(SumKey),
+        parameters: VirList.Of(new VirParam("x", VirType.Int32)),
+        script: VirList.Of(
+            new TacticNode("intro", VirList.Of<VirTacticArg>(new StringArg("y"))),
+            new TacticNode("unfold", VirList.Of<VirTacticArg>(new UnitRefArg(SumKey))),
+            new TacticNode("simp", VirList.Of<VirTacticArg>(
+                new LeanRefArg("Nat.add_comm"),
+                new NumberArg(long.MinValue),
+                new OptionArg("decide", new BoolArg(false)))),
+            new TacticNode("all_goals", VirList.Of<VirTacticArg>(
+                new TacticArg(new TacticNode("try", VirList.Of<VirTacticArg>(new TacticArg(new TacticNode("omega", VirList<VirTacticArg>.Empty)))))))),
+        budget: new VirBudget(60, 0, 5_000_000_000));
+
     public static VirUnit RecordType() => VirUnit.TypeUnit(
         PaymentKey,
         new RecordDefinition(VirList.Of(new VirField("Amount", VirType.Int32), new VirField("Status", Status), new VirField("Big", VirType.Int64), new VirField("Ok", VirType.Bool))),
@@ -194,6 +241,6 @@ internal static class Samples
     public static IEnumerable<VirUnit> All() =>
     [
         Payout(), Capped(), Everything(), ExpressionBodied(), ImpliesTheorem(),
-        RecordType(), EnumType(), ClosedEnumType(), ClosedClassType(), Escapes(),
+        RecordType(), EnumType(), ClosedEnumType(), ClosedClassType(), Escapes(), Sum(), Quantified(),
     ];
 }

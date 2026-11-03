@@ -1,0 +1,54 @@
+{
+  "compilations": [
+    { "name": "accepted", "files": ["accepted/*.cs"], "checkOverflow": false },
+    { "name": "refuted", "files": ["refuted/*.cs"], "checkOverflow": false },
+    { "name": "rejected", "files": ["rejected/*.cs"], "checkOverflow": false }
+  ],
+  "members": {
+    "accepted": {
+      "T:Claims.PaymentStatus": { "outcome": "translated" },
+      "T:Claims.Payment": { "outcome": "translated" },
+      "T:Claims.PaymentResult": { "outcome": "translated" },
+      "M:Claims.Payments.Validate(Claims.Payment)": { "outcome": "translated", "assumeNonNull": ["p"] },
+      "M:Claims.Payments.ValidImpliesPositive(Claims.Payment)": { "outcome": "proved", "by": "script", "assumeNonNull": ["p"] },
+
+      "M:Corpus.Increments.Increment(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.Increments.LargerBelowMax(System.Int32)": { "outcome": "proved", "by": "script" },
+
+      "M:Corpus.Recursion.Sum(System.Int32)": { "outcome": "translated", "recursive": true },
+      "M:Corpus.Recursion.Add(System.Int32,System.Int32)": { "outcome": "translated", "recursive": true },
+      "M:Corpus.Recursion.SumLong(System.Int64)": { "outcome": "translated", "recursive": true },
+
+      "T:Corpus.Light": { "outcome": "translated" },
+      "M:Corpus.Quantifiers.ZeroIsNeutral": { "outcome": "proved", "by": "script" },
+      "M:Corpus.Quantifiers.Flip(System.Boolean)": { "outcome": "translated" },
+      "M:Corpus.Quantifiers.FlipTwice(System.Boolean)": { "outcome": "proved", "by": "script" },
+      "M:Corpus.Quantifiers.Rank(Corpus.Light)": { "outcome": "translated" },
+      "M:Corpus.Quantifiers.RankIsSmall(Corpus.Light)": { "outcome": "proved", "by": "script" },
+      "M:Corpus.Quantifiers.AndTrue(System.Boolean)": { "outcome": "translated" },
+      "M:Corpus.Quantifiers.AndTrueIsIdentity(System.Boolean)": { "outcome": "proved", "by": "script" }
+    },
+    "refuted": {
+      "M:Corpus.Refuted.Increments.Increment(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.Refuted.Increments.AlwaysLarger(System.Int32)": {
+        "outcome": "false",
+        "goal": "x : Int32\n⊢ Increment x > x",
+        "counterexample": { "x": "2147483647" }
+      },
+      "M:Corpus.Refuted.Recursion.Bad(System.Int32)": { "outcome": "false", "recursive": true, "obligation": "decreases" }
+    },
+    "rejected": {
+      "M:Corpus.Rejected.Recursion.IsEven(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "mutual recursion" }] },
+      "M:Corpus.Rejected.Recursion.IsOdd(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "mutual recursion" }] },
+      "M:Corpus.Rejected.Recursion.Factorial(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "recursion without Spec.Decreases" }] },
+      "M:Corpus.Rejected.Recursion.Countdown(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Spec.Decreases not first" }] },
+      "M:Corpus.Rejected.Recursion.Nested(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "nested recursion" }] },
+
+      "M:Corpus.Rejected.Scripts.Scale(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.Rejected.Scripts.Scale(System.Int64)": { "outcome": "translated" },
+      "M:Corpus.Rejected.Scripts.UnfoldsAnOverload(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0004", "construct": "nameof of an overloaded method" }] },
+      "M:Corpus.Rejected.Scripts.SimpWithAString(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0004", "construct": "string literal where a lemma is expected" }] },
+      "M:Corpus.Rejected.Scripts.ForAllInCode": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0004", "construct": "Spec.ForAll outside a theorem statement" }] }
+    }
+  }
+}

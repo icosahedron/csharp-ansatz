@@ -26,6 +26,8 @@ public enum VirUnitKind
 /// <param name="Returns">Return type (functions); otherwise null.</param>
 /// <param name="Body">A function's body: a <see cref="BlockStmt"/>, or a <see cref="VirExpr"/> for an expression-bodied member.</param>
 /// <param name="Statement">A theorem's claim; otherwise null.</param>
+/// <param name="Script">A theorem's proof script, from <c>.By(...)</c>; null when it has none, and for other kinds.</param>
+/// <param name="Budget">A theorem's budget overrides, from <c>[Theorem(...)]</c>; null when it has none, and for other kinds.</param>
 /// <param name="Definition">A type unit's definition; otherwise null.</param>
 /// <param name="Assumptions">The assumptions the translation relies on (docs/m4/03).</param>
 /// <param name="Facts">What changes the unit's meaning beyond its text.</param>
@@ -39,13 +41,18 @@ public sealed record VirUnit(
     VirType? Returns,
     VirNode? Body,
     VirExpr? Statement,
+    VirList<TacticNode>? Script,
+    VirBudget? Budget,
     VirDefinition? Definition,
     VirList<VirAssumption> Assumptions,
     VirFacts Facts,
     VirList<string> Deps)
 {
-    /// <summary>The VIR schema version this library writes.</summary>
-    public const int CurrentVersion = 1;
+    /// <summary>
+    /// The VIR schema version this library writes. Version 2 (M5a) added theorem parameters, quantifiers, measures,
+    /// scripts and budgets; a unit that uses none of them encodes as in version 1 apart from this field (plan KTD18).
+    /// </summary>
+    public const int CurrentVersion = 2;
 
     private readonly VirList<string> _deps = Normalize(Deps);
 
@@ -75,22 +82,28 @@ public sealed record VirUnit(
         VirFacts facts,
         VirList<string> deps,
         string? self = null) =>
-        new(CurrentVersion, key, VirUnitKind.Function, self, parameters, returns, body, null, null, assumptions, facts, deps);
+        new(CurrentVersion, key, VirUnitKind.Function, self, parameters, returns, body, null, null, null, null, assumptions, facts, deps);
 
-    /// <summary>A theorem unit; theorems have no parameters in M4.</summary>
+    /// <summary>A theorem unit. Its parameters are universally quantified.</summary>
     /// <param name="key">The documentation-comment ID.</param>
     /// <param name="statement">The claim.</param>
     /// <param name="assumptions">The assumptions.</param>
     /// <param name="facts">The facts.</param>
     /// <param name="deps">The dependency keys, in any order.</param>
+    /// <param name="parameters">The parameters; none when null.</param>
+    /// <param name="script">The proof script, if it has one.</param>
+    /// <param name="budget">The budget overrides, if it has any.</param>
     /// <returns>The unit.</returns>
     public static VirUnit Theorem(
         string key,
         VirExpr statement,
         VirList<VirAssumption> assumptions,
         VirFacts facts,
-        VirList<string> deps) =>
-        new(CurrentVersion, key, VirUnitKind.Theorem, null, VirList<VirParam>.Empty, null, null, statement, null, assumptions, facts, deps);
+        VirList<string> deps,
+        VirList<VirParam>? parameters = null,
+        VirList<TacticNode>? script = null,
+        VirBudget? budget = null) =>
+        new(CurrentVersion, key, VirUnitKind.Theorem, null, parameters ?? VirList<VirParam>.Empty, null, null, statement, script, budget, null, assumptions, facts, deps);
 
     /// <summary>A type unit.</summary>
     /// <param name="key">The documentation-comment ID, e.g. <c>T:Payouts.Payment</c>.</param>
@@ -105,7 +118,7 @@ public sealed record VirUnit(
         VirList<VirAssumption> assumptions,
         VirFacts facts,
         VirList<string> deps) =>
-        new(CurrentVersion, key, VirUnitKind.Type, null, null, null, null, null, definition, assumptions, facts, deps);
+        new(CurrentVersion, key, VirUnitKind.Type, null, null, null, null, null, null, null, definition, assumptions, facts, deps);
 
     private static VirList<string> Normalize(VirList<string> deps)
     {

@@ -4,8 +4,8 @@ namespace Warrant.Vir;
 public static class VirTree
 {
     /// <summary>
-    /// The unit's nodes in pre-order: the body, then the statement. A node's ID is its index in this sequence.
-    /// Children are visited in encoding field order.
+    /// The unit's nodes in pre-order: the body, then the statement, then the script's tactics. A node's ID is its index
+    /// in this sequence. Children are visited in encoding field order.
     /// </summary>
     /// <param name="unit">The unit.</param>
     /// <returns>The nodes, parents before children.</returns>
@@ -19,6 +19,10 @@ public static class VirTree
         if (unit.Statement is { } statement)
         {
             Visit(statement, nodes);
+        }
+        foreach (var tactic in unit.Script ?? VirList<TacticNode>.Empty)
+        {
+            Visit(tactic, nodes);
         }
         return nodes;
     }
@@ -109,6 +113,21 @@ public static class VirTree
                 yield return e.A;
                 yield return e.B;
                 break;
+            case ForAllExpr e:
+                yield return e.Body;
+                break;
+            case ExistsExpr e:
+                yield return e.Body;
+                break;
+            case DecreasesStmt s:
+                yield return s.Measure;
+                break;
+            case TacticNode t:
+                foreach (var nested in Nested(t.Args))
+                {
+                    yield return nested;
+                }
+                break;
             case DeclStmt s:
                 yield return s.Init;
                 break;
@@ -165,6 +184,23 @@ public static class VirTree
                 break;
             default:
                 throw new ArgumentException($"Unknown VIR node {node.GetType().Name}.", nameof(node));
+        }
+    }
+
+    /// <summary>The tactics nested in a tactic's arguments, including inside options, in argument order.</summary>
+    private static IEnumerable<TacticNode> Nested(IEnumerable<VirTacticArg> args)
+    {
+        foreach (var arg in args)
+        {
+            switch (arg)
+            {
+                case TacticArg a:
+                    yield return a.Tactic;
+                    break;
+                case OptionArg { Value: TacticArg a }:
+                    yield return a.Tactic;
+                    break;
+            }
         }
     }
 

@@ -8,10 +8,6 @@ public static class Specs
     [Verified]
     public static int Id(int x) => x;
 
-    // Quantified theorems need tactics (M5a).
-    [Theorem]
-    static Proof WithParameters(int x) => Prove.That(Id(x) == x);
-
     // Spec.Implies is valid only inside a theorem statement (WRT0004).
     [Verified]
     public static bool ImpliesInCode(bool a, bool b) => Spec.Implies(a, b);

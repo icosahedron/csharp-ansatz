@@ -114,9 +114,9 @@
       "M:Corpus.Rejected.Arithmetic.UnsignedShiftRight(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "shift" }] },
       "M:Corpus.Rejected.Arithmetic.FoldedDivision": { "outcome": "translated" },
 
-      "M:Corpus.Rejected.Statements.Factorial(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "recursion" }] },
-      "M:Corpus.Rejected.Statements.IsEven(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "recursion" }] },
-      "M:Corpus.Rejected.Statements.IsOdd(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "recursion" }] },
+      "M:Corpus.Rejected.Statements.Factorial(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "recursion without Spec.Decreases" }] },
+      "M:Corpus.Rejected.Statements.IsEven(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "mutual recursion" }] },
+      "M:Corpus.Rejected.Statements.IsOdd(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "mutual recursion" }] },
       "M:Corpus.Rejected.Statements.ForLoop(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "loop" }] },
       "M:Corpus.Rejected.Statements.WhileLoop(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "loop" }] },
       "M:Corpus.Rejected.Statements.DoLoop(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "loop" }] },
@@ -131,7 +131,6 @@
       "M:Corpus.Rejected.Statements.CallsUnverified(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0005", "construct": "M:System.Math.Abs(System.Int32)" }] },
 
       "M:Corpus.Rejected.Specs.Id(System.Int32)": { "outcome": "translated" },
-      "M:Corpus.Rejected.Specs.WithParameters(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "theorem with parameters" }] },
       "M:Corpus.Rejected.Specs.ImpliesInCode(System.Boolean,System.Boolean)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0004", "construct": "Spec.Implies outside a theorem statement" }] },
       "M:Corpus.Rejected.Specs.CallsATheorem": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0003", "construct": "M:Corpus.Rejected.Specs.Valid" }] },
       "M:Corpus.Rejected.Specs.Valid": { "outcome": "proved", "by": "rfl" },

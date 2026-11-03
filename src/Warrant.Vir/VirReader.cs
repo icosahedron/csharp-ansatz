@@ -43,12 +43,48 @@ public static class VirReader
             e.TryGetProperty("returns", out var r) ? Type(r) : null,
             body,
             e.TryGetProperty("statement", out var s) ? Expr(s) : null,
+            e.TryGetProperty("script", out var script) ? List(script, Tactic) : null,
+            e.TryGetProperty("budget", out var budget) ? Budget(budget) : null,
             e.TryGetProperty("definition", out var d) ? Definition(d) : null,
             List(e.GetProperty("assumptions"), a => new VirAssumption(
                 Parse<VirAssumptionKind>(Str(a, "kind"), VirSpelling.Of),
                 Str(a, "subject"))),
             Facts(e.GetProperty("facts")),
             List(e.GetProperty("deps"), x => x.GetString()!));
+    }
+
+    private static VirBudget Budget(JsonElement e) => new(
+        checked((int)Long(Str(e, "timeoutSeconds"))),
+        Long(Str(e, "tacticFuel")),
+        Long(Str(e, "kernelFuel")));
+
+    private static TacticNode Tactic(JsonElement e)
+    {
+        var (name, v) = Kind(e);
+        return name == "tactic"
+            ? new TacticNode(Str(v, "name"), List(v.GetProperty("args"), TacticArgument))
+            : throw new FormatException($"Unknown VIR tactic '{name}'.");
+    }
+
+    private static VirTacticArg TacticArgument(JsonElement e)
+    {
+        var (name, v) = Kind(e);
+        return name switch
+        {
+            "unit" => new UnitRefArg(v.GetString()!),
+            "lean" => new LeanRefArg(v.GetString()!),
+            "string" => new StringArg(v.GetString()!),
+            "number" => new NumberArg(Long(v.GetString()!)),
+            "bool" => new BoolArg(v.GetString() switch
+            {
+                "false" => false,
+                "true" => true,
+                var text => throw new FormatException($"Not a bool argument: '{text}'."),
+            }),
+            "tactic" => new TacticArg(Tactic(e)),
+            "option" => new OptionArg(Str(v, "name"), TacticArgument(v.GetProperty("value"))),
+            _ => throw new FormatException($"Unknown VIR tactic argument '{name}'."),
+        };
     }
 
     private static VirFacts Facts(JsonElement e) => new(
@@ -101,6 +137,7 @@ public static class VirReader
                     List(s.GetProperty("body"), Stmt)))),
             "return" => new ReturnStmt(Expr(v)),
             "block" => new BlockStmt(List(v, Stmt)),
+            "decreases" => new DecreasesStmt(Expr(v)),
             _ => throw new FormatException($"Unknown VIR statement '{name}'."),
         };
     }
@@ -155,6 +192,10 @@ public static class VirReader
                 Expr(v.GetProperty("scrutinee")),
                 List(v.GetProperty("arms"), a => new SwitchArm(Pattern(a.GetProperty("pattern")), Expr(a.GetProperty("value"))))),
             "implies" => Typed(type, new ImpliesExpr(Expr(v.GetProperty("a")), Expr(v.GetProperty("b")))),
+            "forall" => Typed(type, new ForAllExpr(
+                v.GetProperty("local").GetInt32(), Str(v, "name"), Type(v.GetProperty("domain")), Expr(v.GetProperty("body")))),
+            "exists" => Typed(type, new ExistsExpr(
+                v.GetProperty("local").GetInt32(), Str(v, "name"), Type(v.GetProperty("domain")), Expr(v.GetProperty("body")))),
             _ => throw new FormatException($"Unknown VIR expression '{name}'."),
         };
     }

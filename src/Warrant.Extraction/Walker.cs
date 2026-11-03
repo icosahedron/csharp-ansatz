@@ -10,13 +10,19 @@ namespace Warrant.Extraction;
 /// Each node is accepted only if its kind, operator kind, operand types and checked flag are on the list; the first one
 /// that is not stops the walk with a <see cref="RejectedException"/> naming the construct.
 /// </summary>
-internal sealed class Walker
+internal sealed partial class Walker
 {
     private readonly ExtractionContext _context;
     private readonly Dictionary<IParameterSymbol, int> _parameters = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<ILocalSymbol, int> _locals = new(SymbolEqualityComparer.Default);
+
+    /// <summary>The variables bound by <c>Spec.ForAll</c> and <c>Spec.Exists</c> lambdas, by local ID.</summary>
+    private readonly Dictionary<IParameterSymbol, int> _bound = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<object, SyntaxNode> _syntax = new(ReferenceComparer.Instance);
     private readonly bool _inTheorem;
+
+    /// <summary>The next local ID: locals and bound variables share one numbering, unique within the unit.</summary>
+    private int _nextLocal;
 
     public Walker(ExtractionContext context, bool inTheorem)
     {
@@ -84,16 +90,31 @@ internal sealed class Walker
 
     public BlockStmt Block(IBlockOperation block) => Track(new BlockStmt(Statements(block.Operations)), block.Syntax);
 
-    private VirList<VirStmt> Statements(IEnumerable<IOperation> operations)
+    /// <summary>A member's block body, whose first statement may be <c>Spec.Decreases</c>.</summary>
+    public BlockStmt Body(IBlockOperation block) => Track(new BlockStmt(Statements(block.Operations, measureFirst: true)), block.Syntax);
+
+    private VirList<VirStmt> Statements(IEnumerable<IOperation> operations, bool measureFirst = false)
     {
         var result = new List<VirStmt>();
         bool ended = false;
+        bool first = true;
         foreach (var op in operations)
         {
             if (op is IEmptyOperation)
             {
                 continue;
             }
+            if (op is IExpressionStatementOperation { Operation: IInvocationOperation call } && IsDecreases(call))
+            {
+                if (!(measureFirst && first))
+                {
+                    throw DecreasesNotFirst(op.Syntax);
+                }
+                result.Add(Track(new DecreasesStmt(Measure(call)), op.Syntax));
+                first = false;
+                continue;
+            }
+            first = false;
             if (op is ILocalFunctionOperation)
             {
                 throw Reject("local function", op.Syntax);
@@ -179,7 +200,7 @@ internal sealed class Walker
                 }
                 MapType(declarator.Symbol.Type, annotated: false, declarator.Syntax);
                 var value = Expr(init);
-                int id = _locals.Count;
+                int id = _nextLocal++;
                 _locals.Add(declarator.Symbol, id);
                 result.Add(Track(new DeclStmt(id, declarator.Symbol.Name, value), declarator.Syntax));
             }
@@ -333,6 +354,8 @@ internal sealed class Walker
                 return Track(new ParamExpr(MapType(p.Type, annotated: false, syntax), index), syntax);
             case ILocalReferenceOperation l when _locals.TryGetValue(l.Local, out int id):
                 return Track(new LocalExpr(MapType(l.Type, annotated: false, syntax), id), syntax);
+            case IParameterReferenceOperation p when _bound.TryGetValue(p.Parameter, out int bound):
+                return Track(new LocalExpr(MapType(p.Type, annotated: false, syntax), bound), syntax);
             case IInstanceReferenceOperation i:
                 return Track(new SelfExpr(MapType(i.Type, annotated: false, syntax)), syntax);
             case IBinaryOperation b:
@@ -729,6 +752,18 @@ internal sealed class Walker
         if (Symbols.IsNamed(target, "Warrant.Prove", "That"))
         {
             throw Reject("Prove.That outside a theorem statement", syntax, id: DiagnosticIds.MalformedSpec);
+        }
+        if (Symbols.IsNamed(target, "Warrant.Spec", "ForAll") || Symbols.IsNamed(target, "Warrant.Spec", "Exists"))
+        {
+            return Quantifier(call);
+        }
+        if (IsDecreases(call))
+        {
+            throw DecreasesNotFirst(syntax);
+        }
+        if (IsScriptMember(target))
+        {
+            throw MalformedScript("proof script outside a theorem", syntax, $"{Symbols.Display(target)} is valid only in a theorem's .By(...) script");
         }
         if (Symbols.IsTheorem(target))
         {

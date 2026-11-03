@@ -182,29 +182,58 @@ casts integers to the enum, mark it `[Closed]`:
 public enum ClaimStatus { Open, Paid, Denied }
 ```
 
-Now `Tactic.Cases(status)` gives exactly three goals, and the analyzer reports
-any cast to `ClaimStatus` from an integer.
+Now `Tactic.Cases(status)` gives exactly three goals (M5a), and Warrant warns
+(WRT0008) about any integer cast or unboxing conversion to `ClaimStatus`
+anywhere in the project.
+
+Two rules keep a closed enum honest:
+
+- **Every member needs its own value.** `Default = Open` would make two names
+  for one value, which the model would treat as two different values. Warrant
+  rejects such an enum (WRT0002).
+- **Give it a member valued 0.** `default(ClaimStatus)`, an uninitialised field
+  and a new array all hold 0. If no member is 0, that value has no name, and
+  Warrant warns (WRT0008). The first member of an enum without explicit values
+  is 0, as `Open` is above.
 
 `[Closed]` works the same way on the "smart enum" pattern: a sealed class with
-only private constructors, whose static get-only instances are its only values.
+only private constructors, whose static instances are its only values. Each
+instance is a get-only auto-property or a `static readonly` field, initialised
+with a `new` of the class:
 
 ```csharp
 [Closed]
 public sealed class Outcome
 {
     public static Outcome Matched { get; } = new("Matched");
-    public static Outcome NoMatch { get; } = new("NoMatch");
+
+    public static readonly Outcome NoMatch = new("NoMatch");
 
     private Outcome(string name) => Name = name;
+
     public string Name { get; }
 }
 ```
 
 Warrant recognises the class by that shape, not by its base class. If a
-`[Closed]` class doesn't have the shape (a public constructor, say), the
-analyzer reports an error instead of guessing. Classes like this are more
-reliably closed than enums: without reflection, no code can create another
-instance.
+`[Closed]` class doesn't have the shape (a public constructor, say), Warrant
+reports error WRT0009 naming what is wrong instead of guessing. Classes like
+this are more reliably closed than enums: without reflection, no code can
+create another instance.
+
+A closed class may have instance fields and properties, like `Name` above, but
+verified code can't read them: Warrant models only *which* instance a value
+is, so `o.Name` is rejected (WRT0002). Compare instances with `==` instead.
+C# can't `switch` over them either, because the instances aren't constants:
+
+```csharp
+[Verified]
+public static int Code(Outcome o) => o == Outcome.Matched ? 1 : o == Outcome.NoMatch ? 2 : 3;
+```
+
+`==` means "the same instance", even if the class overrides `Equals`. When it
+does, the assumption report lists that its equality agrees with identity on the
+instances.
 
 ## Deal with overflow
 

@@ -92,6 +92,30 @@ continued in a Claude Code cloud session
    idempotent (incomplete but sound, and matched exactly); see
    [docs/kernel.md](docs/kernel.md#property-based-tests-milestone-3).
 
+### Milestone 4: translating C#
+
+The plan is [docs/plans/2026-11-02-1245-feat-m4-pure-subset-plan.md](docs/plans/2026-11-02-1245-feat-m4-pure-subset-plan.md),
+and the design is explained chapter by chapter in [docs/m4/](docs/m4/README.md).
+
+1. **Model C# with Lean's own types, and prove the facts in Lean.** C# `int`,
+   `long` and `bool` are Init's `Int32`, `Int64` and `Bool`. The `lean/`
+   project states the CLR facts the translator relies on as theorems, and
+   `scripts/export-semantics.sh` exports it, with every Init constant the
+   translator emits, as the committed bundle
+   `tests/data/warrant-semantics.ndjson.gz`.
+2. **Write the corpus before the extractor.** `tests/corpus/m4/` holds the
+   accepted, refuted and rejected C# members, and `expected.json` the outcome
+   of each, so every rule had a failing test first.
+3. **Copy Lean's term shapes.** Each operator, condition and proof term was
+   elaborated in Lean 4.35.0 and printed with `pp.all`, and translation emits
+   the same shapes.
+4. **Test the model against the CLR.** CLR-agreement tests compare every
+   operator with unchecked C# on boundary and random operands, and
+   differential tests compare each translated method with the compiled one.
+5. **Have Lean re-check the result.** `warrant translate --out` writes the
+   bundle and every translated declaration and proved theorem, and Lean's
+   kernel checks that file in `scripts/cross-check.sh`.
+
 ### Notes on the environment
 
 - The cloud container had no .NET; the SDK was installed with Microsoft's
@@ -134,11 +158,13 @@ dotnet build
 dotnet test
 ```
 
-Expected result: **153 tests pass and two are skipped**. The skipped ones are
-opt-in tests that need external files: `AcceptsFullInit` (step 5) and
-`WritesFixturesForLean` (step 6). That's 31 Cic, 42 Lean4Export and 80 Kernel
-tests, including the FsCheck property tests; the whole suite takes about a
-minute.
+Expected result: **538 tests pass and four are skipped**. The skipped ones are
+opt-in tests that need external files or tools: `AcceptsFullInit` and
+`WritesFixturesForLean` (the kernel's Lean cross-checks), the export-script test
+(needs `LEAN_TOOLCHAIN_BIN`), and the differential-cost measurement (needs
+`WARRANT_DIFFERENTIAL_COST`). By project: 31 Cic, 36 Vir, 208 Extraction,
+65 Semantics, 42 Lean4Export, 85 Kernel, 64 Engine and 7 Cli. No Lean toolchain
+is needed; the whole suite takes about a minute.
 
 ### 3. Run the kernel on the committed corpus
 
@@ -230,7 +256,63 @@ The script runs code downloaded from GitHub (the Lean toolchain, lean4export), s
 review it before running. In a Claude Code session, auto mode may block it;
 approve it in **Accept edits** mode.
 
-### 6. Cross-check against Lean's own kernel
+### 6. Regenerate the semantics bundle
+
+The bundle that the M4 tests and `warrant translate` load is committed, so
+nothing here is needed to run the tests. To rebuild it from `lean/`:
+
+```sh
+scripts/export-semantics.sh                     # writes tests/data/warrant-semantics.ndjson.gz
+scripts/export-semantics.sh /tmp/bundle.ndjson.gz   # or anywhere else
+```
+
+The script uses the same Lean 4.35.0 toolchain and lean4export `5a9a355` as
+step 5 (set `LEAN_TOOLCHAIN_BIN` on Windows), builds the library with
+`lake build`, and exports the 74 roots in `lean/bundle-roots.txt` with their
+dependency closure. It fails if a root does not exist or if anything depends on
+`sorryAx`. The output is deterministic: with an unchanged `lean/`, it is
+byte-identical to the committed file. Check the counts independently with:
+
+```sh
+python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 2,483 constants
+```
+
+### 7. Translate C# with `warrant translate`
+
+```sh
+warrant translate tests/corpus/m4/accepted                      # exit 0
+warrant translate tests/corpus/m4/refuted                       # exit 1, WRT0001
+warrant translate tests/corpus/m4/rejected                      # exit 1, WRT0002 to WRT0009
+warrant translate tests/corpus/m4/accepted --report report.md --out m4.ndjson
+```
+
+The verb compiles every `.cs` file under the directory, translates the
+`[Verified]` members and `[Theorem]`s, and prints one line per unit and any
+diagnostics. On `accepted/` it ends with:
+
+```text
+65 unit(s): 32 translated, 33 proved, 0 false, 0 undecided, 0 failed, 0 skipped; 0 error(s), 0 warning(s)
+```
+
+On `refuted/` it reports both theorems as false, for example:
+
+```text
+tests/corpus/m4/refuted/Increment.cs(12,18): error WRT0001: Theorem 'NeverWraps' is false.
+  Claim:  Increment(int.MaxValue) > int.MaxValue
+  Values: Increment(int.MaxValue) = -2147483648, int.MaxValue = 2147483647
+```
+
+`--report` writes the assumption report as Markdown, and `--out` writes the
+bundle followed by every admitted declaration as lean4export NDJSON, which
+`tools/lean-replay` accepts (2,576 constants for `accepted/`). Running
+`rejected/` as one directory compiles `rejected/CheckedProject.cs` without
+overflow checking, so its members translate there; the corpus tests compile
+that file on its own with overflow checking on, as `expected.json` says. The
+exit codes are 0 when everything
+translated and every theorem was proved, 1 otherwise, and 2 for bad arguments
+or unreadable input.
+
+### 8. Cross-check against Lean's own kernel
 
 ```sh
 scripts/cross-check.sh
@@ -242,8 +324,10 @@ The script uses the same Lean 4.35.0 toolchain (downloaded if needed; set
 [`tools/lean-replay`](tools/lean-replay/README.md), a small Lean program that
 checks an NDJSON file with Lean's kernel. For every corpus file it compares Lean's
 verdict with Warrant's. It then has Lean re-check what Warrant admitted
-(`warrant export`), and the declarations built from scratch in C#
-(`CrossCheckFixtures.cs`). Expected output ends with:
+(`warrant export`), the declarations built from scratch in C#
+(`CrossCheckFixtures.cs`), and the translated M4 corpus: `warrant translate
+tests/corpus/m4/accepted --out` must exit 0, and Lean must accept the file it
+writes. Expected output ends with:
 
 ```
 FILE                         LEAN      WARRANT LEAN(EXPORT)   RESULT
@@ -256,6 +340,7 @@ proj-of-subst-prop.ndjson    reject    reject    accept         ok
 rec-of-subst-prop.ndjson     reject    reject    accept         ok
 sparse-name-index.ndjson     accept    accept    accept         ok
 C# fixtures                  -         accept    accept         ok
+M4 corpus                    -         accept    accept         ok
 
 all verdicts agree
 ```
@@ -264,7 +349,7 @@ Lean declines the original `Nat.add_succ` only because its parser reads format
 3.1.0. Warrant's export of it is 3.1.0, and Lean accepts that. With the full
 Init export included, Lean accepts all 59,349 constants Warrant writes.
 
-### 7. Re-derive the port from its sources (optional)
+### 9. Re-derive the port from its sources (optional)
 
 To compare the kernel with the C++ it was ported from:
 
@@ -279,7 +364,7 @@ git -C lean4 diff v4.33.1 v4.35.0 -- src/kernel   # what changed since the port
 lists the deliberate differences: fuel, no native reduction, a large-stack
 thread, and macro scopes in generated names not being modelled.
 
-### 8. Mathlib (not yet done)
+### 10. Mathlib (not yet done)
 
 The same export script should work from a Mathlib checkout pinned to the same Lean version (v4.35.0).
 For example, run `lake env <path>/lean4export Mathlib > mathlib.ndjson` inside
@@ -296,8 +381,15 @@ export, and memory use that has not been measured at that scale.
 | `src/Warrant.Cic` | CIC terms: names, levels, expressions, constants, declarations |
 | `src/Warrant.Lean4Export` | lean4export reader (3.0.0, 3.1.0) and writer (3.1.0) |
 | `src/Warrant.Kernel` | the type-checking kernel and the export checker |
-| `src/Warrant.Cli` | the `warrant` tool (`check`, `stats`, `export`) |
+| `src/Warrant` | the user package: `[Verified]`, `[Theorem]`, `[Closed]`, `Prove`, `Spec` |
+| `src/Warrant.Vir` | VIR: the model, its canonical JSON encoding and its hashes |
+| `src/Warrant.Frontend` | the Roslyn compilation that extraction reads |
+| `src/Warrant.Extraction` | C# (Roslyn `IOperation`) to VIR, and the M4 subset checks |
+| `src/Warrant.Semantics` | VIR to CIC: types, definitions and theorem statements |
+| `src/Warrant.Engine` | admission, proofs, read-back, assumption reports and NDJSON output |
+| `src/Warrant.Cli` | the `warrant` tool (`check`, `stats`, `export`, `translate`) |
+| `lean/` | the semantics library, proved in Lean, and the bundle roots |
 | `tools/lean-replay` | Lean program: check an NDJSON file with Lean's own kernel |
-| `tests/` | unit, corpus and soundness tests; `tests/data` is the corpus |
-| `scripts/` | `export-lean-library.sh`, `cross-check.sh`, `count-export.py`, shared `lib/lean-toolchain.sh` |
+| `tests/` | unit, corpus and soundness tests; `tests/data` is the kernel corpus and the semantics bundle, `tests/corpus/m4` the C# corpus |
+| `scripts/` | `export-lean-library.sh`, `export-semantics.sh`, `cross-check.sh`, `count-export.py`, shared `lib/lean-toolchain.sh` |
 | `docs/` | design, kernel notes, conversation history |

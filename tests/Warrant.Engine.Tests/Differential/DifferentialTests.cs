@@ -1,9 +1,13 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using FsCheck;
+using FsCheck.Fluent;
 using Warrant.Kernel;
 using Warrant.Semantics;
 using Warrant.Vir;
 using Xunit.Abstractions;
+using Xunit.Sdk;
 
 namespace Warrant.Engine.Tests.Differential;
 
@@ -15,8 +19,9 @@ namespace Warrant.Engine.Tests.Differential;
 public sealed class DifferentialTests(DifferentialFixture corpus, ITestOutputHelper output)
 {
     /// <summary>
-    /// Random inputs per function, after every boundary combination. Sized from the measurements in README.md so that
-    /// the whole differential suite stays within a few minutes; the boundary combinations are never reduced.
+    /// Random inputs per function by default, besides every boundary combination. Sized from the measurements in
+    /// README.md so that the whole differential suite stays within a few minutes; the boundary combinations are never
+    /// reduced. <see cref="Pbt"/> raises it from the environment.
     /// </summary>
     internal const int RandomInputsPerFunction = 1000;
 
@@ -45,19 +50,58 @@ public sealed class DifferentialTests(DifferentialFixture corpus, ITestOutputHel
 
     [Theory]
     [MemberData(nameof(Functions))]
-    public void AgreesOnEveryBoundaryCombinationAndOnRandomInputs(string key)
+    public void AgreesOnEveryBoundaryCombination(string key)
     {
         var unit = corpus.Unit(key);
         var types = ModelCheck.ParameterTypes(unit.Unit);
         Assert.InRange(types.Count, 1, 3);
         var boundaries = corpus.Inputs.BoundaryInputs(types);
         Assert.Equal(types.Select(t => corpus.Inputs.Boundaries(t).Count).Aggregate(1, (a, b) => a * b), boundaries.Count);
-        var random = corpus.Inputs.RandomInputs(types, RandomInputsPerFunction);
-        Assert.Equal(RandomInputsPerFunction, random.Count);
 
-        var run = corpus.Check(unit, [.. boundaries, .. random]);
-        output.WriteLine($"{key}: {boundaries.Count} boundary + {random.Count} random inputs in {run.Elapsed.TotalSeconds:F2} s");
+        var run = corpus.Check(unit, boundaries);
+        output.WriteLine($"{key}: {boundaries.Count} boundary inputs in {run.Elapsed.TotalSeconds:F2} s");
         Assert.True(run.Disagreements.Count == 0, Report(run));
+    }
+
+    /// <summary>
+    /// The property that the model agrees with the CLR on every input (M5a KTD26): <see cref="RandomInputsPerFunction"/>
+    /// cases from the pinned seed, or what <see cref="Pbt"/> reads from the environment. A failure is shrunk and says
+    /// how to replay it.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Functions))]
+    public void AgreesOnRandomInputs(string key)
+    {
+        var unit = corpus.Unit(key);
+        var check = corpus.Checker(unit);
+        var arbitrary = corpus.Inputs.Arbitrary(ModelCheck.ParameterTypes(unit.Unit));
+        var config = Pbt.Config(RandomInputsPerFunction);
+        var cases = 0;
+        var watch = Stopwatch.StartNew();
+        KernelThread.Run(() => Pbt.Check(
+            Prop.ForAll(arbitrary, args =>
+            {
+                cases++;
+                if (check(args) is { } disagreement)
+                {
+                    throw new XunitException(disagreement);
+                }
+            }),
+            config));
+        output.WriteLine($"{key}: {cases} random inputs in {watch.Elapsed.TotalSeconds:F2} s");
+        Assert.Equal(config.MaxTest, cases);
+    }
+
+    /// <summary>A failing record input shrinks one field at a time, each toward 0 or a boundary value.</summary>
+    [Fact]
+    public void ARecordInputShrinksFieldByField()
+    {
+        var point = corpus.Assembly.TypeOf("T:Claims.Point");
+        int X(object? p) => (int)point.GetProperty("X")!.GetValue(p)!;
+        var arbitrary = corpus.Inputs.Arbitrary([VirType.Ref("T:Claims.Point")]);
+        var failure = Assert.Throws<XunitException>(() => Pbt.Check(Prop.ForAll(arbitrary, args => X(args[0]) >= 0), 100));
+        Assert.Contains("Shrunk:\n[|Point { X = -1, Y = 0 }|]", failure.Message.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+        Assert.Contains($"Replay with {Pbt.SeedVariable}={Pbt.DefaultSeed.Seed},{Pbt.DefaultSeed.Gamma}", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]

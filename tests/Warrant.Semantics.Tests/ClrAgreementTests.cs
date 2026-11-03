@@ -10,13 +10,14 @@ namespace Warrant.Semantics.Tests;
 
 /// <summary>
 /// CLR-agreement tests (docs/m4/07, plan U9, KTD19): each row of the operator and condition tables, applied to literals
-/// of boundary and random operands, is definitionally equal in the kernel to the literal of the result C# computes
+/// of boundary operands and, as a property with shrinking and a pinned seed, of random operands, is definitionally equal in the kernel to the literal of the result C# computes
 /// (unchecked). The literal encoder is checked on its own against the CLR's bit patterns, because both sides of every
 /// other comparison go through it. The operations M4 rejects have their CLR behaviour pinned on the CLR side only.
 /// </summary>
 public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFixture<SemanticsBundleFixture>
 {
-    private static readonly Config Runs = Config.QuickThrowOnFailure.WithMaxTest(150);
+    /// <summary>Cases per property by default; <see cref="Pbt"/> pins the seed and reads the environment (M5a KTD26).</summary>
+    private const int Cases = 150;
 
     private static readonly Expr BitVecToNat = Expr.Const(Name.Parse("BitVec.toNat"));
     private static readonly Expr Int32ToBitVec = Expr.Const(Name.Parse("Int32.toBitVec"));
@@ -81,7 +82,7 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
         KernelThread.Run(() =>
         {
             Assert.All(Generators.Int32BoundaryPairs(), p => Assert.True(Ok(p), $"{p.Item1} {name} {p.Item2}"));
-            Prop.ForAll(Generators.Int32Pairs, Ok).Check(Runs);
+            Pbt.Check(Prop.ForAll(Generators.Int32Pairs, Ok), Cases);
         });
     }
 
@@ -95,7 +96,7 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
         KernelThread.Run(() =>
         {
             Assert.All(Generators.Int64BoundaryPairs(), p => Assert.True(Ok(p), $"{p.Item1} {name} {p.Item2}"));
-            Prop.ForAll(Generators.Int64Pairs, Ok).Check(Runs);
+            Pbt.Check(Prop.ForAll(Generators.Int64Pairs, Ok), Cases);
         });
     }
 
@@ -108,8 +109,8 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
         {
             Assert.All(Generators.Int32Boundaries, x => Assert.True(Ok32(x), $"-({x})"));
             Assert.All(Generators.Int64Boundaries, x => Assert.True(Ok64(x), $"-({x}L)"));
-            Prop.ForAll(Generators.Int32s, Ok32).Check(Runs);
-            Prop.ForAll(Generators.Int64s, Ok64).Check(Runs);
+            Pbt.Check(Prop.ForAll(Generators.Int32s, Ok32), Cases);
+            Pbt.Check(Prop.ForAll(Generators.Int64s, Ok64), Cases);
         });
     }
 
@@ -125,7 +126,7 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
         KernelThread.Run(() =>
         {
             Assert.All(Generators.Int32BoundaryPairs(), p => Assert.True(Ok(p), $"{p.Item1} {name} {p.Item2}"));
-            Prop.ForAll(Generators.Int32Pairs, Ok).Check(Runs);
+            Pbt.Check(Prop.ForAll(Generators.Int32Pairs, Ok), Cases);
         });
     }
 
@@ -139,7 +140,7 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
         KernelThread.Run(() =>
         {
             Assert.All(Generators.Int64BoundaryPairs(), p => Assert.True(Ok(p), $"{p.Item1} {name} {p.Item2}"));
-            Prop.ForAll(Generators.Int64Pairs, Ok).Check(Runs);
+            Pbt.Check(Prop.ForAll(Generators.Int64Pairs, Ok), Cases);
         });
     }
 
@@ -165,8 +166,8 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
             Assert.All(Generators.Int64Boundaries.Concat(Generators.Int32Boundaries.Select(x => (long)x)), x => Assert.True(Narrow(x), $"(int){x}L"));
             Assert.True(Narrow(3000000000L), "(int)3000000000L");
             Assert.Equal(-1294967296, unchecked((int)Runtime(3000000000L)));
-            Prop.ForAll(Generators.Int32s, Widen).Check(Runs);
-            Prop.ForAll(Generators.Int64s, Narrow).Check(Runs);
+            Pbt.Check(Prop.ForAll(Generators.Int32s, Widen), Cases);
+            Pbt.Check(Prop.ForAll(Generators.Int64s, Narrow), Cases);
         });
     }
 
@@ -229,8 +230,8 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
     {
         Assert.All(Generators.Int32Boundaries, x => Assert.True(Int32BitsAgree(x), $"{x}"));
         Assert.All(Generators.Int64Boundaries, x => Assert.True(Int64BitsAgree(x), $"{x}L"));
-        Prop.ForAll(Generators.Int32s, Int32BitsAgree).Check(Runs);
-        Prop.ForAll(Generators.Int64s, Int64BitsAgree).Check(Runs);
+        Pbt.Check(Prop.ForAll(Generators.Int32s, Int32BitsAgree), Cases);
+        Pbt.Check(Prop.ForAll(Generators.Int64s, Int64BitsAgree), Cases);
     });
 
     [Fact]

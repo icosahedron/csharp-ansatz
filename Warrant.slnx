@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Warrant/Warrant.csproj" />
     <Project Path="src/Warrant.Cic/Warrant.Cic.csproj" />
     <Project Path="src/Warrant.Cli/Warrant.Cli.csproj" />
     <Project Path="src/Warrant.Kernel/Warrant.Kernel.csproj" />
@@ -7,6 +8,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Warrant.Cic.Tests/Warrant.Cic.Tests.csproj" />
+    <Project Path="tests/Warrant.Extraction.Tests/Warrant.Extraction.Tests.csproj" />
     <Project Path="tests/Warrant.Kernel.Tests/Warrant.Kernel.Tests.csproj" />
     <Project Path="tests/Warrant.Lean4Export.Tests/Warrant.Lean4Export.Tests.csproj" />
   </Folder>

@@ -17,13 +17,13 @@ M5a rewrites them as FsCheck properties (KTD26):
 ```csharp
 [Fact]
 public void TranslationAgreesWithTheClr() =>
-    Prop.ForAll(Arbitraries.For(unit),                          // generators with shrinkers
-                args => Model(unit, args) == Clr(unit, args))   // kernel: f args = r by Eq.refl
-        .Check(Pbt.Config());
+    Pbt.Check(Prop.ForAll(Inputs.Arbitrary(unit.Parameters),     // generators with shrinkers
+                          args => Model(unit, args) == Clr(unit, args)),  // kernel: f args = r by Eq.refl
+              RandomInputsPerFunction);                          // appends the replay seed on failure
 ```
 
 - **Shrinking.** `int` and `long` shrink toward 0 and the boundary values, records field by field, enums toward their first member, so a failure reports `MinValue` or `0`, not `-1216`.
-- **Seeds.** `Pbt.Config()` pins a default seed, so every run tests the same inputs. `WARRANT_PBT_SEED=seed,gamma` replays a failure, and `WARRANT_PBT_SEED=random` draws a new one; the failure message prints the seed in that form. FsCheck 3.6.0 requires `gamma` to be odd.
+- **Seeds.** `Pbt.Config` pins a default seed, so every run tests the same inputs. `WARRANT_PBT_SEED=seed,gamma` replays a failure, and `WARRANT_PBT_SEED=random` draws a new one; the failure message prints the seed in that form. FsCheck 3.6.0 requires `gamma` to be odd.
 - **Length.** `WARRANT_PBT_COUNT` sets the count, and `WARRANT_PBT_LONG=1` runs 10,000 cases per method for a nightly or pre-release run.
 - **Boundaries.** The exhaustive boundary combinations stay a separate, deterministic test.
 

@@ -98,7 +98,7 @@ public sealed class ExportChecker
         var sw = Stopwatch.StartNew();
         try
         {
-            var fork = Env.Fork();
+            var fork = Env.Child();
             Func<IEnumerable<Declaration>> admittedForm;
             switch (declaration)
             {

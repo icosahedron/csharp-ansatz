@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Untrusted orchestration after extraction (KTD3, KTD22): admits translated VIR units into a fork of the semantics bundle, emits rfl and decide proofs, classifies outcomes, reads values back and writes NDJSON.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Never Roslyn (KTD3): the engine sees only VIR. -->
+    <ProjectReference Include="..\Warrant.Vir\Warrant.Vir.csproj" />
+    <ProjectReference Include="..\Warrant.Cic\Warrant.Cic.csproj" />
+    <ProjectReference Include="..\Warrant.Kernel\Warrant.Kernel.csproj" />
+    <ProjectReference Include="..\Warrant.Lean4Export\Warrant.Lean4Export.csproj" />
+    <ProjectReference Include="..\Warrant.Semantics\Warrant.Semantics.csproj" />
+  </ItemGroup>
+</Project>

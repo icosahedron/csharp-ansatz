@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Trusted translation from VIR to CIC: the types, definitions and theorem statements that model C# (docs/m4/05, KTD22).</Description>
+    <!-- CA1720: Int32, Int64 and Bool name Init's types, as the operator table spells them. -->
+    <!-- CA1859: the rules take read-only interfaces, so a statement list and a single statement share one rule. -->
+    <NoWarn>$(NoWarn);CA1720;CA1859</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Never Roslyn (KTD3): translation sees only VIR. -->
+    <ProjectReference Include="..\Warrant.Vir\Warrant.Vir.csproj" />
+    <ProjectReference Include="..\Warrant.Cic\Warrant.Cic.csproj" />
+    <ProjectReference Include="..\Warrant.Kernel\Warrant.Kernel.csproj" />
+    <InternalsVisibleTo Include="Warrant.Semantics.Tests" />
+  </ItemGroup>
+</Project>

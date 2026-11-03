@@ -3,8 +3,6 @@ using System.Globalization;
 using Warrant.Kernel;
 using Warrant.Lean4Export;
 
-// warrant — check lean4export files with the Warrant kernel.
-//
 // Exit codes follow the Lean Kernel Arena convention:
 //   0  every declaration accepted
 //   1  a declaration was rejected (a type error)
@@ -18,6 +16,7 @@ internal static class Cli
           warrant check <export.ndjson[.gz]> [--fuel N] [--admit-rejected] [--quiet]
           warrant stats <export.ndjson[.gz]>
           warrant export <export.ndjson[.gz]> <output.ndjson> [--fuel N] [--quiet]
+          warrant translate <directory> [--out <file.ndjson>] [--report <file.md>] [--check-overflow] [--bundle <path>]
 
         check   re-checks every declaration with the kernel (exit 0 accept, 1 reject, 2 decline)
                 --fuel N          step budget per type checker (default 100000000)
@@ -27,11 +26,18 @@ internal static class Cli
         export  checks the file, then writes what the kernel admitted (its own generated
                 constructors, recursors and quotient constants) as lean4export 3.1.0, so another
                 kernel can re-check exactly what Warrant accepted
+        translate compiles every .cs file under the directory, translates the [Verified] members and
+                  [Theorem]s, and prints one line per member and any diagnostics (exit 0 when every
+                  member translated and every theorem was proved, 1 otherwise, 2 for unreadable input)
+                  --out FILE        write the bundle and every admitted declaration as lean4export NDJSON
+                  --report FILE     write the assumption report as Markdown
+                  --check-overflow  compile with overflow checking on
+                  --bundle PATH     the semantics bundle (default: the one beside warrant.dll)
         """;
 
     public static int Run(string[] args)
     {
-        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export") || (args[0] == "export" && args.Length < 3))
+        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate") || (args[0] == "export" && args.Length < 3))
         {
             Console.Error.WriteLine(Usage);
             return 2;
@@ -42,6 +48,7 @@ internal static class Cli
             {
                 "stats" => Stats(args[1]),
                 "export" => Check(args[1], args.Skip(3).ToArray(), output: args[2]),
+                "translate" => TranslateCommand.Run(args[1..], Console.Out, Console.Error),
                 _ => Check(args[1], args.Skip(2).ToArray()),
             };
         }

@@ -5,9 +5,7 @@ namespace Warrant.Kernel.Tests;
 
 internal static class Corpus
 {
-    public static string Path(string relative) => System.IO.Path.Combine(AppContext.BaseDirectory, "data", relative);
-
-    public static IReadOnlyList<Declaration> Read(string relative) => Lean4Export.Lean4Export.ReadFile(Path(relative)).Declarations;
+    public static IReadOnlyList<Declaration> Read(string relative) => Lean4Export.Lean4Export.ReadFile(TestData.Path(relative)).Declarations;
 
     /// <summary>Checks <paramref name="declarations"/> into a fresh environment.</summary>
     public static (KernelEnvironment Env, IReadOnlyList<CheckResult> Results) CheckAll(IEnumerable<Declaration> declarations, KernelLimits? limits = null)
@@ -18,13 +16,17 @@ internal static class Corpus
     }
 }
 
-/// <summary>init-medium, checked once and shared by the tests that need a realistic environment.</summary>
+/// <summary>
+/// init-medium, checked once and shared by the tests that need a realistic environment. The
+/// environment is frozen: tests that admit declarations do so into a fork of it.
+/// </summary>
 public sealed class InitMediumFixture
 {
     public InitMediumFixture()
     {
         Declarations = Corpus.Read("init-medium.ndjson.gz");
         (Env, Results) = Corpus.CheckAll(Declarations);
+        Env.Freeze();
     }
 
     public IReadOnlyList<Declaration> Declarations { get; }
@@ -44,16 +46,4 @@ public sealed class InitMediumFixture
     }
 
     public Declaration DeclarationOf(Name name) => Declarations.First(d => d.Constants.Any(c => c.Name == name));
-}
-
-/// <summary>A fact that is skipped unless the named environment variable is set.</summary>
-public sealed class FactRequiringEnvAttribute : FactAttribute
-{
-    public FactRequiringEnvAttribute(string variable)
-    {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(variable)))
-        {
-            Skip = $"set {variable} to run";
-        }
-    }
 }

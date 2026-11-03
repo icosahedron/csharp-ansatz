@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Extraction: reads Roslyn's IOperation tree of a compilation, enforces the M4 subset, and produces VIR units, span tables and diagnostics (docs/m4/03).</Description>
+    <!-- Directory.Build.props sets net10.0; the M5b analyzer will load this assembly into the compiler (KTD3, KTD4). -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The analyzer floor (KTD4): a compiler refuses an analyzer built against a newer Roslyn than its own (CS8032). -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Warrant.Vir\Warrant.Vir.csproj" />
+  </ItemGroup>
+</Project>

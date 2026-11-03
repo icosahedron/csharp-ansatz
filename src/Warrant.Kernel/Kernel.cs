@@ -48,7 +48,7 @@ public static class Kernel
     {
         ArgumentNullException.ThrowIfNull(env);
         ArgumentNullException.ThrowIfNull(declaration);
-        var fork = env.Fork();
+        var fork = env.Child();
         try
         {
             switch (declaration)

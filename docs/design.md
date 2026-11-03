@@ -29,13 +29,13 @@ from verified definitions.** See §2.
 | D4 | License **Apache 2.0**, with NOTICE attribution to Lean 4 and Ansatz. | Decided |
 | D5 | **Port the kernel** to C#. Don't bridge to Ansatz's JVM kernel. | Proposed, not objected to |
 | D6 | Cross-check by **exporting lean4export NDJSON**, not by pretty-printing Lean source. | Proposed, not objected to |
-| D7 | Map C# types to **faithful Lean models** (`int` → `Int32` with wrap-around, not unbounded `Int`). | Proposed, not objected to |
+| D7 | Map C# types to **faithful Lean models** (`int` → `Int32` with wrap-around, not unbounded `Int`). | Decided (M4 is built on it) |
 | D8 | Target **net10.0** for the server and core libraries. Components loaded by Roslyn or MSBuild, and the user API package, target **netstandard2.0**, so projects on older frameworks can be verified. | Decided |
 | D9 | External dependencies (databases, services) are **hypotheses in the theorem**, never global axioms. | Proposed |
-| D10 | The C# semantic model is a **Lean 4 library written and proved in real Lean**, exported to NDJSON, and shipped with Warrant. | Proposed |
+| D10 | The C# semantic model is a **Lean 4 library written and proved in real Lean**, exported to NDJSON, and shipped with Warrant. | Decided (M4 is built on it) |
 | D11 | Verification-condition generation is **proof-producing (a tactic)**, so it is outside the trusted base. | Proposed |
 | D12 | Enums are **open by default**: modelled as their underlying integer, so proofs cover unnamed values. `[Closed]` opts in to modelling exactly the named values; that is an assumption, listed in the report, and the analyzer warns on integer casts to the type (§12 Q3). | Decided |
-| D13 | `[Closed]` also applies to **closed-set classes**, recognised **by shape**: sealed, private constructors only, and static get-only instances of the type itself. They translate to an `inductive` with `DecidableEq`; a `[Closed]` class without that shape is an error. Adjust the shape rule if real code needs it (§12 Q16). | Decided |
+| D13 | `[Closed]` also applies to **closed-set classes**, recognised **by shape**: sealed, private constructors only, and static instances of the type itself, each an initialised get-only auto-property or `static readonly` field whose initialiser is a `new` of the class. They translate to an `inductive` with one constructor per instance, and `==` compares a generated `$index` (not `DecidableEq`; see §6.1); a `[Closed]` class without that shape is error WRT0009. Adjust the shape rule if real code needs it (§12 Q16). | Decided |
 
 ---
 
@@ -160,11 +160,14 @@ the translation. Warrant addresses this in three ways:
 |---|---|---|---|
 | `Warrant` (user API) | user app | netstandard2.0 | Attributes, `Spec.*`, `Prove`, `Tactic.*`. No runtime behaviour (§5). |
 | `Warrant.Analyzers` | compiler / IDE | netstandard2.0 | Deterministic checks only: supported subset, spec well-formedness, calling `[Theorem]` methods, missing contracts on externals. No I/O. |
-| `Warrant.Extraction` | analyzer + build task | netstandard2.0 | Roslyn `IOperation` / `ControlFlowGraph` → VIR. Shared, so the analyzer and the build agree on what is supported. |
-| `Warrant.Vir` | everywhere | netstandard2.0 | The **Verification IR** and its canonical serialization. This is the wire protocol between extraction and the server. |
+| `Warrant.Extraction` | analyzer + build task | netstandard2.0 | Roslyn `IOperation` tree → VIR, and the subset checks. Shared, so the analyzer and the build agree on what is supported. Compiled against Roslyn 4.8.0 so that older compilers can load it. M4 reads only the operation tree; the `ControlFlowGraph` may return for loops in M7. |
+| `Warrant.Frontend` | build task, CLI, tests | net10.0 | Builds the `CSharpCompilation` that extraction reads: references, language version, nullable analysis, overflow setting. In M4 it serves the CLI and the tests with fixed corpus settings; from M5a it takes them from the `Csc` inputs (§8.3). |
+| `Warrant.Vir` | everywhere | netstandard2.0 and net10.0 | The **Verification IR**, its canonical serialization and its hashes. This is the wire protocol between extraction and the server. The reader is built for net10.0 only. |
+| `Warrant.Semantics` | server | net10.0 | VIR → CIC: types, definitions and theorem statements (§4.2). Trusted (§9). No Roslyn. |
+| `Warrant.Engine` | server, CLI | net10.0 | The pipeline after VIR: admits translated declarations into a fork of the checked bundle, emits proofs, classifies outcomes, reads values back for messages, writes reports and NDJSON. Untrusted (§9). No Roslyn, so the server can host it unchanged. |
 | `Warrant.Build` | MSBuild | netstandard2.0 | After `CoreCompile`: extract, send to the server (starting it if needed), report diagnostics, write reports. Authoritative for builds and CI. |
 | `warrant-server` | own process | net10.0 | Cache, translation, tactics, kernel, store. Stays free of Roslyn: it only sees VIR. |
-| `warrant` CLI | own process | net10.0 | `verify`, `check-store`, `import`, `export`, `explain`; runs the engine in-process for CI without a daemon. |
+| `warrant` CLI | own process | net10.0 | `verify`, `check-store`, `import`, `export`, `explain`; runs the engine in-process for CI without a daemon. In M4 it has `translate`, which runs the frontend, extraction and the engine on a directory of C#. |
 
 Keeping Roslyn out of the server means the server's input (VIR) is small,
 canonical, and hashable. That is what makes the cache (§8.2) reliable.
@@ -221,20 +224,32 @@ VIR is a small, language-level IR of the supported C# subset. It is not CIC.
   contract) or *unsupported*.
 - Specs attached as data: requires, ensures, invariants, assertions, and proof
   hints.
-- Source spans for every node, so diagnostics point at C# code.
+- Source spans for every node, so diagnostics point at C# code. They are kept in a side table keyed by node ID, outside the hash, so editing a comment does not change a unit's hash.
 - Compilation facts that change semantics, for example whether
   `CheckForOverflowUnderflow` is on (it decides between wrap-around and
   `OverflowException` in unannotated code).
 
-VIR has a canonical binary and JSON encoding, and every unit has a content hash.
+VIR has a canonical JSON encoding, written by hand rather than by a serializer, so the netstandard2.0 and net10.0 builds write the same bytes.
+A binary encoding waits until M5b's server transmits VIR.
+
+VIR grows additively.
+It contains only the nodes the current milestone needs; a later milestone adds node kinds and fields but never changes the encoding of an existing one, and every unit records the VIR schema version, which is part of its hash.
+Records, enums and closed types are units of their own, so each is translated once.
+Every unit has two hashes: the **unit hash** of its own canonical encoding, and the **closure hash** of its unit hash followed by the closure hashes of the units it calls or mentions.
+The closure hash is what the cache is keyed on (§8.2).
+The M4 node set and encoding are in [docs/m4/04-vir.md](m4/04-vir.md).
 
 ### 4.2 Translation to CIC (Warrant.Semantics)
 
 - **Pure units** (no heap writes, no external calls) become plain Lean
-  definitions (CIC terms, not `.lean` source), a *shallow embedding*. `if` becomes `ite`/`dite`, `switch`
-  becomes a match, locals become `let`, and recursion becomes well-founded
+  definitions (CIC terms, not `.lean` source), a *shallow embedding*. `if` becomes `ite`/`dite`, locals become `let`, and recursion becomes well-founded
   recursion with a `Spec.Decreases` measure (or structural recursion when
-  detectable).
+  detectable). A `switch` over a `[Closed]` enum becomes the type's recursor
+  with a constant motive, and a `switch` over an integer or open enum becomes a
+  chain of `ite` tests; translation generates no Lean-style named matchers. In
+  M4, statements are translated in continuation-passing style, and fall-through
+  shared by two branches becomes a `let`-bound join point, so a translated
+  method stays linear in the size of its source ([docs/m4/05-translation.md](m4/05-translation.md)).
 - **Effectful units** become programs in a Warrant monad defined in the Lean
   library (§6.2), with state for the heap, `Except` for exceptions, and
   external calls as specified operations. Their contracts become Hoare triples
@@ -251,10 +266,13 @@ in the untrusted tactics.
 
 > All code in this section is **target syntax for discussion**, not a settled API.
 
-Everything is valid C#. Spec methods are marked
+Everything is valid C#. Spec methods that return `void` are marked
 `[Conditional("WARRANT_CONTRACTS")]`, so the compiler drops the calls from
 emitted IL by default. They remain fully bound in Roslyn's semantic model and
-`IOperation` tree, which is all Warrant needs.
+`IOperation` tree, which is all Warrant needs. C# allows `[Conditional]` only
+on `void` methods, so value-returning calls such as `Spec.Implies` and
+`Prove.That` stay in the IL: `Spec.Implies` computes the implication and
+`Prove.That` throws. In M4 both are valid only in theorem statements (WRT0004).
 
 C# attribute arguments must be compile-time constants, so
 `[Ensures(r => r > 0)]` is impossible. String specs would be untyped. Warrant
@@ -279,7 +297,11 @@ static Proof ValidImpliesPositive(Payment p) =>
 ```
 
 - In a statement position, a `bool` expression is read as a proposition:
-  `&&` → `∧`, `||` → `∨`, `!` → `¬`, and `==` on supported types → `Eq`.
+  `&&` → `∧`, `||` → `∨`, `!` → `¬`, and `==` on integers, `bool` and open
+  enums → `Eq`. `==` on a record is `R.$eq r s = true`, where `$eq` is a
+  generated field-by-field comparison, because C# `==` on a record is whatever
+  the generated `Equals` computes. `==` on a closed type compares generated
+  `$index` values. Neither uses `DecidableEq`.
   This avoids ChatGPT's suggested `Prop` type with overloaded operators and
   `Eq(a, b)` helpers. Roslyn has already bound the C# operators; the
   translator reinterprets them.
@@ -395,9 +417,9 @@ public void PayInInstallments(Payment p, int count, decimal installment)   // no
 | `float` `double` | not supported | Lean's `Float` is opaque to the kernel. |
 | `string` `char` | Warrant model over UTF-16 code units | Lean's `String` is a sequence of Unicode scalar values, so `Length` would differ for surrogate pairs. |
 | `T?` (reference, nullable) / `Nullable<T>` | `Option T` | Non-nullable reference annotations are assumptions, listed in the report, not facts. |
-| `record` / `readonly record struct` | Lean `structure` | `with` becomes structure update. Value equality is generated. |
-| `enum` | underlying integer + named constants | C# enums are open (any value can be cast), so they aren't modelled as closed inductive types unless marked `[Closed]` (D12). |
-| `[Closed]` sealed class with static instances | `inductive` with `DecidableEq` | The "smart enum" pattern, recognised by shape (D13). |
+| `record` / `readonly record struct` | single-constructor `inductive`, read by primitive projection | `with` becomes a constructor application. `==` is a generated field-by-field `$eq : R → R → Bool`, not `DecidableEq`, so it can follow the generated `Equals` where that differs from structural equality (`decimal` fields, M6). M4 accepts sealed positional record classes with compiler-generated equality and no other instance state. |
+| `enum` | underlying integer + named constants | C# enums are open (any value can be cast), so they aren't modelled as closed inductive types unless marked `[Closed]` (D12). An open enum is an `abbrev` of its underlying type. A `[Closed]` enum is an `inductive` with one constructor per member; its members must have distinct values. |
+| `[Closed]` sealed class with static instances | `inductive` with one constructor per instance | The "smart enum" pattern, recognised by shape (D13). `==` compares a generated `$index`, the constructor's position. Instances may be get-only auto-properties or `static readonly` fields. |
 | Generics | universe-polymorphic parameters | Constraints become type-class instances later. |
 | `IReadOnlyList<T>`, `ImmutableArray<T>` | `List T` / `Array T` models | |
 | Exceptions | `Except` branch of the monad | |
@@ -482,7 +504,8 @@ nested inductives.
 - Status and the exact list of deliberate differences from Lean: [kernel.md](kernel.md).
 - `Warrant.Cic.Expr` has no metavariable kind today. Whether `Warrant.Meta`
   adds one to the shared type (as Lean does, with the kernel rejecting it) or
-  keeps its own representation is decided at M4.
+  keeps its own representation is decided at the start of M5a, the first
+  milestone that uses metavariables. M4 needed none.
 
 ### 7.2 Import (lean4export NDJSON)
 
@@ -494,9 +517,13 @@ nested inductives.
     fast, and suitable for development.
   - **Verified import:** re-check every declaration with our kernel. This is
     the default for CI on the semantics bundle, and is the main kernel test.
-- Bundles shipped with Warrant: Init (Ansatz ships an `init-medium` subset
-  of Lean 4.33.1's Init: 5,118 constants in 4,631 declaration records, 3.3 MB
-  gzipped) and the Warrant semantics library.
+- The bundle shipped with Warrant is `warrant-semantics`
+  (`tests/data/warrant-semantics.ndjson.gz`): the Warrant semantics library and
+  every Init constant the translator emits, with their whole dependency closure
+  (2,483 constants at Lean 4.35.0), exported by `scripts/export-semantics.sh`.
+  The kernel and corpus tests also use Ansatz's `init-medium` subset of Lean
+  4.33.1's Init (5,118 constants in 4,631 declaration records, 3.3 MB gzipped),
+  but it is not shipped: it has no `Int32` or `Int64`.
   Mathlib (707,508 declarations at v4.33.1) is optional and downloaded.
 
 ### 7.3 Store
@@ -547,11 +574,17 @@ Lean rendering is still useful, but as a separate debugging feature.
 
 ### 8.2 Content-addressed cache
 
-- **Key:** a hash of the canonical VIR of the unit, the *statements* (not the
-  proofs) of the units and contracts it depends on, the semantics-bundle hash,
-  the environment and store hashes, and the kernel version.
+- **Key:** the unit's closure hash (§4.1), which covers its own canonical VIR
+  and the closure hashes of every unit it calls or mentions; the contracts it
+  depends on; the semantics-bundle hash; the environment and store hashes; and
+  the kernel version. Hashing only the *statements* of dependencies is not
+  enough under a shallow embedding: a theorem proved by computation depends on
+  its callees' bodies, so editing a callee's body can turn a proved theorem
+  false without changing the theorem's text.
 - **Value:** the verdict, the **proof certificate** (proof terms as NDJSON),
-  diagnostics, and the assumption report.
+  diagnostics, and the assumption report. Cached diagnostics refer to VIR node
+  IDs, not source positions; they are mapped to spans through the span table of
+  the current extraction, so a cached result never points at stale lines.
 - Stored on disk per project (`obj/warrant/`) and in a per-user shared cache.
 - **Proof replay:** a cached certificate can be re-checked by the kernel alone,
   without re-running tactics. That is cheap compared with proof search, so CI
@@ -598,17 +631,26 @@ ProcessPayment            VERIFIED   (kernel: Warrant 0.1, cert 3f9a…)
 
 ## 9. Trusted computing base
 
+The trusted base is drawn by assembly.
+
 | Trusted | Why | Mitigation |
 |---|---|---|
 | `Warrant.Kernel` | Accepts or rejects proof terms. | Arena negatives, init/Mathlib corpus, cross-kernel export, property tests, trace diffs (§10). |
-| `Warrant.Semantics` (VIR → CIC) | The faithfulness gap. | Small and syntax-directed; differential testing against compiled .NET. |
+| `Warrant.Semantics` (VIR → CIC) | The faithfulness gap. It builds every declaration whole, including each theorem's name and *statement*, because a wrong statement proves the wrong claim. | Small and syntax-directed; differential testing against compiled .NET, and CLR-agreement tests for every operation it emits. |
 | `Warrant.Extraction` (C# → VIR) | Same gap, one layer earlier. | Same differential tests, end to end. |
-| Semantic-model *definitions* in `lean/Warrant` | The claim that "this models C#". | Reviewed; tested against .NET behaviour (for example exhaustively for 8- and 16-bit types, sampled for 32/64-bit). |
+| `Warrant.Frontend`'s compilation options | They decide what the C# means (language version, references, overflow checking). | The build task takes them from `Csc`'s own inputs (§8.3). |
+| `Warrant.Vir` (model, writer and reader) | Translation sees only what VIR carries. | Round-trip, golden-file and cross-framework encoding tests. |
+| Semantic-model *definitions* in `lean/Warrant`, and the Init definitions it reuses | The claim that "this models C#". | Reviewed; tested against .NET behaviour (for example exhaustively for 8- and 16-bit types, sampled for 32/64-bit). |
 | Declared contracts and global assumptions | By design. | Listed in every assumption report. |
 | Trusted-mode imports | Lean already checked them. | Verified import mode removes this. |
 
-**Not trusted:** the elaborator, tactics, VC generation (D11), the server, the
-cache (with recheck), the importer in verified mode, and the Roslyn analyzer.
+**Not trusted:** `Warrant.Engine` (proof emission, outcome classification,
+read-back of values for messages, reports and NDJSON export), the elaborator,
+tactics, VC generation (D11), the server, the cache (with recheck), the
+importer in verified mode, and the Roslyn analyzer. The engine fills only the
+proof slot of a declaration that `Warrant.Semantics` built, and a theorem
+counts as proved only when the kernel admits that exact declaration, so a bug
+in the engine can make a true claim fail but never a false one pass.
 
 ---
 
@@ -728,7 +770,13 @@ or two per milestone from M4 to M7.
     private constructors, static get-only instances of the type itself); they
     translate to an `inductive` with `DecidableEq`, and the analyzer rejects a
     `[Closed]` class that doesn't have that shape. *Decided (D13):* as proposed,
-    in M4; revisit the shape rule if real code doesn't fit it.
+    in M4; revisit the shape rule if real code doesn't fit it. As built in M4,
+    a `[Closed]` class without the shape is error **WRT0009**, which names the
+    step of the shape check that failed; instances may also be `static
+    readonly` fields; and `==` compares a generated `$index` rather than
+    using `DecidableEq`. Reading an instance field or property of a closed
+    class in verified code is WRT0002, because the model keeps only which
+    instance a value is.
 17. **Specs on expression-bodied members.** `Spec.Ensures` is a statement, so
     it needs a block body. Most small pure methods and properties are
     expression-bodied (`=> a && b`), so specifying them means rewriting the

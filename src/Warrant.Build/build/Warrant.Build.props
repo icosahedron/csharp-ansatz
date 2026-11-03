@@ -1,0 +1,10 @@
+<Project>
+  <!--
+    Imported before the project's own properties. It only marks the package as present: the Warrant package's
+    WRT0011 check reads the mark (KTD23), and the defaults live in Warrant.Build.targets so that a project's own
+    settings, which come after this file, still win.
+  -->
+  <PropertyGroup>
+    <WarrantBuildImported>true</WarrantBuildImported>
+  </PropertyGroup>
+</Project>

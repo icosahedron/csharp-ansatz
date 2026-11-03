@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- The task project compiles against MSBuild without its runtime assemblies; the tests host the task themselves. -->
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.11.48" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Warrant.TestSupport" />
+    <ProjectReference Include="..\..\src\Warrant.Build\Warrant.Build.csproj" />
+    <ProjectReference Include="..\Warrant.Build.FakeCli\Warrant.Build.FakeCli.csproj" />
+    <ProjectReference Include="..\Warrant.TestSupport\Warrant.TestSupport.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The smoke test imports the targets as the packages would, from beside the built task. -->
+    <None Include="..\..\src\Warrant.Build\build\*" LinkBase="targets\Warrant.Build" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\Warrant\build\*" LinkBase="targets\Warrant" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

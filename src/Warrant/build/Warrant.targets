@@ -1,0 +1,21 @@
+<Project>
+  <!--
+    A project that references Warrant but runs no verification would build green with no theorem checked (KTD23).
+    MSBuild cannot see whether the project has [Verified] code, so the warning does not try; NoWarn silences it.
+    In build/, not buildTransitive/, so an application that only consumes a verified library is not warned.
+  -->
+  <PropertyGroup>
+    <_WarrantFirstTargetFramework>$([System.Text.RegularExpressions.Regex]::Replace('$(TargetFrameworks)', '^[\s;]*([^;\s]*)[\s\S]*$', '$1'))</_WarrantFirstTargetFramework>
+  </PropertyGroup>
+
+  <Target Name="_WarrantCheckVerificationEnabled"
+          BeforeTargets="CoreCompile"
+          Condition="'$(DesignTimeBuild)' != 'true' and ('$(TargetFrameworks)' == '' or '$(TargetFramework)' == '$(_WarrantFirstTargetFramework)')">
+    <Warning Condition="'$(WarrantBuildImported)' != 'true'"
+             Code="WRT0011"
+             Text="Warrant: this project references Warrant but not Warrant.Build, so no theorem is verified. Add a reference to Warrant.Build, or add WRT0011 to NoWarn." />
+    <Warning Condition="'$(WarrantBuildImported)' == 'true' and '$(WarrantEnabled)' != 'true'"
+             Code="WRT0011"
+             Text="Warrant: WarrantEnabled is '$(WarrantEnabled)', so no theorem is verified. Set it to true, or add WRT0011 to NoWarn." />
+  </Target>
+</Project>

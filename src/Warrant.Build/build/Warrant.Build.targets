@@ -1,0 +1,44 @@
+<Project>
+  <!--
+    Runs `warrant verify` after CoreCompile (docs/m5a/07, KTD21, KTD22). Every build verifies again: the target has no
+    Inputs or Outputs, because M5a re-checks every proof on every build.
+  -->
+  <PropertyGroup>
+    <WarrantEnabled Condition="'$(WarrantEnabled)' == ''">true</WarrantEnabled>
+    <!-- Csc then outputs its full argument list as @(CscCommandLineArgs), which the CLI parses (KTD21). -->
+    <ProvideCommandLineArgs Condition="'$(WarrantEnabled)' == 'true'">true</ProvideCommandLineArgs>
+    <!-- Both paths are overridable so tests can point at a locally built task and CLI. -->
+    <WarrantTaskAssembly Condition="'$(WarrantTaskAssembly)' == ''">$(MSBuildThisFileDirectory)..\tasks\netstandard2.0\Warrant.Build.dll</WarrantTaskAssembly>
+    <WarrantCliPath Condition="'$(WarrantCliPath)' == ''">$(MSBuildThisFileDirectory)..\tools\net10.0\any\warrant.dll</WarrantCliPath>
+    <!-- The first entry of $(TargetFrameworks), and whether there are two or more: the inner build that verifies. -->
+    <_WarrantFirstTargetFramework>$([System.Text.RegularExpressions.Regex]::Replace('$(TargetFrameworks)', '^[\s;]*([^;\s]*)[\s\S]*$', '$1'))</_WarrantFirstTargetFramework>
+    <_WarrantMultiTargeted>$([System.Text.RegularExpressions.Regex]::IsMatch('$(TargetFrameworks)', '[^;\s]\s*;[\s;]*[^;\s]'))</_WarrantMultiTargeted>
+  </PropertyGroup>
+
+  <UsingTask TaskName="Warrant.Build.WarrantVerify" AssemblyFile="$(WarrantTaskAssembly)" />
+
+  <Target Name="WarrantVerify"
+          AfterTargets="CoreCompile"
+          Condition="'$(WarrantEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and ('$(TargetFrameworks)' == '' or '$(TargetFramework)' == '$(_WarrantFirstTargetFramework)')">
+    <PropertyGroup>
+      <_WarrantCscArgsFile>$(IntermediateOutputPath)warrant.csc.args</_WarrantCscArgsFile>
+    </PropertyGroup>
+    <!-- When CoreCompile was up to date Csc did not run and the item is empty: the last compile's file still holds. -->
+    <WriteLinesToFile Condition="'@(CscCommandLineArgs)' != ''"
+                      File="$(_WarrantCscArgsFile)"
+                      Lines="@(CscCommandLineArgs)"
+                      Overwrite="true"
+                      WriteOnlyWhenDifferent="true" />
+    <WarrantVerify CscArgsFile="$(_WarrantCscArgsFile)"
+                   ProjectDirectory="$(MSBuildProjectDirectory)"
+                   CliPath="$(WarrantCliPath)"
+                   DotnetHostPath="$(DOTNET_HOST_PATH)"
+                   KernelFuel="$(WarrantKernelFuel)"
+                   TacticFuel="$(WarrantTacticFuel)"
+                   TimeoutSeconds="$(WarrantTimeoutSeconds)"
+                   KeepConditionalCheck="$(_WarrantMultiTargeted)" />
+    <ItemGroup>
+      <FileWrites Include="$(_WarrantCscArgsFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>MSBuild integration: runs `warrant verify` after CoreCompile and reports unproved theorems as build errors (docs/m5a/07).</Description>
+    <!-- Both MSBuilds load the task: Visual Studio's on .NET Framework, dotnet build's on .NET (KTD22). -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- A development dependency: the build uses it, and consumers of the built assembly never see it. -->
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <!-- The task assembly goes to tasks/netstandard2.0/, where build/Warrant.Build.targets looks for it. -->
+    <BuildOutputTargetFolder>tasks</BuildOutputTargetFolder>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_WarrantPackCli</TargetsForTfmSpecificContentInPackage>
+    <!-- NU5100: the task assembly is deliberately outside lib/; NU5128: no lib/ means no dependency groups to match. -->
+    <NoWarn>$(NoWarn);NU5100;NU5128</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The host MSBuild supplies these assemblies at run time; the package must not carry copies (KTD22). -->
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.11.48" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- build/, not buildTransitive/: a project that only consumes a verified library does not verify it again (KTD22). -->
+    <None Include="build\Warrant.Build.props" Pack="true" PackagePath="build\" />
+    <None Include="build\Warrant.Build.targets" Pack="true" PackagePath="build\" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Warrant.Build.Tests" />
+  </ItemGroup>
+
+  <!-- Publishes the framework-dependent CLI and packs it under tools/net10.0/any/, where the targets launch it. -->
+  <Target Name="_WarrantPackCli">
+    <PropertyGroup>
+      <_WarrantCliPublishDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'cli'))</_WarrantCliPublishDir>
+    </PropertyGroup>
+    <!-- A separate evaluation restores the CLI when this project is packed on its own. -->
+    <MSBuild Projects="..\Warrant.Cli\Warrant.Cli.csproj" Targets="Restore" Properties="Configuration=$(Configuration);_WarrantCliRestore=true" RemoveProperties="TargetFramework;RuntimeIdentifier" />
+    <MSBuild Projects="..\Warrant.Cli\Warrant.Cli.csproj" Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(_WarrantCliPublishDir);UseAppHost=false;SelfContained=false"
+             RemoveProperties="TargetFramework;RuntimeIdentifier" />
+    <ItemGroup>
+      <_WarrantCliFile Include="$(_WarrantCliPublishDir)**\*" Exclude="$(_WarrantCliPublishDir)**\*.pdb;$(_WarrantCliPublishDir)**\*.xml" />
+      <TfmSpecificPackageFile Include="@(_WarrantCliFile)" PackagePath="tools\net10.0\any\%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+  </Target>
+</Project>

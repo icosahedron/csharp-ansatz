@@ -26,14 +26,14 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
     public void EveryKindHasTheExportedCount()
     {
         // tests/data/README.md; the simp count includes Lean's own duplicate entry for Nat.not_lt_zero.
-        Assert.Equal(271, Sidecar.SimpEntries.Count);
+        Assert.Equal(346, Sidecar.SimpEntries.Count);
         Assert.Equal(2, Sidecar.SimpEntries.Count(e => e.Name == N("Nat.not_lt_zero")));
-        Assert.Equal(2, Sidecar.CongrEntries.Count);
-        Assert.Equal(128, Sidecar.Instances.Count());
-        Assert.Equal(538, Sidecar.ReducibilityStatuses.Count());
-        Assert.Equal(44, Sidecar.DefEqNames.Count());
-        Assert.Equal(302, Sidecar.Matchers.Count());
-        Assert.Equal(53, Sidecar.Classes.Count());
+        Assert.Equal(3, Sidecar.CongrEntries.Count);
+        Assert.Equal(142, Sidecar.Instances.Count());
+        Assert.Equal(575, Sidecar.ReducibilityStatuses.Count());
+        Assert.Equal(58, Sidecar.DefEqNames.Count());
+        Assert.Equal(324, Sidecar.Matchers.Count());
+        Assert.Equal(57, Sidecar.Classes.Count());
     }
 
     [Fact]
@@ -54,9 +54,9 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal(
             new Dictionary<ReducibilityStatus, int>
             {
-                [ReducibilityStatus.Reducible] = 226,
-                [ReducibilityStatus.InstanceReducible] = 200,
-                [ReducibilityStatus.ImplicitReducible] = 107,
+                [ReducibilityStatus.Reducible] = 244,
+                [ReducibilityStatus.InstanceReducible] = 212,
+                [ReducibilityStatus.ImplicitReducible] = 114,
                 [ReducibilityStatus.Irreducible] = 5,
             },
             Sidecar.ReducibilityStatuses.GroupBy(kv => kv.Value).ToDictionary(g => g.Key, g => g.Count()));
@@ -196,7 +196,7 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal((inst, 1000), (added.Name, added.Priority));
         Assert.True(fork.IsInstance(inst));
         Assert.Equal(baseSidecar.GetInstances(N("DecidableEq")).Count + 1, fork.GetInstances(N("DecidableEq")).Count);
-        Assert.Equal(539, fork.ReducibilityStatuses.Count(kv => kv.Value != ReducibilityStatus.Semireducible));
+        Assert.Equal(576, fork.ReducibilityStatuses.Count(kv => kv.Value != ReducibilityStatus.Semireducible));
         Assert.Same(baseSidecar.Header, fork.Header);
         Assert.Equal(baseSidecar.SimpEntries, fork.SimpEntries);
 

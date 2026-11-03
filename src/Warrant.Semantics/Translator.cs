@@ -113,9 +113,9 @@ public static class Translator
                     }
                 case VirUnitKind.Theorem:
                     {
-                        var statement = new BodyTranslator(types).Statement(unit);
+                        var (statement, claim) = new BodyTranslator(types).StatementAndClaim(unit);
                         Declare(unit.Key, name, display, null);
-                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [], new TheoremShell(name, statement, unit.Script, unit.Budget));
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [], new TheoremShell(name, statement, unit.Script, unit.Budget, claim));
                     }
                 case VirUnitKind.Type:
                     {

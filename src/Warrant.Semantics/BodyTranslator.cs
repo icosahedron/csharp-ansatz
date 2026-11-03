@@ -66,7 +66,14 @@ internal sealed partial class BodyTranslator
     /// A theorem's statement, translated as a condition (docs/m4/06, "The statement"). The parameters become free
     /// variables while the claim is translated, then outer <c>∀</c> binders in order, with no instance (M5a KTD17).
     /// </summary>
-    public Condition Statement(VirUnit unit)
+    public Condition Statement(VirUnit unit) => StatementAndClaim(unit).Statement;
+
+    /// <summary>
+    /// A theorem's statement, as <see cref="Statement(VirUnit)"/>, and, when the theorem has parameters and its claim has a
+    /// <c>Decidable</c> instance, the claim and instance as functions of the parameters: <c>fun ps => P</c> and
+    /// <c>fun ps => D</c>. The engine's counterexample search applies them to concrete values (M5a KTD25).
+    /// </summary>
+    public (Condition Statement, Condition? Claim) StatementAndClaim(VirUnit unit)
     {
         var statement = unit.Statement ?? throw new TranslationException(unit.Key, "a theorem has no statement.");
         foreach (var p in unit.Params ?? VirList<VirParam>.Empty)
@@ -75,7 +82,12 @@ internal sealed partial class BodyTranslator
         }
         _quantified = _params.Count > 0 || Nodes(statement).Any(n => n is ForAllExpr or ExistsExpr);
         var claim = Cond(statement, Env.Empty);
-        return _params.Count == 0 ? claim : new Condition(_lctx.MkPi(_params, claim.Prop), null);
+        if (_params.Count == 0)
+        {
+            return (claim, null);
+        }
+        var decidable = claim.Instance is { } instance ? new Condition(_lctx.MkLambda(_params, claim.Prop), _lctx.MkLambda(_params, instance)) : null;
+        return (new Condition(_lctx.MkPi(_params, claim.Prop), null), decidable);
     }
 
     // ---- Values ----

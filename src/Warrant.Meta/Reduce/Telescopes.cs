@@ -58,7 +58,7 @@ public sealed partial class MetaM
         }
     }
 
-    private static Expr CleanupAnnotations(Expr e)
+    internal static Expr CleanupAnnotations(Expr e)
     {
         while (true)
         {

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.CodeAnalysis.CSharp;
 using Warrant.Extraction;
 using Warrant.Kernel;
+using Warrant.Meta;
 
 namespace Warrant.Engine.Tests;
 
@@ -18,14 +19,26 @@ public sealed class EngineFixture
 
     public SemanticsBundle Bundle { get; } = SharedBundle.Value;
 
-    /// <summary>The engine's run over a named corpus compilation, at <see cref="KernelLimits.Corpus"/>.</summary>
+    /// <summary>The attribute sidecar, loaded once per test process against the bundle's SHA-256.</summary>
+    internal static readonly Lazy<Sidecar> SharedSidecar =
+        new(() => Sidecar.Load(TestData.Path(AttributeSidecarFixture.FileName), AttributeSidecarFixture.BundleSha256));
+
+    /// <summary>The options of the corpus runs: the default budgets with the corpus kernel fuel, and the sidecar.</summary>
+    public EngineOptions Options { get; } = EngineOptions.Default with { Kernel = KernelLimits.Corpus, Attributes = SharedSidecar.Value };
+
+    /// <summary>
+    /// The engine's run over a named corpus compilation, at <see cref="KernelLimits.Corpus"/>: an M4 compilation by its
+    /// name, an M5a one as <c>m5a/name</c>.
+    /// </summary>
     public EngineResult Run(string compilation)
     {
         lock (_runs)
         {
             if (!_runs.TryGetValue(compilation, out var result))
             {
-                result = Pipeline.Run(EngineCorpus.Inputs(EngineCorpus.Extract(compilation)), Bundle, KernelLimits.Corpus);
+                var set = compilation.StartsWith("m5a/", StringComparison.Ordinal) ? CorpusSet.M5a : CorpusSet.M4;
+                var name = set == CorpusSet.M5a ? compilation["m5a/".Length..] : compilation;
+                result = Pipeline.Run(EngineCorpus.Inputs(EngineCorpus.Extract(set.Compile(name))), Bundle, Options);
                 _runs.Add(compilation, result);
             }
             return result;

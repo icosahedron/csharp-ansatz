@@ -132,7 +132,7 @@ Each theorem runs with three limits (Key Decisions, KTD24):
 | Limit | Default | MSBuild property | Per theorem |
 |---|---|---|---|
 | kernel fuel | 20M steps (100M in corpus tests) | `WarrantKernelFuel` | `[Theorem(KernelFuel = …)]` |
-| tactic fuel | ten times the largest use in the M5a corpus, measured in U11 | `WarrantTacticFuel` | `[Theorem(TacticFuel = …)]` |
+| tactic fuel | 910 steps: ten times the largest use in the M5a corpus and U11's tests (91), measured in U11 and again by each unit that adds a tactic | `WarrantTacticFuel` | `[Theorem(TacticFuel = …)]` |
 | wall clock | 30 s | `WarrantTimeoutSeconds` | `[Theorem(TimeoutSeconds = …)]` |
 
 Exhausting any of them fails the theorem with WRT0006 and never counts as a proof.

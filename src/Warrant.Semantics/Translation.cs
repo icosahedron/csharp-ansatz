@@ -47,12 +47,13 @@ public sealed class TranslationException : Exception
 /// </summary>
 public sealed class TheoremShell
 {
-    internal TheoremShell(Name name, Condition statement, VirList<TacticNode>? script, VirBudget? budget)
+    internal TheoremShell(Name name, Condition statement, VirList<TacticNode>? script, VirBudget? budget, Condition? claim = null)
     {
         Name = name;
         Statement = statement;
         Script = script;
         Budget = budget;
+        Claim = claim;
     }
 
     /// <summary>The theorem's name.</summary>
@@ -72,6 +73,13 @@ public sealed class TheoremShell
 
     /// <summary>The theorem's budget overrides from <c>[Theorem(...)]</c>; null when it has none.</summary>
     public VirBudget? Budget { get; }
+
+    /// <summary>
+    /// For a theorem with parameters whose claim is decidable, the claim and its <c>Decidable</c> instance as functions
+    /// of the parameters, <c>fun ps => P</c> and <c>fun ps => D</c>; null otherwise. It is never part of the declaration:
+    /// the engine's counterexample search evaluates <c>decide</c> of it at concrete values (M5a KTD25).
+    /// </summary>
+    public Condition? Claim { get; }
 
     /// <summary>The theorem declaration with this exact name and type, and <paramref name="proof"/> as its value.</summary>
     /// <param name="proof">The proof term; the kernel decides whether it proves <see cref="Type"/>.</param>

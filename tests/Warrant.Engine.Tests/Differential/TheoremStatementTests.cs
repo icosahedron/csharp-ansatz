@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Warrant.Cic;
+using Warrant.Engine.Reports;
 using Warrant.Frontend;
 using Warrant.Kernel;
 using Warrant.Semantics;
@@ -91,7 +92,8 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
     /// <c>∀ (x₁ : T₁) … (xₙ : Tₙ), P</c>. Instantiating the binders with each combination of the parameters' boundary
     /// values gives a closed proposition, which the kernel decides with a <c>Decidable</c> instance built here from the
     /// proposition's shape (independently of the translator's table); the result must be the C# claim's value on the
-    /// CLR at the same arguments. Until proof scripts run (U11), the engine reports each such theorem undecided.
+    /// CLR at the same arguments. With no script, the engine reports each such theorem not proved with its goal (U11), with
+    /// a counterexample exactly when a boundary instance is false (KTD25).
     /// </summary>
     [Fact]
     public void AQuantifiedStatementAgreesWithTheClrAtEveryBoundaryInstance()
@@ -149,7 +151,8 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
         foreach (var theorem in extraction.Units.Where(u => u.Unit.Kind == VirUnitKind.Theorem))
         {
             var outcome = run.Find(theorem.Key);
-            Assert.True(outcome is UndecidedOutcome, $"{theorem.Key}: {Describe(outcome)}");
+            var notProved = outcome as NotProvedOutcome ?? throw new Xunit.Sdk.XunitException($"{theorem.Key}: {Describe(outcome)}");
+            Assert.Equal("unsolved goals", notProved.Message);
             var shell = translation.Find(theorem.Key)!.Theorem!;
             var types = (theorem.Unit.Params ?? VirList<VirParam>.Empty).Select(p => p.Type).ToList();
             var method = assembly.MethodOf(theorem.Unit);
@@ -174,6 +177,7 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
                 }
             });
             instances.Add(theorem.Key, counts);
+            Assert.True(counts.False > 0 == !notProved.Counterexample.IsEmpty, $"{theorem.Key}: {counts.False} false instance(s), counterexample [{OutcomeText.Counterexample(notProved.Counterexample)}]");
         }
 
         // Each claim's true and false instances among the boundary values.
@@ -261,7 +265,9 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
         null => "no outcome",
         ProvedOutcome p => $"proved by {p.By}",
         FalseOutcome => "false (WRT0001)",
+        NotProvedOutcome n => $"not proved (WRT0001): {n.Message}",
         UndecidedOutcome u => $"undecided (WRT0006): {u.Reason}",
+        InternalErrorOutcome i => $"internal error (WRT0010): {i.Reason}",
         FailedOutcome f => $"failed: {f.Reason}",
         SkippedOutcome s => $"skipped: {s.Reason}",
         _ => outcome.GetType().Name,

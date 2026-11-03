@@ -20,7 +20,7 @@ internal static class TranslateCommand
     /// <param name="output">Where member lines, diagnostics and the summary go.</param>
     /// <param name="error">Where usage errors and declines go.</param>
     /// <returns>
-    /// 0 when every member translated and every theorem was proved; 1 when anything was rejected, false, undecided, failed
+    /// 0 when every member translated and every theorem was proved; 1 when anything was rejected, false, unproved, undecided, an internal error, failed
     /// or skipped, or the compilation has errors; 2 for bad arguments or unreadable input.
     /// </returns>
     public static int Run(string[] args, TextWriter output, TextWriter error)
@@ -143,9 +143,21 @@ internal static class TranslateCommand
                         output.WriteLine($"  Values: {OutcomeText.Values(f.Sides, sources.Text)}");
                     }
                     break;
+                case NotProvedOutcome n:
+                    errors++;
+                    output.WriteLine(sources.Format(n.TacticSpan ?? location, "error", NotProvedOutcome.Code, OutcomeText.NotProvedMessage(theorem, n)));
+                    foreach (var line in OutcomeText.NotProvedDetails(n))
+                    {
+                        output.WriteLine(line.Length == 0 ? "" : $"  {line}");
+                    }
+                    break;
                 case UndecidedOutcome u:
                     errors++;
                     output.WriteLine(sources.Format(location, "error", UndecidedOutcome.Code, OutcomeText.UndecidedMessage(theorem, u.Reason)));
+                    break;
+                case InternalErrorOutcome i:
+                    errors++;
+                    output.WriteLine(sources.Format(location, "error", InternalErrorOutcome.Code, OutcomeText.InternalErrorMessage(theorem, i.Reason)));
                     break;
             }
         }
@@ -168,7 +180,8 @@ internal static class TranslateCommand
         output.WriteLine(string.Create(
             CultureInfo.InvariantCulture,
             $"{result.Units.Length} unit(s): {Count("translated")} translated, {Count("proved")} proved, {Count("false")} false, "
-            + $"{Count("undecided")} undecided, {Count("failed")} failed, {Count("skipped")} skipped; {errors} error(s), {warnings} warning(s)"));
+            + $"{Count("unproved")} unproved, {Count("undecided")} undecided, {Count("internal")} internal error(s), "
+            + $"{Count("failed")} failed, {Count("skipped")} skipped; {errors} error(s), {warnings} warning(s)"));
 
         bool clean = extraction.Diagnostics.All(d => d.Severity != ExtractionSeverity.Error)
             && result.Units.All(u => u is TranslatedOutcome or ProvedOutcome);

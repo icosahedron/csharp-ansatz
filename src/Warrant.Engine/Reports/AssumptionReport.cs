@@ -15,7 +15,7 @@ public enum ReportStatus
     /// <summary>A theorem the kernel admitted with its proof.</summary>
     Verified,
 
-    /// <summary>Anything else: a false, undecided, failed or skipped unit.</summary>
+    /// <summary>Anything else: a false, unproved, undecided, failed or skipped unit, or an internal error.</summary>
     Failed,
 }
 
@@ -40,8 +40,11 @@ public sealed record AssumptionReport(string Kernel, string Bundle, ImmutableArr
 /// <param name="Kind">What the unit is.</param>
 /// <param name="DisplayName">The C# display name.</param>
 /// <param name="Status">The status.</param>
-/// <param name="Outcome">The engine outcome: <c>translated</c>, <c>proved</c>, <c>false</c>, <c>undecided</c>, <c>failed</c> or <c>skipped</c>.</param>
-/// <param name="By">For a verified theorem, the proof the kernel accepted (<c>rfl</c> or <c>decide</c>); otherwise null.</param>
+/// <param name="Outcome">
+/// The engine outcome: <c>translated</c>, <c>proved</c>, <c>false</c>, <c>unproved</c>, <c>undecided</c>,
+/// <c>internal</c>, <c>failed</c> or <c>skipped</c>.
+/// </param>
+/// <param name="By">For a verified theorem, the proof the kernel accepted (<c>rfl</c>, <c>decide</c> or <c>script</c>); otherwise null.</param>
 /// <param name="Claim">For a theorem, the claim's source text when it is known; otherwise null.</param>
 /// <param name="Detail">For a failed unit, why; otherwise null.</param>
 /// <param name="Assumptions">The unit's own assumptions, then those it inherits from the units it depends on.</param>
@@ -115,7 +118,9 @@ public static class AssumptionReports
                 TranslatedOutcome => (ReportStatus.Translated, (string?)null, (string?)null),
                 ProvedOutcome p => (ReportStatus.Verified, ProofName(p.By), null),
                 FalseOutcome => (ReportStatus.Failed, null, OutcomeText.FalseDetail),
+                NotProvedOutcome n => (ReportStatus.Failed, null, OutcomeText.NotProvedDetail(n)),
                 UndecidedOutcome u => (ReportStatus.Failed, null, OutcomeText.UndecidedDetail(u.Reason)),
+                InternalErrorOutcome i => (ReportStatus.Failed, null, OutcomeText.InternalErrorDetail(i.Reason)),
                 FailedOutcome f => (ReportStatus.Failed, null, f.Reason),
                 SkippedOutcome s => (ReportStatus.Failed, null, s.Reason),
                 _ => throw new InvalidOperationException($"Unknown outcome {outcome.GetType().Name}."),
@@ -146,19 +151,29 @@ public static class AssumptionReports
 
     /// <summary>The proof's name as reports and messages print it.</summary>
     /// <param name="kind">The proof.</param>
-    /// <returns><c>rfl</c> or <c>decide</c>.</returns>
-    public static string ProofName(ProofKind kind) => kind == ProofKind.Rfl ? "rfl" : "decide";
+    /// <returns><c>rfl</c>, <c>decide</c> or <c>script</c>.</returns>
+    public static string ProofName(ProofKind kind) => kind switch
+    {
+        ProofKind.Rfl => "rfl",
+        ProofKind.Decide => "decide",
+        _ => "script",
+    };
 
     /// <summary>The outcome's name as reports and the CLI print it.</summary>
     /// <param name="outcome">The outcome.</param>
-    /// <returns><c>translated</c>, <c>proved</c>, <c>false</c>, <c>undecided</c>, <c>failed</c> or <c>skipped</c>.</returns>
+    /// <returns>
+    /// <c>translated</c>, <c>proved</c>, <c>false</c>, <c>unproved</c>, <c>undecided</c>, <c>internal</c>, <c>failed</c> or
+    /// <c>skipped</c>.
+    /// </returns>
     /// <exception cref="InvalidOperationException">The outcome is of an unknown kind.</exception>
     public static string OutcomeName(UnitOutcome outcome) => outcome switch
     {
         TranslatedOutcome => "translated",
         ProvedOutcome => "proved",
         FalseOutcome => "false",
+        NotProvedOutcome => "unproved",
         UndecidedOutcome => "undecided",
+        InternalErrorOutcome => "internal",
         FailedOutcome => "failed",
         SkippedOutcome => "skipped",
         _ => throw new InvalidOperationException($"Unknown outcome {outcome?.GetType().Name}."),

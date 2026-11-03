@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using Warrant.Engine;
 using Warrant.Engine.Reports;
 using Warrant.Extraction;
@@ -129,25 +128,24 @@ internal static class TranslateCommand
         foreach (var unit in result.Units)
         {
             var location = units.TryGetValue(unit.Key, out var extracted) ? extracted.Location : null;
-            var theorem = ShortName(unit.DisplayName);
+            var theorem = OutcomeText.ShortName(unit.DisplayName);
             switch (unit)
             {
                 case FalseOutcome f:
                     errors++;
-                    output.WriteLine(sources.Format(location, "error", FalseOutcome.Code, $"Theorem '{theorem}' is false."));
+                    output.WriteLine(sources.Format(location, "error", FalseOutcome.Code, OutcomeText.FalseMessage(theorem)));
                     if (AssumptionReports.ClaimSpan(engineUnits[unit.Key]) is { } claimSpan && sources.Text(claimSpan) is { } claim)
                     {
                         output.WriteLine($"  Claim:  {claim}");
                     }
                     if (f.Sides.Length > 0)
                     {
-                        var values = f.Sides.Select((s, i) => $"{(s.Span is { } span ? sources.Text(span) : null) ?? (i == 0 ? "left" : "right")} = {s.Value}");
-                        output.WriteLine($"  Values: {string.Join(", ", values)}");
+                        output.WriteLine($"  Values: {OutcomeText.Values(f.Sides, sources.Text)}");
                     }
                     break;
                 case UndecidedOutcome u:
                     errors++;
-                    output.WriteLine(sources.Format(location, "error", UndecidedOutcome.Code, $"Theorem '{theorem}' was not decided: {u.Reason}"));
+                    output.WriteLine(sources.Format(location, "error", UndecidedOutcome.Code, OutcomeText.UndecidedMessage(theorem, u.Reason)));
                     break;
             }
         }
@@ -160,7 +158,7 @@ internal static class TranslateCommand
         }
         if (reportPath is not null)
         {
-            var settings = new ReportSettings(checkOverflow, BundleName(bundlePath));
+            var settings = new ReportSettings(checkOverflow, OutcomeText.BundleName(bundlePath));
             File.WriteAllText(reportPath, MarkdownReport.Render(AssumptionReports.Build(result, inputs, settings, sources.Text)));
             output.WriteLine($"wrote the assumption report to {reportPath}");
         }
@@ -186,24 +184,6 @@ internal static class TranslateCommand
     };
 
     private static string Severity(ExtractionSeverity severity) => severity == ExtractionSeverity.Error ? "error" : "warning";
-
-    /// <summary>A theorem's name without its type, as messages print it (docs/m4/06).</summary>
-    private static string ShortName(string displayName)
-    {
-        var paren = displayName.IndexOf('(', StringComparison.Ordinal);
-        var head = paren < 0 ? displayName : displayName[..paren];
-        return head[(head.LastIndexOf('.') + 1)..];
-    }
-
-    /// <summary>The bundle's file name and the start of its SHA-256, which identify it in reports.</summary>
-    private static string BundleName(string path)
-    {
-        using var stream = File.OpenRead(path);
-        var hash = Convert.ToHexStringLower(SHA256.HashData(stream));
-        var name = Path.GetFileName(path);
-        name = name.EndsWith(".ndjson.gz", StringComparison.Ordinal) ? name[..^".ndjson.gz".Length] : name;
-        return $"{name} sha256:{hash[..12]}";
-    }
 
     private static string AppDirectory() =>
         Path.GetDirectoryName(typeof(TranslateCommand).Assembly.Location) is { Length: > 0 } dir ? dir : AppContext.BaseDirectory;

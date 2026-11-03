@@ -23,6 +23,23 @@ public static class VirTree
         return nodes;
     }
 
+    /// <summary>A node's ID: its index in <see cref="PreOrder"/>, found by reference.</summary>
+    /// <param name="unit">The unit.</param>
+    /// <param name="node">The node.</param>
+    /// <returns>The ID, or null when the node is not among the unit's nodes.</returns>
+    public static int? IdOf(VirUnit unit, VirNode node)
+    {
+        var nodes = PreOrder(unit);
+        for (int id = 0; id < nodes.Count; id++)
+        {
+            if (ReferenceEquals(nodes[id], node))
+            {
+                return id;
+            }
+        }
+        return null;
+    }
+
     /// <summary>The direct children of a node, in encoding field order.</summary>
     /// <param name="node">The node.</param>
     /// <returns>The children.</returns>

@@ -202,18 +202,8 @@ public static class Pipeline
             {
                 return [];
             }
-            var nodes = VirTree.PreOrder(unit.Unit);
-            int Id(VirNode node)
-            {
-                for (int i = 0; i < nodes.Count; i++)
-                {
-                    if (ReferenceEquals(nodes[i], node))
-                    {
-                        return i;
-                    }
-                }
-                throw new InvalidOperationException("a statement operand is not among the unit's nodes");
-            }
+            int Id(VirNode node) =>
+                VirTree.IdOf(unit.Unit, node) ?? throw new InvalidOperationException("a statement operand is not among the unit's nodes");
 
             (Expr Type, Expr Left, Expr Right)? operands = null;
             if (compare.Kind is not (CompareKind.Record or CompareKind.Closed) && shell.Type.GetAppFn() is ConstExpr head)

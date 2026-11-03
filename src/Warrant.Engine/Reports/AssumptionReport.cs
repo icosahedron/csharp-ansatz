@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Globalization;
 using Warrant.Kernel;
+using Warrant.Semantics;
 using Warrant.Vir;
 
 namespace Warrant.Engine.Reports;
@@ -98,7 +99,7 @@ public static class AssumptionReports
         ArgumentNullException.ThrowIfNull(settings);
         var byKey = units.GroupBy(u => u.Unit.Key, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
         var names = result.Units.ToDictionary(u => u.Key, u => u.DisplayName, StringComparer.Ordinal);
-        string Name(string key) => names.TryGetValue(key, out var n) ? n : FallbackName(key);
+        string Name(string key) => names.TryGetValue(key, out var n) ? n : LeanNames.FallbackDisplay(key);
 
         var reports = ImmutableArray.CreateBuilder<UnitReport>(result.Units.Length);
         foreach (var outcome in result.Units)
@@ -113,8 +114,8 @@ public static class AssumptionReports
             {
                 TranslatedOutcome => (ReportStatus.Translated, (string?)null, (string?)null),
                 ProvedOutcome p => (ReportStatus.Verified, ProofName(p.By), null),
-                FalseOutcome => (ReportStatus.Failed, null, $"the claim is false ({FalseOutcome.Code})"),
-                UndecidedOutcome u => (ReportStatus.Failed, null, $"the claim was not decided ({UndecidedOutcome.Code}): {u.Reason}"),
+                FalseOutcome => (ReportStatus.Failed, null, OutcomeText.FalseDetail),
+                UndecidedOutcome u => (ReportStatus.Failed, null, OutcomeText.UndecidedDetail(u.Reason)),
                 FailedOutcome f => (ReportStatus.Failed, null, f.Reason),
                 SkippedOutcome s => (ReportStatus.Failed, null, s.Reason),
                 _ => throw new InvalidOperationException($"Unknown outcome {outcome.GetType().Name}."),
@@ -140,15 +141,7 @@ public static class AssumptionReports
         {
             return null;
         }
-        var nodes = VirTree.PreOrder(unit.Unit);
-        for (int id = 0; id < nodes.Count; id++)
-        {
-            if (ReferenceEquals(nodes[id], statement))
-            {
-                return unit.Spans.TryGetSpan(id, out var span) ? span : null;
-            }
-        }
-        return null;
+        return VirTree.IdOf(unit.Unit, statement) is { } id && unit.Spans.TryGetSpan(id, out var span) ? span : null;
     }
 
     /// <summary>The proof's name as reports and messages print it.</summary>
@@ -185,9 +178,6 @@ public static class AssumptionReports
         var inherited = !string.Equals(assumption.UnitKey, unitKey, StringComparison.Ordinal);
         return new ReportAssumption(kind, shown, name(assumption.UnitKey), inherited, text);
     }
-
-    /// <summary>A display name for a key with no unit: the ID without its kind prefix.</summary>
-    private static string FallbackName(string key) => key.Length > 2 && key[1] == ':' ? key[2..] : key;
 
     private static string KernelName()
     {

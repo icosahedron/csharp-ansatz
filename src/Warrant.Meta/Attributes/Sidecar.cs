@@ -121,6 +121,9 @@ public sealed class Sidecar
     public IEnumerable<InstanceEntry> Instances =>
         (_parent?.Instances ?? []).Concat(_instancesByClass.Values.SelectMany(l => l).OrderBy(i => i.Order));
 
+    /// <summary>Grows whenever an instance is added, so Meta knows when to rebuild its instance index.</summary>
+    internal int InstanceVersion => _nextOrder;
+
     /// <summary>Every constant whose status is not <see cref="ReducibilityStatus.Semireducible"/>, with its status.</summary>
     public IEnumerable<KeyValuePair<Name, ReducibilityStatus>> ReducibilityStatuses
     {

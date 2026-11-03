@@ -35,7 +35,7 @@ public sealed class IsDefEqStuckException : MetaException
 // whnf.reducibleClassField are on, throwOnStuckAfterApp is off. Not ported: unification hints
 // (`tryUnificationHints` is false), context approximation, and the instance-typed metavariables of
 // `respectTransparency.instanceSearchTypes` (no metavariable is instance-typed until instance
-// resolution exists). `synthPending` returns false.
+// resolution exists). `synthPending` calls instance resolution (Attributes/SynthInstance.cs).
 public sealed partial class MetaM
 {
     private readonly Dictionary<DefEqKey, bool> _defEqTransCache = [];
@@ -64,11 +64,11 @@ public sealed partial class MetaM
     private static LBool ToLBool(bool b) => b ? LBool.True : LBool.False;
 
     /// <summary>
-    /// Synthesizes a pending instance metavariable (Lean's <c>synthPending</c>). Instance resolution
-    /// is not ported yet, so nothing is ever synthesized.
+    /// Synthesizes a pending instance metavariable by instance resolution (Lean's <c>synthPending</c>):
+    /// a natural or synthetic metavariable whose type is a class is assigned the instance found, at
+    /// most two nested calls deep. Returns whether it was assigned.
     /// </summary>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "Instance resolution (U16) will use the instance.")]
-    public bool SynthPending(MVarId mvarId) => false;
+    public bool SynthPending(MVarId mvarId) => SynthPendingImp(mvarId);
 
     // ---------------------------------------------------------------- small predicates
 

@@ -5,11 +5,18 @@ using Warrant.Vir;
 namespace Warrant.Semantics;
 
 /// <summary>
-/// A C# condition as Lean's <c>ite</c> takes it: a proposition and a <c>Decidable</c> instance for it (KTD8).
+/// A C# condition as Lean's <c>ite</c> takes it: a proposition and a <c>Decidable</c> instance for it (KTD8). A quantified
+/// claim (M5a KTD17) has no instance: a <c>∀</c> or <c>∃</c> is not decidable in general, and neither is a condition
+/// built from one.
 /// </summary>
 /// <param name="Prop">The proposition <c>P</c>.</param>
-/// <param name="Instance">A term of type <c>Decidable P</c>.</param>
-public sealed record Condition(Expr Prop, Expr Instance);
+/// <param name="Instance">A term of type <c>Decidable P</c>, or null when the proposition has none.</param>
+public sealed record Condition(Expr Prop, Expr? Instance)
+{
+    /// <summary>The instance, for a rule that needs one: <c>decide</c> and <c>ite</c> take only a decidable condition.</summary>
+    internal Expr DecidableInstance =>
+        Instance ?? throw new TranslationException(null, "a quantified claim is not a bool value.");
+}
 
 /// <summary>
 /// The literal encodings of docs/m4/05 ("Literals and the operator table"), in the shapes Lean 4.35.0 elaborates.
@@ -151,7 +158,7 @@ public static class Operators
     public static Expr Decide(Condition condition)
     {
         ArgumentNullException.ThrowIfNull(condition);
-        return Expr.App(Init.Decide, condition.Prop, condition.Instance);
+        return Expr.App(Init.Decide, condition.Prop, condition.DecidableInstance);
     }
 
     /// <summary><c>c ? t : e</c>, and every branch: <c>@ite T P D t e</c>.</summary>
@@ -163,7 +170,7 @@ public static class Operators
     public static Expr Ite(Expr type, Condition condition, Expr then, Expr @else)
     {
         ArgumentNullException.ThrowIfNull(condition);
-        return Expr.App(Init.Ite, type, condition.Prop, condition.Instance, then, @else);
+        return Expr.App(Init.Ite, type, condition.Prop, condition.DecidableInstance, then, @else);
     }
 
     /// <summary><c>Nat.beq a b</c>, which compares two closed-type indexes.</summary>
@@ -226,16 +233,43 @@ public static class Conditions
         _ => throw new TranslationException(null, $"<= is not defined on {type}."),
     };
 
-    /// <summary><c>!x</c>: <c>Not P</c> with <c>@instDecidableNot P D</c>.</summary>
+    /// <summary>
+    /// <c>a &gt; b</c> in a quantified statement, as Lean elaborates it: <c>@GT.gt T instLTT a b</c> with <c>T.decLt b a</c>
+    /// (M5a KTD17). A closed statement and a function body keep M4's swapped <see cref="Lt"/>.
+    /// </summary>
+    /// <param name="type"><c>Int32</c> or <c>Int64</c>.</param>
+    /// <param name="a">The left operand.</param>
+    /// <param name="b">The right operand.</param>
+    /// <returns>The condition.</returns>
+    public static Condition Gt(VirPrimitive type, Expr a, Expr b) => type switch
+    {
+        VirPrimitive.Int32 => new(Expr.App(Init.Gt, Init.Int32, Init.LtInt32, a, b), Expr.App(Init.Int32DecLt, b, a)),
+        VirPrimitive.Int64 => new(Expr.App(Init.Gt, Init.Int64, Init.LtInt64, a, b), Expr.App(Init.Int64DecLt, b, a)),
+        _ => throw new TranslationException(null, $"> is not defined on {type}."),
+    };
+
+    /// <summary><c>a &gt;= b</c> in a quantified statement: <c>@GE.ge T instLET a b</c> with <c>T.decLe b a</c>, as <see cref="Gt"/>.</summary>
+    /// <param name="type"><c>Int32</c> or <c>Int64</c>.</param>
+    /// <param name="a">The left operand.</param>
+    /// <param name="b">The right operand.</param>
+    /// <returns>The condition.</returns>
+    public static Condition Ge(VirPrimitive type, Expr a, Expr b) => type switch
+    {
+        VirPrimitive.Int32 => new(Expr.App(Init.Ge, Init.Int32, Init.LeInt32, a, b), Expr.App(Init.Int32DecLe, b, a)),
+        VirPrimitive.Int64 => new(Expr.App(Init.Ge, Init.Int64, Init.LeInt64, a, b), Expr.App(Init.Int64DecLe, b, a)),
+        _ => throw new TranslationException(null, $">= is not defined on {type}."),
+    };
+
+    /// <summary><c>!x</c>: <c>Not P</c> with <c>@instDecidableNot P D</c>, and no instance when <c>P</c> has none.</summary>
     /// <param name="x">The operand.</param>
     /// <returns>The condition.</returns>
     public static Condition Not(Condition x)
     {
         ArgumentNullException.ThrowIfNull(x);
-        return new(Expr.App(Init.Not, x.Prop), Expr.App(Init.DecidableNot, x.Prop, x.Instance));
+        return new(Expr.App(Init.Not, x.Prop), x.Instance is { } d ? Expr.App(Init.DecidableNot, x.Prop, d) : null);
     }
 
-    /// <summary><c>x &amp;&amp; y</c>: <c>And Px Py</c> with <c>@instDecidableAnd Px Py Dx Dy</c>.</summary>
+    /// <summary><c>x &amp;&amp; y</c>: <c>And Px Py</c> with <c>@instDecidableAnd Px Py Dx Dy</c>, and no instance when either has none.</summary>
     /// <param name="x">The left operand.</param>
     /// <param name="y">The right operand.</param>
     /// <returns>The condition.</returns>
@@ -243,10 +277,12 @@ public static class Conditions
     {
         ArgumentNullException.ThrowIfNull(x);
         ArgumentNullException.ThrowIfNull(y);
-        return new(Expr.App(Init.And, x.Prop, y.Prop), Expr.App(Init.DecidableAnd, x.Prop, y.Prop, x.Instance, y.Instance));
+        return new(
+            Expr.App(Init.And, x.Prop, y.Prop),
+            x.Instance is { } dx && y.Instance is { } dy ? Expr.App(Init.DecidableAnd, x.Prop, y.Prop, dx, dy) : null);
     }
 
-    /// <summary><c>x || y</c>: <c>Or Px Py</c> with <c>@instDecidableOr Px Py Dx Dy</c>.</summary>
+    /// <summary><c>x || y</c>: <c>Or Px Py</c> with <c>@instDecidableOr Px Py Dx Dy</c>, and no instance when either has none.</summary>
     /// <param name="x">The left operand.</param>
     /// <param name="y">The right operand.</param>
     /// <returns>The condition.</returns>
@@ -254,7 +290,9 @@ public static class Conditions
     {
         ArgumentNullException.ThrowIfNull(x);
         ArgumentNullException.ThrowIfNull(y);
-        return new(Expr.App(Init.Or, x.Prop, y.Prop), Expr.App(Init.DecidableOr, x.Prop, y.Prop, x.Instance, y.Instance));
+        return new(
+            Expr.App(Init.Or, x.Prop, y.Prop),
+            x.Instance is { } dx && y.Instance is { } dy ? Expr.App(Init.DecidableOr, x.Prop, y.Prop, dx, dy) : null);
     }
 
     /// <summary>A <c>bool</c> value <c>b</c> as a condition: <c>@Eq Bool b Bool.true</c> with <c>instDecidableEqBool b Bool.true</c>.</summary>
@@ -263,7 +301,8 @@ public static class Conditions
     public static Condition IsTrue(Expr b) => Eq(VirPrimitive.Bool, b, Init.True);
 
     /// <summary>
-    /// <c>Spec.Implies(x, y)</c>: <c>∀ (_ : Px), Py</c> with <c>@forall_prop_decidable Px (fun _ =&gt; Py) Dx (fun _ =&gt; Dy)</c>.
+    /// <c>Spec.Implies(x, y)</c>: <c>∀ (_ : Px), Py</c> with <c>@forall_prop_decidable Px (fun _ =&gt; Py) Dx (fun _ =&gt; Dy)</c>,
+    /// and no instance when either has none.
     /// </summary>
     /// <param name="x">The hypothesis.</param>
     /// <param name="y">The conclusion.</param>
@@ -274,7 +313,9 @@ public static class Conditions
         ArgumentNullException.ThrowIfNull(y);
         return new(
             Expr.Forall(Init.Unused, x.Prop, Closed(y.Prop)),
-            Expr.App(Init.ForallPropDecidable, x.Prop, Expr.Lam(Init.Unused, x.Prop, Closed(y.Prop)), x.Instance, Expr.Lam(Init.Unused, x.Prop, Closed(y.Instance))));
+            x.Instance is { } dx && y.Instance is { } dy
+                ? Expr.App(Init.ForallPropDecidable, x.Prop, Expr.Lam(Init.Unused, x.Prop, Closed(y.Prop)), dx, Expr.Lam(Init.Unused, x.Prop, Closed(dy)))
+                : null);
     }
 
     /// <summary>

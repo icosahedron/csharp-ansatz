@@ -2,8 +2,10 @@ using System.Reflection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Warrant.Cic;
 using Warrant.Frontend;
 using Warrant.Kernel;
+using Warrant.Semantics;
 using Warrant.Vir;
 using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
@@ -82,6 +84,148 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
                 ["M:Implications.BlockBodiedFalse"] = false,
             },
             claims);
+    }
+
+    /// <summary>
+    /// A theorem with parameters states its claim for all of them (M5a KTD17): its statement is
+    /// <c>∀ (x₁ : T₁) … (xₙ : Tₙ), P</c>. Instantiating the binders with each combination of the parameters' boundary
+    /// values gives a closed proposition, which the kernel decides with a <c>Decidable</c> instance built here from the
+    /// proposition's shape (independently of the translator's table); the result must be the C# claim's value on the
+    /// CLR at the same arguments. Until proof scripts run (U11), the engine reports each such theorem undecided.
+    /// </summary>
+    [Fact]
+    public void AQuantifiedStatementAgreesWithTheClrAtEveryBoundaryInstance()
+    {
+        var compilation = CompilationFactory.Create(
+            [new SourceFile("Quantified.cs", """
+                using Warrant;
+
+                public enum PaymentStatus { Pending, Processed, Failed }
+
+                public sealed record Payment(int Id, int Amount, PaymentStatus Status);
+
+                public enum PaymentResult { Valid, InvalidAmount, InvalidStatus }
+
+                public static class Quantified
+                {
+                    [Verified] public static int Increment(int x) => x + 1;
+
+                    [Verified] public static bool Flip(bool b) => !b;
+
+                    [Verified]
+                    public static PaymentResult Validate(Payment p)
+                    {
+                        if (p.Amount <= 0) return PaymentResult.InvalidAmount;
+                        if (p.Status != PaymentStatus.Pending) return PaymentResult.InvalidStatus;
+                        return PaymentResult.Valid;
+                    }
+
+                    [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
+
+                    [Theorem] static Proof LargerBelowMax(int x) => Prove.That(Spec.Implies(x < int.MaxValue, Increment(x) > x));
+
+                    [Theorem] static Proof FlipTwice(bool b) => Prove.That(Flip(Flip(b)) == b);
+
+                    [Theorem]
+                    static Proof ValidImpliesPositive(Payment p) =>
+                        Prove.That(Spec.Implies(Validate(p) == PaymentResult.Valid, p.Amount > 0));
+
+                    [Theorem] static Proof Ordered(long a, long b) => Prove.That(a >= b || b > a + 1);
+                }
+                """)],
+            checkOverflow: false);
+        var extraction = EngineCorpus.Extract(compilation);
+        Assert.Empty(extraction.Diagnostics);
+        var run = Pipeline.Run(EngineCorpus.Inputs(extraction), corpus.Bundle, KernelLimits.Corpus);
+        var translation = Translator.Translate(extraction.Units.Select(u => u.Unit), corpus.Bundle.Env);
+
+        var (claimsCompilation, _) = ClaimsCompilation(compilation);
+        using var assembly = CorpusAssembly.Load(claimsCompilation);
+        var definitions = extraction.Units.Where(u => u.Unit.Definition is not null).ToDictionary(u => u.Key, u => u.Unit.Definition!, StringComparer.Ordinal);
+        var values = new Values(assembly, definitions);
+        var inputs = new Inputs(values);
+
+        var instances = new Dictionary<string, (int True, int False)>(StringComparer.Ordinal);
+        foreach (var theorem in extraction.Units.Where(u => u.Unit.Kind == VirUnitKind.Theorem))
+        {
+            var outcome = run.Find(theorem.Key);
+            Assert.True(outcome is UndecidedOutcome, $"{theorem.Key}: {Describe(outcome)}");
+            var shell = translation.Find(theorem.Key)!.Theorem!;
+            var types = (theorem.Unit.Params ?? VirList<VirParam>.Empty).Select(p => p.Type).ToList();
+            var method = assembly.MethodOf(theorem.Unit);
+            var counts = (True: 0, False: 0);
+            KernelThread.Run(() =>
+            {
+                foreach (var args in inputs.BoundaryInputs(types))
+                {
+                    var claim = (bool)CorpusAssembly.Invoke(method, args)!;
+                    var instance = shell.Type;
+                    for (int i = 0; i < types.Count; i++)
+                    {
+                        instance = ExprOps.Instantiate(Assert.IsType<ForallExpr>(instance).Body, values.Term(types[i], args[i]));
+                    }
+                    var decide = Expr.App(Expr.Const(Name.Parse("Decidable.decide")), instance, DecidableInstance(instance));
+                    var checker = new TypeChecker(run.Environment, limits: KernelLimits.Corpus);
+                    checker.Check(decide);
+                    var decided = checker.Whnf(decide);
+                    var description = $"{theorem.DisplayName}({string.Join(", ", args.Select((a, i) => values.Display(types[i], a)))})";
+                    Assert.True(decided.Equals(Literals.Bool(claim)), $"{description}: the CLR computes {claim}, the statement decides to {decided}");
+                    counts = claim ? (counts.True + 1, counts.False) : (counts.True, counts.False + 1);
+                }
+            });
+            instances.Add(theorem.Key, counts);
+        }
+
+        // Each claim's true and false instances among the boundary values.
+        Assert.Equal(
+            new Dictionary<string, (int, int)>
+            {
+                ["M:Quantified.AlwaysLarger(System.Int32)"] = (6, 1),
+                ["M:Quantified.LargerBelowMax(System.Int32)"] = (7, 0),
+                ["M:Quantified.FlipTwice(System.Boolean)"] = (2, 0),
+                // Id and Amount at the int boundaries, Status at its three members and four unnamed values.
+                ["M:Quantified.ValidImpliesPositive(Payment)"] = (7 * 7 * 7, 0),
+                ["M:Quantified.Ordered(System.Int64,System.Int64)"] = (7 * 7 - 4, 4),
+            },
+            instances);
+    }
+
+    private static readonly Dictionary<string, (string Eq, string Lt, string Le)> Decidables = new(StringComparer.Ordinal)
+    {
+        ["Int32"] = ("instDecidableEqInt32", "Int32.decLt", "Int32.decLe"),
+        ["Int64"] = ("instDecidableEqInt64", "Int64.decLt", "Int64.decLe"),
+        ["Bool"] = ("instDecidableEqBool", "", ""),
+    };
+
+    /// <summary>
+    /// A <c>Decidable P</c> instance for a closed, quantifier-free proposition, by its head: the instances Lean's
+    /// instance resolution finds for <c>=</c>, <c>&lt;</c>, <c>≤</c>, <c>&gt;</c>, <c>≥</c>, <c>¬</c>, <c>∧</c>, <c>∨</c> and
+    /// <c>→</c> on the types C# compares.
+    /// </summary>
+    private static Expr DecidableInstance(Expr p)
+    {
+        Expr C(string name) => Expr.Const(Name.Parse(name));
+        if (p is ForallExpr f)
+        {
+            Assert.False(f.Body.HasLooseBVars, $"{p} is not an implication");
+            return Expr.App(
+                C("forall_prop_decidable"), f.BinderType, Expr.Lam(f.BinderName, f.BinderType, f.Body), DecidableInstance(f.BinderType), Expr.Lam(f.BinderName, f.BinderType, DecidableInstance(f.Body)));
+        }
+        var head = Assert.IsType<ConstExpr>(p.GetAppFn()).Name.ToString();
+        var args = p.GetAppArgs();
+        string Type() => Assert.IsType<ConstExpr>(args[0]).Name.ToString();
+        return head switch
+        {
+            "Eq" => Expr.App(C(Decidables[Type()].Eq), args[1], args[2]),
+            "LT.lt" => Expr.App(C(Decidables[Type()].Lt), args[2], args[3]),
+            "LE.le" => Expr.App(C(Decidables[Type()].Le), args[2], args[3]),
+            "GT.gt" => Expr.App(C(Decidables[Type()].Lt), args[3], args[2]),
+            "GE.ge" => Expr.App(C(Decidables[Type()].Le), args[3], args[2]),
+            "Not" => Expr.App(C("instDecidableNot"), args[0], DecidableInstance(args[0])),
+            "And" => Expr.App(C("instDecidableAnd"), args[0], args[1], DecidableInstance(args[0]), DecidableInstance(args[1])),
+            "Or" => Expr.App(C("instDecidableOr"), args[0], args[1], DecidableInstance(args[0]), DecidableInstance(args[1])),
+            _ => throw new InvalidOperationException($"no Decidable instance for {p}"),
+        };
     }
 
     /// <summary>

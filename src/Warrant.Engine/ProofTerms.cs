@@ -42,14 +42,15 @@ public static class ProofTerms
 
     /// <summary>
     /// <c>@of_decide_eq_true P D (@Eq.refl Bool Bool.true)</c> for a statement <c>P</c> with instance <c>D</c>. The kernel
-    /// accepts it exactly when <c>Decidable.decide P D</c> computes to <c>Bool.true</c>.
+    /// accepts it exactly when <c>Decidable.decide P D</c> computes to <c>Bool.true</c>. A quantified statement has no
+    /// instance, and so no <c>decide</c> proof (M5a KTD17).
     /// </summary>
     /// <param name="statement">The theorem's statement.</param>
-    /// <returns>The term.</returns>
-    public static Expr Decide(Condition statement)
+    /// <returns>The term, or null when the statement has no instance.</returns>
+    public static Expr? Decide(Condition statement)
     {
         ArgumentNullException.ThrowIfNull(statement);
-        return Expr.App(OfDecideEqTrue, statement.Prop, statement.Instance, TrueEqTrue);
+        return statement.Instance is { } instance ? Expr.App(OfDecideEqTrue, statement.Prop, instance, TrueEqTrue) : null;
     }
 
     /// <summary>

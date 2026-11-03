@@ -166,6 +166,10 @@ public static class Pipeline
                 return new ProvedOutcome(key, unit.Unit.Kind, display, assumptions, kind, declaration);
             }
 
+            if (shell.Statement.Instance is null)
+            {
+                return new UndecidedOutcome(key, unit.Unit.Kind, display, assumptions, "the claim is quantified, so it cannot be decided, and proof scripts are not run yet.");
+            }
             Expr decided;
             try
             {

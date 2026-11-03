@@ -60,6 +60,10 @@ internal static class Init
     public static readonly Expr Int32DecLe = C("Int32.decLe");
     public static readonly Expr Int64DecLt = C("Int64.decLt");
     public static readonly Expr Int64DecLe = C("Int64.decLe");
+    public static readonly Expr Gt = C("GT.gt", Level.Zero);
+    public static readonly Expr Ge = C("GE.ge", Level.Zero);
+
+    public static readonly Expr Exists = C("Exists", Level.One);
 
     public static readonly Expr Int32ToInt64 = C("Int32.toInt64");
     public static readonly Expr Int64ToInt32 = C("Int64.toInt32");

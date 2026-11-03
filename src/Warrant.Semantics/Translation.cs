@@ -47,20 +47,31 @@ public sealed class TranslationException : Exception
 /// </summary>
 public sealed class TheoremShell
 {
-    internal TheoremShell(Name name, Condition statement)
+    internal TheoremShell(Name name, Condition statement, VirList<TacticNode>? script, VirBudget? budget)
     {
         Name = name;
         Statement = statement;
+        Script = script;
+        Budget = budget;
     }
 
     /// <summary>The theorem's name.</summary>
     public Name Name { get; }
 
-    /// <summary>The theorem's type: the statement's proposition <c>P</c>.</summary>
+    /// <summary>The theorem's type: the statement's proposition <c>P</c>, closed over the theorem's parameters by <c>∀</c>.</summary>
     public Expr Type => Statement.Prop;
 
-    /// <summary>The statement: the proposition <c>P</c> and its <c>Decidable P</c> instance <c>D</c>, for the <c>decide</c> proof.</summary>
+    /// <summary>
+    /// The statement: the proposition <c>P</c> and its <c>Decidable P</c> instance <c>D</c>, for the <c>decide</c> proof; a
+    /// quantified statement has no instance (M5a KTD17).
+    /// </summary>
     public Condition Statement { get; }
+
+    /// <summary>The proof script from <c>.By(...)</c>, which the engine runs to find a proof; null when the theorem has none.</summary>
+    public VirList<TacticNode>? Script { get; }
+
+    /// <summary>The theorem's budget overrides from <c>[Theorem(...)]</c>; null when it has none.</summary>
+    public VirBudget? Budget { get; }
 
     /// <summary>The theorem declaration with this exact name and type, and <paramref name="proof"/> as its value.</summary>
     /// <param name="proof">The proof term; the kernel decides whether it proves <see cref="Type"/>.</param>

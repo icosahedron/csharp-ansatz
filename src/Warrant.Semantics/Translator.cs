@@ -113,14 +113,9 @@ public static class Translator
                     }
                 case VirUnitKind.Theorem:
                     {
-                        if (unit.Params is { Count: > 0 })
-                        {
-                            throw new TranslationException(unit.Key, "theorems with parameters need M5a.");
-                        }
-                        var statement = new BodyTranslator(types).Statement(
-                            unit.Statement ?? throw new TranslationException(unit.Key, "a theorem has no statement."));
+                        var statement = new BodyTranslator(types).Statement(unit);
                         Declare(unit.Key, name, display, null);
-                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [], new TheoremShell(name, statement));
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [], new TheoremShell(name, statement, unit.Script, unit.Budget));
                     }
                 case VirUnitKind.Type:
                     {

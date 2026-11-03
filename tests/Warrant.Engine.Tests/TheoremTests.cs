@@ -299,9 +299,11 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
             Expr.App(
                 Expr.Const(Name.Parse("of_decide_eq_true")),
                 statement.Prop,
-                statement.Instance,
+                statement.Instance!,
                 Expr.App(Expr.Const(Name.Parse("Eq.refl"), Level.One), Expr.Const(Name.Parse("Bool")), Expr.Const(Name.Parse("Bool.true")))),
             ProofTerms.Decide(statement));
+        // A quantified statement has no instance, so no decide proof (M5a KTD17).
+        Assert.Null(ProofTerms.Decide(new Condition(Expr.Forall(Name.Parse("x"), Literals.Type(VirPrimitive.Int32), statement.Prop), null)));
     }
 
     // ---- Export ----

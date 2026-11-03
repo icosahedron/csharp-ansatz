@@ -20,6 +20,13 @@ internal sealed partial class BodyTranslator
     private readonly List<Expr> _params = [];
     private Expr? _self;
 
+    /// <summary>
+    /// Whether this is a quantified statement (one with parameters, <c>Spec.ForAll</c> or <c>Spec.Exists</c>): its
+    /// <c>&gt;</c> and <c>&gt;=</c> are <c>GT.gt</c> and <c>GE.ge</c>, as Lean elaborates them, so the goals tactics show
+    /// read as the C# does (M5a KTD17). Closed statements and function bodies keep M4's swapped <c>&lt;</c> and <c>&lt;=</c>.
+    /// </summary>
+    private bool _quantified;
+
     public BodyTranslator(TypeTable types) => _types = types;
 
     /// <summary>A function unit's type (<c>∀</c> over <c>self</c> and the parameters) and value (<c>fun</c> over the same).</summary>
@@ -55,8 +62,21 @@ internal sealed partial class BodyTranslator
         return (_lctx.MkPi(binders, returns), _lctx.MkLambda(binders, body));
     }
 
-    /// <summary>A theorem's statement, translated as a condition (docs/m4/06, "The statement").</summary>
-    public Condition Statement(VirExpr statement) => Cond(statement, Env.Empty);
+    /// <summary>
+    /// A theorem's statement, translated as a condition (docs/m4/06, "The statement"). The parameters become free
+    /// variables while the claim is translated, then outer <c>∀</c> binders in order, with no instance (M5a KTD17).
+    /// </summary>
+    public Condition Statement(VirUnit unit)
+    {
+        var statement = unit.Statement ?? throw new TranslationException(unit.Key, "a theorem has no statement.");
+        foreach (var p in unit.Params ?? VirList<VirParam>.Empty)
+        {
+            _params.Add(_lctx.MkLocalDecl(_ngen, Name.From(p.Name), _types.Cic(p.Type)));
+        }
+        _quantified = _params.Count > 0 || Nodes(statement).Any(n => n is ForAllExpr or ExistsExpr);
+        var claim = Cond(statement, Env.Empty);
+        return _params.Count == 0 ? claim : new Condition(_lctx.MkPi(_params, claim.Prop), null);
+    }
 
     // ---- Values ----
 
@@ -109,6 +129,8 @@ internal sealed partial class BodyTranslator
                 return Switch(s, env);
             case ImpliesExpr:
                 throw new TranslationException(null, "Spec.Implies is valid only in a theorem statement.");
+            case ForAllExpr or ExistsExpr:
+                throw new TranslationException(null, "a quantified claim is not a bool value.");
             default:
                 throw new TranslationException(null, $"unsupported expression {e.GetType().Name}.");
         }
@@ -158,8 +180,25 @@ internal sealed partial class BodyTranslator
         LogicalExpr { Op: LogicalOp.Or or LogicalOp.OrEager } l => Conditions.Or(Cond(l.L, env), Cond(l.R, env)),
         NotExpr n => Conditions.Not(Cond(n.Operand, env)),
         ImpliesExpr i => Conditions.Implies(Cond(i.A, env), Cond(i.B, env)),
+        ForAllExpr f => ForAll(f, env),
+        ExistsExpr x => Exists(x, env),
         _ => Conditions.IsTrue(Value(e, env)),
     };
+
+    /// <summary><c>Spec.ForAll&lt;T&gt;(x =&gt; p)</c>: <c>∀ (x : T), P</c>, with no instance (M5a KTD17).</summary>
+    private Condition ForAll(ForAllExpr f, Env env)
+    {
+        var x = _lctx.MkLocalDecl(_ngen, Name.From(f.Name), _types.Cic(f.Domain));
+        return new Condition(_lctx.MkPi([x], Cond(f.Body, env.Set(f.Local, x)).Prop), null);
+    }
+
+    /// <summary><c>Spec.Exists&lt;T&gt;(x =&gt; p)</c>: <c>@Exists T (fun (x : T) =&gt; P)</c>, with no instance (M5a KTD17).</summary>
+    private Condition Exists(ExistsExpr e, Env env)
+    {
+        var x = _lctx.MkLocalDecl(_ngen, Name.From(e.Name), _types.Cic(e.Domain));
+        var body = _lctx.MkLambda([x], Cond(e.Body, env.Set(e.Local, x)).Prop);
+        return new Condition(Expr.App(Init.Exists, _types.Cic(e.Domain), body), null);
+    }
 
     /// <summary>
     /// A comparison as a condition. Integers and open enums (at the underlying type) use the order and equality rows; records
@@ -179,8 +218,8 @@ internal sealed partial class BodyTranslator
                     {
                         case CompareOp.Lt: return Conditions.Lt(t, a, b);
                         case CompareOp.Le: return Conditions.Le(t, a, b);
-                        case CompareOp.Gt: return Conditions.Lt(t, b, a);
-                        case CompareOp.Ge: return Conditions.Le(t, b, a);
+                        case CompareOp.Gt: return _quantified ? Conditions.Gt(t, a, b) : Conditions.Lt(t, b, a);
+                        case CompareOp.Ge: return _quantified ? Conditions.Ge(t, a, b) : Conditions.Le(t, b, a);
                     }
                     eq = Conditions.Eq(t, a, b);
                     break;

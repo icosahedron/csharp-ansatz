@@ -94,29 +94,4 @@ internal static class CrossCheckFixtures
         };
         return decls;
     }
-
-    /// <summary>
-    /// The declarations of <paramref name="decl"/> as the kernel holds them in <paramref name="env"/>
-    /// after admission (types, constructors and every generated recursor).
-    /// </summary>
-    public static Declaration AdmittedForm(KernelEnvironment env, KernelDeclaration decl)
-    {
-        switch (decl)
-        {
-            case InductiveDecl ind:
-            {
-                var typeNames = ind.Types.Select(t => t.Name).ToEquatableArray();
-                return new InductiveDeclaration(
-                    ind.Types.Select(t => (InductiveInfo)env.Get(t.Name)).ToEquatableArray(),
-                    ind.Types.SelectMany(t => t.Constructors).Select(c => (ConstructorInfo)env.Get(c.Name)).ToEquatableArray(),
-                    env.Constants.OfType<RecursorInfo>().Where(r => r.All.Equals(typeNames)).OrderBy(r => r.Name).ToEquatableArray());
-            }
-            case DefinitionDecl d:
-                return new ConstantDeclaration(env.Get(d.Value.Name));
-            case TheoremDecl t:
-                return new ConstantDeclaration(env.Get(t.Value.Name));
-            default:
-                throw new ArgumentException($"unsupported fixture {decl}", nameof(decl));
-        }
-    }
 }

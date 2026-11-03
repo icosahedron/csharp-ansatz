@@ -23,7 +23,7 @@ internal static class Inductive
         CheckUniformIndOccs(d);
         var res = new ElimNested(env, d).Run();
         int nnested = res.Aux2Nested.Count;
-        var auxEnv = env.Fork();
+        var auxEnv = env.Child();
         new AddInductiveFn(auxEnv, res.AuxDecl, nnested, limits).Run();
         if (nnested == 0)
         {

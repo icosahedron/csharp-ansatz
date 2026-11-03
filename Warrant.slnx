@@ -11,5 +11,6 @@
     <Project Path="tests/Warrant.Extraction.Tests/Warrant.Extraction.Tests.csproj" />
     <Project Path="tests/Warrant.Kernel.Tests/Warrant.Kernel.Tests.csproj" />
     <Project Path="tests/Warrant.Lean4Export.Tests/Warrant.Lean4Export.Tests.csproj" />
+    <Project Path="tests/Warrant.TestSupport/Warrant.TestSupport.csproj" />
   </Folder>
 </Solution>

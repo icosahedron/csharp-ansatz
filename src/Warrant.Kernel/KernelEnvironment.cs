@@ -8,15 +8,24 @@ namespace Warrant.Kernel;
 /// (<see cref="Kernel"/>) add to it.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Admission can fail part-way through (for example after declaring an inductive type but before
-/// its recursor checks out), so work happens on a <see cref="Fork"/> that is committed only on
+/// its recursor checks out), so work happens on a child environment that is committed only on
 /// success, mirroring how Lean's persistent environments are discarded on error.
+/// </para>
+/// <para>
+/// An environment that will not grow further can be <see cref="Freeze">frozen</see> and then
+/// <see cref="Fork">forked</see>: each fork is an O(1) overlay that sees the frozen base and admits
+/// into itself only. Since nothing writes to the base after freezing, any number of forks can
+/// read it in parallel.
+/// </para>
 /// </remarks>
 public sealed class KernelEnvironment
 {
     private readonly KernelEnvironment? _parent;
     private readonly Dictionary<Name, ConstantInfo> _constants = [];
     private bool? _quotInitialized;
+    private bool _frozen;
 
     /// <summary>Creates an empty environment.</summary>
     public KernelEnvironment()
@@ -27,6 +36,9 @@ public sealed class KernelEnvironment
 
     /// <summary>The number of constants (including any in parent environments).</summary>
     public int Count => _constants.Count + (_parent?.Count ?? 0);
+
+    /// <summary>Whether this environment has been frozen (see <see cref="Freeze"/>).</summary>
+    public bool IsFrozen => _frozen;
 
     /// <summary>Whether the quotient package (<c>Quot</c>, <c>Quot.mk</c>, …) has been added.</summary>
     public bool IsQuotInitialized => _quotInitialized ?? _parent?.IsQuotInitialized ?? false;
@@ -72,13 +84,36 @@ public sealed class KernelEnvironment
     /// <summary>The constants added to this environment itself (not its parents), in insertion order.</summary>
     internal IEnumerable<ConstantInfo> LocalConstants => _constants.Values;
 
-    /// <summary>A child environment whose additions become visible here only after <see cref="Commit"/>.</summary>
-    internal KernelEnvironment Fork() => new(this);
+    /// <summary>
+    /// Forbids any further additions to this environment, so that it can be shared by
+    /// <see cref="Fork">forks</see>. Admitting into a frozen environment throws
+    /// <see cref="InvalidOperationException"/>. Freezing is permanent and idempotent.
+    /// </summary>
+    public void Freeze() => _frozen = true;
 
-    /// <summary>Adds this fork's constants (and quotient flag) to its parent.</summary>
+    /// <summary>
+    /// An empty overlay on this frozen environment: it sees every constant here and admits new
+    /// ones into itself only, so neither this environment nor any other fork of it sees them.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">This environment is not frozen.</exception>
+    public KernelEnvironment Fork()
+    {
+        if (!_frozen)
+        {
+            throw new InvalidOperationException("Only a frozen environment can be forked; call Freeze first.");
+        }
+        return new(this);
+    }
+
+    /// <summary>A child environment whose additions become visible here only after <see cref="Commit"/>.</summary>
+    internal KernelEnvironment Child() => new(this);
+
+    /// <summary>Adds this child's constants (and quotient flag) to its parent.</summary>
+    /// <exception cref="InvalidOperationException">The parent is frozen.</exception>
     internal void Commit()
     {
-        var parent = _parent ?? throw new InvalidOperationException("Only a fork can be committed.");
+        var parent = _parent ?? throw new InvalidOperationException("Only a child environment can be committed.");
+        parent.ThrowIfFrozen();
         foreach (var (name, c) in _constants)
         {
             parent._constants.Add(name, c);
@@ -90,7 +125,23 @@ public sealed class KernelEnvironment
     }
 
     /// <summary>Adds a constant without checking it (the kernel's <c>add_core</c>).</summary>
-    internal void AddCore(ConstantInfo constant) => _constants[constant.Name] = constant;
+    internal void AddCore(ConstantInfo constant)
+    {
+        ThrowIfFrozen();
+        _constants[constant.Name] = constant;
+    }
 
-    internal void MarkQuotInitialized() => _quotInitialized = true;
+    internal void MarkQuotInitialized()
+    {
+        ThrowIfFrozen();
+        _quotInitialized = true;
+    }
+
+    private void ThrowIfFrozen()
+    {
+        if (_frozen)
+        {
+            throw new InvalidOperationException("The environment is frozen; admit into a fork of it instead.");
+        }
+    }
 }

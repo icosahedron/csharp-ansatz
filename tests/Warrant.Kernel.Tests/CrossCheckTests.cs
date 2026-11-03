@@ -13,7 +13,7 @@ public class CrossCheckTests(InitMediumFixture initMedium) : IClassFixture<InitM
 
     private KernelEnvironment AdmitFixtures()
     {
-        var env = Copy(initMedium.Env);
+        var env = initMedium.Env.Fork();
         KernelThread.Run(() =>
         {
             foreach (var d in CrossCheckFixtures.Build())
@@ -21,20 +21,6 @@ public class CrossCheckTests(InitMediumFixture initMedium) : IClassFixture<InitM
                 Kernel.Add(env, d);
             }
         });
-        return env;
-    }
-
-    private static KernelEnvironment Copy(KernelEnvironment source)
-    {
-        var env = new KernelEnvironment();
-        foreach (var c in source.Constants)
-        {
-            env.AddCore(c);
-        }
-        if (source.IsQuotInitialized)
-        {
-            env.MarkQuotInitialized();
-        }
         return env;
     }
 
@@ -74,12 +60,12 @@ public class CrossCheckTests(InitMediumFixture initMedium) : IClassFixture<InitM
     {
         var path = Environment.GetEnvironmentVariable("WARRANT_CROSSCHECK_OUT")!;
         var env = AdmitFixtures();
-        var source = Lean4Export.Lean4Export.ReadFile(Corpus.Path("init-medium.ndjson.gz"));
+        var source = Lean4Export.Lean4Export.ReadFile(TestData.Path("init-medium.ndjson.gz"));
         using var writer = new Lean4ExportWriter(File.Create(path), source.Metadata);
         writer.WriteAll(source.Declarations);
         foreach (var d in CrossCheckFixtures.Build())
         {
-            writer.Write(CrossCheckFixtures.AdmittedForm(env, d));
+            writer.Write(AdmittedDeclarations.Of(env, d));
         }
     }
 }

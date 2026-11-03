@@ -462,7 +462,7 @@ public class ExtractionTests
     }
 
     [Fact]
-    public void APreprocessorConditionalStopsTranslation()
+    public void CodeThatDiffersBetweenBuildsIsRejectedAndSoAreItsUsers()
     {
         var result = Extract("""
             public static class C
@@ -478,13 +478,121 @@ public class ExtractionTests
                     return 2;
             #endif
                 }
+
+                [Theorem] static Proof IsTwo() => Prove.That(F() == 2);
+            }
+            """);
+        Assert.Equal("WRT0002 | preprocessor conditional", Only(result, "M:C.F"));
+        Assert.Equal("WRT0002 | depends on a rejected unit", Only(result, "M:C.IsTwo"));
+        Assert.Equal(["M:C.Plain(System.Int32)"], result.Units.Select(u => u.Key));
+    }
+
+    [Fact]
+    public void AnOverloadUnderIfThatChangesACallRejectsTheCaller()
+    {
+        // G(5) calls G(int) when DEBUG is defined and G(long) otherwise, though Caller has no #if of its own.
+        var result = Extract("""
+            public static class C
+            {
+            #if DEBUG
+                [Verified] public static int G(int x) => 1;
+            #endif
+                [Verified] public static int G(long x) => 2;
+
+                [Verified] public static int Caller() => G(5);
+            }
+            """);
+        Assert.Equal("WRT0002 | preprocessor conditional", Only(result, "M:C.Caller"));
+        Assert.Empty(result.DiagnosticsFor("M:C.G(System.Int64)"));
+        Assert.Equal(["M:C.G(System.Int64)"], result.Units.Select(u => u.Key));
+    }
+
+    [Fact]
+    public void AnIfThatTheVerifiedCodeDoesNotReachChangesNothing()
+    {
+        var result = Extract("""
+            public static class C
+            {
+                [Verified] public static int F(int x) => x + 1;
+
+            #if DEBUG
+                public static void Log(string message) => System.Console.WriteLine(message);
+            #endif
+            }
+            """);
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(["M:C.F(System.Int32)"], result.Units.Select(u => u.Key));
+    }
+
+    [Fact]
+    public void BuildsThatDoNotCompileAreNotCompared()
+    {
+        // Without MODERN the file does not compile, so only the MODERN build is real.
+        var result = Extract("""
+            public static class C
+            {
+                [Verified] public static int F(int x) => x + 1;
+
+            #if !MODERN
+                public static int Old() => Missing();
+            #endif
             }
             """);
         Assert.False(result.HasCompileErrors);
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(["M:C.F(System.Int32)"], result.Units.Select(u => u.Key));
+    }
+
+    [Fact]
+    public void NoBuildCompilingReportsTheFirstBuildsErrors()
+    {
+        var result = Extract("""
+            public static class C
+            {
+            #if DEBUG
+                public static int A() => Missing();
+            #else
+                public static int B() => Missing();
+            #endif
+            }
+            """);
+        Assert.True(result.HasCompileErrors);
+        Assert.Equal("CS0103", Assert.Single(result.Diagnostics).Id);
+    }
+
+    [Fact]
+    public void AClosedEnumWarningFromAnyBuildIsReported()
+    {
+        var result = Extract("""
+            [Closed] public enum Phase { Draft, Open }
+            public static class C
+            {
+                [Verified] public static bool IsOpen(Phase p) => p == Phase.Open;
+            #if DEBUG
+                public static Phase Cast(int x) => (Phase)x;
+            #endif
+            }
+            """);
+        Assert.Equal("WRT0008 | integer cast to a closed enum", Only(result, "M:C.Cast(System.Int32)"));
+        Assert.NotNull(result.Find("M:C.IsOpen(Phase)"));
+    }
+
+    [Fact]
+    public void MoreThanSixSymbolsAreNotCombined()
+    {
+        var result = Extract("""
+            public static class C
+            {
+                [Verified] public static int F(int x) => x;
+            #if A || B || C1 || D || E || F1 || G
+                public static int H() => 0;
+            #endif
+            }
+            """);
         Assert.Empty(result.Units);
         var error = Assert.Single(result.Diagnostics);
-        Assert.Equal(("WRT0002", "preprocessor conditional", ExtractionSeverity.Error), (error.Id, error.Construct, error.Severity));
-        Assert.Equal(9, error.Location!.StartLine); // the #if, after Inline's using line
+        Assert.Equal(("WRT0002", "preprocessor conditional"), (error.Id, error.Construct));
+        Assert.Equal(5, error.Location!.StartLine); // the #if, after Inline's using line
     }
 
     // Each of these is unsound to ignore: the model would drop the guard or the write.

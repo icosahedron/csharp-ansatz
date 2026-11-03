@@ -161,6 +161,9 @@
       "T:Corpus.Rejected.Tier": { "outcome": "translated" },
       "M:Corpus.Rejected.ClosedClasses.ReadsAField(Corpus.Rejected.Tier)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "closed class instance member" }] },
 
+      "M:Corpus.Rejected.Conditional.BuildNumber": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "preprocessor conditional" }] },
+      "M:Corpus.Rejected.Conditional.Unaffected(System.Int32)": { "outcome": "translated" },
+
       "T:Corpus.Rejected.Unsealed": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "unsealed record" }] },
       "T:Corpus.Rejected.OwnEquality": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "record with its own equality" }] },
       "T:Corpus.Rejected.ExtraState": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "record with other instance state" }] },

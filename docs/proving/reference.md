@@ -187,7 +187,7 @@ diagnostic message uses.
 | `switch section mixing default with case labels` | WRT0002 | `case 1: default:`. Write the `case` as its own section. |
 | `unsealed record`, `record struct`, `record with its own equality`, `record with other instance state`, `record with a base record`, `record that is not positional` | WRT0002 | `==` on a record must be field-by-field over its positional properties. |
 | `record with its own copy constructor` | WRT0002 | `with` runs the copy constructor, and the model copies the fields, as only the compiler's copy constructor does. |
-| `preprocessor conditional` | WRT0002 | Any `#if` in the compilation stops translation, because M4 does not know the defines of the real build. M5a takes them from `Csc`. |
+| `preprocessor conditional` | WRT0002 | A member that translates differently depending on which `#if` symbols the build defines, for example one with an `#if DEBUG` in its body, or one that calls an overload declared under `#if`. Extraction compares every combination of the symbols the conditions test (at most six), skipping combinations that do not compile. Code an `#if` does not affect is translated as usual. M5a takes the real defines from `Csc`. |
 | `cyclic record types` | WRT0002 | Without `null`, no value of such a type can be built. |
 | `reserved member name` | WRT0002 | A member of a record or closed type named `rec`, `recOn`, `casesOn`, `noConfusion`, `noConfusionType`, `below`, `brecOn`, `ctorIdx` or `injEq`. |
 | `instance member of a class` | WRT0002 | Only records may have verified instance members. |

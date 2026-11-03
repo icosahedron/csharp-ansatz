@@ -20,6 +20,9 @@ public static class Extractor
 
     private const string PreprocessorConditional = "preprocessor conditional";
 
+    /// <summary>The most <c>#if</c> symbols extraction combines: 2^6 = 64 extractions.</summary>
+    private const int MaxConditionalSymbols = 6;
+
     /// <summary>The Roslyn version recorded in <c>facts</c>: the loaded compiler's assembly version, as <c>major.minor.build</c>.</summary>
     public static string RoslynVersion
     {
@@ -43,6 +46,50 @@ public static class Extractor
         {
             throw new ArgumentNullException(nameof(compilation));
         }
+        // The compilation is parsed without the defines of a real build, which M5a takes from Csc. Code under #if could
+        // therefore be code no build runs, or could add an overload or a type that changes what other code binds to.
+        // So every combination of the symbols the #if conditions test is extracted, and a unit is kept only if its VIR is
+        // the same in every combination that compiles. A combination that does not compile is not a real build.
+        var symbols = ConditionalSymbols(compilation, cancellationToken);
+        if (symbols.Count == 0)
+        {
+            return ExtractOne(compilation, cancellationToken);
+        }
+        if (symbols.Count > MaxConditionalSymbols)
+        {
+            var at = compilation.SyntaxTrees
+                .SelectMany(t => t.GetRoot(cancellationToken).DescendantTrivia())
+                .First(t => t.IsKind(SyntaxKind.IfDirectiveTrivia));
+            var tooMany = new ExtractionDiagnostic(
+                DiagnosticIds.Unsupported,
+                ExtractionSeverity.Error,
+                PreprocessorConditional,
+                null,
+                Symbols.Span(at.GetLocation()),
+                $"M4 combines at most {MaxConditionalSymbols} {PreprocessorConditional} symbols; this compilation tests {string.Join(", ", symbols)}.");
+            return new ExtractionResult([], [tooMany], hasCompileErrors: false);
+        }
+
+        var results = new List<ExtractionResult>();
+        ExtractionResult? firstFailure = null;
+        for (int mask = 0; mask < 1 << symbols.Count; mask++)
+        {
+            var defined = symbols.Where((_, i) => (mask & (1 << i)) != 0).ToList();
+            var result = ExtractOne(mask == 0 ? compilation : WithSymbols(compilation, defined, cancellationToken), cancellationToken);
+            if (result.HasCompileErrors)
+            {
+                firstFailure ??= result;
+            }
+            else
+            {
+                results.Add(result);
+            }
+        }
+        return results.Count == 0 ? firstFailure! : Agreeing(results, symbols);
+    }
+
+    private static ExtractionResult ExtractOne(CSharpCompilation compilation, CancellationToken cancellationToken)
+    {
         var errors = compilation.GetDiagnostics(cancellationToken)
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .Select(d => new ExtractionDiagnostic(
@@ -52,25 +99,85 @@ public static class Extractor
         {
             return new ExtractionResult([], Sort(errors), hasCompileErrors: true);
         }
-
-        // The compilation is parsed without the defines of a real build, which M5a takes from Csc, so code under #if
-        // could be the code no build runs. Until then nothing in a compilation with a conditional is translated.
-        var conditionals = compilation.SyntaxTrees
-            .SelectMany(t => t.GetRoot(cancellationToken).DescendantTrivia())
-            .Where(t => t.IsKind(SyntaxKind.IfDirectiveTrivia))
-            .Select(t => new ExtractionDiagnostic(
-                DiagnosticIds.Unsupported,
-                ExtractionSeverity.Error,
-                PreprocessorConditional,
-                null,
-                Symbols.Span(t.GetLocation()),
-                $"M4 does not support {PreprocessorConditional}: the defines of the real build are not known until M5a."))
-            .ToList();
-        if (conditionals.Count > 0)
-        {
-            return new ExtractionResult([], Sort(conditionals), hasCompileErrors: false);
-        }
         return new Run(compilation, cancellationToken).Execute();
+    }
+
+    /// <summary>The symbols any <c>#if</c> or <c>#elif</c> condition in the compilation tests, sorted ordinally.</summary>
+    private static List<string> ConditionalSymbols(CSharpCompilation compilation, CancellationToken cancellationToken) =>
+        compilation.SyntaxTrees
+            .SelectMany(t => t.GetRoot(cancellationToken).DescendantTrivia())
+            .Where(t => t.IsKind(SyntaxKind.IfDirectiveTrivia) || t.IsKind(SyntaxKind.ElifDirectiveTrivia))
+            .Select(t => (ConditionalDirectiveTriviaSyntax)t.GetStructure()!)
+            .SelectMany(d => d.Condition.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
+            .Select(i => i.Identifier.ValueText)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>The compilation with every tree parsed again with <paramref name="defined"/> added to its symbols.</summary>
+    private static CSharpCompilation WithSymbols(CSharpCompilation compilation, List<string> defined, CancellationToken cancellationToken)
+    {
+        var trees = compilation.SyntaxTrees.Select(t =>
+        {
+            var options = (CSharpParseOptions)t.Options;
+            var names = options.PreprocessorSymbolNames.Concat(defined).Distinct(StringComparer.Ordinal);
+            return CSharpSyntaxTree.ParseText(t.GetText(cancellationToken), options.WithPreprocessorSymbols(names), t.FilePath, cancellationToken);
+        });
+        return compilation.RemoveAllSyntaxTrees().AddSyntaxTrees(trees);
+    }
+
+    /// <summary>
+    /// The first result without the units whose VIR differs in another result, or that depend on one; with the warnings
+    /// of every result, since a WRT0008 in any build is a way to break a closed assumption.
+    /// </summary>
+    private static ExtractionResult Agreeing(List<ExtractionResult> results, List<string> symbols)
+    {
+        var reference = results[0];
+        var diagnostics = reference.Diagnostics.ToList();
+        var rejected = new HashSet<string>(StringComparer.Ordinal);
+        var kept = new List<ExtractedUnit>();
+
+        // Units come dependencies first, so a rejected dependency is already in the set when its user is reached.
+        foreach (var unit in reference.Units)
+        {
+            var vir = VirWriter.Write(unit.Unit);
+            bool differs = results.Skip(1).Any(r => r.Find(unit.Key) is not { } other || !vir.AsSpan().SequenceEqual(VirWriter.Write(other.Unit)));
+            var dependency = unit.Unit.Deps.FirstOrDefault(rejected.Contains);
+            if (differs)
+            {
+                rejected.Add(unit.Key);
+                diagnostics.Add(new ExtractionDiagnostic(
+                    DiagnosticIds.Unsupported,
+                    ExtractionSeverity.Error,
+                    PreprocessorConditional,
+                    unit.Key,
+                    unit.Location,
+                    $"{unit.DisplayName} translates differently depending on which of {string.Join(", ", symbols)} the build defines."));
+            }
+            else if (dependency is not null)
+            {
+                rejected.Add(unit.Key);
+                diagnostics.Add(new ExtractionDiagnostic(
+                    DiagnosticIds.Unsupported,
+                    ExtractionSeverity.Error,
+                    DependsOnRejected,
+                    unit.Key,
+                    unit.Location,
+                    $"{unit.DisplayName} depends on {dependency}, which is rejected."));
+            }
+            else
+            {
+                kept.Add(unit);
+            }
+        }
+        foreach (var warning in results.Skip(1).SelectMany(r => r.Diagnostics).Where(d => d.Severity == ExtractionSeverity.Warning))
+        {
+            if (!diagnostics.Contains(warning))
+            {
+                diagnostics.Add(warning);
+            }
+        }
+        return new ExtractionResult(kept, Sort(diagnostics), hasCompileErrors: false);
     }
 
     /// <summary>The language version as <c>facts</c> records it: <c>14</c> for C# 14.0, <c>7.3</c> for C# 7.3.</summary>

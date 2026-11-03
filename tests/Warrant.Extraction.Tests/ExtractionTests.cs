@@ -46,6 +46,42 @@ public class ExtractionTests
         Assert.Equal(["M:C.Unrelated(System.Int32)"], result.Units.Select(u => u.Key));
     }
 
+    [Fact]
+    public void ASwitchSectionMixingDefaultWithCaseLabelsIsRejected()
+    {
+        var result = Extract("""
+            public static class C
+            {
+                [Verified]
+                public static int Mixed(int n)
+                {
+                    switch (n)
+                    {
+                        case 1:
+                        default:
+                            return 0;
+                        case 2:
+                            return 5;
+                    }
+                }
+
+                [Verified]
+                public static int Separate(int n)
+                {
+                    switch (n)
+                    {
+                        case 2:
+                            return 5;
+                        default:
+                            return 0;
+                    }
+                }
+            }
+            """);
+        Assert.Equal("WRT0002 | switch section mixing default with case labels", Only(result, "M:C.Mixed(System.Int32)"));
+        Assert.Empty(result.DiagnosticsFor("M:C.Separate(System.Int32)"));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

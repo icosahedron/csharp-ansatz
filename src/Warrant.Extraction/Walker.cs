@@ -269,6 +269,11 @@ internal sealed class Walker
         foreach (var section in s.Cases)
         {
             var labels = new List<VirPattern>();
+            if (section.Clauses.Length > 1 && section.Clauses.Any(cl => cl is IDefaultCaseClauseOperation))
+            {
+                // `case 1: default:` — translation places default last, which a shared section cannot express.
+                throw Reject("switch section mixing default with case labels", section.Syntax);
+            }
             foreach (var clause in section.Clauses)
             {
                 labels.Add(clause switch

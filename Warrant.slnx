@@ -13,6 +13,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Warrant.Cic.Tests/Warrant.Cic.Tests.csproj" />
+    <Project Path="tests/Warrant.Cli.Tests/Warrant.Cli.Tests.csproj" />
     <Project Path="tests/Warrant.Engine.Tests/Warrant.Engine.Tests.csproj" />
     <Project Path="tests/Warrant.Extraction.Tests/Warrant.Extraction.Tests.csproj" />
     <Project Path="tests/Warrant.Kernel.Tests/Warrant.Kernel.Tests.csproj" />

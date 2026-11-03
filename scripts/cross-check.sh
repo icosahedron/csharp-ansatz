@@ -11,6 +11,8 @@
 # Then declarations built from scratch in C# (tests/.../CrossCheckFixtures.cs: recursive,
 # mutual, nested, structure, universe-polymorphic and K-like types) are written by Warrant
 # and must be accepted by Lean, which re-derives every recursor and compares it with ours.
+# Last, `warrant translate` translates the M4 corpus (tests/corpus/m4/accepted) and must succeed, and Lean's
+# kernel must accept what it wrote: the semantics bundle plus every translated definition and proved theorem.
 #
 # Set WARRANT_INIT_EXPORT to a full-Init export (scripts/export-lean-library.sh) to include it.
 set -euo pipefail
@@ -61,6 +63,16 @@ set -e
 result=ok
 if [ "$ls" != accept ] || [ "$lean" != accept ]; then result="FIXTURES FAILED"; failures=$((failures + 1)); fi
 row "C# fixtures" "-" "$ls" "$lean" "$result"
+
+# The M4 corpus (docs/m4/07): Warrant translates it, and Lean's kernel re-checks the bundle plus every admitted
+# translated definition and proved theorem.
+set +e
+"${WARRANT[@]}" translate tests/corpus/m4/accepted --out "$OUT/m4.ndjson" > "$OUT/m4.translate.txt" 2>&1; ls=$(verdict $?)
+"$LEAN" "$OUT/m4.ndjson" > "$OUT/m4.lean.txt" 2>&1; lean=$(verdict $?)
+set -e
+result=ok
+if [ "$ls" != accept ] || [ "$lean" != accept ]; then result="M4 CORPUS FAILED"; failures=$((failures + 1)); fi
+row "M4 corpus" "-" "$ls" "$lean" "$result"
 
 echo
 echo "details in $OUT"

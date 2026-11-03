@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Warrant.TestSupport" />
+    <ProjectReference Include="..\..\src\Warrant.Engine\Warrant.Engine.csproj" />
+    <ProjectReference Include="..\Warrant.TestSupport\Warrant.TestSupport.csproj" />
+    <!-- Test-only: the corpus is compiled and extracted here; Warrant.Engine itself never sees Roslyn (KTD3). -->
+    <ProjectReference Include="..\..\src\Warrant\Warrant.csproj" />
+    <ProjectReference Include="..\..\src\Warrant.Frontend\Warrant.Frontend.csproj" />
+    <ProjectReference Include="..\..\src\Warrant.Extraction\Warrant.Extraction.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\data\warrant-semantics.ndjson.gz" LinkBase="data" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The corpus is compiled in memory from these copies (docs/m4/02). -->
+    <None Include="..\corpus\m4\**\*" LinkBase="corpus\m4" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

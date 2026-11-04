@@ -297,7 +297,7 @@ diagnostics. On `accepted/` it ends with:
 On `refuted/` it reports both theorems as false, for example:
 
 ```text
-tests/corpus/m4/refuted/Increment.cs(12,18): error WRT0001: Theorem 'NeverWraps' is false.
+tests/corpus/m4/refuted/Increment.cs(12,18): error WRT0001: Theorem 'Increments.NeverWraps()' is false.
   Claim:  Increment(int.MaxValue) > int.MaxValue
   Values: Increment(int.MaxValue) = -2147483648, int.MaxValue = 2147483647
 ```

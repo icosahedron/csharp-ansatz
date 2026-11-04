@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.CodeAnalysis;
 using Warrant.Engine;
 using Warrant.Engine.Reports;
 using Warrant.Extraction;
@@ -89,7 +90,8 @@ internal static class TranslateCommand
         var sources = new Sources(directory, root);
         output.WriteLine($"translating {files.Count} file(s) in {directory}");
 
-        var extraction = Extractor.Extract(CompilationFactory.FromFiles(root, files, checkOverflow));
+        var compilation = CompilationFactory.FromFiles(root, files, checkOverflow);
+        var extraction = Extractor.Extract(compilation);
         if (extraction.HasCompileErrors)
         {
             foreach (var d in extraction.Diagnostics)
@@ -128,7 +130,7 @@ internal static class TranslateCommand
         foreach (var unit in result.Units)
         {
             var location = units.TryGetValue(unit.Key, out var extracted) ? extracted.Location : null;
-            var theorem = OutcomeText.ShortName(unit.DisplayName);
+            var theorem = MessageName(compilation, unit);
             switch (unit)
             {
                 case FalseOutcome f:
@@ -188,7 +190,26 @@ internal static class TranslateCommand
         return clean ? 0 : 1;
     }
 
-    private static string Describe(UnitOutcome unit) => unit switch
+    /// <summary>
+    /// A unit's name as diagnostics print it (docs/m5a/04): the C# display name with containing types and parameter types
+    /// but no namespace, e.g. <c>Increments.AlwaysLarger(int)</c>; the short name when the symbol cannot be found.
+    /// </summary>
+    internal static string MessageName(Compilation compilation, UnitOutcome unit) =>
+        DocumentationCommentId.GetFirstSymbolForDeclarationId(unit.Key, compilation) is { } symbol
+            ? symbol.ToDisplayString(MessageNameFormat)
+            : OutcomeText.ShortName(unit.DisplayName);
+
+    private static readonly SymbolDisplayFormat MessageNameFormat =
+        new(
+            globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+            typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypes,
+            genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+            memberOptions: SymbolDisplayMemberOptions.IncludeParameters | SymbolDisplayMemberOptions.IncludeContainingType
+                | SymbolDisplayMemberOptions.IncludeExplicitInterface,
+            parameterOptions: SymbolDisplayParameterOptions.IncludeType | SymbolDisplayParameterOptions.IncludeParamsRefOut,
+            miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes | SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers);
+
+    internal static string Describe(UnitOutcome unit) => unit switch
     {
         ProvedOutcome p => $"proved ({AssumptionReports.ProofName(p.By)})",
         FailedOutcome f => $"failed: {f.Reason}",
@@ -196,13 +217,13 @@ internal static class TranslateCommand
         _ => AssumptionReports.OutcomeName(unit),
     };
 
-    private static string Severity(ExtractionSeverity severity) => severity == ExtractionSeverity.Error ? "error" : "warning";
+    internal static string Severity(ExtractionSeverity severity) => severity == ExtractionSeverity.Error ? "error" : "warning";
 
-    private static string AppDirectory() =>
+    internal static string AppDirectory() =>
         Path.GetDirectoryName(typeof(TranslateCommand).Assembly.Location) is { Length: > 0 } dir ? dir : AppContext.BaseDirectory;
 
     /// <summary>The source files on disk, for diagnostic paths and the text of spans.</summary>
-    private sealed class Sources(string directory, string root)
+    internal sealed class Sources(string directory, string root)
     {
         private readonly Dictionary<string, string[]?> _lines = new(StringComparer.Ordinal);
 
@@ -212,7 +233,7 @@ internal static class TranslateCommand
                 : string.Create(CultureInfo.InvariantCulture, $"{FilePath(location.Path)}({location.StartLine},{location.StartColumn}): {severity} {id}: {message}");
 
         /// <summary>A source path under the directory as the user named it, in the separator style they used.</summary>
-        private string FilePath(string relative)
+        public string FilePath(string relative)
         {
             var separator = directory.Contains('\\', StringComparison.Ordinal) ? '\\' : '/';
             return directory.TrimEnd('/', '\\') + separator + relative.Replace('/', separator);

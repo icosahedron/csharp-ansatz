@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using Warrant.Kernel;
 using Warrant.Lean4Export;
 
@@ -17,6 +18,8 @@ internal static class Cli
           warrant stats <export.ndjson[.gz]>
           warrant export <export.ndjson[.gz]> <output.ndjson> [--fuel N] [--quiet]
           warrant translate <directory> [--out <file.ndjson>] [--report <file.md>] [--check-overflow] [--bundle <path>]
+          warrant verify --csc-args <file> [--project-dir <dir>] [options]
+          warrant verify <directory> [options]
 
         check   re-checks every declaration with the kernel (exit 0 accept, 1 reject, 2 decline)
                 --fuel N          step budget per type checker (default 100000000)
@@ -33,11 +36,23 @@ internal static class Cli
                   --report FILE     write the assumption report as Markdown
                   --check-overflow  compile with overflow checking on
                   --bundle PATH     the semantics bundle (default: the one beside warrant.dll)
+        verify  builds the compilation from the compiler's argument file (one argument per line, paths relative
+                to --project-dir, default the current directory) or, like translate, from a directory; then
+                translates, proves and reports every [Verified] member and [Theorem] (exit 0 when every theorem
+                was proved, warnings allowed; 1 when an error was reported; 2 for bad arguments or unreadable input)
+                  --format text|msbuild     text (default), or one tab-separated WRT1 record per diagnostic
+                  --out FILE                write the bundle and every admitted declaration as lean4export NDJSON
+                  --report DIR              write report.md and report.json
+                  --keep-conditional-check  compare every #if combination even with the build's defines
+                  --kernel-fuel N           kernel steps per theorem (default 20000000; 100000000 for a directory)
+                  --tactic-fuel N           tactic steps per theorem (default 910)
+                  --timeout SECONDS         wall-clock limit per theorem (default 30)
+                  --bundle PATH             the semantics bundle; the attribute sidecar must be beside it
         """;
 
     public static int Run(string[] args)
     {
-        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate") || (args[0] == "export" && args.Length < 3))
+        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate" or "verify") || (args[0] == "export" && args.Length < 3))
         {
             Console.Error.WriteLine(Usage);
             return 2;
@@ -49,6 +64,7 @@ internal static class Cli
                 "stats" => Stats(args[1]),
                 "export" => Check(args[1], args.Skip(3).ToArray(), output: args[2]),
                 "translate" => TranslateCommand.Run(args[1..], Console.Out, Console.Error),
+                "verify" => Verify(args[1..]),
                 _ => Check(args[1], args.Skip(2).ToArray()),
             };
         }
@@ -57,6 +73,13 @@ internal static class Cli
             Console.Error.WriteLine($"declined: {ex.Message}");
             return 2;
         }
+    }
+
+    /// <summary>The build task reads verify's output as UTF-8 without a BOM, whatever the console's code page (goals hold ⊢).</summary>
+    private static int Verify(string[] args)
+    {
+        Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        return VerifyCommand.Run(args, Console.Out, Console.Error);
     }
 
     private static int Stats(string path)

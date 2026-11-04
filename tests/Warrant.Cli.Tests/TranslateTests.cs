@@ -27,7 +27,7 @@ public sealed partial class TranslateTests
         Assert.Equal(1, code);
         var file = Regex.Escape(Path.Combine(dir, "Increment.cs"));
         Assert.Matches(
-            $@"(?m)^{file}\(12,\d+\): error WRT0001: Theorem 'NeverWraps' is false\.\n"
+            $@"(?m)^{file}\(12,\d+\): error WRT0001: Theorem 'Increments\.NeverWraps\(\)' is false\.\n"
             + @"  Claim:  Increment\(int\.MaxValue\) > int\.MaxValue\n"
             + @"  Values: Increment\(int\.MaxValue\) = -2147483648, int\.MaxValue = 2147483647\n",
             output);

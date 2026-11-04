@@ -88,6 +88,16 @@ public static class OutcomeText
     public static string InternalErrorMessage(string theorem, string reason) =>
         $"Theorem '{theorem}' was not checked because of an internal error in Warrant: {FirstLine(reason)}";
 
+    /// <summary>
+    /// The diagnostic message for a unit the engine could not translate or the kernel rejected (WRT0010): extraction
+    /// accepted it, so the fault is Warrant's.
+    /// </summary>
+    /// <param name="unit">The unit's name.</param>
+    /// <param name="reason">The translator's or the kernel's message.</param>
+    /// <returns>The message.</returns>
+    public static string FailedMessage(string unit, string reason) =>
+        $"'{unit}' was not admitted because of an internal error in Warrant: {FirstLine(reason)}";
+
     /// <summary>The assumption report's detail for an internal error.</summary>
     /// <param name="reason">The kernel's or Meta's message.</param>
     /// <returns>The detail.</returns>

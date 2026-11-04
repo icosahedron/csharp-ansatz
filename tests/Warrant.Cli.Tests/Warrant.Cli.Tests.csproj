@@ -18,5 +18,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\corpus\m4\**\*" LinkBase="corpus\m4" CopyToOutputDirectory="PreserveNewest" />
+    <!-- A Csc argument file and the project files it names (plan M5a U12); its sources are data, not this project's code. -->
+    <Compile Remove="cscargs\**" />
+    <None Remove="cscargs\**" />
+    <None Include="cscargs\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -288,7 +288,8 @@ the `Warrant` package's own targets.
 
 A theorem's own `[Theorem(...)]` arguments override the three budgets. Design-time
 builds never verify, and a multi-targeted project verifies once, in the build
-of the first entry of `TargetFrameworks`.
+of the first entry of `TargetFrameworks`. A build of a single framework that is not
+the first (`dotnet build -f`) does not verify, and does not warn.
 
 ## CLI
 

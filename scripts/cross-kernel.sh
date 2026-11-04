@@ -114,6 +114,21 @@ judge() {
 }
 
 # check_file NAME FILE EXPECTED OFFICIAL NANODA LEAN4LEAN: the original row, then a row for Warrant's export.
+# Runs a step that writes a file the next rows judge (`produce <name> <out> <log> <command...>`), after deleting the
+# file a previous run left. A step that fails, or writes nothing, is a Warrant failure: a crash or a failed verify must
+# not leave an older or partial file to be judged.
+produce() {
+  local name="$1" out="$2"; shift 2
+  local v
+  rm -f "$out"
+  v="$(run "$@")"
+  if [ "$v" != accept ] || [ ! -s "$out" ]; then
+    echo "$name: the step that writes $(basename "$out") ended with $v (log $1)"
+    failures=$((failures + 1))
+    return 1
+  fi
+}
+
 check_file() {
   local name="$1" file="$2" expected="$3" key="${1//\//_}"
   local input="$file" export="$OUT/exports/$key.warrant.ndjson"
@@ -148,9 +163,8 @@ if [ -z "${ARENA_ONLY:-}" ]; then
   # Declarations built from scratch in C#, written by Warrant (as in scripts/cross-check.sh).
   fixtures_out="$OUT/exports/fixtures.ndjson"
   if command -v cygpath >/dev/null 2>&1; then fixtures_out="$(cygpath -w "$fixtures_out")"; fi
-  run "$LOGS/fixtures.build.txt" env WARRANT_CROSSCHECK_OUT="$fixtures_out" \
-    dotnet test tests/Warrant.Kernel.Tests -c Release --filter "FullyQualifiedName~CrossCheckTests" >/dev/null
-  if [ -s "$OUT/exports/fixtures.ndjson" ]; then
+  if produce "C# fixtures" "$OUT/exports/fixtures.ndjson" "$LOGS/fixtures.build.txt" env WARRANT_CROSSCHECK_OUT="$fixtures_out" \
+    dotnet test tests/Warrant.Kernel.Tests -c Release --filter "FullyQualifiedName~CrossCheckTests"; then
     judge "C# fixtures" accept "$(lean_v fixtures "$OUT/exports/fixtures.ndjson")" \
       "$(run "$LOGS/fixtures.warrant.txt" "${WARRANT[@]}" check "$OUT/exports/fixtures.ndjson" --quiet)" \
       "$(ansatz_v fixtures "$OUT/exports/fixtures.ndjson")" - - - export
@@ -159,8 +173,8 @@ if [ -z "${ARENA_ONLY:-}" ]; then
   fi
 
   # The translated M4 corpus: the semantics bundle plus every translated definition and proved theorem.
-  run "$LOGS/m4.translate.txt" "${WARRANT[@]}" translate tests/corpus/m4/accepted --out "$OUT/exports/m4.ndjson" >/dev/null
-  if [ -s "$OUT/exports/m4.ndjson" ]; then
+  if produce "M4 corpus (translated)" "$OUT/exports/m4.ndjson" \
+    "$LOGS/m4.translate.txt" "${WARRANT[@]}" translate tests/corpus/m4/accepted --out "$OUT/exports/m4.ndjson"; then
     judge "M4 corpus (translated)" accept "$(lean_v m4 "$OUT/exports/m4.ndjson")" \
       "$(run "$LOGS/m4.warrant.txt" "${WARRANT[@]}" check "$OUT/exports/m4.ndjson" --quiet)" \
       "$(ansatz_v m4 "$OUT/exports/m4.ndjson")" - - - export
@@ -171,8 +185,8 @@ if [ -z "${ARENA_ONLY:-}" ]; then
   # The M5a certificate (docs/m5a/08): `warrant verify` proves the M5a corpus by its scripts and writes the bundle
   # plus every admitted declaration. Then the same certificate with the last theorem's proof replaced by the proof
   # of the theorem before it, which proves a different statement: every kernel must reject it.
-  run "$LOGS/m5a.verify.txt" "${WARRANT[@]}" verify tests/corpus/m5a/accepted --out "$OUT/exports/m5a.ndjson" >/dev/null
-  if [ -s "$OUT/exports/m5a.ndjson" ]; then
+  if produce "M5a certificate (verify)" "$OUT/exports/m5a.ndjson" \
+    "$LOGS/m5a.verify.txt" "${WARRANT[@]}" verify tests/corpus/m5a/accepted --out "$OUT/exports/m5a.ndjson"; then
     judge "M5a certificate (verify)" accept "$(lean_v m5a "$OUT/exports/m5a.ndjson")" \
       "$(run "$LOGS/m5a.warrant.txt" "${WARRANT[@]}" check "$OUT/exports/m5a.ndjson" --quiet)" \
       "$(ansatz_v m5a "$OUT/exports/m5a.ndjson")" - - - export

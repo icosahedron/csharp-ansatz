@@ -811,13 +811,14 @@ public static class Extractor
         }
 
         /// <summary>
-        /// Non-null values a unit receives, directly or through record fields (R7), then the closed types it uses (R8):
+        /// Non-null values a unit receives, directly or through record fields (R7), including the values a
+        /// <c>Spec.ForAll</c> ranges over, then the closed types it uses (R8):
         /// that only their named members exist, and for a closed class with its own equality, that it agrees with identity.
         /// </summary>
         private VirList<VirAssumption> Assumptions(Candidate c)
         {
             var result = new List<VirAssumption>();
-            foreach (var p in c.ParameterSymbols)
+            foreach (var p in c.ParameterSymbols.Concat(c.Walker?.Universals ?? []))
             {
                 if (Symbols.IsNullableReference(p.Type))
                 {

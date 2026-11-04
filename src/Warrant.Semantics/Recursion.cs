@@ -87,6 +87,12 @@ internal sealed partial class BodyTranslator
     private RecursionState? _rec;
 
     /// <summary>
+    /// The key of the recursive method whose body is being translated, for its functional or its equation lemma; null
+    /// otherwise. <see cref="Branches"/> never skips a branch that calls it.
+    /// </summary>
+    private string? _selfKey;
+
+    /// <summary>
     /// The free variables in scope at the current point of the body, outermost first: <c>let</c>s, join points and their
     /// parameters, and <c>dite</c> hypotheses. Kept only while translating a recursive method's functional.
     /// </summary>
@@ -112,9 +118,14 @@ internal sealed partial class BodyTranslator
     public (Expr Type, Expr Value, ImmutableArray<DecreaseObligation> Decreases, Expr EquationProof) Recursive(VirUnit unit)
     {
         var binders = Binders(unit);
+        if (binders.Count == 0)
+        {
+            throw new TranslationException(null, "a recursive method needs a parameter: Spec.Decreases of a method without one cannot decrease.");
+        }
         var returns = ReturnType(unit);
         var block = (BlockStmt)unit.Body!;
         var measure = ((DecreasesStmt)block.Stmts[0]).Measure;
+        _selfKey = unit.Key;
         CollectLocals(block);
         var toInt = _types.Underlying(measure.Type) switch
         {
@@ -133,9 +144,14 @@ internal sealed partial class BodyTranslator
         var decreasing = Expr.App(Init.InvImage, domain, Init.Nat, NatLtRelation, mu, y, x);
         var rec = _lctx.MkLocalDecl(_ngen, Name.From("rec"), _lctx.MkPi([y], Expr.Forall(Init.Unused, decreasing, Conditions.Closed(returns))));
 
-        _rec = new RecursionState(unit, (FVarExpr)rec, binders, types, Measure, measure);
+        var recursion = new RecursionState(unit, (FVarExpr)rec, binders, types, Measure, measure);
+        _rec = recursion;
         var body = Statements(block.Stmts, 0, Env.Empty, new Unreachable(returns));
         _rec = null;
+        if (_recDecreases.Count != recursion.CallCount)
+        {
+            throw new TranslationException(null, $"{recursion.CallCount - _recDecreases.Count} of the method's calls to itself were not translated.");
+        }
         if (binders.Count > 1)
         {
             body = ExprOps.InstantiateRev(ExprOps.Abstract(body, [.. binders]), [.. Projections(x, binders.Count)]);
@@ -159,6 +175,7 @@ internal sealed partial class BodyTranslator
         var returns = ReturnType(unit);
         var block = (BlockStmt)unit.Body!;
         CollectLocals(block);
+        _selfKey = unit.Key;
         var body = Statements(block.Stmts, 0, Env.Empty, new Unreachable(returns));
         var lhs = Expr.App(Expr.Const(name), [.. binders]);
         return new Condition(_lctx.MkPi(binders, Expr.App(Init.Eq, returns, lhs, body)), null);
@@ -365,6 +382,9 @@ internal sealed partial class BodyTranslator
         public VirExpr MeasureNode { get; }
 
         public bool Mentions(Expr e) => BodyTranslator.Mentions(e, Fvar);
+
+        /// <summary>The number of the method's calls to itself.</summary>
+        public int CallCount => _calls.Count;
 
         /// <summary>The call's number among the method's calls to itself, from 1, in pre-order (source order).</summary>
         public int IndexOf(CallExpr call) =>

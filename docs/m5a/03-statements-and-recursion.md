@@ -95,6 +95,8 @@ A local whose value contains a recursive call is different: inside `F` its value
 In `var a = Fib(n - 1); return a + Fib(n - 2);`, `Fib.$dec_2` therefore quantifies over `a`, which is enough, because the second call's decrease does not depend on `a`.
 For the same reason, a hypothesis whose statement mentions a recursive call's result is left out of the obligation.
 A recursive call inside another recursive call's argument, `F(F(n - 1))`, would need the inner result's value in the outer obligation, and is rejected (WRT0002 `nested recursion`).
+Every call is translated, even one whose result nothing reads: M4 leaves out an `if` that returns nothing and changes no local the rest of the method reads (docs/m4), but not when a branch calls the method itself, since leaving it out would drop that call's obligation and admit a model of a method that never terminates.
+As a backstop, the translator checks that it recorded one obligation for each of the method's calls to itself, and a method with no parameters, whose measure cannot decrease, is rejected.
 The engine proves each one with the omega pipeline (chapter 6) and admits it before the definition, which refers to it.
 A theorem that fails is reported like any other, at the call, with `omega`'s constraints and the goal.
 This is `warrant verify tests/corpus/m5a/refuted`:

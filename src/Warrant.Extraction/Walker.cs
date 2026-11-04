@@ -18,6 +18,15 @@ internal sealed partial class Walker
 
     /// <summary>The variables bound by <c>Spec.ForAll</c> and <c>Spec.Exists</c> lambdas, by local ID.</summary>
     private readonly Dictionary<IParameterSymbol, int> _bound = new(SymbolEqualityComparer.Default);
+
+    /// <summary>
+    /// The variables bound by <c>Spec.ForAll</c>, in order. A reference-typed one ranges over non-null values only, which
+    /// the unit's assumptions must say, as they do for a parameter.
+    /// </summary>
+    private readonly List<IParameterSymbol> _universals = [];
+
+    /// <summary>The variables bound by <c>Spec.ForAll</c> in the unit walked, in source order.</summary>
+    public IReadOnlyList<IParameterSymbol> Universals => _universals;
     private readonly Dictionary<object, SyntaxNode> _syntax = new(ReferenceComparer.Instance);
     private readonly bool _inTheorem;
 

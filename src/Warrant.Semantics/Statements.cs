@@ -72,7 +72,8 @@ internal sealed partial class BodyTranslator
     /// 2. one branch falls through: <paramref name="k"/> is translated once, into that branch;
     /// 3. neither contains a <c>return</c>, and they change exactly one local <c>x</c> that <paramref name="k"/> reads:
     ///    <c>let x := combine(x after each branch); k</c>;
-    /// 4. neither contains a <c>return</c>, and they change no local <paramref name="k"/> reads: <paramref name="k"/> alone;
+    /// 4. neither contains a <c>return</c> or a call of the recursive method being translated, and they change no local
+    ///    <paramref name="k"/> reads: <paramref name="k"/> alone (a skipped call would leave its decrease unchecked);
     /// 5. otherwise a join point over the locals <paramref name="k"/> reads and some branch changes.
     /// Each branch is translated with its <paramref name="hypotheses"/> in scope, when there are any.
     /// </summary>
@@ -98,7 +99,8 @@ internal sealed partial class BodyTranslator
             .Distinct()
             .Order()
             .ToList();
-        if (!returns && live.Count == 0)
+        bool recurses = _selfKey is { } selfKey && branches.Any(b => Nodes(b).Any(n => n is CallExpr c && string.Equals(c.Target, selfKey, StringComparison.Ordinal)));
+        if (!returns && !recurses && live.Count == 0)
         {
             return k.Invoke(env);
         }

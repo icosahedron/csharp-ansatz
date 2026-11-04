@@ -164,6 +164,53 @@ public sealed class RecursionTests(EngineFixture engine) : IClassFixture<EngineF
     }
 
     [Fact]
+    public void ACallInABranchWhoseResultIsUnusedStillHasItsDecreaseChecked()
+    {
+        // Code review P0: an if that returns nothing and changes no local the rest reads was skipped whole (Branches
+        // rule 4), so F(n) below had no decrease obligation and F was admitted as `0`, although the C# never terminates.
+        var result = Script("""
+            public static class S
+            {
+                [Verified]
+                public static int F(int n)
+                {
+                    Spec.Decreases(n);
+                    int x = 0;
+                    if (n > 0) { x = F(n); }
+                    return 0;
+                }
+
+                [Theorem] static Proof FOfFive() => Prove.That(F(5) == 0).By(Tactic.Unfold(nameof(F)), Tactic.Simp());
+            }
+            """);
+        var outcome = Assert.IsType<NotProvedOutcome>(result.Find("M:S.F(System.Int32)"));
+        Assert.Equal(1, outcome.Decrease?.Index);
+        Assert.IsNotType<ProvedOutcome>(result.Find("M:S.FOfFive"));
+    }
+
+    [Fact]
+    public void ARecursiveMethodWithoutParametersFailsTranslation()
+    {
+        var result = Script("""
+            public static class S
+            {
+                [Verified]
+                public static int G()
+                {
+                    Spec.Decreases(0);
+                    return 1;
+                }
+
+                [Verified]
+                public static int H(int n) => n;
+            }
+            """);
+        var failed = Assert.IsType<FailedOutcome>(result.Find("M:S.G"));
+        Assert.Contains("needs a parameter", failed.Reason, StringComparison.Ordinal);
+        Assert.IsType<TranslatedOutcome>(result.Find("M:S.H(System.Int32)"));
+    }
+
+    [Fact]
     public void TheDecreaseFailureNamesTheCallAndTheMeasure()
     {
         var outcome = Assert.IsType<NotProvedOutcome>(engine.Run("m5a/refuted").Find("M:Corpus.Refuted.Recursion.Bad(System.Int32)"));

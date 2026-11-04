@@ -102,6 +102,10 @@ internal sealed partial class Walker
         var domain = MapType(parameter.Type, parameter.NullableAnnotation == NullableAnnotation.Annotated, lambda.Syntax);
         int local = _nextLocal++;
         _bound.Add(parameter, local);
+        if (name == "ForAll")
+        {
+            _universals.Add(parameter);
+        }
         var body = Expr(claim);
         VirExpr result = name == "ForAll"
             ? new ForAllExpr(local, parameter.Name, domain, body)

@@ -223,6 +223,26 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Contains(theorem.Assumptions, a => a.UnitKey == validate.Key && a.Assumption == new VirAssumption(VirAssumptionKind.NonNull, "p"));
     }
 
+    [Fact]
+    public void AForAllOverAReferenceTypeAssumesItsValuesAreNotNull()
+    {
+        // Code review: a quantified record ranges over non-null values only, which the report must say, as for a parameter.
+        var result = Script("""
+            public sealed record Payment(int Id, int Amount);
+
+            public static class S
+            {
+                [Theorem] static Proof Reflexive() => Prove.That(Spec.ForAll<Payment>(p => p.Amount == p.Amount)).By(Tactic.Intro("p"));
+
+                [Theorem] static Proof Witness() => Prove.That(Spec.Exists<int>(n => n == n)).By(Tactic.Exact(Lean.Const("True.intro")));
+            }
+            """);
+        var forAll = result.Find("M:S.Reflexive")!;
+        Assert.Contains(forAll.Assumptions, a => a.UnitKey == forAll.Key && a.Assumption == new VirAssumption(VirAssumptionKind.NonNull, "p"));
+        var exists = result.Find("M:S.Witness")!;
+        Assert.DoesNotContain(exists.Assumptions, a => a.Assumption.Kind == VirAssumptionKind.NonNull);
+    }
+
     // ---- VIR from JSON ----
 
     [Fact]

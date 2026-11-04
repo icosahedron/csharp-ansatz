@@ -44,7 +44,8 @@ Three details follow:
 
 - **Skipped compiles.** When `CoreCompile` is up to date, Csc does not run and the item is empty, so the task reuses the file from the last compile.
 - **Real defines.** With the compiler's `/define:` list, extraction no longer compares every combination of `#if` symbols (M4 docs/m4/03); code is translated under the build's actual configuration. The combination check stays for `warrant verify <directory>` and `translate`, which have no compiler arguments, and for multi-targeted projects (below), where a difference reads, for example, `Sample.Picks.Pick(int) translates differently depending on which of NET8_0 the build defines.` (WRT0002).
-- **Source generators.** Generated sources exist only inside Csc and are not in the arguments. A project whose code does not compile without them fails with WRT0012 naming the missing symbols, rather than a verification of different code or a green build with nothing checked: `error WRT0012: The compilation does not compile without generated sources (source generators run only inside the compiler); missing: As.` Setting `EmitCompilerGeneratedFiles` makes Csc write them to disk; picking them up from there is follow-up work.
+- **Source generators.** Generated sources exist only inside Csc and are not in the arguments. A project whose code does not compile without them fails with WRT0012 naming the missing symbols, rather than a green build with nothing checked: `error WRT0012: The compilation does not compile without generated sources (source generators run only inside the compiler); missing: As.` Setting `EmitCompilerGeneratedFiles` makes Csc write them to disk; picking them up from there is follow-up work.
+  WRT0012 catches only code that fails to compile without them. Generated code that compiles either way but changes what the hand-written code means, such as an overload that binds more closely than the one verified or an interceptor, is not detected: Warrant then verifies the code as written, which is not the code the compiler emitted. Running the generators in the CLI is follow-up work.
 
 ## `warrant verify`
 
@@ -118,6 +119,7 @@ This is `src/Warrant.Build/build/Warrant.Build.targets`, shortened; `Warrant.Bui
 The target has no `Inputs` and `Outputs`, so every build verifies again (KTD22).
 Skipping an unchanged project would be a cache keyed on timestamps, and the CI trust decision for M5a is that every build re-checks every proof (Key Decisions).
 In a multi-targeted project the target runs in the inner build of the first target framework only, so diagnostics are not repeated, and it asks the CLI to keep M4's `#if` combination check, so a verified method whose meaning differs under `#if NET8_0` is rejected instead of being proved for one framework and shipped unproved for the other.
+A build of one framework that is not the first, such as `dotnet build -f net10.0` for `net8.0;net10.0`, therefore verifies nothing and gives no warning: the inner build cannot tell whether the first framework's build is part of the same invocation. Verify with the first framework, or a build of all of them.
 Design-time builds, which Visual Studio runs constantly in the background, skip it.
 
 The task launches the CLI, which the package carries framework-dependent under `tools/net10.0/any/`, as `dotnet warrant.dll`, using `$(DOTNET_HOST_PATH)` and falling back to `dotnet` on the path.

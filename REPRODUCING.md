@@ -188,7 +188,7 @@ dotnet build
 dotnet test
 ```
 
-Expected result: **967 tests pass and 17 are skipped**. The skipped ones are
+Expected result: **970 tests pass and 17 are skipped**. The skipped ones are
 opt-in tests that need external files or tools: `AcceptsFullInit` and
 `WritesFixturesForLean` (the kernel's Lean cross-checks), the export-script test
 (needs `LEAN_TOOLCHAIN_BIN`), the two differential-cost measurements (need

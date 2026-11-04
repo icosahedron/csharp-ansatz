@@ -49,6 +49,8 @@ public class CorpusTests(InitMediumFixture initMedium) : IClassFixture<InitMediu
     [InlineData("arena/141_falseFromUnsafe.ndjson", "falseFromUnsafe")]
     [InlineData("arena/proj-of-subst-prop.ndjson", "PR14806Subst.observe")]
     [InlineData("arena/rec-of-subst-prop.ndjson", "Issue.forallFalse")]
+    [InlineData("arena/forged-quot-ind.ndjson", "Quot")]
+    [InlineData("arena/inductive-undeclared-universe.ndjson", "U")]
     public void ArenaVerdicts(string file, string expectedRejected)
     {
         var (_, results) = Corpus.CheckAll(Corpus.Read(file));
@@ -62,6 +64,17 @@ public class CorpusTests(InitMediumFixture initMedium) : IClassFixture<InitMediu
             Assert.Equal(expectedRejected, rejected.FirstOrDefault());
             Assert.All(results.Where(r => !r.Accepted), r => Assert.False(r.ResourceLimit));
         }
+    }
+
+    [Fact]
+    public void QuotientPrimitivesCannotBeForged()
+    {
+        // Ansatz accepts this file (docs/kernel.md, cross-kernel checks): `Quot.ind` arrives before `Quot`, which
+        // must still mean the primitive, so the later `def Quot` and `def Quot.mk` and the proof of False fail.
+        var (env, results) = Corpus.CheckAll(Corpus.Read("arena/forged-quot-ind.ndjson"));
+        Assert.Contains("'Quot' has already been declared", results.Single(r => !r.Accepted && r.Name == Name.Parse("Quot")).Error, StringComparison.Ordinal);
+        Assert.False(results.Single(r => r.Name == Name.Parse("fakeQuotFalse")).Accepted);
+        Assert.Null(env.Find(Name.Parse("fakeQuotFalse")));
     }
 
     [Fact]

@@ -103,6 +103,76 @@ Replay requires every recursor in the file to be `==` to the one Lean generates,
 so these runs check Warrant's recursor generation against Lean's, not just
 type correctness.
 
+## Cross-kernel checks: Ansatz and the arena (milestone 5a)
+
+`scripts/cross-kernel.sh` compares Warrant's verdicts with several kernels at once
+(ticket `d953584`, plan KTD27). Each row is one file, with one verdict column per kernel:
+
+- **LEAN**: Lean's kernel, through `tools/lean-replay` (Lean 4.35.0).
+- **WARRANT**: `warrant export` on an original file, which checks it as `warrant check` does;
+  `warrant check` on a file Warrant wrote.
+- **ANSATZ**: Ansatz's `arena-check --fuel 100000000`, with fuel equal to Warrant's corpus fuel.
+  It needs `clojure` on `PATH` and a built Ansatz checkout in `ANSATZ_DIR` (default `../ansatz`;
+  build it once with `clojure -T:build javac`). Without either, the column says SKIPPED.
+- **ARENA-OFFICIAL, NANODA, LEAN4LEAN**: the verdicts
+  [lean-kernel-arena](https://arena.lean-lang.org/) publishes in `results.json` for Lean's C++ kernel,
+  nanoda and lean4lean. They exist for arena tests only.
+
+A decline, a timeout (`KERNEL_TIMEOUT`, 900 s by default) or a checker error is no verdict.
+`scripts/lib/arena.sh` downloads `lean-arena-tests.tar.gz` and `results.json` and records the
+arena commit from `results.json`. It also checks each test's SHA-256 against `results.json`
+and skips any test that does not match, with a message. The rows are:
+
+- every test in the arena tarball, judged against the arena's expected outcome;
+- init-medium, `Nat.add_succ` and `tests/data/arena/*`, judged against their known outcome;
+- Warrant's export of each of those files, which every kernel must accept;
+- the declarations built in C# (`CrossCheckFixtures.cs`, on top of init-medium) and the translated M4 corpus
+  (the semantics bundle plus the translated definitions and theorems), which must be accepted.
+
+The script exits 1 only when Warrant contradicts an expected outcome, or when Lean rejects
+something Warrant admitted. It lists every other disagreement, and each one is explained below.
+Arena tests marked `either` would be recorded without a judgement, but the tarball contains none:
+the 30 `either` tests are not in it.
+
+### Results
+
+The run used arena commit `236ab46` (results published 2026-11-02 18:44 UTC) and Ansatz `4ff56b8`.
+All 207 tarball tests matched their published SHA-256. Ansatz ran under the Clojure CLI
+(deps.clj 1.12.6.1673) on Java 26. The run produced 432 rows in about 60 minutes.
+Ansatz took 45 of those minutes, two of them 900-second timeouts, Warrant 7 and Lean 4.
+The two fixtures added afterwards (below) raise the count to 436 rows. A second run over the
+committed corpus alone took 113 s and gave the same verdicts on the new fixtures as on their arena originals.
+
+| Rows | Lean | Warrant | Ansatz | official / nanoda / lean4lean |
+|---|---|---|---|---|
+| 127 arena tests expected to accept | 127 accept | 127 accept | 125 accept, 1 timeout, 1 decline | 127 accept / 125 accept and 2 declines / 127 accept |
+| 80 arena tests expected to reject | 74 reject, 6 decline | 80 reject | 79 reject, **1 accept** | 80 reject / 79 reject and **1 accept** / 80 reject |
+| 207 Warrant exports of the arena tests | 207 accept | 207 accept | 204 accept, 1 reject, 1 timeout, 1 decline | – |
+| init-medium, `Nat.add_succ`, the 6 committed arena files, and the exports of all 8 | 15 agree, 1 decline | 16 agree | 13 agree, 3 reject | – |
+| C# fixtures; translated M4 corpus | accept; accept | accept; accept | reject; reject | – |
+
+**Warrant's verdict matched the expected outcome on every row, and Lean accepted everything
+Warrant wrote.** No verdict from another kernel showed a fault in Warrant.
+
+### Disagreements
+
+| Row(s) | Kernel | Cause | Regression |
+|---|---|---|---|
+| `bugs/forged-quot-ind` | Ansatz **accepts** a proof of `False` | **Ansatz is unsound here.** The file declares `Quot.ind` before `Quot` and `Quot.mk`, and then defines `Quot` and `Quot.mk` as ordinary definitions. Ansatz checks the quotient declaration by comparing its type with one built from the names `Quot` and `Quot.mk`. It does not require them to be the primitives already in the environment. Warrant, like Lean, installs the whole quotient package when the first quotient constant arrives. The later `def Quot` therefore fails with "'Quot' has already been declared", and `fakeQuotFalse` does not type-check. The arena reports that nanoda once had the same bug; its published verdict is now reject. | `tests/data/arena/forged-quot-ind.ndjson`, `CorpusTests.ArenaVerdicts` and `QuotientPrimitivesCannotBeForged` |
+| `other/inductive-undeclared-universe` | nanoda (published) accepts | **nanoda's bug.** An inductive type uses the universe parameter `u` without declaring it. Warrant rejects it with "invalid reference to undefined universe level parameter 'u'", as do Lean, official, lean4lean and Ansatz. | `tests/data/arena/inductive-undeclared-universe.ndjson`, `CorpusTests.ArenaVerdicts` |
+| init-medium and its export; the C# fixtures, which include init-medium; Warrant's exports of `tutorial/140_falseFromUnsafe` and of `141_falseFromUnsafe` | Ansatz rejects with "Unknown constant" at a recursive unsafe definition (`_private…Array.foldlMUnsafe.fold`, `unsafeLoop`) | **An Ansatz limitation.** `arena-check` admits definitions one at a time and does not put a recursive `unsafe` (or `partial` implementation) definition in the environment before checking its body. Lean and Warrant admit such definitions; Warrant buffers each mutual unsafe block (see "How exported data is checked"). On the original `falseFromUnsafe` files Ansatz rejects too, with the expected verdict, but at `unsafeLoop` rather than at `falseFromUnsafe`. | None: Warrant's behaviour is covered by `UnsafeDefinitionIsAcceptedButSafeUseIsNot` and by Lean's verdict on the same files |
+| translated M4 corpus | Ansatz rejects `Nat.zero_sub` (declaration 583 of 2,955) | **A version difference.** The corpus contains the Lean 4.35.0 semantics bundle, and Ansatz targets Lean 4.33.1. Ansatz short-cuts `Nat.decEq` on literals by building `Decidable.isTrue (Eq.refl n)`. In Lean 4.35.0, `Decidable` is a structure built with `Decidable.intro` and a `Bool` field, so that term no longer reduces and `decide (Nat.pred 0 = 0)` does not reach `true`. Ansatz accepts the Lean 4.33.1 `Nat.zero_sub` in init-medium. It rejects `tests/data/warrant-semantics.ndjson.gz` the same way, with or without its `mdata` nodes. | None: Lean accepts the file |
+
+### Rows without a verdict
+
+| Row(s) | Kernel | Why |
+|---|---|---|
+| `tutorial/132_dup_defs`, `133_dup_ind_def`, `134_dup_ctor_def`, `135_dup_rec_def`, `138_dup_ctor_rec`, `139_DupConCon` | Lean declines | lean-replay's parser stops at a duplicate declaration ("Duplicate declaration: …") before the kernel runs. Every other kernel rejects these files, as expected. |
+| `Nat.add_succ` | Lean declines | The file is format 3.0.0, which Lean's parser does not read. Lean accepts Warrant's 3.1.0 export of it. |
+| `perf/app-lam` and its export | Ansatz times out (900 s) | Ansatz's own proposed arena entry declines this test because it exhausts the heap. Warrant takes 4 s. |
+| `perf/magma-list-deep-n36` and its export | Ansatz declines | "Java heap space" with `-Xmx8g`, after admitting 622 of 623 declarations. |
+| `other/level-index-out-of-order`, `other/sparse-name-index` | nanoda declines (published) | nanoda's parser rejects non-contiguous table indices. |
+
 ## Property-based tests (milestone 3)
 
 `tests/Warrant.Kernel.Tests/PropertyTests.cs` uses FsCheck to compare the kernel

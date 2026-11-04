@@ -22,6 +22,8 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
         ["exact"] = Exact,
         ["apply"] = Apply,
         ["unfold"] = Unfold,
+        ["cases"] = Cases,
+        ["induction"] = Induction,
         ["all_goals"] = AllGoals,
         ["try"] = Try,
     };
@@ -110,6 +112,38 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
         }
     }
 
+    /// <summary><c>Tactic.Cases(x)</c>: one goal per constructor of the hypothesis <c>x</c>'s type, through <c>T.casesOn</c> (KTD8).</summary>
+    private static void Cases(TacticRunner r, TacticNode node)
+    {
+        var m = r.State.Meta;
+        r.State.LiftMetaTactic(g => [.. m.Cases(g, r.Hypothesis(node).FVarId).Select(s => s.MVarId)]);
+    }
+
+    /// <summary>
+    /// <c>Tactic.Induction(x)</c>: <c>T.rec</c> on the hypothesis <c>x</c>, as Lean's <c>induction</c> does when the type has
+    /// no custom eliminator (KTD6), which Warrant never has.
+    /// </summary>
+    private static void Induction(TacticRunner r, TacticNode node)
+    {
+        var m = r.State.Meta;
+        r.State.LiftMetaTactic(g =>
+        {
+            var major = r.Hypothesis(node);
+            // Lean's getElimNameInfo (Lean/Elab/Tactic/Induction.lean 817) takes T.rec and refuses mutual and nested types.
+            if (m.WhnfD(major.Type).GetAppFn() is not ConstExpr { Name: var typeName } || m.Env.Find(typeName) is not InductiveInfo ival)
+            {
+                throw TacticException.Failed("induction", g, $"major premise type is not an inductive type\n  {m.Pp(major.Type)}");
+            }
+            var kind = ival.All.Count != 1 ? "mutually inductive" : ival.NumNested > 0 ? "a nested inductive type" : null;
+            if (kind is not null)
+            {
+                throw new TacticException("induction", g, $"The `induction` tactic does not support the type `{m.PpConst(ival.Name)}` because it is {kind}");
+            }
+            var rec = ival.Name.Append("rec");
+            return [.. m.Induction(g, major.FVarId, rec).Select(s => s.MVarId)];
+        });
+    }
+
     /// <summary><c>Tactic.AllGoals(t)</c>.</summary>
     private static void AllGoals(TacticRunner r, TacticNode node)
     {
@@ -134,6 +168,12 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
         var args = node.Args.Where(a => a is not OptionArg).ToList();
         return args.Count == 1 ? args[0] : throw TacticException.Failed(node.Name, tactics.GetMainGoal(), $"expected one argument, got {args.Count}");
     }
+
+    /// <summary>The hypothesis a tactic's one string argument names, in the main goal's context (the U9 surface).</summary>
+    private LocalDecl Hypothesis(TacticNode node) =>
+        Single(node) is StringArg h
+            ? tactics.WithMainContext(() => tactics.Meta.GetLocalDeclFromUserName(Name.From(h.Value)))
+            : throw TacticException.Failed(node.Name, tactics.GetMainGoal(), "expected the name of a hypothesis");
 
     private TacticNode Nested(TacticNode node) =>
         Single(node) is TacticArg { Tactic: var nested } ? nested : throw TacticException.Failed(node.Name, tactics.GetMainGoal(), "expected a tactic");

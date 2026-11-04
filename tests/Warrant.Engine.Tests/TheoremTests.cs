@@ -437,8 +437,6 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
 
     [Theory]
     [InlineData("Tactic.Simp()", "simp")]
-    [InlineData("Tactic.Cases(\"b\")", "cases")]
-    [InlineData("Tactic.Induction(\"b\")", "induction")]
     [InlineData("Tactic.AllGoals(Tactic.Omega())", "omega")]
     public void ATacticOfALaterUnitIsNotAvailableYet(string tactic, string name)
     {
@@ -562,8 +560,8 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     [Fact]
     public void EveryM5aCorpusTheoremNeedsATacticOfALaterUnit()
     {
-        // Every M5a corpus script needs simp, omega, cases or induction (docs/m5a/01), so none is proved yet; each fails
-        // cleanly with WRT0001 naming the tactic, and none is reported false.
+        // Every M5a corpus script needs simp or omega (docs/m5a/01), so none is proved yet; each fails cleanly with WRT0001
+        // naming the tactic, and none is reported false. Cases and Induction (U14) run before the simp they reach.
         int theorems = 0;
         foreach (var compilation in new[] { "accepted", "refuted" })
         {
@@ -571,7 +569,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
             foreach (var outcome in result.Units.Where(u => u.UnitKind == VirUnitKind.Theorem))
             {
                 var notProved = Assert.IsType<NotProvedOutcome>(outcome);
-                Assert.Matches("^Tactic `(simp|omega|cases|induction)` is not available yet$", notProved.Message);
+                Assert.Matches("^Tactic `(simp|omega)` is not available yet$", notProved.Message);
                 Assert.NotNull(notProved.TacticSpan);
                 theorems++;
             }
@@ -595,6 +593,117 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
             Assert.Contains(n, roots);
             Assert.NotNull(engine.Bundle.Env.Find(n));
         });
+    }
+
+    // ---- cases and induction (M5a U14) ----
+
+    [Fact]
+    public void CasesOnAClosedEnumGivesOneGoalPerMemberInDeclarationOrder()
+    {
+        var outcome = Assert.IsType<NotProvedOutcome>(Script("""
+            [Closed]
+            public enum ClaimStatus { Open, Paid, Denied, Withdrawn }
+
+            public static class S
+            {
+                [Verified] public static int Priority(ClaimStatus s) => s switch { ClaimStatus.Open => 2, ClaimStatus.Paid => 0, _ => 1 };
+                [Theorem] static Proof Split(ClaimStatus s) => Prove.That(Priority(s) >= 0).By(Tactic.Cases("s"));
+            }
+            """).Find("M:S.Split(ClaimStatus)"));
+        Assert.Equal("unsolved goals", outcome.Message);
+        Assert.Equal(
+            "case Open\n⊢ Priority ClaimStatus.Open ≥ 0\n\ncase Paid\n⊢ Priority ClaimStatus.Paid ≥ 0\n\n"
+            + "case Denied\n⊢ Priority ClaimStatus.Denied ≥ 0\n\ncase Withdrawn\n⊢ Priority ClaimStatus.Withdrawn ≥ 0",
+            outcome.Goals);
+    }
+
+    [Fact]
+    public void CasesOnARecordGivesOneGoalWithItsFieldsAsHypotheses()
+    {
+        var outcome = Assert.IsType<NotProvedOutcome>(Script("""
+            public enum PaymentStatus { Pending, Processed, Failed }
+            public sealed record Payment(int Id, int Amount, PaymentStatus Status);
+
+            public static class S
+            {
+                [Theorem] static Proof Split(Payment p) => Prove.That(p.Amount == p.Amount).By(Tactic.Cases("p"));
+            }
+            """).Find("M:S.Split(Payment)"));
+        Assert.Equal("unsolved goals", outcome.Message);
+        Assert.Equal(
+            "Id Amount : Int32\nStatus : PaymentStatus\n⊢ (new Payment Id Amount Status).Amount = (new Payment Id Amount Status).Amount",
+            outcome.Goals);
+    }
+
+    [Fact]
+    public void AClosedEnumTheoremIsProvedByCasesAndRflInEachBranch()
+    {
+        var result = Script("""
+            [Closed]
+            public enum Light { Red, Amber, Green }
+
+            public static class S
+            {
+                [Verified] public static Light Next(Light l) => l switch { Light.Red => Light.Amber, Light.Amber => Light.Green, _ => Light.Red };
+
+                [Theorem]
+                static Proof ThreeStepsComeBack(Light l) =>
+                    Prove.That(Next(Next(Next(l))) == l).By(Tactic.Cases("l"), Tactic.AllGoals(Tactic.Exact(Lean.Const("rfl"))));
+            }
+            """);
+        var proved = Assert.IsType<ProvedOutcome>(result.Find("M:S.ThreeStepsComeBack(Light)"));
+        Assert.Equal(ProofKind.Script, proved.By);
+        Assert.Contains("Cs.Light.casesOn", proved.Certificate.Value.Value.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InductionOnABoolProvesAndTrueIsIdentityWithRflForSimp()
+    {
+        // The corpus's AndTrueIsIdentity closes its goals with simp (U17); with rfl, it is proved now.
+        var result = Script("""
+            public static class S
+            {
+                [Verified] public static bool AndTrue(bool b) => b && true;
+
+                [Theorem]
+                static Proof AndTrueIsIdentity(bool b) =>
+                    Prove.That(AndTrue(b) == b)
+                         .By(Tactic.Unfold(nameof(AndTrue)), Tactic.Induction("b"), Tactic.AllGoals(Tactic.Exact(Lean.Const("rfl"))));
+            }
+            """);
+        Assert.Equal(ProofKind.Script, Assert.IsType<ProvedOutcome>(result.Find("M:S.AndTrueIsIdentity(System.Boolean)")).By);
+    }
+
+    [Fact]
+    public void TheCorpusCasesAndInductionReachTheirSimp()
+    {
+        var result = engine.Run("m5a/accepted");
+        foreach (var (key, goals) in new[]
+        {
+            ("M:Corpus.Quantifiers.FlipTwice(System.Boolean)", "case false\n⊢ Bool.not (Bool.not Bool.false) = Bool.false"),
+            ("M:Corpus.Quantifiers.RankIsSmall(Corpus.Light)", "case Red\n⊢ Light (recursor) 0 1 2 Light.Red ≤ 2"),
+            ("M:Corpus.Quantifiers.AndTrueIsIdentity(System.Boolean)", "case false\n⊢ Bool.and Bool.false Bool.true = Bool.false"),
+        })
+        {
+            var outcome = Assert.IsType<NotProvedOutcome>(result.Find(key));
+            Assert.Equal("Tactic `simp` is not available yet", outcome.Message);
+            // AllGoals stops at the first goal, where simp is not available yet.
+            Assert.Equal(goals, outcome.Goals);
+        }
+    }
+
+    [Fact]
+    public void CasesOnAnEquationReportsThatIndexedFamiliesAreNotSupportedYet()
+    {
+        var outcome = Assert.IsType<NotProvedOutcome>(Script("""
+            public static class S
+            {
+                [Theorem]
+                static Proof Symmetric(int a, int b) => Prove.That(Spec.Implies(a == b, b == a)).By(Tactic.Intro("h"), Tactic.Cases("h"));
+            }
+            """).Find("M:S.Symmetric(System.Int32,System.Int32)"));
+        Assert.Equal("Tactic `cases` failed: cases on an indexed family is not supported yet", outcome.Message);
+        Assert.Equal("a b : Int32\nh : a = b\n⊢ b = a", outcome.Goals);
     }
 
     // ---- Helpers ----

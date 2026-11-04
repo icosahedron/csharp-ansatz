@@ -109,6 +109,9 @@ public static class Pipeline
 
         public KernelEnvironment Env { get; } = bundle.Env.Fork();
 
+        /// <summary>The attribute sidecar with this run's entries for the declarations it generates (KTD8, KTD9).</summary>
+        public Sidecar Attributes { get; } = options.Attributes.Fork();
+
         public Dictionary<string, UnitOutcome> Outcomes { get; } = new(StringComparer.Ordinal);
 
         public List<KernelDeclaration> Admitted { get; } = [];
@@ -218,19 +221,35 @@ public static class Pipeline
                     ? Compute(unit, shell, display, assumptions, budget)
                     : RunScript(unit, shell, display, assumptions, budget);
             }
+            var admitted = new List<KernelDeclaration>();
             foreach (var declaration in translated.Declarations)
             {
                 try
                 {
-                    Kernel.Kernel.Add(Env, declaration, limits);
+                    AddDeclaration(declaration, admitted);
+                    if (declaration is InductiveDecl inductive)
+                    {
+                        // KTD8: casesOn and ctorIdx, which Lean's elaborator would have made, each built after the last is admitted.
+                        foreach (var construction in Constructions.For(Env, inductive))
+                        {
+                            AddDeclaration(construction, admitted);
+                            Constructions.Register(Attributes, construction.Value);
+                        }
+                    }
                 }
                 catch (KernelException ex)
                 {
                     return new FailedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, ex.Message);
                 }
-                Admitted.Add(declaration);
             }
-            return new TranslatedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, translated.Declarations);
+            return new TranslatedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, [.. admitted]);
+        }
+
+        private void AddDeclaration(KernelDeclaration declaration, List<KernelDeclaration> admitted)
+        {
+            Kernel.Kernel.Add(Env, declaration, limits);
+            Admitted.Add(declaration);
+            admitted.Add(declaration);
         }
 
         /// <summary>
@@ -296,7 +315,7 @@ public static class Pipeline
         {
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
-            var meta = new MetaM(Env, budget.Meta) { Attributes = options.Attributes, DisplayNames = _names };
+            var meta = new MetaM(Env, budget.Meta) { Attributes = Attributes, DisplayNames = _names };
             var printer = new GoalPrinter(Env, _names);
             var tactics = new TacticM(meta, []);
             var runner = new TacticRunner(tactics, unit);

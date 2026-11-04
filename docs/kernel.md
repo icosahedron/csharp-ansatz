@@ -129,6 +129,9 @@ type correctness.
 - **ANSATZ**: Ansatz's `arena-check --fuel 100000000`, with fuel equal to Warrant's corpus fuel.
   It needs `clojure` on `PATH` and a built Ansatz checkout in `ANSATZ_DIR` (default `../ansatz`;
   build it once with `clojure -T:build javac`). Without either, the column says SKIPPED.
+  The script passes `-J-Dansatz.kernel.natDecEqShortcut=false` (override with `ANSATZ_JVM_OPTS`). The property is
+  read only by a local patch to Ansatz, described under "Ansatz on Lean 4.35 certificates" below;
+  an unpatched Ansatz ignores it.
 - **ARENA-OFFICIAL, NANODA, LEAN4LEAN**: the verdicts
   [lean-kernel-arena](https://arena.lean-lang.org/) publishes in `results.json` for Lean's C++ kernel,
   nanoda and lean4lean. They exist for arena tests only.
@@ -175,16 +178,35 @@ committed corpus alone took 113 s and gave the same verdicts on the new fixtures
 **Warrant's verdict matched the expected outcome on every row, and Lean accepted everything
 Warrant wrote.** No verdict from another kernel showed a fault in Warrant.
 
-The M5a certificate rows were added later and run with `CORPUS_ONLY=1` (Ansatz `4ff56b8`, Lean 4.35.0
-from elan, 26 rows; the rows the earlier run also had gave the same verdicts):
+The M5a certificate rows were added later and run with `CORPUS_ONLY=1` (Lean 4.35.0 from elan, 26 rows; the
+rows the earlier run also had gave the same verdicts). With unpatched Ansatz `4ff56b8`, Ansatz rejected the M4
+corpus and both M5a certificates at `Nat.zero_sub`, inside the bundle (see "Ansatz on Lean 4.35 certificates").
+The table is the rerun of 2026-11-04 with the patched Ansatz:
 
-| Row | Lean | Warrant | Ansatz |
+| Row | Lean | Warrant | Ansatz (patched) |
 |---|---|---|---|
-| M5a certificate (2,879 constants: the bundle and 38 admitted declarations) | accept | accept | reject at `Nat.zero_sub` (582 of 2,879 admitted) |
-| M5a certificate, one proof replaced (`RankIsSmall` given `ValidImpliesPositive`'s proof) | reject: "declaration type mismatch" at `RankIsSmall` | reject: the same, at `RankIsSmall` | reject at `Nat.zero_sub`, before reaching the tampered theorem |
+| translated M4 corpus (2,956 declarations) | accept | accept | accept, all 2,956 |
+| M5a certificate (2,879 constants: the bundle and 38 admitted declarations) | accept | accept | accept, all 2,879 |
+| M5a certificate, one proof replaced (`RankIsSmall` given `ValidImpliesPositive`'s proof) | reject: "declaration type mismatch" at `RankIsSmall` | reject: the same, at `RankIsSmall` | reject at `RankIsSmall`, after admitting the other 2,878 |
 
-Lean and Warrant both reject the tampered certificate at the theorem whose proof was replaced, and nowhere else.
-Ansatz's verdict on it matches the expected outcome only by accident, so it is not counted as evidence.
+All three kernels reject the tampered certificate at the theorem whose proof was replaced, and nowhere else.
+So the translated definitions, the proofs found by tactics, the decrease theorems and the equation lemmas are
+checked by three independent kernels. The other rows gave the same verdicts as the unpatched run.
+
+### Ansatz on Lean 4.35 certificates
+
+Ansatz targets Lean 4.33.1. Its reducer has a native short-cut for `Nat.decEq` on two equal literals, which builds
+`Decidable.isTrue (Eq.refl n)` (`src-java/ansatz/kernel/Reducer.java`, `mkNatDecEqTrue`). In Lean 4.35.0,
+`Decidable` is a structure built with `Decidable.intro` and a `Bool` field. That term no longer reduces, so
+`decide (Nat.pred 0 = 0)` does not reach `true`, and unpatched Ansatz rejects the 4.35 bundle at `Nat.zero_sub`.
+
+The local patch adds the JVM property `ansatz.kernel.natDecEqShortcut`. When the property is `false`, both
+short-cut call sites return no result, and `Nat.decEq` reduces by its definition, as it does in Lean's kernel.
+The default is unchanged. The patch removes an optimisation and adds no reduction rule. With the short-cut off,
+Ansatz reduces `Nat.decEq` only by the unfolding that Lean's kernel also uses. The patch is 7 lines, is not upstream, and is kept in
+`tools/ansatz/nat-deceq-shortcut.patch` against Ansatz `4ff56b8`. Apply it with
+`git -C "$ANSATZ_DIR" apply <path>/tools/ansatz/nat-deceq-shortcut.patch`, then rebuild with `clojure -T:build javac`.
+Reporting it upstream, with `forged-quot-ind`, is still to do.
 
 ### Disagreements
 
@@ -193,7 +215,7 @@ Ansatz's verdict on it matches the expected outcome only by accident, so it is n
 | `bugs/forged-quot-ind` | Ansatz **accepts** a proof of `False` | **Ansatz is unsound here.** The file declares `Quot.ind` before `Quot` and `Quot.mk`, and then defines `Quot` and `Quot.mk` as ordinary definitions. Ansatz checks the quotient declaration by comparing its type with one built from the names `Quot` and `Quot.mk`. It does not require them to be the primitives already in the environment. Warrant, like Lean, installs the whole quotient package when the first quotient constant arrives. The later `def Quot` therefore fails with "'Quot' has already been declared", and `fakeQuotFalse` does not type-check. The arena reports that nanoda once had the same bug; its published verdict is now reject. | `tests/data/arena/forged-quot-ind.ndjson`, `CorpusTests.ArenaVerdicts` and `QuotientPrimitivesCannotBeForged` |
 | `other/inductive-undeclared-universe` | nanoda (published) accepts | **nanoda's bug.** An inductive type uses the universe parameter `u` without declaring it. Warrant rejects it with "invalid reference to undefined universe level parameter 'u'", as do Lean, official, lean4lean and Ansatz. | `tests/data/arena/inductive-undeclared-universe.ndjson`, `CorpusTests.ArenaVerdicts` |
 | init-medium and its export; the C# fixtures, which include init-medium; Warrant's exports of `tutorial/140_falseFromUnsafe` and of `141_falseFromUnsafe` | Ansatz rejects with "Unknown constant" at a recursive unsafe definition (`_private…Array.foldlMUnsafe.fold`, `unsafeLoop`) | **An Ansatz limitation.** `arena-check` admits definitions one at a time and does not put a recursive `unsafe` (or `partial` implementation) definition in the environment before checking its body. Lean and Warrant admit such definitions; Warrant buffers each mutual unsafe block (see "How exported data is checked"). On the original `falseFromUnsafe` files Ansatz rejects too, with the expected verdict, but at `unsafeLoop` rather than at `falseFromUnsafe`. | None: Warrant's behaviour is covered by `UnsafeDefinitionIsAcceptedButSafeUseIsNot` and by Lean's verdict on the same files |
-| translated M4 corpus; the M5a certificate and its tampered copy | Ansatz rejects `Nat.zero_sub` (declaration 583 of 2,955 in M4, of 2,879 in M5a) | **A version difference.** The corpus contains the Lean 4.35.0 semantics bundle, and Ansatz targets Lean 4.33.1. Ansatz short-cuts `Nat.decEq` on literals by building `Decidable.isTrue (Eq.refl n)`. In Lean 4.35.0, `Decidable` is a structure built with `Decidable.intro` and a `Bool` field, so that term no longer reduces and `decide (Nat.pred 0 = 0)` does not reach `true`. Ansatz accepts the Lean 4.33.1 `Nat.zero_sub` in init-medium. It rejects `tests/data/warrant-semantics.ndjson.gz` the same way, with or without its `mdata` nodes. Both certificates hold the same bundle, so Ansatz stops there before any M5a declaration; on the tampered copy its reject is therefore not a verdict on the replaced proof. | None: Lean accepts the M4 corpus and the M5a certificate, and rejects the tampered copy at the replaced proof |
+| translated M4 corpus; the M5a certificate and its tampered copy (unpatched Ansatz only) | Ansatz rejects `Nat.zero_sub` (declaration 583 in M4 and in M5a) | **A version difference**, explained under "Ansatz on Lean 4.35 certificates". Unpatched Ansatz accepts the Lean 4.33.1 `Nat.zero_sub` in init-medium, and rejects `tests/data/warrant-semantics.ndjson.gz` the same way, with or without its `mdata` nodes. With the patch, Ansatz accepts the M4 corpus and the M5a certificate and rejects the tampered copy at the replaced proof. | None: with the patch, Ansatz agrees with Lean and Warrant on all three rows |
 
 ### Rows without a verdict
 

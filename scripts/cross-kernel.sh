@@ -49,6 +49,10 @@ LEAN=tools/lean-replay/.lake/build/bin/lean-replay
 WARRANT=(dotnet src/Warrant.Cli/bin/Release/net10.0/warrant.dll)
 
 ANSATZ_DIR="${ANSATZ_DIR:-../ansatz}"
+# Ansatz's native Nat.decEq shortcut builds Lean 4.33's Decidable.isTrue term, which Lean 4.35's Decidable
+# no longer reduces, so Ansatz rejects the 4.35 bundle at Nat.zero_sub. A local Ansatz patch (docs/kernel.md)
+# reads this property to turn the shortcut off; an unpatched Ansatz ignores it.
+ANSATZ_JVM_OPTS="${ANSATZ_JVM_OPTS--J-Dansatz.kernel.natDecEqShortcut=false}"
 ansatz_skip=""
 if ! command -v clojure >/dev/null 2>&1; then
   ansatz_skip="no clojure on PATH"
@@ -80,7 +84,7 @@ ansatz_v() {
   if [ -n "$ansatz_skip" ]; then echo SKIPPED; return; fi
   local file; file="$(realpath "$2")"
   if command -v cygpath >/dev/null 2>&1; then file="$(cygpath -w "$file")"; fi
-  (cd "$ANSATZ_DIR" && run "$LOGS/$1.ansatz.txt" clojure -J-Xmx8g -M:arena --fuel 100000000 "$file")
+  (cd "$ANSATZ_DIR" && run "$LOGS/$1.ansatz.txt" clojure -J-Xmx8g ${ANSATZ_JVM_OPTS} -M:arena --fuel 100000000 "$file")
 }
 
 verdict_row() { printf '%-60s %-8s %-8s %-8s %-14s %-8s %-9s %s\n' "$@"; }

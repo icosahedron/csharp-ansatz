@@ -1,1 +1,1 @@
-{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":5,"timestamp":1793681974,"nonce":"tp33Vnj3sJzvkpIBU5ZNrmvWgV8=","added":["feature:leansharp-roadmap","kind:task"],"removed":null}]}
+{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":3,"timestamp":1793785340,"nonce":"obcYxHvsbqR8UvIRsCrc2++S/70=","message":"Done in PR https://github.com/icosahedron/csharp-ansatz/pull/2 (U1): node-ID lookup and outcome wording moved into one place each. Close when PR 2 merges.","files":null}]}

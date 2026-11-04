@@ -35,6 +35,7 @@ equality, which the export round-trip tests need.
 | Lean 4 | Warrant | Why |
 |---|---|---|
 | No step limit (only heartbeats/recursion depth from the caller) | **Fuel**: each call of the core procedures costs a step; 20M interactive, 100M for corpora. Running out rejects as a *resource limit*, never as a type error | Checking must terminate inside a build server. |
+| No wall-clock limit | **Deadline** (M5a): an optional `KernelLimits.Deadline`, read on the first step and then every 1,024 steps against a monotonic clock. Passing it rejects as a resource limit, like fuel | A theorem's 30-second limit must stop the kernel too ([docs/m5a/02](m5a/02-metavariables-and-meta.md)). |
 | `Lean.reduceBool`/`Lean.reduceNat` run compiled code | **Not supported**: they never reduce, so declarations relying on them (`native_decide`) are rejected | Warrant has no compiler, and trusting one would enlarge the trusted base. |
 | Recursion on large native stacks | Recursion on a 512 MB-stack thread (`KernelThread`); stack exhaustion becomes a resource limit | Same algorithm, no stack-overflow crash. |
 | The local context is restored after leaving a binder | Free-variable declarations accumulate for the life of a type checker | Names are globally unique, so this is unobservable; it avoids copying. |
@@ -55,6 +56,20 @@ lean4export lists *constants*, while the kernel admits *declarations*.
   the generated ones.
 - **Mutual unsafe/partial definitions** are buffered until the whole block has
   arrived, then admitted together.
+
+## Metavariables (milestone 5a)
+
+`Warrant.Cic.Expr` has a metavariable kind and `Level` a metavariable level
+since M5a, for `Warrant.Meta`'s tactics ([docs/m5a/02](m5a/02-metavariables-and-meta.md)).
+The kernel never accepts either. `Kernel.Add` rejects a declaration whose type
+or value has an expression or universe metavariable before it type-checks
+anything, with Lean's message `declaration has metavariables 'name'` (Lean adds
+a `(kernel) ` prefix), using flags cached on every term. The type checker also
+throws "kernel type checker does not support meta variables" on one, and the
+NDJSON writer refuses them. `MVarRejectionTests` puts a universe metavariable
+only in a binder's domain (`Sort ?u`) and only in a constant's universe
+argument (`PUnit.{?u}`): without the up-front check, the kernel accepted both,
+and Ansatz's kernel misses universe metavariables the same way.
 
 ## Results (milestone 2)
 

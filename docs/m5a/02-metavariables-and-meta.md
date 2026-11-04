@@ -37,7 +37,8 @@ Level holes are needed because tactics instantiate universe-polymorphic lemmas.
 ## The kernel never accepts one
 
 A proof with a hole is not a proof.
-The kernel therefore rejects any declaration whose type or value has a metavariable, before it type-checks anything, exactly as Lean's C++ kernel does with "declaration has metavariables":
+The kernel therefore rejects any declaration whose type or value has a metavariable, before it type-checks anything, as Lean's C++ kernel does.
+The message is Lean's, without its `(kernel) ` prefix: `declaration has metavariables 'name'`.
 
 ```csharp
 // Kernel.Add, in outline (KTD1)
@@ -48,7 +49,8 @@ TypeCheck(decl);
 
 The check catches level holes too.
 Ansatz's kernel misses them: its universe check returns "no undefined parameter" for a level metavariable, so `Sort ?u` would pass.
-Warrant's test for this case puts a level hole only inside a binder's domain, where no other check would look.
+Warrant's tests put a level hole only inside a binder's domain, where no other check would look, and in a constant's universe argument (`PUnit.{?u}`).
+Without the up-front check, Warrant's kernel accepted both theorems: the gap was real, and the check closes it.
 
 Every place in the kernel that switches on a term's kind gets an explicit `MVar` arm (13 sites in Cic, the kernel and the NDJSON writer).
 Today an unexpected kind in `WhnfCore` throws `InvalidOperationException("unreachable")`, which the engine does not catch; after U4 it throws a `KernelException`, and `InferTypeCore` says "kernel type checker does not support meta variables", Lean's wording.
@@ -61,7 +63,8 @@ The kernel's check is the one that is trusted.
 
 The kernel's only limit today is fuel, charged in `Tick()`.
 A 30-second limit per theorem (design Q8) needs the kernel to stop on time as well, so `KernelLimits` gains an optional deadline that `Tick()` checks (KTD2).
-Passing it raises the same `KernelResourceException` as running out of fuel, so a resource limit still only ever rejects.
+Reading the clock costs more than a step, so `Tick()` reads it on the first step and then once every 1,024 steps, against a monotonic clock (`Stopwatch`).
+Passing the deadline raises the same `KernelResourceException` as running out of fuel, so a resource limit still only ever rejects.
 
 ## Why Meta has its own reduction and unification
 
@@ -104,6 +107,7 @@ The three kinds matter:
 | synthetic opaque | goals | no; only a tactic assigns a goal |
 
 A depth counter lets a tactic run a sub-search, such as `simp`'s side-condition prover or instance resolution, in which outer holes are read-only (`withNewMCtxDepth`).
+In Lean 4.35.0, `withNewMCtxDepth` restores the whole saved context when it returns (`Lean/Meta/Basic.lean`, line 2008), so assignments made inside the sub-search are discarded; the callers instantiate the result before they leave it, and Warrant's port does the same.
 
 Assignments are checked before they are made (`checkAssignment`):
 
@@ -148,7 +152,10 @@ Unification in `apply` and `exact` works at `default`, which unfolds everything 
 
 Statuses are attributes, which the NDJSON bundle does not carry, so they come from the attribute sidecar (chapter 5).
 A missing entry means `semireducible`, so a missing `reducible` entry silently stops `simp` from seeing through an abbreviation; the sidecar therefore exports every non-default status, including the two that are new in 4.x.
-Translated declarations get their statuses from the engine: open enums and their members are reducible, as in M4 (M4 docs/m4/05), and recursive definitions are irreducible (chapter 3).
+In the committed sidecar, `Int32.add`, `Int32.toInt`, `Int.add`, `Int.emod` and `Int.bmod` are `implicitReducible`, and `Nat.add` is `instanceReducible`.
+Translated declarations get their statuses from the engine: every translated `abbrev` (an open enum and its members, M4 docs/m4/05) is reducible, recursive definitions are irreducible (chapter 3), and the generated `casesOn` is reducible (chapter 4).
+
+Some of what Lean's elaborator records is in neither the bundle nor the sidecar, so Meta reconstructs it: a projection function is recognised from its value, an auxiliary recursor by its name (an inductive type's `casesOn`, `recOn`, `brecOn`, `binductionOn` or `below`), the `@[match_pattern]` declarations of Init are a fixed list, and Lean's `backward.*` options are fixed at their 4.35.0 defaults.
 
 ## Budgets inside Meta
 

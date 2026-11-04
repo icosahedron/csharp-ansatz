@@ -10,20 +10,25 @@ This chapter covers the file that carries it, the two lookup structures built fr
 ## The sidecar
 
 `tests/data/warrant-attributes.ndjson.gz` sits next to the bundle and is exported from the same Lean toolchain and roots (KTD9).
-A Lean program in `tools/warrant-attrs/`, modelled on Ansatz's `scripts/dump_attrs.lean` and `dump_instances.lean`, imports Init and the semantics library and writes one line per entry:
+A Lean program in `tools/warrant-attrs/`, modelled on Ansatz's `scripts/dump_attrs.lean` and `dump_instances.lean`, imports Init and the semantics library and writes one line per entry (`scripts/export-attributes.sh`).
+These lines are from the committed file, the header's hashes shortened:
 
 ```json
-{"kind":"header","format":1,"lean":"<githash>","bundleSha256":"…"}
-{"kind":"simp","name":"Int32.not_le","prio":1000,"post":true,"inv":false,"module":"Init.Data.SInt.Lemmas","leanKeys":["Not","LE.le","Int32","*","*"]}
-{"kind":"congr","name":"ite_congr","fn":"ite","prio":1000}
-{"kind":"instance","name":"instDecidableEqInt32","class":"DecidableEq","prio":1000}
+{"kind":"header","format":1,"lean":"eb6cafb…","bundleSha256":"cc74b3a…"}
+{"kind":"simp","name":"Int32.not_le","prio":1000,"post":true,"inv":false,"module":"Init.Data.SInt.Lemmas","leanKeys":["Not","LE.le","Int32","*","*","*"]}
+{"kind":"congr","name":"ite_congr","fn":"ite","prio":1000,"hyps":[9,10,11]}
+{"kind":"instance","name":"instDecidableEqInt32","class":"DecidableEq","prio":1000,"order":1700}
 {"kind":"reducibility","name":"Int.bmod","status":"implicitReducible"}
-{"kind":"matcher","name":"…match_1","numParams":…,"numDiscrs":…,"altNumParams":[…]}
+{"kind":"matcher","name":"Int32.decEq.match_1","numParams":0,"numDiscrs":2,"uElimPos":0,"discrNames":[null,null],"alts":[{"numFields":2,"numOverlaps":0,"unitThunk":false}],"overlaps":[]}
 {"kind":"class","name":"HAdd","outParams":[2]}
 ```
 
+`leanKeys` are Lean's keys printed with `DiscrTree.Key.format`, which leaves out each key's arity.
+The committed sidecar has 346 simp entries, 3 congruence lemmas, 142 instances, 575 reducibility entries, 324 matchers and 57 classes.
+
 The exporter reads each extension's entries module by module, because after `importModules` the extension's state misses scoped entries (a lesson from Ansatz).
 It keeps only names in the bundle's closure, so no entry points outside the checked environment, and the header records the bundle's hash, which the loader checks.
+The assumption report still names only the bundle; adding the sidecar's hash to it, as KTD9 planned, is not built.
 
 Four kinds deserve a note:
 
@@ -32,7 +37,10 @@ Four kinds deserve a note:
 - **Matchers.** Init definitions use compiled `match` functions, which are not reducible; Meta reduces them only with their matcher info.
 - **Lean's keys.** The lookup keys Lean computed are kept, but only as a test oracle (below).
 
-Translated declarations have no Lean attributes, so the engine adds their entries when it admits them: open enums and their members are reducible, recursive definitions irreducible, and generated `casesOn` reducible (chapters 3 and 4).
+`no_index` is metadata (`MData`) on a lemma's statement, and lean4export drops metadata by default, so `scripts/export-semantics.sh` exports the bundle with `--export-mdata` to keep it.
+In that export a true `Bool` value appears as `Lean.DataValue.ofBool true`.
+
+Translated declarations have no Lean attributes, so the engine adds their entries when it admits them: every translated `abbrev` (an open enum and its members) is reducible, recursive definitions irreducible, and generated `casesOn` reducible (chapters 3 and 4).
 
 The sidecar can only select which kernel-checked lemmas tactics try.
 A stale or wrong sidecar can make a proof fail; it cannot make a false claim pass.
@@ -48,13 +56,15 @@ The rules that matter most:
 - `@OfNat.ofNat Int32 5 _` keys as the literal `5`;
 - a term marked `no_index` keys as `*`.
 
-U16's test recomputes the keys of every simp entry and compares them with `leanKeys`.
+U16's test recomputes the keys of every simp entry and compares them with `leanKeys`; they agree on all 346.
 A port bug in key computation would otherwise make `simp` silently miss lemmas.
 
 ## Instances
 
 `simp` needs instances: its `decide` step needs `Decidable (InvalidAmount = Valid)`, and a lemma's instance arguments that matching did not fill must be found.
-Warrant resolves them by depth-first search over the sidecar's instances, highest priority first and most recent first among equals, with Lean's handling of out-parameters (`HAdd α β ?γ`), inside a nested metavariable depth so the search cannot assign the goal's holes (KTD10).
+Warrant indexes the sidecar's instances in a discrimination tree whose keys, like the simp keys, are recomputed from the instances' kernel types; an instance of `DecidableEq α` is indexed under `Decidable (Eq …)`, as in Lean.
+It resolves a goal by depth-first search, highest priority first and most recent first among equals, with Lean's handling of out-parameters (`HAdd α β ?γ`), inside a nested metavariable depth so the search cannot assign the goal's holes (KTD10).
+The search stops at a nesting depth of 32 or after 10,000 instances tried.
 Lean's resolver is tabled, which matters for loops and diamonds in Mathlib's class hierarchy; Init's instances for `Int32`, `Int64`, `Int`, `Nat` and `Bool` are a few levels deep.
 
 Open enums matter here: `DecidableEq PaymentResult` resolves only because `PaymentResult` is a reducible abbreviation of `Int32`, so the search reaches `instDecidableEqInt32`.
@@ -66,7 +76,7 @@ Each step returns a `Result`: a new term and, unless the change was by definitio
 Proofs compose with `Eq.trans`, and congruence lifts a rewrite inside an application with `congrArg`, `congrFun` and `congr`, under an implication with `implies_congr`, and under `ite` with the `@[congr]` lemma `ite_congr`.
 The goal is replaced through `Eq.mpr`, and a goal that simplifies to `True` is closed with `of_eq_true`.
 
-What is not ported: Lean's ground arithmetic simprocs (`Int32.reduceAdd`, `Int32.reduceToInt` and about 2,000 lines like them), `simp_all`, `dsimp` as a tactic, loop protection and arithmetic normalisation.
+What is not ported: Lean's ground arithmetic simprocs (`Int32.reduceAdd`, `Int32.reduceToInt` and about 2,000 lines like them), `simp_all`, `dsimp` (where Lean calls it, Warrant's simp leaves the term as it is), automatically generated congruence lemmas (`mkCongrSimp?`), matcher equations, permutation and AC ordering of rewrites, loop protection, arithmetic normalisation, and unfolding a definition passed to `simp` as an argument.
 Two needs those simprocs would serve are met otherwise:
 
 - closed comparisons such as `InvalidAmount = Valid` are decided by `simp`'s `decide` step, which evaluates `Decidable.decide` in the kernel;
@@ -95,20 +105,22 @@ Init has no lemma that splits an equation whose left side is an `if`; Mathlib's 
 `InvalidAmount = Valid` is a closed comparison of two literals, which only a simproc or `decide` settles.
 And the last step, from `0 < a → s = Pending → 0 < a`, needs `contextual`, which uses an implication's premise while simplifying its conclusion.
 
-So Warrant's defaults are:
+So Warrant's defaults are (`DefaultSimpSet`):
 
-- a curated list of about 120 Init lemmas (logic, `Bool`, `ite`, `decide`, order, and the `Int32`/`Int64` lemmas `simp` should always use, such as `Int32.not_le`), each with its sidecar priority;
-- `Warrant.ite_eq_iff` and `dite_eq_iff`, proved in `lean/Warrant/Simp.lean`:
+- the 54 Init lemmas listed under "Default simp set" in `lean/bundle-roots.txt` (logic, `Bool`, `ite`, `decide`, `gt_iff_lt` and `ge_iff_le`, and the `Int32`/`Int64` lemmas `not_le`, `not_lt`, `lt_irrefl` and `le_refl`), each with its sidecar priority;
+- six lemmas from `lean/Warrant/Simp.lean`: `Warrant.ite_eq_iff`, `Warrant.dite_eq_iff` and the four literal lemmas (`Warrant.Int32.toInt_ofNat_lit`, `toInt_neg_ofNat_lit` and their `Int64` versions). They carry no `@[simp]`; the default set and the omega-prep set name them.
 
   ```lean
   theorem Warrant.ite_eq_iff [Decidable p] {a b c : α} :
       (if p then a else b) = c ↔ (p ∧ a = c) ∨ (¬p ∧ b = c)
   ```
 
-- the semantics library's own `@[simp]` lemmas;
+- the semantics library's own `@[simp]` lemmas, of which there are none yet;
 - `decide` and `contextual` on.
 
-With these, the rewrite closes the goal (*ran*, with the same lemmas in Lean):
+The plan's Key Decisions estimated about 120 Init lemmas; 54 cover the M5a corpus.
+Before the engine marked translated `abbrev`s reducible, Warrant's `simp` stopped on `ValidImpliesPositive` exactly where Lean's default `simp` stops.
+With the defaults, the rewrite closes the goal (*ran*, with the same lemmas in Lean, and in Warrant):
 
 1. `ite_eq_iff` splits the outer `if`: `(a ≤ 0 ∧ InvalidAmount = Valid) ∨ (¬ a ≤ 0 ∧ (if … ) = Valid)`.
 2. `decide` turns `InvalidAmount = Valid` into `False`; `and_false` and `false_or` remove the branch.
@@ -116,10 +128,11 @@ With these, the rewrite closes the goal (*ran*, with the same lemmas in Lean):
 4. `gt_iff_lt` turns the conclusion `p.Amount > 0` into `0 < p.Amount`, by definition.
 5. `contextual` rewrites `0 < a` in the conclusion to `True` using the premise, and `implies_true` closes the goal.
 
-The proof depends on `propext` only, and Warrant's existing kernel accepted Lean's version of it.
+Warrant's proof term uses `Warrant.ite_eq_iff`, `eq_false_of_decide` and `implies_congr_ctx`, and depends on `propext` only (a test checks both); Warrant's kernel also accepted Lean's version of the proof.
 The full Init simp set was not an option: it has 10,301 lemmas, whose closure is about 31,000 constants, twelve times the bundle, re-checked on every load.
 
-A developer changes the defaults per call: `Tactic.Simp(nameof(MyLemma))` adds a lemma, and `Tactic.Simp().With(decide: false)` turns an option off.
+A developer changes the defaults per call: `Tactic.Simp(nameof(MyLemma))` adds a theorem, `Tactic.Simp(Lean.Const("Int32.lt_iff_toInt_lt"))` adds a lemma from the bundle (only the bundle's declarations can be named, not all of Init), and `Tactic.Simp().With(decide: false)` or `.With(contextual: false)` turns an option off.
+Naming a `[Verified]` method in `Tactic.Simp` does not unfold it; use `Tactic.Unfold`.
 
 ## `unfold` on recursive definitions
 

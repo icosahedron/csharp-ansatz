@@ -33,23 +33,27 @@ Int.bmod x m = if x % m < (m + 1) / 2 then x % m else x % m - m
 
 and `omega` handles `%` by a constant and splits an `if` whose branches are integers.
 So the omega-prep simp set rewrites `bmod` away (KTD13).
+`Int.bmod_def` holds by definition, so this rewrite is a change by definition and leaves no trace in the certificate.
 
 ## The omega-prep set
 
-`Tactic.Omega()` runs, at every hypothesis and at the goal, a `simp` with only these lemmas, then `omega`:
+`Tactic.Omega()` first tries `assumption` at reducible and instance transparency, as Lean 4.35.0's `omega` does.
+If that does not close the goal, it runs `simp only [prep] at *`, with `decide` on and `contextual` off, where `prep` is only these lemmas, and then `omega`:
 
 ```text
 gt_iff_lt, ge_iff_le, ne_eq
 Int32.lt_iff_toInt_lt, Int32.le_iff_toInt_le, ← Int32.toInt_inj
 Int32.toInt_add, toInt_sub, toInt_mul, toInt_neg
-Int32.toInt_zero, toInt_one, toInt_minValue, toInt_maxValue, toInt_toInt64
+Int32.toInt_zero, toInt_one, toInt_minValue, toInt_maxValue
 Warrant.Int32.toInt_ofNat_lit, Warrant.Int32.toInt_neg_ofNat_lit       (chapter 5)
 apply_ite Int32.toInt
-Int.bmod_def
 the Int64 versions of all of the above
+Int32.toInt_toInt64, Int64.toInt_toInt32
+Int.bmod_def
 ```
 
-The list lives in one C# table, and each name is a bundle root (KTD29).
+The list lives in one C# table (`OmegaPrepSet`), and each name is a bundle root (KTD29).
+So are `Lean.Omega.LinearCombo.coordinate_eval_0` to `coordinate_eval_9`, which `omega`'s proof uses for its first ten atoms.
 This is Lean's `bv_omega` pattern (`simp only [bitvec_to_nat] at *; omega`), which converts `BitVec` to `Nat`; Lean has no `Int32` equivalent, so Warrant writes one.
 
 The range facts `-2^31 ≤ x.toInt` and `x.toInt < 2^31` are not rewrites; `omega` needs them as hypotheses.
@@ -68,11 +72,14 @@ x.toInt < 2^31 - 1 →
 ```
 
 `omega` negates the goal, takes `x.toInt`, the `if` and `(x.toInt + 1) / 2^32` as atoms, adds the range facts, splits the `if` into two cases, and finds a contradiction in each.
-Warrant's existing kernel accepted Lean's proof of this.
+Warrant's kernel accepted Lean's proof of this during planning, and Warrant's own `omega` now proves it: the certificate uses `Int32.toInt_add`, `Lean.Omega.ite_disjunction`, `coordinate_eval_0` and `Int32.le_toInt`, and depends on `Classical.choice`, `Quot.sound` and `propext`.
+
+`Clamp(x) <= 100` (`accepted/Clamp.cs`) goes through the literal lemmas: `Warrant.Int32.toInt_ofNat_lit` turns `(100 : Int32).toInt` into `100`, and `apply_ite` moves `toInt` inside `Clamp`'s two `if`s.
 
 ## The false example
 
-`AlwaysLarger` has no premise, and with `x = 2^31 - 1` the goal is false, so `omega` fails (*ran*):
+`AlwaysLarger` has no premise, and with `x = 2^31 - 1` the goal is false, so `omega` fails.
+Lean's text and Warrant's are the same; this is Warrant's (*ran*, `warrant verify tests/corpus/m5a/refuted`):
 
 ```text
 omega could not prove the goal:
@@ -81,12 +88,12 @@ a possible counterexample may satisfy the constraints
   -2147483648 ≤ a ≤ -1
   -6442450943 ≤ a + 4294967296*b ≤ -2147483648
 where
- a := if (x.toInt + 1) % ↑(2 ^ 32) < … then … else …
- b := (x.toInt + 1) / 4294967296
+ a := if (x.toInt + ↑1) % ↑(2 ^ 32) < (↑(2 ^ 32) + 1) / 2 then (x.toInt + ↑1) % ↑(2 ^ 32) else (x.toInt + ↑1) % ↑(2 ^ 32) - ↑(2 ^ 32)
+ b := (x.toInt + ↑1) / 4294967296
 ```
 
 These constraints describe the bad region; they do not name a value.
-The build error shows the goal `omega` was given, after `Unfold` and before the prep step, with C# names, and the counterexample `x = 2147483647` from the engine's boundary search (chapter 4), and keeps omega's text, with its atoms printed by the goal printer, as the last part of the message.
+The build error's first line names the theorem, `omega`'s first line and the counterexample `x = 2147483647` from the engine's boundary search (chapter 4); `omega`'s constraints follow, with its atoms printed by the goal printer, and then the goal `omega` was given, after `Unfold` and before the prep step, with C# names (chapter 4 shows the whole message).
 
 ## The decrease example
 
@@ -96,7 +103,7 @@ The build error shows the goal `omega` was given, after `Unfold` and before the 
 ∀ (n : Int32), ¬ n ≤ 0 → (n - 1).toInt.toNat < n.toInt.toNat
 ```
 
-The prep set turns `¬ n ≤ 0` into `¬ n.toInt ≤ 0` and `(n - 1).toInt` into a `bmod`, then an `if`; `omega` handles `Int.toNat` itself (it rewrites `↑(x.toNat)` to `max x 0`), and with the range facts it proves the obligation (*ran*, with the same lemmas in Lean).
+The prep set turns `¬ n ≤ 0` into `¬ n.toInt ≤ 0` and `(n - 1).toInt` into a `bmod`, then an `if`; `omega` handles `Int.toNat` itself (it rewrites `↑(x.toNat)` to `max x 0`), and with the range facts it proves the obligation (*ran*, with the same lemmas in Lean, and by Warrant for `Sum`, `Add` and `SumLong`).
 Without the guard, `n = int.MinValue` makes `n - 1` wrap to `int.MaxValue`, the obligation is false, and `omega` fails, which is the right answer.
 
 ## The port
@@ -120,6 +127,8 @@ Two consequences follow:
 
 - the C# code must compute exactly what Init's definitions compute, or the kernel rejects the proof; U18's property tests compare the two on random inputs, so a mismatch is found before a user hits it;
 - the kernel does real work, but little: Lean's proofs of the exit examples passed Warrant's kernel at 100,000 fuel per declaration, 200 times below the build budget (*ran*).
+
+For the goals the tests cover, Warrant's failure messages match Lean 4.35.0's character for character.
 
 An `omega` proof over `Int` alone depends on `propext` and `Quot.sound` (*ran*); `omega` adds `Classical.choice` only when it turns a goal that is not decidable into `False` by classical contradiction (`FalseOrByContra`).
 For the exit examples `Classical.choice` comes from Init's `Int32` lemmas that the prep set uses (chapter 3), and the assumption report lists whichever axioms a certificate actually depends on.

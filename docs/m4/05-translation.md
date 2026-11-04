@@ -44,7 +44,7 @@ A C# symbol's Lean name depends on that symbol alone, and is derived from its do
 These names are for the kernel and for export.
 People never have to read them: diagnostics and reports show C# display names, kept next to the translation.
 A display name is fully qualified and lists the parameter types as C# writes them, `Payouts.PayoutRules.Payout(int, int, int)` or `Claims.Payments.Validate(Claims.Payment)`, so overloads stay apart in a report.
-A WRT0001 message names the theorem by its short name (`'NeverWraps'`), because its location already says where it is (chapter 6).
+A WRT0001 message named the theorem by its short name in M4 (`'NeverWraps'`), because its location already says where it is (chapter 6). Since M5a, theorems can have parameters, and the message names the containing types and the parameter types: `'Increments.NeverWraps()'`.
 
 ## Types
 

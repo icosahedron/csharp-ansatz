@@ -1,6 +1,8 @@
 # Tutorial: your first proofs
 
-> Target syntax; see the [status note](README.md). Part 1 needs M5a, part 2 needs M6.
+> Part 1 runs today (M5a): every output in it was copied from `warrant verify`
+> run on the code it shows. Part 2 is target syntax and needs M6; see the
+> [status note](README.md).
 
 In this tutorial you will take a small insurance payout calculation, prove three
 things about it, watch Warrant refuse a fourth claim that looks obviously true,
@@ -22,7 +24,15 @@ dotnet add package Warrant.Build
 
 `Warrant` holds the attributes and the `Spec`, `Prove` and `Tactic` classes.
 None of them do anything at run time. `Warrant.Build` runs the verifier after
-every build.
+every build, and fails the build when a theorem is not proved.
+
+The packages are not on nuget.org yet. Until they are, build the `warrant`
+tool from source ([REPRODUCING.md](../../REPRODUCING.md)) and run
+`warrant verify .` in the project's directory after each change. It runs the
+same verification as the build and prints the same diagnostics. The outputs
+below are from `warrant verify`; `dotnet build` shows the diagnostics in
+MSBuild's format, with the file, line and column in front of every line, and
+ends with the same `Warrant:` summary line.
 
 ### Step 2: write the method
 
@@ -46,16 +56,12 @@ public static class PayoutRules
 }
 ```
 
-`[Verified]` tells Warrant to translate this method into its logic. Build:
-
-```sh
-dotnet build
-```
-
-The build succeeds and prints one line from Warrant:
+`[Verified]` tells Warrant to translate this method into its logic. Verify:
 
 ```text
-Warrant: 1 verified unit, 0 theorems.
+verifying 1 file(s) in .
+  Payouts.PayoutRules.Payout(int, int, int)  translated
+Warrant: 1 verified units, 0 theorems proved, 0 not proved.
 ```
 
 Nothing has been proved yet. Warrant has only checked that the method is
@@ -78,21 +84,25 @@ static class PayoutTheorems
 }
 ```
 
-Build again:
+Verify again:
 
 ```text
-Warrant: 1 verified unit, 2 theorems proved.
+verifying 1 file(s) in .
+  Payouts.PayoutRules.Payout(int, int, int)           translated
+  Payouts.PayoutTheorems.CappedAtTheLimit()           proved (rfl)
+  Payouts.PayoutTheorems.NothingBelowTheDeductible()  proved (rfl)
+Warrant: 3 verified units, 2 theorems proved, 0 not proved.
 ```
 
 These look like unit tests, and for now they are: each one checks one input.
 The difference is that they are checked by evaluating the translated method
-inside the kernel, not by running it. Notice that you never call a `[Theorem]`
-method yourself; the analyzer reports an error if you try.
+inside the kernel, not by running it (`rfl`). Notice that you never call a
+`[Theorem]` method yourself; calling one is error WRT0003.
 
 ### Step 4: prove something for every input
 
 Theorems with parameters are claims about **all** values of those parameters.
-Add:
+Add to `PayoutTheorems`:
 
 ```csharp
     [Theorem]
@@ -102,20 +112,40 @@ Add:
 ```
 
 `.By(...)` is the proof script: unfold the method's definition, simplify, then
-let `omega` (a decision procedure for integer arithmetic) finish. Build:
+let `omega` (a decision procedure for integer arithmetic) finish. Verify:
 
 ```text
-Payouts.cs(31,5): error WRT0001: Theorem 'PayoutIsNeverNegative' could not be proved.
-  omega found a counterexample:
-    loss = 1, deductible = 0, limit = -1
-  Unsolved goal:
-    loss deductible limit : Int32
-    h : deductible < loss
-    ⊢ 0 ≤ if limit < loss - deductible then limit else loss - deductible
+verifying 1 file(s) in .
+  Payouts.PayoutRules.Payout(int, int, int)                    translated
+  Payouts.PayoutTheorems.CappedAtTheLimit()                    proved (rfl)
+  Payouts.PayoutTheorems.NothingBelowTheDeductible()           proved (rfl)
+  Payouts.PayoutTheorems.PayoutIsNeverNegative(int, int, int)  unproved
+./Payouts.cs(30,76): error WRT0001: Theorem 'PayoutTheorems.PayoutIsNeverNegative(int, int, int)' could not be proved: omega could not prove the goal. Counterexample: loss = 0, deductible = -1, limit = -1.
+  a possible counterexample may satisfy the constraints
+    -2147483648 ≤ c ≤ -1
+    b - c ≥ 1
+    0 ≤ b ≤ 2147483647
+    b + 4294967296*d ≥ 1
+    -2147483648 ≤ a ≤ 2147483647
+    -2147483648 ≤ a + b + 4294967296*d ≤ 2147483647
+  where
+   a := deductible.toInt
+   b := if (loss.toInt - deductible.toInt) % ↑(2 ^ 32) < (↑(2 ^ 32) + 1) / 2 then (loss.toInt - deductible.toInt) % ↑(2 ^ 32) else (loss.toInt - deductible.toInt) % ↑(2 ^ 32) - ↑(2 ^ 32)
+   c := limit.toInt
+   d := (loss.toInt - deductible.toInt) / 4294967296
+
+  loss deductible limit : Int32
+  ⊢ 0 ≤ if loss ≤ deductible then 0 else if limit < loss - deductible then limit else loss - deductible
+Warrant: 4 verified units, 2 theorems proved, 1 not proved.
 ```
 
-The build failed, and the counterexample is right: with a negative limit, the
-method returns a negative payout. The theorem was wrong, not the proof.
+The location (line 30, column 76) is `Tactic.Omega()`, the step that failed.
+Read the first line and the last block first. The counterexample is right:
+with `loss = 0`, `deductible = -1` and `limit = -1`, `covered` is 1, which is
+more than the limit, so the method returns the limit, -1. The goal is what
+`omega` was asked to prove, after `Unfold` and `Simp`; the constraints in
+between are `omega`'s description of where it could not rule out a failure.
+The theorem was wrong, not the proof.
 
 ### Step 5: state what you actually mean
 
@@ -129,18 +159,25 @@ Payouts are only meaningful for non-negative deductibles and limits. Say so:
              .By(Tactic.Unfold(nameof(PayoutRules.Payout)), Tactic.Simp(), Tactic.Omega());
 ```
 
-Build. It passes.
-
-Now try removing `deductible >= 0` from the condition and building again. The
-counterexample this time is less obvious:
+Verify. It passes:
 
 ```text
-    loss = 2147483647, deductible = -1, limit = 0
+  Payouts.PayoutTheorems.PayoutIsNeverNegative(int, int, int)  proved (script)
+Warrant: 4 verified units, 3 theorems proved, 0 not proved.
 ```
 
-`loss - deductible` is `int.MaxValue + 1`, which wraps around to
-`int.MinValue` in C#. Warrant models `int` the way the CLR runs it, so it
-finds the overflow that a proof about mathematical integers would have missed.
+Now try removing `deductible >= 0` from the condition, leaving
+`Spec.Implies(limit >= 0, …)`, and verify again. The counterexample this time
+is less obvious:
+
+```text
+… could not be proved: omega could not prove the goal. Counterexample: loss = 0, deductible = -2147483648, limit = 0.
+```
+
+`loss - deductible` is `0 - int.MinValue`, which is `int.MaxValue + 1` and
+wraps around to `int.MinValue` in C#. That is not more than the limit, so the
+method returns it. Warrant models `int` the way the CLR runs it, so it finds
+the overflow that a proof about mathematical integers would have missed.
 Put the condition back.
 
 ### Step 6: one more, without help

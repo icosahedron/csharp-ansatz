@@ -1,9 +1,9 @@
 # M5a: proofs about every input, in the build
 
-> Status: **planned.** These chapters were written with the plan, before the implementation; U21 updates them to match the code.
+> Status: **implemented, as these chapters describe.** They were written with the plan, before the implementation, and U21 brought them up to date with the code. One check from the exit criterion is still manual and has not been done: how Visual Studio's Error List shows a multi-line WRT0001 (chapter 7).
 > The plan that schedules this work is [docs/plans/2026-11-03-0838-feat-m5a-meta-tactics-plan.md](../plans/2026-11-03-0838-feat-m5a-meta-tactics-plan.md).
 > Its Key Technical Decisions (`KTD1`, `KTD2`, …) own the decisions; these chapters explain them and cite them by ID.
-> Code in these chapters shows the shape of the design and is not compiled. Lean terms are written in Lean notation for reading. Results marked *ran* come from running Lean 4.35.0 or Warrant's kernel during planning.
+> Code in these chapters shows the shape of the design and is not compiled. Lean terms are written in Lean notation for reading. Results marked *ran* come from running Lean 4.35.0 or Warrant's kernel, during planning or against the built code; output in `text` blocks that is not marked illustrative is copied from a run or from a test's expected value.
 
 M4 proves claims about fixed inputs by computation.
 M5a proves claims about every input by search: untrusted tactics, ported from Lean, build a proof term, and the kernel checks it.
@@ -67,10 +67,19 @@ public static class Sums
 ```
 
 `AlwaysLarger` is false: `Increment(int.MaxValue)` wraps to `int.MinValue`.
-The build fails at the tactic that could not finish, showing the goal it was given:
+The build fails at the tactic that could not finish, with `omega`'s own explanation and then the goal it was given.
+This is `warrant verify tests/corpus/m5a/refuted`, where the file has a comment line at the top:
 
 ```text
-Increments.cs(9,52): error WRT0001: Theorem 'Increments.AlwaysLarger(int)' could not be proved: Tactic `omega` failed: omega could not prove the goal. Counterexample: x = 2147483647.
+refuted/Increment.cs(14,52): error WRT0001: Theorem 'Increments.AlwaysLarger(int)' could not be proved: omega could not prove the goal. Counterexample: x = 2147483647.
+  a possible counterexample may satisfy the constraints
+    b ≥ 0
+    -2147483648 ≤ a ≤ -1
+    -6442450943 ≤ a + 4294967296*b ≤ -2147483648
+  where
+   a := if (x.toInt + ↑1) % ↑(2 ^ 32) < (↑(2 ^ 32) + 1) / 2 then (x.toInt + ↑1) % ↑(2 ^ 32) else (x.toInt + ↑1) % ↑(2 ^ 32) - ↑(2 ^ 32)
+   b := (x.toInt + ↑1) / 4294967296
+
   x : Int32
   ⊢ x + 1 > x
 ```

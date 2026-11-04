@@ -36,6 +36,9 @@ from verified definitions.** See §2.
 | D11 | Verification-condition generation is **proof-producing (a tactic)**, so it is outside the trusted base. | Proposed |
 | D12 | Enums are **open by default**: modelled as their underlying integer, so proofs cover unnamed values. `[Closed]` opts in to modelling exactly the named values; that is an assumption, listed in the report, and the analyzer warns on integer casts to the type (§12 Q3). | Decided |
 | D13 | `[Closed]` also applies to **closed-set classes**, recognised **by shape**: sealed, private constructors only, and static instances of the type itself, each an initialised get-only auto-property or `static readonly` field whose initialiser is a `new` of the class. They translate to an `inductive` with one constructor per instance, and `==` compares a generated `$index` (not `DecidableEq`; see §6.1); a `[Closed]` class without that shape is error WRT0009. Adjust the shape rule if real code needs it (§12 Q16). | Decided |
+| D14 | **Budgets** (§12 Q8): kernel fuel stays at 20M steps for builds and 100M for corpus runs, tactics get their own fuel (171,970 steps by default), and each theorem gets a 30-second wall-clock limit. All three are adjustable per project (MSBuild properties) and per theorem (`[Theorem]` arguments). Exhausting one fails the theorem. | Decided (M5a is built on it) |
+| D15 | **CI trust** (§12 Q9): every build re-checks every proof with the kernel. M5a has no cache; trusting signed caches waits for M5b's cache. | Decided for M5a |
+| D16 | **The CLI builds the compilation, not the MSBuild task** (§8.3): the task passes Csc's own arguments to `warrant verify`, which runs as a child process. | Decided (M5a is built on it) |
 
 ---
 
@@ -242,9 +245,13 @@ The M4 node set and encoding are in [docs/m4/04-vir.md](m4/04-vir.md).
 ### 4.2 Translation to CIC (Warrant.Semantics)
 
 - **Pure units** (no heap writes, no external calls) become plain Lean
-  definitions (CIC terms, not `.lean` source), a *shallow embedding*. `if` becomes `ite`/`dite`, locals become `let`, and recursion becomes well-founded
-  recursion with a `Spec.Decreases` measure (or structural recursion when
-  detectable). A `switch` over a `[Closed]` enum becomes the type's recursor
+  definitions (CIC terms, not `.lean` source), a *shallow embedding*. `if` becomes `ite`/`dite`, locals become `let`, and direct self-recursion becomes well-founded
+  recursion with a `Spec.Decreases` measure: `WellFounded.Nat.fix` over the
+  measure clamped to `Nat`, with a decrease theorem per recursive call and a
+  generated equation lemma ([docs/m5a/03](m5a/03-statements-and-recursion.md)).
+  Structural recursion is not built: no M5a type can recurse structurally
+  (`Int32` has no `brecOn`, and records and closed types cannot be recursive),
+  so it waits for recursive types. A `switch` over a `[Closed]` enum becomes the type's recursor
   with a constant motive, and a `switch` over an integer or open enum becomes a
   chain of `ite` tests; translation generates no Lean-style named matchers. In
   M4, statements are translated in continuation-passing style, and fall-through
@@ -474,9 +481,10 @@ second reference. Ansatz's version is about 11k lines: `TypeChecker` 3.2k,
 nested inductives.
 
 - **Expressions:** 12 kinds, `BVar`, `FVar`, `Sort`, `Const`, `App`, `Lam`,
-  `Forall`, `Let`, `NatLit`, `StrLit`, `MData`, `Proj`. **There is no `MVar` in
-  the kernel**; metavariables live in `Warrant.Meta`. (ChatGPT's list
-  wrongly included `MVar` and omitted `Proj`.)
+  `Forall`, `Let`, `NatLit`, `StrLit`, `MData`, `Proj`, that the kernel
+  accepts. (ChatGPT's list wrongly included `MVar` and omitted `Proj`.) Since
+  M5a the shared `Warrant.Cic.Expr` also has a 13th kind, `MVar`, and levels a
+  `Level.MVar`, for `Warrant.Meta`; the kernel never accepts either (below).
 - Each expression caches its hash and flags at construction (loose bound
   variable range, has free variables, has universe parameters), as Lean does.
   Hash-consing is optional, and caches use reference equality.
@@ -496,16 +504,22 @@ nested inductives.
 - **Fuel and cancellation.** The Lean kernel has no fuel limit; Ansatz adds
   one, and so do we. Running out of fuel means rejection, never acceptance.
   The default is about 20M steps for interactive use and 100M for corpus
-  verification.
+  verification. Since M5a an optional wall-clock deadline, checked every
+  1,024 steps, rejects the same way.
 - **Tracing** in the same NDJSON format as Ansatz's `checkConstantTraced`
   (`{s, d, l, r, res, by}`), so that definitional-equality traces can be
   diffed against Ansatz and Ansatz's instrumented Lean kernel.
 - The kernel depends only on `Warrant.Cic`: no I/O, no Roslyn, no store.
 - Status and the exact list of deliberate differences from Lean: [kernel.md](kernel.md).
-- `Warrant.Cic.Expr` has no metavariable kind today. Whether `Warrant.Meta`
-  adds one to the shared type (as Lean does, with the kernel rejecting it) or
-  keeps its own representation is decided at the start of M5a, the first
-  milestone that uses metavariables. M4 needed none.
+- **Metavariables** (decided in M5a): `Warrant.Meta` adds its holes to the
+  shared `Warrant.Cic.Expr` and `Level`, as Lean does, rather than keeping its
+  own representation, so substitution and traversal are not duplicated. Every
+  term caches `HasExprMVar` and `HasLevelMVar`, and the kernel rejects a
+  declaration whose type or value has an expression or universe metavariable
+  before it type-checks anything ("declaration has metavariables"), as Lean's
+  C++ kernel does; the type checker also throws on one. Ansatz's kernel misses
+  universe metavariables; Warrant's tests cover that case
+  ([docs/m5a/02](m5a/02-metavariables-and-meta.md)).
 
 ### 7.2 Import (lean4export NDJSON)
 
@@ -593,10 +607,27 @@ Lean rendering is still useful, but as a separate debugging feature.
 
 ### 8.3 Build integration
 
-`Warrant.Build` runs after `CoreCompile`. It recreates the
-`CSharpCompilation` from the same inputs Csc received (sources, references,
-defines, `LangVersion`, overflow-checking setting), extracts VIR, calls the
-server, and emits errors such as:
+`Warrant.Build` runs after `CoreCompile`. It sets `ProvideCommandLineArgs`, so
+Csc reports its full argument list, writes the list to
+`obj/…/warrant.csc.args`, and runs `warrant verify --csc-args` as a child
+process. The CLI, not the task, recreates the `CSharpCompilation` from the
+same inputs Csc received (sources, references, defines, `LangVersion`,
+overflow-checking setting) with Roslyn's `CSharpCommandLineParser`, extracts
+VIR and proves (D16). This changed in M5a for two reasons: extraction is
+built against Roslyn 4.8, which cannot parse the C# 14 that SDK 10 defaults
+to, and loading Roslyn into Visual Studio's .NET Framework MSBuild depends on
+fragile assembly binding. The task is a netstandard2.0 `ToolTask` with no
+Roslyn reference. Generated sources exist only inside Csc, so code that does
+not compile without them is error WRT0012. M5b replaces the child process with
+the server ([docs/m5a/07](m5a/07-verify-and-build.md)). The task emits errors
+such as this one from M5a:
+
+```text
+Increments.cs(13,52,13,66): error WRT0001: Theorem 'Increments.AlwaysLarger(int)' could not be proved: omega could not prove the goal. Counterexample: x = 2147483647.
+```
+
+followed by `omega`'s constraints and the goal. With contracts (M6) they will
+look like this:
 
 ```text
 Payments.cs(42,5): error WRT0001: Postcondition of 'ProcessPayment' could not be verified.
@@ -689,7 +720,7 @@ in the engine can make a true claim fail but never a false one pass.
 | M2 | `Warrant.Kernel` | All 5,118 init-medium constants pass; arena negatives are rejected; then full Init. ✅ full Init (57,977 declarations), init-medium and arena (see [kernel.md](kernel.md)) |
 | M3 | Exporter, cross-kernel harness, FsCheck property tests | Certificates check in at least one external kernel. Mathlib is a stretch goal. ✅ Lean's kernel re-checks everything Warrant admits, including full Init and C#-built types (see [kernel.md](kernel.md)); the store moved to M5b |
 | M4 | VIR, extraction of the pure subset (`int`/`long`/`bool`, enums, records, `if`/`switch`; theorems are parameterless `[Theorem]` methods returning `Prove.That(bool)`; recursion is rejected until M5a, and `/`, `%` and checked arithmetic are rejected with a diagnostic until M6, and non-null record parameters are recorded as assumptions), semantics library v0 with CLR-agreement tests (§10.6), translation, differential testing | A fixed corpus (`tests/corpus/m4/`) translates, including a `Validate`-shaped method over records and enums (`int` in place of `decimal`), and every rejected construct has a corpus method that is rejected with the diagnostic. Differential tests pass; null-record inputs check that .NET throws and that the non-null assumption is recorded. CLR-agreement tests pass for every modelled operation. Theorems without free parameters are closed by `rfl`/`decide` proof terms the translator emits. The translated corpus, exported with its Init + semantics closure, passes a new translated-output step in `scripts/cross-check.sh`. |
-| M5a | `Warrant.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `simp`, `omega`), quantified theorems and `Prove.That(...).By(...)`, structural recursion and well-founded recursion with `Spec.Decreases`, translator-generated equation lemmas for recursive definitions, a development-time export of simp, instance and reducibility attributes for Init and the semantics library next to the NDJSON bundle (untrusted tactic input; Std is added in M6), `Int32`/`Int64` → `Int` bridging lemmas and an omega-prep simp set (§6.2), in-process `warrant verify` (§3.2), a thin MSBuild task that runs `warrant verify` as a child process (the net10.0 engine cannot load in .NET Framework MSBuild) | First end-to-end result: `Increment(x) > x` fails the build with its goal shown under `dotnet build` and Visual Studio's MSBuild; `ValidImpliesPositive` (`int`), a well-founded method whose decrease needs `omega`, and a quantified theorem over a translated `int` method closed by `simp` then `omega` pass. Differential tests pass for a well-founded unit, evaluated with its equation lemmas. The certificate of a verified C# theorem passes the translated-output step of `scripts/cross-check.sh`. |
+| M5a | `Warrant.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `unfold`, `simp`, `omega`, `all_goals`, `try`), quantified theorems and `Prove.That(...).By(...)`, well-founded recursion with `Spec.Decreases` (structural recursion is unreachable for M5a's types, §4.2), translator-generated equation lemmas for recursive definitions, a development-time export of simp, instance and reducibility attributes for Init and the semantics library next to the NDJSON bundle (untrusted tactic input; Std is added in M6), `Int32`/`Int64` → `Int` bridging lemmas and an omega-prep simp set (§6.2), in-process `warrant verify` (§3.2), a thin MSBuild task that runs `warrant verify` as a child process (the net10.0 engine cannot load in .NET Framework MSBuild) | First end-to-end result: `Increment(x) > x` fails the build with its goal and the counterexample `x = 2147483647` shown under `dotnet build`, Visual Studio 2026's MSBuild and Visual Studio 2022's MSBuild; `ValidImpliesPositive` (`int`) passes with `Unfold` then `Simp`; a well-founded method whose decrease needs `omega`, and a quantified theorem over a translated `int` method closed by `simp` then `omega`, pass. Differential tests pass for a well-founded unit, both by kernel evaluation and by rewriting with its equation lemma. The certificate of a verified C# theorem passes the translated-output step of `scripts/cross-check.sh`. ✅ as described in [docs/m5a/](m5a/README.md); how Visual Studio's Error List shows a multi-line goal is still to be checked by hand |
 | M5b | Server, content-addressed cache, store v1 (trusted and verified import), CLI verbs, analyzers | The M5a result through the server. A second build is served from the cache without running tactics, `WarrantRecheck=true` re-checks cached certificates with the kernel alone, and the Init + semantics store passes `warrant check-store` in verified mode. `cancel` aborts a running verify, a unit over its fuel or wall-clock budget reports a timeout, and analyzer output is identical across runs. Baseline per-unit verification latency and server memory are recorded for M8. Store v1 waits for the Mathlib run's memory figure. |
 | M6 | Contracts: `Spec.Requires`/`Ensures`, contract classes, effect monad (exceptions, null, overflow, `/` and `%`), VC generation with `@[spec]` lemmas in the attribute sidecar, assumption reports, a minimal `decimal` model (96-bit mantissa and scale, comparisons, add/subtract without overflow; `==` is numeric equality, so `1.0m == 1.00m`, also inside records). Readonly fields whose type has a contract become theorem parameters (other field access waits for M7). First step: the Std closure the library imports is kernel-checked and cross-checked | Pure parts of the payment example verified, and `ProcessPayment` verified with the store as a hypothesis. Differential tests with contract-satisfying mocked externals pass, every new model operation (including the minimal `decimal`) passes CLR-agreement tests, generators include zero divisors, `MinValue / -1` and equal `decimal`s with different scales, and `ProcessPayment`'s certificate passes `scripts/cross-check.sh`. |
 | M7 | Regions, loops with invariants, heap model for mutable objects, full `decimal` arithmetic and rounding, strings | The payment example verified without restructuring into records (the target code in §5.3). CLR-agreement tests pass for the `decimal`, string and heap models. |
@@ -698,8 +729,9 @@ in the engine can make a true claim fail but never a false one pass.
 Work deferred from M2/M3 (the Mathlib run with memory measurement, Ansatz and
 arena cross-checks, trace diffing, and the §10.3 property tests not yet
 covered) is tracked on its own tickets. The Ansatz/arena cross-checks and the
-property tests must be done before M5a closes. The Mathlib run must finish
-before M5b's store v1 work and M8's typed handles.
+property tests were done in M5a ([kernel.md](kernel.md)). Trace diffing is
+still open. The Mathlib run must finish before M5b's store v1 work and M8's
+typed handles.
 
 Porting sources: the **Lean 4 sources are authoritative** (`src/kernel/` for
 the kernel, `src/Lean/Meta/` for tactics). **Ansatz is the second reference**
@@ -729,11 +761,17 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
    extension, or an analyzer that reads a results file? The last one conflicts
    with analyzer determinism.
 8. **Automation defaults.** Which tactic pipeline, and what fuel and time
-   budgets per unit? Decide the budgets when M5a starts (in-process
-   `warrant verify` enforces them until M5b's server does); the pipeline can
-   wait for M6.
+   budgets per unit? *Budgets decided (D14):* kernel fuel 20M steps for builds
+   and 100M for corpus runs, tactic fuel 171,970 steps (ten times the largest
+   use in the M5a corpus), and 30 seconds of wall clock per theorem, set per
+   project with `WarrantKernelFuel`, `WarrantTacticFuel` and
+   `WarrantTimeoutSeconds` and per theorem with `[Theorem(KernelFuel = …,
+   TacticFuel = …, TimeoutSeconds = …)]`. In-process `warrant verify` enforces
+   them until M5b's server does. The pipeline for contracts waits for M6.
 9. **CI trust policy.** Always recheck certificates, or trust signed caches?
-   Decide when M5a starts: its MSBuild task is authoritative for CI.
+   *Decided for M5a (D15):* every build re-checks every proof with the
+   kernel, so the MSBuild task has no `Inputs`/`Outputs` and M5a has no cache.
+   Signed caches and `WarrantRecheck` are M5b's question.
 10. **Lean version pin.** Pinned to Lean v4.35.0 and lean4export `5a9a355`
     (`scripts/lib/lean-toolchain.sh`). The kernel was ported against v4.33.1
     and re-diffed against v4.35.0: the only kernel change in between removes

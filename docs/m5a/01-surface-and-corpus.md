@@ -99,14 +99,21 @@ public sealed class TheoremAttribute : Attribute
 
 `Spec.ForAll` and `Spec.Exists` return `bool` so that they compose with `&&` and `Spec.Implies`, and they throw if called, because a quantifier over `int` cannot be computed.
 Like `Prove.That`, they are valid only in theorem statements (WRT0004 elsewhere).
-`Spec.Decreases` returns `void`, so it can be `[Conditional]` and disappears from the compiled code (M4 KTD20); extraction reads it from the operation tree, which still contains the call, and U9 checks that it does.
+`Spec.Decreases` returns `void`, so it can be `[Conditional]` and disappears from the compiled code (M4 KTD20); extraction reads it from the operation tree, which still contains the call, and a U9 test checks that it does.
+Its parameter is `long`, so an `int` measure is widened implicitly at the call; extraction drops that implicit conversion and stores the measure in its own type, `int32`.
 
-Names in a script follow one rule, so extraction never guesses:
+Names in a script follow fixed rules, so extraction never guesses:
 
 - `nameof(M)` names a C# member: a `[Verified]` method to unfold, or a `[Theorem]` to use as a lemma.
-  Extraction resolves it through the semantic model, so an overloaded or unknown name is WRT0004 and a resolved one adds a dependency edge (KTD18).
-- `Lean.Const("Int32.lt_iff_toInt_lt")` names a Lean declaration, which must be in the bundle.
-- A string literal names a hypothesis in the goal, as in `Tactic.Exact("h")`.
+  Extraction resolves it through the semantic model and adds a dependency edge (KTD18).
+  It must resolve to exactly one `[Verified]` member or `[Theorem]` declared in the compilation: an overload set is WRT0004 `nameof of an overloaded method`, and anything else is WRT0004 `nameof that names no verified member or theorem`.
+- `Lean.Const("Int32.lt_iff_toInt_lt")` names a Lean declaration, which must be in the bundle. It takes a string literal, and it is not accepted where a variable or a member to unfold is expected.
+- A string literal names a hypothesis or variable in the goal, as in `Tactic.Exact("h")` or `Tactic.Cases("b")`.
+  That holds for `Intro`, `Exact`, `Apply`, `Cases` and `Induction`.
+  `Simp` takes lemmas only, so a string literal there is WRT0004 `string literal where a lemma is expected`; `Unfold` takes members only, so a string literal there is WRT0004 `string literal where a member name is expected`.
+
+A step that is not a `Tactic.X(...)` call, an option value that is not a constant, or a script built as an array is WRT0004 `unsupported script argument`.
+A `Tactic` or `Lean` call outside a theorem's `.By(...)` is WRT0004 `proof script outside a theorem`, and a theorem whose script names the theorem itself is WRT0004 `theorem used in its own proof`.
 
 The budget properties on `[Theorem]` are compile-time constants, so extraction can read them (KTD24); zero means the project's setting (chapter 7).
 
@@ -116,20 +123,21 @@ VIR grows by new kinds and fields only (M4 KTD5), and the schema version becomes
 
 | VIR addition | From | Holds |
 |---|---|---|
-| `ForAll`, `Exists` | `Spec.ForAll<T>(x => p)`, `Spec.Exists<T>(x => p)` | the bound variable's name and type, and the body |
-| `Decreases` | `Spec.Decreases(e)` as the first statement | the measure expression |
-| a theorem unit's parameters | the method's parameters | as for `[Verified]` units |
-| `ProofScript` on a theorem unit | `.By(...)` | a list of tactic nodes |
-| tactic node | each `Tactic.X(...)` | the tactic's name, then arguments: lemma references (unit key or Lean name), strings, numbers, nested tactics, named options |
-| budget overrides on a theorem unit | `[Theorem(...)]` | the three numbers |
+| `forall`, `exists` | `Spec.ForAll<T>(x => p)`, `Spec.Exists<T>(x => p)` | `local` (the bound variable's ID), `name`, `domain` (its type) and `body` |
+| `decreases` statement | `Spec.Decreases(e)` as the first statement | the measure expression |
+| a theorem unit's `params` | the method's parameters | as for `[Verified]` units |
+| `script` on a theorem unit, after `statement` | `.By(...)` | a list of `{"tactic": {"name", "args"}}` nodes |
+| tactic node | each `Tactic.X(...)` | the tactic's name as Lean spells it (`intro`, `exact`, `apply`, `cases`, `induction`, `unfold`, `simp`, `omega`, `all_goals`, `try`), then arguments: `unit` (a unit key, from `nameof`), `lean` (a Lean name), `string`, `number`, `bool`, a nested tactic, and `option` (a name and a value) |
+| `budget` on a theorem unit | `[Theorem(...)]` | `timeoutSeconds`, `tacticFuel` and `kernelFuel` as decimal strings; omitted when all three are zero |
 
-A tactic node is generic: `Tactic.Simp().With(decide: false)` becomes `tactic "simp" [option decide false]`, and a later tactic needs no new VIR kind.
+A tactic node is generic: `Tactic.Simp().With(decide: false)` becomes `simp` with the argument `option{decide, bool false}`, and a later tactic needs no new VIR kind.
 The tactic's source span goes into the span side table, so a failure points at the `Tactic.X` call that failed.
+A unit that uses none of these encodes as in version 1, apart from the version field.
 
 The rules that M4 used to reject now accept:
 
 - theorems with parameters;
-- the lambda inside `Spec.ForAll` and `Spec.Exists`, with one parameter of a supported type and a body in the M4 subset (a lambda anywhere else stays WRT0002);
+- the lambda inside `Spec.ForAll` and `Spec.Exists`, with one parameter of a supported type and an expression body in the M4 subset (a lambda anywhere else stays WRT0002 `lambda`, a lambda with a statement body is WRT0002 `lambda with statements`, and a claim that is not a lambda is WRT0004 `quantifier whose claim is not a lambda`);
 - `.By(...)` on `Prove.That`;
 - a method that calls itself, when its block body starts with `Spec.Decreases`.
 
@@ -153,12 +161,16 @@ The exit criterion's members are:
 |---|---|---|
 | `accepted/Payments.cs` | `Validate`, `ValidImpliesPositive` | proved by `Unfold`, `Simp` |
 | `accepted/Increment.cs` | `Increment`, `LargerBelowMax` (`x < int.MaxValue` implies `Increment(x) > x`) | proved by `Unfold`, `Simp`, `Omega` |
-| `accepted/Recursion.cs` | `Sum`, a two-parameter recursion, `long` recursion | translated; decrease proved by `omega` |
-| `accepted/Quantifiers.cs` | `ZeroIsNeutral`, `Cases` over `bool` and a closed enum, `Induction` over `Nat` | proved |
-| `refuted/Increment.cs` | `AlwaysLarger` | WRT0001, goal `x : Int32 ⊢ Increment x > x`, counterexample `x = 2147483647` |
+| `accepted/Clamp.cs` | `Clamp`, `AtMostOneHundred` (`Clamp(x) <= 100`) | proved by `Unfold`, `Omega`, through the literal lemmas (chapter 6) |
+| `accepted/Recursion.cs` | `Sum`, `Add` (two parameters, the measure is the second), `SumLong` (a `long` measure) | translated; each decrease proved by `omega` |
+| `accepted/Quantifiers.cs` | `ZeroIsNeutral` (`Spec.ForAll` with `Intro`), `FlipTwice` (`Cases` over `bool`), `RankIsSmall` (`Cases` over a `[Closed]` enum, with `.With(decide: true)`), `AndTrueIsIdentity` (`Induction` over `bool`, with `AllGoals` and `Try`) | proved |
+| `refuted/Increment.cs` | `AlwaysLarger` | WRT0001 at `Tactic.Omega()`, goal `x : Int32 ⊢ x + 1 > x` (after `Unfold`), counterexample `x = 2147483647` |
 | `refuted/Recursion.cs` | `Bad(n) => Bad(n - 1)` without a guard | WRT0001 on the decrease obligation |
-| `rejected/Recursion.cs` | mutual recursion, recursion without `Spec.Decreases`, `Spec.Decreases` not first | WRT0002 |
-| `rejected/Scripts.cs` | a `nameof` of an overloaded method, a string literal where a lemma is expected | WRT0004 |
+| `rejected/Recursion.cs` | mutual recursion (`IsEven`, `IsOdd`), recursion without `Spec.Decreases` (`Factorial`), `Spec.Decreases` not first (`Countdown`), nested recursion (`Nested`) | WRT0002 |
+| `rejected/Scripts.cs` | a `nameof` of an overloaded method, a string literal where a lemma is expected, `Spec.ForAll` outside a theorem | WRT0004 |
 
-`expected.json` gains, per theorem, the expected goal text for refuted members and the counterexample, so the goal printer's output is part of the exit criterion.
-As in M4, the corpus is written before the extractor changes (U9), so every rule has a failing test first.
+C# cannot declare a variable of Lean's `Nat`, so the corpus has no induction over `Nat`; `AndTrueIsIdentity` runs `Induction` over a `bool`, and induction over `Nat` is tested at the Meta level (chapter 4).
+
+`expected.json` gains, per theorem, the expected goal text for refuted members and the counterexample.
+The corpus tests check which members extraction accepts and rejects; the goals, counterexamples and proofs are checked by the engine's tests, which assert the printed goal of each refuted member.
+As in M4, the corpus was written before the extractor changed (U9), so every rule had a failing test first.

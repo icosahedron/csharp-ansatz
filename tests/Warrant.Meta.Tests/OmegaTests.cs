@@ -118,13 +118,10 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
     [Fact]
     public void LinearFactsOverIntAndNat()
     {
-        // ∀ x y : Int, x < y → y > x
         Proves(IntTerms.ForallN(IntT, ["x", "y"], v => IntTerms.Arrow(IntTerms.Lt(v[0], v[1]), IntTerms.Gt(v[1], v[0]))));
-        // ∀ x y : Int, x + 1 ≤ y → x < y ∧ 2 * x < 2 * y
         Proves(IntTerms.ForallN(IntT, ["x", "y"], v => IntTerms.Arrow(
             IntTerms.Le(IntTerms.Add(v[0], IntTerms.Lit(1)), v[1]),
             Expr.App(C("And"), IntTerms.Lt(v[0], v[1]), IntTerms.Lt(IntTerms.Mul(IntTerms.Lit(2), v[0]), IntTerms.Mul(IntTerms.Lit(2), v[1]))))));
-        // ∀ x y : Nat, x + 2 ≤ y → x < y - 1
         Proves(IntTerms.ForallN(Nat, ["x", "y"], v => IntTerms.Arrow(
             IntTerms.NLe(IntTerms.NAdd(v[0], IntTerms.NLit(2)), v[1]), IntTerms.NLt(v[0], IntTerms.NSub(v[1], IntTerms.NLit(1))))));
     }
@@ -151,11 +148,8 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
     [Fact]
     public void DivisionAndRemainderByLiterals()
     {
-        // ∀ x : Int, x % 4 < 4
         Proves(IntTerms.ForallN(IntT, ["x"], v => IntTerms.Lt(IntTerms.Mod(v[0], IntTerms.Lit(4)), IntTerms.Lit(4))), "Int.emod_def");
-        // ∀ x : Int, 2 * (x / 2) ≤ x
         Proves(IntTerms.ForallN(IntT, ["x"], v => IntTerms.Le(IntTerms.Mul(IntTerms.Lit(2), IntTerms.Div(v[0], IntTerms.Lit(2))), v[0])));
-        // ∀ x : Int, x / 3 ≥ 1 → x ≥ 3
         Proves(IntTerms.ForallN(IntT, ["x"], v => IntTerms.Arrow(
             IntTerms.Ge(IntTerms.Div(v[0], IntTerms.Lit(3)), IntTerms.Lit(1)), IntTerms.Ge(v[0], IntTerms.Lit(3)))));
     }
@@ -163,7 +157,6 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
     [Fact]
     public void AnIfThenElseAtomIsSplit()
     {
-        // ∀ x : Int, (if x ≤ 0 then 0 else x) ≥ 0
         Proves(IntTerms.ForallN(IntT, ["x"], v => IntTerms.Ge(IntTerms.IteLe(v[0], IntTerms.Lit(0), IntTerms.Lit(0), v[0]), IntTerms.Lit(0))),
             "Lean.Omega.ite_disjunction", "Or.elim");
     }
@@ -171,7 +164,6 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
     [Fact]
     public void IntToNatBecomesAMaximum()
     {
-        // ∀ x : Int, 0 ≤ x → ((x.toNat : Nat) : Int) = x
         Proves(IntTerms.ForallN(IntT, ["x"], v => IntTerms.Arrow(
             IntTerms.Le(IntTerms.Lit(0), v[0]), IntTerms.Eq(IntT, IntTerms.Cast(IntTerms.ToNat(v[0])), v[0]))), "Int.toNat_eq_max");
         // The decrease shape: ∀ n : Int, ¬ n ≤ 0 → (n - 1).toNat < n.toNat
@@ -212,8 +204,6 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
             "omega could not prove the goal:\nNo usable constraints found. You may need to unfold definitions so `omega` can see linear arithmetic facts about `Nat` and `Int`, which may also involve multiplication, division, and modular remainder by constants.",
             empty);
     }
-
-    // ---- Tactic.Omega(): the omega-prep set, then omega (KTD13, docs/m5a/06) ----
 
     /// <summary>Runs <c>Tactic.Omega()</c> (<see cref="MetaM.OmegaTactic"/>) on the statement and has the kernel admit the proof.</summary>
     private void PrepProves(Expr statement)

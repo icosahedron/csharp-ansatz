@@ -319,11 +319,7 @@ public static class Pipeline
                 meta.OmegaTactic(introduced);
                 proof = meta.InstantiateMVars(goal);
             }
-            catch (MetaResourceException ex)
-            {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while proving the decrease of {Describe(unit, decrease)}.");
-            }
-            catch (KernelResourceException ex)
+            catch (Exception ex) when (ex is MetaResourceException or KernelResourceException)
             {
                 return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while proving the decrease of {Describe(unit, decrease)}.");
             }
@@ -473,11 +469,7 @@ public static class Pipeline
             {
                 return NotProved(ex.Message, tactics.GetUnsolvedGoals(), runner.FailedAt);
             }
-            catch (MetaResourceException ex)
-            {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while running the proof script.");
-            }
-            catch (KernelResourceException ex)
+            catch (Exception ex) when (ex is MetaResourceException or KernelResourceException)
             {
                 return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while running the proof script.");
             }

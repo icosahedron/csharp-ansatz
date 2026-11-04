@@ -10,8 +10,6 @@ public sealed partial class MetaM
     // Lean's Context.univApprox: set while retrying postponed constraints with approximations.
     private bool _univApproxActive;
 
-    // ---------------------------------------------------------------- decLevel
-
     private Level? DecAux(Level u, bool canAssignMVars)
     {
         switch (u.Kind)
@@ -63,8 +61,6 @@ public sealed partial class MetaM
 
     /// <summary>The <c>u</c> with <paramref name="type"/> <c>: Sort (u+1)</c> (Lean's <c>getDecLevel</c>).</summary>
     public Level GetDecLevel(Expr type) => DecLevel(LevelOps.Normalize(this.InstantiateLevelMVars(GetLevel(type))));
-
-    // ---------------------------------------------------------------- solving
 
     private static bool StrictOccursMax(Level lvl, Level l)
     {
@@ -287,8 +283,6 @@ public sealed partial class MetaM
         }
         return true;
     }
-
-    // ---------------------------------------------------------------- postponed constraints
 
     private bool ProcessPostponedStep()
     {

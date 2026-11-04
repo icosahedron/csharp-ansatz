@@ -20,8 +20,6 @@ public class EncodingTests
     [Fact]
     public void AnM4UnitEncodesAsInVersionOneApartFromTheVersion()
     {
-        // M5a's additions are new kinds and fields, omitted when absent (plan KTD18), so a version 1 unit's bytes are
-        // what the version 1 writer wrote: the golden file with its version field set back to 1.
         var golden = Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "golden", "payout.json")));
         Assert.StartsWith(J("""{`vir`:2,"""), golden, StringComparison.Ordinal);
         Assert.Equal(J("""{`vir`:1,""") + golden[J("""{`vir`:2,""").Length..], VirWriter.WriteString(Samples.Payout() with { Vir = 1 }));

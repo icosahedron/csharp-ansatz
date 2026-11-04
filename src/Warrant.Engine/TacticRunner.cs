@@ -48,7 +48,7 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
         if (!Tactics.TryGetValue(node.Name, out var handler))
         {
             FailedAt ??= node;
-            throw new TacticUnavailableException(node.Name, $"Tactic `{node.Name}` is not available yet");
+            throw new TacticUnavailableException($"Tactic `{node.Name}` is not available yet");
         }
         try
         {
@@ -61,8 +61,6 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
         }
         tactics.PruneSolvedGoals();
     }
-
-    // ---- The tactics ----
 
     /// <summary><c>Tactic.Intro(names)</c>: one binder per name, or one binder under its own name when there is none.</summary>
     private static void Intro(TacticRunner r, TacticNode node)
@@ -103,7 +101,7 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
     /// </summary>
     private static void Unfold(TacticRunner r, TacticNode node)
     {
-        foreach (var arg in node.Args.Where(a => a is not OptionArg))
+        foreach (var arg in Positional(node))
         {
             var c = r.Constant(node, arg);
             r.State.LiftMetaTactic1(g => r.State.Meta.UnfoldTarget(g, c));
@@ -159,7 +157,7 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
                 _ => throw TacticException.Failed(node.Name, r.State.GetMainGoal(), $"unknown option '{option.Name}'"),
             };
         }
-        var lemmas = node.Args.Where(a => a is not OptionArg).Select(a => r.Constant(node, a)).ToList();
+        var lemmas = Positional(node).Select(a => r.Constant(node, a)).ToList();
         r.State.LiftMetaTactic(g =>
         {
             SimpTheorems? extra = null;
@@ -205,11 +203,12 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
         }
     }
 
-    // ---- Arguments ----
+    /// <summary>A tactic's arguments other than its <c>.With(…)</c> options, in order.</summary>
+    private static IEnumerable<VirTacticArg> Positional(TacticNode node) => node.Args.Where(a => a is not OptionArg);
 
     private VirTacticArg Single(TacticNode node)
     {
-        var args = node.Args.Where(a => a is not OptionArg).ToList();
+        var args = Positional(node).ToList();
         return args.Count == 1 ? args[0] : throw TacticException.Failed(node.Name, tactics.GetMainGoal(), $"expected one argument, got {args.Count}");
     }
 
@@ -255,13 +254,4 @@ internal sealed class TacticUnavailableException : Exception
         : base(message, innerException)
     {
     }
-
-    public TacticUnavailableException(string tactic, string message)
-        : base(message)
-    {
-        Tactic = tactic;
-    }
-
-    /// <summary>The tactic's name.</summary>
-    public string? Tactic { get; }
 }

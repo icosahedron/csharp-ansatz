@@ -31,7 +31,6 @@ public sealed partial class MetaM
             var body = type.InstantiateRevRange(j, fvars.Count, fvars);
             if (type is ForallExpr)
             {
-                // The telescope reached maxFVars.
                 Expr[] xs0 = [.. fvars];
                 return WithReader(c => c with { LCtx = lctx }, () => k(xs0, body));
             }

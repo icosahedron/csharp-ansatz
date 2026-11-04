@@ -218,8 +218,6 @@ public sealed partial class MetaM
         return DisplayNames?.Constant?.Invoke(name) ?? name.ToString();
     }
 
-    // ---------------------------------------------------------------- Lean/Meta/Tactic/Util.lean
-
     /// <summary>The goal's tag (Lean's <c>MVarId.getTag</c>, Util.lean 23).</summary>
     public Name GetTag(MVarId mvarId) => GetMVarDecl(mvarId).UserName;
 

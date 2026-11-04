@@ -61,8 +61,6 @@ internal sealed class MkBinding : IMonadMCtx
 
     private Name MkFreshBinderName() => Name.From("x", "_@", "_hyg").Append((ulong)NextMacroScope++);
 
-    // ---------------------------------------------------------------- forward dependencies
-
     /// <summary>
     /// <paramref name="toRevert"/> together with every variable of <paramref name="lctx"/> that may
     /// depend on them, sorted by index (Lean's <c>collectForwardDeps</c>). With
@@ -191,8 +189,6 @@ internal sealed class MkBinding : IMonadMCtx
         }
         return e;
     }
-
-    // ---------------------------------------------------------------- elimination
 
     private Expr Visit(IReadOnlyList<Expr> xs, Expr e)
     {
@@ -362,8 +358,6 @@ internal sealed class MkBinding : IMonadMCtx
         }
         return ExprExtensions.MkAppN(Visit(xs, f), VisitAll(xs, args));
     }
-
-    // ---------------------------------------------------------------- entry points
 
     /// <summary>
     /// <paramref name="e"/> with every unassigned metavariable whose context contains one of

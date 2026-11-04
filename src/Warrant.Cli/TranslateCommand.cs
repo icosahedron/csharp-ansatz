@@ -83,10 +83,7 @@ internal static class TranslateCommand
     private static int Translate(string directory, string? outPath, string? reportPath, string bundlePath, bool checkOverflow, TextWriter output)
     {
         var root = Path.GetFullPath(directory);
-        var files = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
-            .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
-            .Order(StringComparer.Ordinal)
-            .ToList();
+        var files = SourceFiles(root);
         var sources = new Sources(directory, root);
         output.WriteLine($"translating {files.Count} file(s) in {directory}");
 
@@ -216,6 +213,13 @@ internal static class TranslateCommand
         SkippedOutcome s => $"skipped: {s.Reason}",
         _ => AssumptionReports.OutcomeName(unit),
     };
+
+    /// <summary>Every .cs file under the root, as '/'-separated paths relative to it, in ordinal order.</summary>
+    internal static List<string> SourceFiles(string root) =>
+        Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal)
+            .ToList();
 
     internal static string Severity(ExtractionSeverity severity) => severity == ExtractionSeverity.Error ? "error" : "warning";
 

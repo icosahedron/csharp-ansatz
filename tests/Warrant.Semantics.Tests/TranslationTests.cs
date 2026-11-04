@@ -184,8 +184,6 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
         });
     }
 
-    // ---- Quantified statements (M5a KTD17) ----
-
     private const string Quantified = """
         public enum PaymentStatus { Pending, Processed, Failed }
         public sealed record Payment(int Id, int Amount, PaymentStatus Status);

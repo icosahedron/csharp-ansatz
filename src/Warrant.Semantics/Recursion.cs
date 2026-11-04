@@ -224,8 +224,6 @@ internal sealed partial class BodyTranslator
         return r;
     }
 
-    // ---- Branches on the way to a recursive call ----
-
     /// <summary>
     /// The hypotheses of a two-way branch on <paramref name="c"/>, <c>h : P</c> and <c>h : ¬P</c>, while translating a
     /// recursive method's functional; nulls otherwise.
@@ -300,8 +298,6 @@ internal sealed partial class BodyTranslator
 
     private static bool Mentions(Expr e, FVarExpr fvar) =>
         e.HasFVar && ExprOps.Find(e, (x, _) => x is FVarExpr f && f.Id == fvar.Id) is not null;
-
-    // ---- Packing ----
 
     /// <summary><c>@LT.lt Nat instLTNat a b</c>.</summary>
     private static Expr NatLt(Expr a, Expr b) => Expr.App(Init.Lt, Init.Nat, Init.LtNat, a, b);

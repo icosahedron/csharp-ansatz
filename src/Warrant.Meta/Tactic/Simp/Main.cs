@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Warrant.Cic;
 using Warrant.Kernel;
 
@@ -13,13 +14,18 @@ namespace Warrant.Meta;
 /// <param name="CongrTheorems">The congruence lemmas, by the function they are about, highest priority first.</param>
 public sealed record SimpContext(SimpConfig Config, ImmutableList<SimpTheorems> Theorems, IReadOnlyDictionary<Name, ImmutableArray<CongrEntry>> CongrTheorems)
 {
-    /// <summary>The <c>@[congr]</c> lemmas of <paramref name="sidecar"/>, by function, highest priority first.</summary>
+    private static readonly ConditionalWeakTable<Sidecar, IReadOnlyDictionary<Name, ImmutableArray<CongrEntry>>> CongrCache = new();
+
+    /// <summary>
+    /// The <c>@[congr]</c> lemmas of <paramref name="sidecar"/>, by function, highest priority first; grouped once per
+    /// sidecar, whose entries never change after loading.
+    /// </summary>
     public static IReadOnlyDictionary<Name, ImmutableArray<CongrEntry>> CongrTheoremsOf(Sidecar sidecar)
     {
         ArgumentNullException.ThrowIfNull(sidecar);
-        return sidecar.CongrEntries
+        return CongrCache.GetValue(sidecar, static s => s.CongrEntries
             .GroupBy(c => c.Function)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.Priority).ToImmutableArray());
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.Priority).ToImmutableArray()));
     }
 }
 
@@ -112,8 +118,6 @@ public sealed partial class Simplifier
         },
         k);
 
-    // ---------------------------------------------------------------- Main.lean: simp, simpLoop
-
     /// <summary>Lean's <c>simp</c> (<c>simpImpl</c>): proofs are left alone.</summary>
     internal SimpResult Simp(Expr e)
     {
@@ -202,8 +206,6 @@ public sealed partial class Simplifier
 
     // Lean's dsimp: not ported; a subterm simp may only change by definition is left as it is (chapter 5).
     private static Expr Dsimp(Expr e) => e;
-
-    // ---------------------------------------------------------------- Main.lean: reduce
 
     private static bool IsOfNatNatLit(Expr e) =>
         e.IsAppOf(MetaNames.OfNatOfNat) && e.GetAppNumArgs() >= 3 && e.GetAppArgs()[1] is NatLitExpr;
@@ -304,8 +306,6 @@ public sealed partial class Simplifier
             e = eNew;
         }
     }
-
-    // ---------------------------------------------------------------- Main.lean: binders and projections
 
     /// <summary>
     /// Lean's <c>withNewLemmas</c>: with <c>contextual</c>, the proofs among <paramref name="xs"/> become rewrite rules

@@ -98,8 +98,6 @@ public sealed record MetavarContext
     /// <summary>Delayed assignments.</summary>
     public ImmutableDictionary<MVarId, DelayedMetavarAssignment> DAssignment { get; init; } = ImmutableDictionary<MVarId, DelayedMetavarAssignment>.Empty;
 
-    // ---------------------------------------------------------------- declarations
-
     /// <summary>
     /// Declares <paramref name="mvarId"/> at the current depth (Lean's <c>addExprMVarDecl</c>); the
     /// id must be fresh.
@@ -193,8 +191,6 @@ public sealed record MetavarContext
         return this with { Depth = depth, LevelAssignDepth = allowLevelAssignments ? LevelAssignDepth : depth };
     }
 
-    // ---------------------------------------------------------------- assignments
-
     /// <summary>The assignment of <paramref name="mvarId"/>, or null.</summary>
     public Expr? GetExprAssignment(MVarId mvarId) => EAssignment.TryGetValue(mvarId, out var v) ? v : null;
 
@@ -256,8 +252,6 @@ public sealed record MetavarContext
     public MetavarContext AssignDelayedMVar(MVarId mvarId, ImmutableArray<Expr> fvars, MVarId mvarIdPending) =>
         this with { DAssignment = DAssignment.SetItem(mvarId, new DelayedMetavarAssignment(fvars, mvarIdPending)) };
 
-    // ---------------------------------------------------------------- instantiation
-
     /// <summary>
     /// Substitutes assigned metavariables in <paramref name="e"/>, recursively, and returns the
     /// result with this context updated by path compression (Lean's <c>instantiateMVarsCore</c>). See
@@ -287,8 +281,6 @@ public sealed record MetavarContext
         var r = fn.VisitLevel(l);
         return (r, fn.MCtx);
     }
-
-    // ---------------------------------------------------------------- dependencies
 
     /// <summary>
     /// Whether <paramref name="e"/> depends on a free variable satisfying <paramref name="pf"/> or an

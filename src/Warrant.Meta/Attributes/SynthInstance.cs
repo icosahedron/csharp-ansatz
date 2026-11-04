@@ -123,8 +123,6 @@ public sealed partial class MetaM
         }
     });
 
-    // ---------------------------------------------------------------- preprocessing
-
     private enum SynthPreprocessKind
     {
         NoMVars,
@@ -186,8 +184,6 @@ public sealed partial class MetaM
         }
         return MkForallFVars(xs, ExprExtensions.MkAppN(head, args));
     });
-
-    // ---------------------------------------------------------------- the search
 
     // A candidate instance (Lean's SynthInstance.Instance).
     private sealed record SynthCandidate(Expr Val, ImmutableArray<int> SynthOrder);
@@ -374,8 +370,6 @@ public sealed partial class MetaM
         }
         return ([.. inst.SynthOrder.Where(i => i < mvars.Count).Select(i => mvars[i])], instVal, instType);
     }
-
-    // ---------------------------------------------------------------- results
 
     // Lean's abstractMVars, for universes: the search's own universe metavariables become parameters.
     private SynthAnswer AbstractLevelMVars(Expr e)

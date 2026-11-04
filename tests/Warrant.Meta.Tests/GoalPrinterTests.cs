@@ -44,8 +44,6 @@ public sealed class GoalPrinterTests(SemanticsBundleFixture bundle) : IClassFixt
 
     private MetaM NewBundleMeta() => new(bundle.Env);
 
-    // ------------------------------------------------------------------ term builders
-
     private static ConstExpr C(string name, params Level[] levels) => Expr.Const(N(name), levels);
 
     private static Expr Lit(int n) =>
@@ -97,8 +95,6 @@ public sealed class GoalPrinterTests(SemanticsBundleFixture bundle) : IClassFixt
         return Go(0);
     }
 
-    // ------------------------------------------------------------------ layout
-
     [Fact]
     public void TheReadmeFailureGoalPrintsAfterIntro()
     {
@@ -147,8 +143,6 @@ public sealed class GoalPrinterTests(SemanticsBundleFixture bundle) : IClassFixt
             Printer().PpGoals(m.MCtx, [tagged, plain]));
         _ = (x, y);
     }
-
-    // ------------------------------------------------------------------ notation
 
     [Fact]
     public void ProjectionsOfTranslatedRecordsPrintByFieldName()

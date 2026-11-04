@@ -16,7 +16,6 @@ public sealed class NodeIdTests
                 var nodes = VirTree.PreOrder(unit);
                 foreach (var node in nodes)
                 {
-                    // The scan Pipeline.Sides and AssumptionReports.ClaimSpan each did before U1.
                     int expected = -1;
                     for (int i = 0; i < nodes.Count; i++)
                     {

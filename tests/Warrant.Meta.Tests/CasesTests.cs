@@ -41,7 +41,6 @@ public sealed class CasesTests(AttributeSidecarFixture attributes) : IClassFixtu
     [Fact]
     public void CasesOnABoolGivesAFalseGoalAndATrueGoal()
     {
-        // ∀ (b : Bool), (b && b) = b
         var statement = Expr.Forall(N("b"), Bool, Eq(Bool, Expr.App(Expr.Const(N("Bool.and")), Expr.BVar(0), Expr.BVar(0)), Expr.BVar(0)));
         var (m, t, goal) = Start(statement);
         Intro(t, "b");
@@ -107,7 +106,6 @@ public sealed class CasesTests(AttributeSidecarFixture attributes) : IClassFixtu
     [Fact]
     public void CasesOnAnEquationIsNotSupportedYet()
     {
-        // ∀ (a b : Nat), a = b → b = a
         var statement = Expr.Forall(N("a"), Nat, Expr.Forall(N("b"), Nat, Expr.Forall(N("h"), Eq(Nat, Expr.BVar(1), Expr.BVar(0)), Eq(Nat, Expr.BVar(1), Expr.BVar(2)))));
         var (m, t, _) = Start(statement);
         Intro(t, "a", "b", "h");
@@ -119,7 +117,6 @@ public sealed class CasesTests(AttributeSidecarFixture attributes) : IClassFixtu
     [Fact]
     public void CasesRefusesAGoalWithAnUnassignedMetavariable()
     {
-        // ∀ (b : Bool), b = ?x
         var (m, t, _) = Start(Expr.Forall(N("b"), Bool, Expr.Const(N("True"))));
         Intro(t, "b");
         var hole = t.WithMainContext(() => m.MkFreshExprMVar(Bool));

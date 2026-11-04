@@ -38,8 +38,6 @@ namespace Warrant.Meta.Omega
     {
         private MetaM M => Meta;
 
-        // -------------------------------------------------------------- asLinearCombo
-
         /// <summary><c>mkEvalRflProof</c>: <c>rfl : e = lc.eval atoms</c>.</summary>
         private Proof MkEvalRflProof(Expr e, LinearCombo lc) => () =>
             OmegaAppBuilder.MkEqReflWithExpectedType(M, e, Expr.App(Expr.Const(OmegaNames.LinearComboEval), ToExpr(lc), AtomsCoeffs()));
@@ -245,7 +243,6 @@ namespace Warrant.Meta.Omega
             if (AppOf(n, OmegaNames.HMul, 6) is { } mul)
             {
                 var (lc, prf, facts) = Rewrite(Expr.App(Expr.Const(OmegaNames.IntNatCastMul), mul[4], mul[5]));
-                // The product is non-negative.
                 return new(lc, prf, Insert(facts, Expr.App(Expr.Const(OmegaNames.IntOfNatMulNonneg), mul[4], mul[5])));
             }
             if (AppOf(n, OmegaNames.HDiv, 6) is { } div)
@@ -288,8 +285,6 @@ namespace Warrant.Meta.Omega
             }
             return MkAtomLinearCombo(e);
         }
-
-        // -------------------------------------------------------------- facts
 
         /// <summary><c>MetaProblem.addIntEquality</c> (Frontend.lean 346): adds <c>x = 0</c>, given <c>h</c>.</summary>
         private MetaProblem AddIntEquality(MetaProblem p, Expr h, Expr x)
@@ -480,8 +475,6 @@ namespace Warrant.Meta.Omega
             return (p, total);
         }
 
-        // -------------------------------------------------------------- the failure message
-
         /// <summary><c>formatErrorMessage</c> (Frontend.lean 533).</summary>
         private string FormatErrorMessage(Problem p)
         {
@@ -571,8 +564,6 @@ namespace Warrant.Meta.Omega
             return sb.ToString();
         }
 
-        // -------------------------------------------------------------- the algorithm
-
         /// <summary>
         /// <c>splitDisjunction</c> (Frontend.lean 620): splits the first disjunction whose left side brings a new fact, and
         /// proves <c>False</c> in both branches by <c>Or.elim</c>.
@@ -600,7 +591,6 @@ namespace Warrant.Meta.Omega
                 }));
                 if (p1 is null)
                 {
-                    // No new facts found.
                     m = m with { Disjunctions = t };
                     continue;
                 }

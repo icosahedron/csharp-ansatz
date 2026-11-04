@@ -100,7 +100,6 @@ public sealed partial class MetaM
                 case AppExpr app:
                     if (e.GetAppFn() is BVarExpr)
                     {
-                        // Beta-reduce when the head is a bound variable.
                         var head = Visit(e.GetAppFn(), offset);
                         var revArgs = e.GetAppRevArgs();
                         for (int i = 0; i < revArgs.Length; i++)
@@ -291,8 +290,6 @@ public sealed partial class MetaM
             _ => CheckInferTypeCache(e, () => InferLambdaType(e)), // lambda and let
         };
     }
-
-    // ---------------------------------------------------------------- isProp and friends
 
     private static bool IsAlwaysZero(Level l) => l.Kind switch
     {

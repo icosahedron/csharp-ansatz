@@ -70,8 +70,6 @@ public sealed partial class MetaM
     /// </summary>
     public bool SynthPending(MVarId mvarId) => SynthPendingImp(mvarId);
 
-    // ---------------------------------------------------------------- small predicates
-
     // fun xs => ?m ys with ?m unassigned and assignable.
     private bool IsAbstractedUnassignedMVar(Expr e)
     {
@@ -104,8 +102,6 @@ public sealed partial class MetaM
     private bool IsAssignable(Expr e) => e is MVarExpr mv && !IsReadOnlyOrSyntheticOpaque(mv.Id);
 
     private static bool EtaEq(Expr t, Expr s) => t.EtaExpanded() is { } t1 && t1.Equals(s);
-
-    // ---------------------------------------------------------------- eta, eta-struct, Nat, strings
 
     // b = mk a.1 … a.n with a not a constructor application.
     private bool IsDefEqEtaStruct(Expr a, Expr b)
@@ -192,8 +188,6 @@ public sealed partial class MetaM
         }
         return LBool.Undef;
     }
-
-    // ---------------------------------------------------------------- arguments
 
     // Lean's isDefEqArgsFirstPass: explicit arguments and easy ?m =?= t cases now; other implicit
     // arguments, and higher-order output parameters, postponed.
@@ -286,8 +280,6 @@ public sealed partial class MetaM
         return true;
     }
 
-    // ---------------------------------------------------------------- binders
-
     private bool IsDefEqBindingDomain(Expr[] fvars, Expr[] ds2, Func<bool> k)
     {
         return Loop(0);
@@ -338,8 +330,6 @@ public sealed partial class MetaM
         return WithReader(c => c with { LCtx = lctx }, () =>
             IsDefEqBindingDomain(xs, [.. ds2], () => IsExprDefEqAux(body1.InstantiateRev(xs), body2.InstantiateRev(xs))));
     }
-
-    // ---------------------------------------------------------------- assignment
 
     // The types of ?m and v must agree before ?m := v (at `implicit`, Lean's respectTransparency.types).
     private bool CheckTypesAndAssign(Expr mvar, Expr v)
@@ -622,8 +612,6 @@ public sealed partial class MetaM
         return mvarApp.Equals(vNew) || ProcessAssignment(mvarApp, vNew);
     }
 
-    // ---------------------------------------------------------------- lazy delta
-
     private ConstantInfo? IsDeltaCandidate(Expr t) => t.GetAppFn() is ConstExpr c ? GetUnfoldableConst(c.Name) : null;
 
     private LBool IsDefEqLeft(Expr t, Expr s) => ToLBool(IsExprDefEqAux(t, s));
@@ -839,8 +827,6 @@ public sealed partial class MetaM
         return tInfo.Name == sInfo.Name ? UnfoldBothDefEq(t, s) : UnfoldNonProjFnDefEq(tInfo, sInfo, t, s);
     }
 
-    // ---------------------------------------------------------------- delayed assignments, proof irrelevance
-
     private Expr? ExpandDelayedAssigned(Expr t)
     {
         if (t.GetAppFn() is not MVarExpr tFn || MCtx.GetDelayedMVarAssignment(tFn.Id) is not { } d)
@@ -924,8 +910,6 @@ public sealed partial class MetaM
         var cfg = Config;
         return cfg.Zeta || cfg.ZetaUnused ? ConsumeUnusedLet(e, consumeNondep: cfg.ZetaUnused || cfg.ZetaHave) : e;
     }
-
-    // ---------------------------------------------------------------- quick
 
     private LBool IsDefEqQuick(Expr t, Expr s)
     {
@@ -1066,8 +1050,6 @@ public sealed partial class MetaM
         UnstuckMVar(t, t1 => IsExprDefEqAux(t1, s), () =>
             UnstuckMVar(s, s1 => IsExprDefEqAux(t, s1), () => false)); // no unification hints
 
-    // ---------------------------------------------------------------- projections
-
     private enum DeltaStepKind
     {
         Eq,
@@ -1207,8 +1189,6 @@ public sealed partial class MetaM
             return ProcessAssignment1(s, ctorApp);
         }
     }
-
-    // ---------------------------------------------------------------- applications and the rest
 
     // Applications in whnf: compare heads and arguments (spines once, not curried prefixes).
     private bool IsDefEqApp(Expr t, Expr s)
@@ -1409,8 +1389,6 @@ public sealed partial class MetaM
         }
         return result;
     }
-
-    // ---------------------------------------------------------------- entry points
 
     /// <summary>
     /// Whether <paramref name="t"/> and <paramref name="s"/> are definitionally equal at the

@@ -87,8 +87,6 @@ internal sealed partial class OmegaM
         }
     }
 
-    // ------------------------------------------------------------------ ground terms
-
     /// <summary><c>natCast?</c>: <c>Expr.nat?</c>, also through <c>Nat.cast</c>.</summary>
     public static BigInteger? NatCast(Expr n) => AppOf(n, OmegaNames.NatCast, 3) is { } a ? Nat(a[2]) : Nat(n);
 
@@ -166,8 +164,6 @@ internal sealed partial class OmegaM
         return (op, args[4], args[5]);
     }
 
-    // ------------------------------------------------------------------ atoms
-
     /// <summary>
     /// <c>analyzeAtom</c> (OmegaM.lean 166): the facts a new atom brings. Lean's <c>Fin.val</c> and <c>BitVec.toNat</c>
     /// cases are left out (Warrant's goals have neither); Warrant adds <c>Int32.toInt</c> and <c>Int64.toInt</c>, whose
@@ -199,7 +195,6 @@ internal sealed partial class OmegaM
             {
                 return [];
             }
-            // k * (x / k) ≤ x < k * (x / k) + k
             var zero = IntLit(0);
             return
             [
@@ -310,8 +305,6 @@ internal sealed partial class OmegaM
         _atomIndex = _atomIndex.Add(e, i);
         return (i, facts);
     }
-
-    // ------------------------------------------------------------------ cache
 
     /// <summary>The cached linear combination of <paramref name="e"/>, if visited.</summary>
     public bool TryGetCached(Expr e, out (LinearCombo Lc, Proof Prf) entry) => _cache.TryGetValue(e, out entry);

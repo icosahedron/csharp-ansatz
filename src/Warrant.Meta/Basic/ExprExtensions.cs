@@ -173,8 +173,6 @@ public static class ExprExtensions
         return f.IsHeadBetaTargetFn(false) ? f.BetaRev(e.GetAppRevArgs()) : e;
     }
 
-    // ------------------------------------------------------------------ updates preserving sharing
-
     /// <summary>Rebuilds an application only if a child changed (Lean's <c>updateApp!</c>).</summary>
     public static Expr UpdateApp(this AppExpr e, Expr fn, Expr arg) =>
         ReferenceEquals(fn, e.Fn) && ReferenceEquals(arg, e.Arg) ? e : Expr.App(fn, arg);

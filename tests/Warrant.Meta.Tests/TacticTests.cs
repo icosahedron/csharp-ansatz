@@ -57,7 +57,6 @@ public sealed class TacticTests(SemanticsBundleFixture bundle) : IClassFixture<S
     [Fact]
     public void IntroApplyEqSymmAndExactAHypothesisProveSymmetry()
     {
-        // ∀ (a b : Int32), a = b → b = a
         var statement = Expr.Forall(N("a"), Int32, Expr.Forall(N("b"), Int32,
             Arrow(Eq(Int32, Expr.BVar(1), Expr.BVar(0)), Eq(Int32, Expr.BVar(1), Expr.BVar(2)))));
         var (m, t, goal) = Start(statement);
@@ -76,7 +75,6 @@ public sealed class TacticTests(SemanticsBundleFixture bundle) : IClassFixture<S
     [Fact]
     public void AChainOfIntroApplyAndIntroBuildsAClosedCertificate()
     {
-        // ∀ (P : Prop), ((∀ (x : Int32), x = x) → P) → P
         var reflexive = Expr.Forall(N("x"), Int32, Eq(Int32, Expr.BVar(0), Expr.BVar(0)));
         var statement = Expr.Forall(N("P"), Expr.Prop, Arrow(Arrow(reflexive, Expr.BVar(1)), Expr.BVar(1)));
         var (m, t, goal) = Start(statement);

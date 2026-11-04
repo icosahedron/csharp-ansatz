@@ -167,10 +167,18 @@ public static class OutcomeText
     /// <returns>The name, e.g. <c>warrant-semantics sha256:0123456789ab</c>.</returns>
     public static string BundleName(string path)
     {
-        using var stream = File.OpenRead(path);
-        var hash = Convert.ToHexStringLower(SHA256.HashData(stream));
+        var hash = FileSha256(path);
         var name = Path.GetFileName(path);
         name = name.EndsWith(".ndjson.gz", StringComparison.Ordinal) ? name[..^".ndjson.gz".Length] : name;
         return $"{name} sha256:{hash[..12]}";
+    }
+
+    /// <summary>The SHA-256 of a file's bytes as lower-case hex.</summary>
+    /// <param name="path">The file.</param>
+    /// <returns>The 64-character hex digest.</returns>
+    public static string FileSha256(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
     }
 }

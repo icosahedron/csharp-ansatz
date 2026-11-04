@@ -141,8 +141,6 @@ public class CorpusTests
         }
     }
 
-    // SHA-256 of every M4 unit's VIR at schema version 1, one unit per line in compilation and unit order, captured
-    // from the M4 extractor before M5a added to VIR (plan U9): M5a adds kinds and fields but changes no existing encoding.
     private const string M4VirAtVersion1 = "17845076f4fda166e0409d5d374dbfbd6a89580b26c3f8e501b8df6d6f033994";
 
     [Fact]

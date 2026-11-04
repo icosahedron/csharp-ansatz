@@ -215,8 +215,6 @@ public sealed partial class MetaM
     private readonly Dictionary<(ulong, Expr), Expr> _whnfCache = [];
     private readonly Dictionary<Name, ProjectionFunctionInfo?> _projFnInfoCache = [];
 
-    // ---------------------------------------------------------------- helpers
-
     /// <summary>Lean's <c>Expr.toCtorIfLit</c>: a literal as a constructor application.</summary>
     public Expr ToCtorIfLit(Expr e) => e switch
     {
@@ -517,8 +515,6 @@ public sealed partial class MetaM
         return ExprExtensions.MkAppRange(r, majorPos + 1, recArgs.Length, recArgs);
     }
 
-    // ---------------------------------------------------------------- stuck metavariables
-
     private MVarId? IsRecStuck(RecursorInfo recVal, Expr[] recArgs)
     {
         if (recVal.K)
@@ -611,8 +607,6 @@ public sealed partial class MetaM
         }
     }
 
-    // ---------------------------------------------------------------- whnfEasyCases
-
     /// <summary>Lean's <c>whnfEasyCases</c>: the cases that need no reduction; <paramref name="k"/> handles the rest.</summary>
     private Expr WhnfEasyCases(Expr e, Func<Expr, Expr> k)
     {
@@ -664,8 +658,6 @@ public sealed partial class MetaM
         var val = ExprOps.InstantiateValueLevelParams(c, lvls);
         return val.BetaRev(revArgs);
     }
-
-    // ---------------------------------------------------------------- matchers
 
     // Eagerly unfold `dite` in a matcher's body (the `match` compiler's auxiliary uses; see the
     // module comment above `unfoldNestedDIte` in WHNF.lean).
@@ -733,8 +725,6 @@ public sealed partial class MetaM
         });
     }
 
-    // ---------------------------------------------------------------- projections
-
     /// <summary>Field <paramref name="i"/> of a constructor application (Lean's <c>projectCore?</c>).</summary>
     public Expr? ProjectCore(Expr e, int i)
     {
@@ -774,8 +764,6 @@ public sealed partial class MetaM
         return ExprExtensions.MkAppRange(result, d.FVars.Length, args.Length, args);
     }
 
-    // ---------------------------------------------------------------- zeta
-
     /// <summary>Lean's <c>expandLet</c>: zeta-reduces the <c>let</c>s (and, with <paramref name="zetaHave"/>, <c>have</c>s) at the head.</summary>
     internal static Expr ExpandLet(Expr e, List<Expr> vs, bool zetaHave = true)
     {
@@ -796,8 +784,6 @@ public sealed partial class MetaM
         }
         return e;
     }
-
-    // ---------------------------------------------------------------- whnfCore
 
     /// <summary>
     /// Beta, zeta, iota, projection and matcher reduction, expanding assigned metavariables and
@@ -894,8 +880,6 @@ public sealed partial class MetaM
                 throw new InvalidOperationException("unreachable: whnfEasyCases handles the other kinds");
         }
     }
-
-    // ---------------------------------------------------------------- delta
 
     /// <summary>
     /// Unfolds a class projection applied to an instance and reduces the instance's projection at
@@ -1052,8 +1036,6 @@ public sealed partial class MetaM
         };
     }
 
-    // ---------------------------------------------------------------- Nat literals
-
     private BigInteger? WithNatValue(Expr a)
     {
         if (!a.HasExprMVar && a.HasFVar)
@@ -1164,8 +1146,6 @@ public sealed partial class MetaM
         Expr? Pred(Expr a, Expr b, Func<BigInteger, BigInteger, bool> op) =>
             WithNatValue(a) is { } x && WithNatValue(b) is { } y ? MetaNames.MkBool(op(x, y)) : null;
     }
-
-    // ---------------------------------------------------------------- whnf
 
     /// <summary>
     /// The weak head normal form of <paramref name="e"/> at the current transparency (Lean's

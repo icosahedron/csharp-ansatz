@@ -200,7 +200,6 @@ public static class Constructions
         var xs = new Expr[info.NumParams + info.NumIndices];
         for (int i = 0; i < xs.Length; i++)
         {
-            // withImplicitBinderInfos: the parameters and indices are implicit.
             var f = (ForallExpr)type;
             xs[i] = lctx.MkLocalDecl(ngen, f.BinderName, f.BinderType, BinderInfo.Implicit);
             type = ExprOps.Instantiate(f.Body, xs[i]);

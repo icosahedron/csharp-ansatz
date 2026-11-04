@@ -131,8 +131,6 @@ public sealed class Notation
         }
     }
 
-    // ---------------------------------------------------------------- terms
-
     private Doc Pp(Expr e)
     {
         switch (e)
@@ -194,8 +192,6 @@ public sealed class Notation
         var text = arg.ToString();
         return new(keyword + (text.Contains(' ', StringComparison.Ordinal) ? $"({text})" : text), LeadPrec, Closed);
     }
-
-    // ---------------------------------------------------------------- applications and notations
 
     private Doc App(Expr e)
     {
@@ -301,8 +297,6 @@ public sealed class Notation
 
     private static Doc IfThenElse(string? hyp, Doc cond, Doc thenDoc, Doc elseDoc) =>
         new($"if {(hyp is null ? "" : hyp + " : ")}{cond.Text} then {thenDoc.Text} else {elseDoc.Text}", LeadPrec, Math.Min(0, elseDoc.Right));
-
-    // ---------------------------------------------------------------- binders
 
     private Doc Exists(Expr pred)
     {
@@ -455,8 +449,6 @@ public sealed class Notation
         bool captures = ExprOps.Find(body, (e, _) => e is FVarExpr f && _lctx.Find(f.Id)?.UserName == suggestion) is not null;
         return (captures ? _lctx.GetUnusedName(suggestion) : suggestion).ToString();
     }
-
-    // ---------------------------------------------------------------- parentheses
 
     /// <summary>
     /// <paramref name="d"/> in a slot of precedence <paramref name="prec"/>, followed by an operator

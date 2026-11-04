@@ -103,8 +103,6 @@ public sealed partial class MetaM : IMonadMCtx
     /// <summary>The current configuration (Lean's <c>getConfig</c>).</summary>
     public MetaConfig Config => Context.Config;
 
-    // ---------------------------------------------------------------- fresh names and state
-
     /// <summary>A fresh free-variable id.</summary>
     public FVarId MkFreshFVarId() => new(_ngen.Next());
 
@@ -154,8 +152,6 @@ public sealed partial class MetaM : IMonadMCtx
 
     /// <summary>Runs <paramref name="k"/> letting unification assign goals (Lean's <c>withAssignableSyntheticOpaque</c>).</summary>
     public T WithAssignableSyntheticOpaque<T>(Func<T> k) => WithConfig(c => c with { AssignSyntheticOpaque = true }, k);
-
-    // ---------------------------------------------------------------- metavariables
 
     /// <summary>Creates a metavariable in an explicit local context (Lean's <c>mkFreshExprMVarAt</c>).</summary>
     public MVarExpr MkFreshExprMVarAt(
@@ -279,8 +275,6 @@ public sealed partial class MetaM : IMonadMCtx
     /// <summary>Records <c>?mvarId := val</c> for a universe metavariable, with no checks (Lean's <c>assignLevelMVar</c>).</summary>
     public void AssignLevelMVar(LMVarId mvarId, Level val) => MCtx = MCtx.AssignLevelMVar(mvarId, val);
 
-    // ---------------------------------------------------------------- free variables
-
     /// <summary>The declaration of <paramref name="fvarId"/> in the current context, or null.</summary>
     public LocalDecl? FindLocalDecl(FVarId fvarId) => LCtx.Find(fvarId);
 
@@ -302,8 +296,6 @@ public sealed partial class MetaM : IMonadMCtx
         var decl = GetLocalDecl(fvarId);
         return LCtx.DeclsFrom(decl.Index + 1).Any(other => this.LocalDeclDependsOn(other, fvarId));
     }
-
-    // ---------------------------------------------------------------- binders
 
     private T LiftMkBinding<T>(Func<MkBinding, T> x, bool preserveOrder = false, BinderInfo binderInfoForMVars = BinderInfo.Implicit, ImmutableHashSet<MVarId>? mvarIdsToAbstract = null)
     {
@@ -393,8 +385,6 @@ public sealed partial class MetaM : IMonadMCtx
             binderInfoForMVars,
             mvarIdsToAbstract);
     }
-
-    // ---------------------------------------------------------------- scopes
 
     /// <summary>
     /// Runs <paramref name="k"/> with a fresh hypothesis <c>(name : type)</c> added to the local
@@ -498,8 +488,6 @@ public sealed partial class MetaM : IMonadMCtx
 
     /// <summary>Runs <paramref name="k"/> and then restores the metavariable context (Lean's <c>withoutModifyingMCtx</c>).</summary>
     public T WithoutModifyingMCtx<T>(Func<T> k) => WithMCtx(MCtx, k);
-
-    // ---------------------------------------------------------------- telescopes (no reduction)
 
     /// <summary>
     /// For <paramref name="type"/> of the form <c>∀ xs, A</c>, runs <paramref name="k"/> on fresh

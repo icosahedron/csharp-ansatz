@@ -74,11 +74,9 @@ internal static class Counterexample
             }
             catch (KernelException)
             {
-                // Out of fuel or stuck: skip this combination.
             }
             catch (InsufficientExecutionStackException)
             {
-                // Too deep: skip this combination.
             }
             int k = index.Length - 1;
             while (k >= 0 && ++index[k] == candidates[k].Length)

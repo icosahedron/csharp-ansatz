@@ -56,9 +56,14 @@ public static class DefaultSimpSet
             {
                 var builder = new MetaM(meta.Env, new MetaLimits(long.MaxValue)) { Attributes = sidecar };
                 var set = new SimpTheorems();
+                var firstEntries = new Dictionary<Name, SimpEntry>();
+                foreach (var s in sidecar.SimpEntries)
+                {
+                    firstEntries.TryAdd(s.Name, s);
+                }
                 foreach (var name in LemmaNames(sidecar))
                 {
-                    var entry = sidecar.SimpEntries.FirstOrDefault(s => s.Name == name);
+                    var entry = firstEntries.GetValueOrDefault(name);
                     set.AddRange(builder.MkSimpTheoremsFromConst(
                         name,
                         post: entry?.Post ?? true,

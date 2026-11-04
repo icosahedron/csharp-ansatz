@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -117,7 +116,7 @@ internal static class VerifyCommand
         try
         {
             // The sidecar first: it names the bundle it was made for, so a mismatched pair is declined before the slow load.
-            var sidecar = Sidecar.Load(sidecarPath, Sha256(bundlePath));
+            var sidecar = Sidecar.Load(sidecarPath, OutcomeText.FileSha256(bundlePath));
             var settings = new Settings(msbuild, outPath, reportDir, bundlePath, sidecar, kernelFuel, tacticFuel, timeoutSeconds);
             return cscArgs is not null
                 ? FromCscArgs(cscArgs, projectDir ?? Environment.CurrentDirectory, keepConditionalCheck, settings, output)
@@ -166,10 +165,7 @@ internal static class VerifyCommand
     private static int FromDirectory(string directory, Settings settings, TextWriter output)
     {
         var root = Path.GetFullPath(directory);
-        var files = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
-            .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
-            .Order(StringComparer.Ordinal)
-            .ToList();
+        var files = TranslateCommand.SourceFiles(root);
         var report = new Reporter(output, settings.Msbuild, new TranslateCommand.Sources(directory, root));
         report.Line($"verifying {files.Count} file(s) in {directory}");
         var compilation = CompilationFactory.FromFiles(root, files, checkOverflow: false);
@@ -264,12 +260,6 @@ internal static class VerifyCommand
     private static long? Count(string text) =>
         long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? n : null;
 
-    private static string Sha256(string path)
-    {
-        using var stream = File.OpenRead(path);
-        return Convert.ToHexStringLower(SHA256.HashData(stream));
-    }
-
     /// <summary>A compiler diagnostic's location as a span; its path is the tree's, relative to the project directory.</summary>
     private static VirSpan? Span(Location location)
     {
@@ -349,14 +339,14 @@ internal static class VerifyCommand
             var result = new StringBuilder(text.Length);
             foreach (var c in text)
             {
-                result.Append(c switch
+                _ = c switch
                 {
-                    '\\' => @"\\",
-                    '\n' => @"\n",
-                    '\r' => @"\r",
-                    '\t' => @"\t",
-                    _ => c.ToString(),
-                });
+                    '\\' => result.Append(@"\\"),
+                    '\n' => result.Append(@"\n"),
+                    '\r' => result.Append(@"\r"),
+                    '\t' => result.Append(@"\t"),
+                    _ => result.Append(c),
+                };
             }
             return result.ToString();
         }

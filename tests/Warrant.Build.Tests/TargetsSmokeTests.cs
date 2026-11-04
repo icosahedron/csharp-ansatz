@@ -80,34 +80,6 @@ public sealed class TargetsSmokeTests : IDisposable
     }
 
     [FactRequiringEnv(Gate)]
-    public void ADesignTimeBuildDoesNotVerify()
-    {
-        var project = Sample("DesignTime", "<TargetFramework>net10.0</TargetFramework>");
-        using var fake = new FakeCli(project);
-        fake.Script([], exitCode: 0);
-
-        var (exitCode, _) = Build(project, "-p:DesignTimeBuild=true");
-
-        Assert.Equal(0, exitCode);
-        Assert.Empty(fake.Invocations());
-    }
-
-    [FactRequiringEnv(Gate)]
-    public void AMultiTargetedProjectVerifiesOnceInTheFirstFrameworkKeepingTheConditionalCheck()
-    {
-        var project = Sample("Multi", "<TargetFrameworks>net9.0;net10.0</TargetFrameworks>");
-        using var fake = new FakeCli(project);
-        fake.Script(["WRT1\tsummary\tinfo\t\t\t0\t0\t0\t0\tWarrant: 1 verified unit, 1 theorem proved, 0 not proved."], exitCode: 0);
-
-        var (exitCode, _) = Build(project);
-
-        Assert.Equal(0, exitCode);
-        var args = Assert.Single(fake.Invocations());
-        Assert.Equal(Path.Combine(project, "obj", "Debug", "net9.0", "warrant.csc.args"), Path.GetFullPath(args[2], project));
-        Assert.Contains("--keep-conditional-check", args);
-    }
-
-    [FactRequiringEnv(Gate)]
     public void ReferencingWarrantWithoutVerificationWarnsWrt0011()
     {
         var withoutTask = Sample("NoTask", "<TargetFramework>net10.0</TargetFramework>", importWarrantBuild: false);

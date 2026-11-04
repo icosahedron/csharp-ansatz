@@ -242,7 +242,6 @@ internal sealed record Problem
             return this;
         }
         var m = MinNatAbs.Min(c) + 1;
-        // The atom's value is bmod_div_term m c atoms.
         var x = Expr.App(Expr.Const(OmegaNames.BmodDivTerm), NatLit(m), ToExpr(c), o.AtomsCoeffs());
         var (i, facts) = o.Lookup(x);
         if (r1 != r)

@@ -66,7 +66,7 @@ public class CorpusTests
         var diagnostics = result.DiagnosticsFor(key);
         switch (outcome)
         {
-            case "translated" or "proved" or "false":
+            case "translated" or "proved" or "false" or "unproved":
                 Assert.Empty(diagnostics);
                 Assert.NotNull(unit);
                 if (outcome != "translated" && !expected.TryGetProperty("recursive", out _))

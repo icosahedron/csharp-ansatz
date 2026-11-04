@@ -19,7 +19,9 @@
 #     (scripts/lib/arena.sh), compared with the arena's expected outcome; `either` is recorded, not judged;
 #   - init-medium, Nat.add_succ and tests/data/arena/*, compared with their known outcome;
 #   - Warrant's export of each of the above (what it admitted), which every kernel must accept;
-#   - the declarations built in C# (CrossCheckFixtures.cs) and the translated M4 corpus, which must be accepted.
+#   - the declarations built in C# (CrossCheckFixtures.cs), the translated M4 corpus and the M5a certificate
+#     (`warrant verify tests/corpus/m5a/accepted`), which must be accepted;
+#   - the M5a certificate with one proof replaced, which must be rejected.
 #
 # The script exits 1 when Warrant's verdict contradicts a row's expected outcome, or when Lean rejects what
 # Warrant admitted. Other kernels' disagreements are listed for docs/kernel.md and do not fail the run.
@@ -27,7 +29,7 @@
 #
 # Environment: LEAN_TOOLCHAIN_BIN (see scripts/lib/lean-toolchain.sh), ANSATZ_DIR, ARENA_REFRESH=1 to download
 # the arena files again, KERNEL_TIMEOUT (seconds per kernel run, default 900), ARENA_ONLY=1 to run only
-# the arena tests.
+# the arena tests, CORPUS_ONLY=1 to skip them (and their download).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/lean-toolchain.sh
@@ -58,7 +60,7 @@ else
 fi
 [ -z "$ansatz_skip" ] || echo "Ansatz SKIPPED: $ansatz_skip" >&2
 
-fetch_arena "$WORKDIR"
+if [ -z "${CORPUS_ONLY:-}" ]; then fetch_arena "$WORKDIR"; else ARENA_COMMIT="- (CORPUS_ONLY)"; fi
 
 # run LOG CMD… : runs one kernel with the time limit and prints its verdict (accept, reject, decline,
 # timeout or error), keeping its output in LOG.
@@ -126,9 +128,11 @@ check_file() {
   fi
 }
 
-while IFS=$'\t' read -r file name outcome official nanoda l4l; do
-  check_file "arena/$name" "$file" "$outcome" "$official" "$nanoda" "$l4l"
-done < "$ARENA_DIR/index.tsv"
+if [ -z "${CORPUS_ONLY:-}" ]; then
+  while IFS=$'\t' read -r file name outcome official nanoda l4l; do
+    check_file "arena/$name" "$file" "$outcome" "$official" "$nanoda" "$l4l"
+  done < "$ARENA_DIR/index.tsv"
+fi
 
 if [ -z "${ARENA_ONLY:-}" ]; then
   # Known outcomes of the committed corpus (tests/data/README.md): these are older exports of arena tests,
@@ -162,6 +166,25 @@ if [ -z "${ARENA_ONLY:-}" ]; then
       "$(ansatz_v m4 "$OUT/exports/m4.ndjson")" - - - export
   else
     judge "M4 corpus (translated)" accept - error - - - - export
+  fi
+
+  # The M5a certificate (docs/m5a/08): `warrant verify` proves the M5a corpus by its scripts and writes the bundle
+  # plus every admitted declaration. Then the same certificate with the last theorem's proof replaced by the proof
+  # of the theorem before it, which proves a different statement: every kernel must reject it.
+  run "$LOGS/m5a.verify.txt" "${WARRANT[@]}" verify tests/corpus/m5a/accepted --out "$OUT/exports/m5a.ndjson" >/dev/null
+  if [ -s "$OUT/exports/m5a.ndjson" ]; then
+    judge "M5a certificate (verify)" accept "$(lean_v m5a "$OUT/exports/m5a.ndjson")" \
+      "$(run "$LOGS/m5a.warrant.txt" "${WARRANT[@]}" check "$OUT/exports/m5a.ndjson" --quiet)" \
+      "$(ansatz_v m5a "$OUT/exports/m5a.ndjson")" - - - export
+    thms="$(grep -n '^{"thm":' "$OUT/exports/m5a.ndjson" | tail -2)"
+    proof="$(echo "$thms" | head -1 | sed -E 's/.*"value":([0-9]+).*/\1/')"
+    sed -E "$(echo "$thms" | tail -1 | cut -d: -f1)s/\"value\":[0-9]+/\"value\":$proof/" \
+      "$OUT/exports/m5a.ndjson" > "$OUT/exports/m5a.tampered.ndjson"
+    judge "M5a certificate, one proof replaced" reject "$(lean_v m5a.tampered "$OUT/exports/m5a.tampered.ndjson")" \
+      "$(run "$LOGS/m5a.tampered.warrant.txt" "${WARRANT[@]}" check "$OUT/exports/m5a.tampered.ndjson" --quiet)" \
+      "$(ansatz_v m5a.tampered "$OUT/exports/m5a.tampered.ndjson")" - - -
+  else
+    judge "M5a certificate (verify)" accept - error - - - - export
   fi
 fi
 

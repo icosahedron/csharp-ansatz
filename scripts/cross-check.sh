@@ -13,6 +13,8 @@
 # and must be accepted by Lean, which re-derives every recursor and compares it with ours.
 # Last, `warrant translate` translates the M4 corpus (tests/corpus/m4/accepted) and must succeed, and Lean's
 # kernel must accept what it wrote: the semantics bundle plus every translated definition and proved theorem.
+# Then `warrant verify` proves the M5a corpus (tests/corpus/m5a/accepted) by its scripts, and Lean's kernel must
+# accept the certificate it wrote; a copy with one proof replaced must be rejected by both kernels.
 #
 # Set WARRANT_INIT_EXPORT to a full-Init export (scripts/export-lean-library.sh) to include it.
 set -euo pipefail
@@ -73,6 +75,38 @@ set -e
 result=ok
 if [ "$ls" != accept ] || [ "$lean" != accept ]; then result="M4 CORPUS FAILED"; failures=$((failures + 1)); fi
 row "M4 corpus" "-" "$ls" "$lean" "$result"
+
+# The M5a corpus (docs/m5a/08): `warrant verify` proves its theorems by their scripts and writes the certificate,
+# the bundle plus every admitted declaration (quantified theorems with simp and omega proofs, recursive definitions
+# with their decrease theorems and equation lemmas, generated casesOn and ctorIdx), which Lean's kernel re-checks.
+set +e
+"${WARRANT[@]}" verify tests/corpus/m5a/accepted --out "$OUT/m5a.ndjson" > "$OUT/m5a.verify.txt" 2>&1; ls=$(verdict $?)
+"$LEAN" "$OUT/m5a.ndjson" > "$OUT/m5a.lean.txt" 2>&1; lean=$(verdict $?)
+set -e
+result=ok
+if [ "$ls" != accept ] || [ "$lean" != accept ]; then result="M5A CORPUS FAILED"; failures=$((failures + 1)); fi
+row "M5a corpus" "-" "$ls" "$lean" "$result"
+
+# A tampered certificate: the last theorem's proof is replaced with the proof of the theorem before it, which proves
+# a different statement. Both kernels must reject the file.
+tampered="$OUT/m5a.tampered.ndjson"
+thms="$(grep -n '^{"thm":' "$OUT/m5a.ndjson" | tail -2 || true)"
+last_line="$(echo "$thms" | tail -1 | cut -d: -f1)"
+proof="$(echo "$thms" | head -1 | sed -E 's/.*"value":([0-9]+).*/\1/')"
+set +e
+if [ "$(echo "$thms" | wc -l)" -eq 2 ]; then
+  sed -E "${last_line}s/\"value\":[0-9]+/\"value\":$proof/" "$OUT/m5a.ndjson" > "$tampered"
+  "${WARRANT[@]}" check "$tampered" --quiet > "$OUT/m5a.tampered.warrant.txt" 2>&1; ls=$(verdict $?)
+  "$LEAN" "$tampered" > "$OUT/m5a.tampered.lean.txt" 2>&1; lean=$(verdict $?)
+else
+  ls=missing; lean=missing
+fi
+set -e
+result=ok
+if [ "$ls" != reject ] || [ "$lean" != reject ] || cmp -s "$OUT/m5a.ndjson" "$tampered"; then
+  result="TAMPERED CERTIFICATE NOT REJECTED"; failures=$((failures + 1))
+fi
+row "M5a tampered" "-" "$ls" "$lean" "$result"
 
 echo
 echo "details in $OUT"

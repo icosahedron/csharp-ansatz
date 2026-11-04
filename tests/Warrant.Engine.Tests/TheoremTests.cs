@@ -559,33 +559,6 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Contains("Lemma", skipped.Reason, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void EveryM5aCorpusScriptIsProvedButTheFalseClaim()
-    {
-        // With omega (U18), every M5a corpus script is proved except AlwaysLarger, the false claim.
-        var proved = new List<string>();
-        foreach (var compilation in new[] { "accepted", "refuted" })
-        {
-            var result = engine.Run($"m5a/{compilation}");
-            foreach (var outcome in result.Units.Where(u => u.UnitKind == VirUnitKind.Theorem))
-            {
-                if (outcome is ProvedOutcome { By: ProofKind.Script })
-                {
-                    proved.Add(outcome.Key);
-                    continue;
-                }
-                Assert.Equal("M:Corpus.Refuted.Increments.AlwaysLarger(System.Int32)", outcome.Key);
-                Assert.IsType<NotProvedOutcome>(outcome);
-            }
-        }
-        Assert.Equal(
-            ["M:Claims.Payments.ValidImpliesPositive(Claims.Payment)", "M:Corpus.Clamps.AtMostOneHundred(System.Int32)",
-             "M:Corpus.Increments.LargerBelowMax(System.Int32)", "M:Corpus.Quantifiers.AndTrueIsIdentity(System.Boolean)",
-             "M:Corpus.Quantifiers.FlipTwice(System.Boolean)", "M:Corpus.Quantifiers.RankIsSmall(Corpus.Light)",
-             "M:Corpus.Quantifiers.ZeroIsNeutral"],
-            proved.Order(StringComparer.Ordinal));
-    }
-
     // ---- omega (M5a U18) ----
 
     [Fact]

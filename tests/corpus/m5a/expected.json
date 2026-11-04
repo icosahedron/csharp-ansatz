@@ -34,11 +34,18 @@
     "refuted": {
       "M:Corpus.Refuted.Increments.Increment(System.Int32)": { "outcome": "translated" },
       "M:Corpus.Refuted.Increments.AlwaysLarger(System.Int32)": {
-        "outcome": "false",
-        "goal": "x : Int32\n⊢ Increment x > x",
+        "outcome": "unproved",
+        "code": "WRT0001",
+        "goal": "x : Int32\n⊢ x + 1 > x",
         "counterexample": { "x": "2147483647" }
       },
-      "M:Corpus.Refuted.Recursion.Bad(System.Int32)": { "outcome": "false", "recursive": true, "obligation": "decreases" }
+      "M:Corpus.Refuted.Recursion.Bad(System.Int32)": {
+        "outcome": "unproved",
+        "recursive": true,
+        "obligation": "decreases",
+        "code": "WRT0001",
+        "goal": "n : Int32\n⊢ (n - 1).toInt.toNat < n.toInt.toNat"
+      }
     },
     "rejected": {
       "M:Corpus.Rejected.Recursion.IsEven(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "mutual recursion" }] },

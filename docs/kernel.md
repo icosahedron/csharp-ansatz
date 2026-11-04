@@ -126,8 +126,14 @@ and skips any test that does not match, with a message. The rows are:
 - every test in the arena tarball, judged against the arena's expected outcome;
 - init-medium, `Nat.add_succ` and `tests/data/arena/*`, judged against their known outcome;
 - Warrant's export of each of those files, which every kernel must accept;
-- the declarations built in C# (`CrossCheckFixtures.cs`, on top of init-medium) and the translated M4 corpus
-  (the semantics bundle plus the translated definitions and theorems), which must be accepted.
+- the declarations built in C# (`CrossCheckFixtures.cs`, on top of init-medium), the translated M4 corpus
+  (the semantics bundle plus the translated definitions and theorems) and the M5a certificate
+  (`warrant verify tests/corpus/m5a/accepted --out …`: the bundle plus the theorems proved by their scripts,
+  the recursive definitions with their decrease theorems and equation lemmas), which must be accepted;
+- the M5a certificate with its last theorem's proof replaced by the proof of the theorem before it, which
+  must be rejected.
+
+`CORPUS_ONLY=1` skips the arena tests and their download, for a run over the committed files only.
 
 The script exits 1 only when Warrant contradicts an expected outcome, or when Lean rejects
 something Warrant admitted. It lists every other disagreement, and each one is explained below.
@@ -154,6 +160,17 @@ committed corpus alone took 113 s and gave the same verdicts on the new fixtures
 **Warrant's verdict matched the expected outcome on every row, and Lean accepted everything
 Warrant wrote.** No verdict from another kernel showed a fault in Warrant.
 
+The M5a certificate rows were added later and run with `CORPUS_ONLY=1` (Ansatz `4ff56b8`, Lean 4.35.0
+from elan, 26 rows; the rows the earlier run also had gave the same verdicts):
+
+| Row | Lean | Warrant | Ansatz |
+|---|---|---|---|
+| M5a certificate (2,879 constants: the bundle and 38 admitted declarations) | accept | accept | reject at `Nat.zero_sub` (582 of 2,879 admitted) |
+| M5a certificate, one proof replaced (`RankIsSmall` given `ValidImpliesPositive`'s proof) | reject: "declaration type mismatch" at `RankIsSmall` | reject: the same, at `RankIsSmall` | reject at `Nat.zero_sub`, before reaching the tampered theorem |
+
+Lean and Warrant both reject the tampered certificate at the theorem whose proof was replaced, and nowhere else.
+Ansatz's verdict on it matches the expected outcome only by accident, so it is not counted as evidence.
+
 ### Disagreements
 
 | Row(s) | Kernel | Cause | Regression |
@@ -161,7 +178,7 @@ Warrant wrote.** No verdict from another kernel showed a fault in Warrant.
 | `bugs/forged-quot-ind` | Ansatz **accepts** a proof of `False` | **Ansatz is unsound here.** The file declares `Quot.ind` before `Quot` and `Quot.mk`, and then defines `Quot` and `Quot.mk` as ordinary definitions. Ansatz checks the quotient declaration by comparing its type with one built from the names `Quot` and `Quot.mk`. It does not require them to be the primitives already in the environment. Warrant, like Lean, installs the whole quotient package when the first quotient constant arrives. The later `def Quot` therefore fails with "'Quot' has already been declared", and `fakeQuotFalse` does not type-check. The arena reports that nanoda once had the same bug; its published verdict is now reject. | `tests/data/arena/forged-quot-ind.ndjson`, `CorpusTests.ArenaVerdicts` and `QuotientPrimitivesCannotBeForged` |
 | `other/inductive-undeclared-universe` | nanoda (published) accepts | **nanoda's bug.** An inductive type uses the universe parameter `u` without declaring it. Warrant rejects it with "invalid reference to undefined universe level parameter 'u'", as do Lean, official, lean4lean and Ansatz. | `tests/data/arena/inductive-undeclared-universe.ndjson`, `CorpusTests.ArenaVerdicts` |
 | init-medium and its export; the C# fixtures, which include init-medium; Warrant's exports of `tutorial/140_falseFromUnsafe` and of `141_falseFromUnsafe` | Ansatz rejects with "Unknown constant" at a recursive unsafe definition (`_private…Array.foldlMUnsafe.fold`, `unsafeLoop`) | **An Ansatz limitation.** `arena-check` admits definitions one at a time and does not put a recursive `unsafe` (or `partial` implementation) definition in the environment before checking its body. Lean and Warrant admit such definitions; Warrant buffers each mutual unsafe block (see "How exported data is checked"). On the original `falseFromUnsafe` files Ansatz rejects too, with the expected verdict, but at `unsafeLoop` rather than at `falseFromUnsafe`. | None: Warrant's behaviour is covered by `UnsafeDefinitionIsAcceptedButSafeUseIsNot` and by Lean's verdict on the same files |
-| translated M4 corpus | Ansatz rejects `Nat.zero_sub` (declaration 583 of 2,955) | **A version difference.** The corpus contains the Lean 4.35.0 semantics bundle, and Ansatz targets Lean 4.33.1. Ansatz short-cuts `Nat.decEq` on literals by building `Decidable.isTrue (Eq.refl n)`. In Lean 4.35.0, `Decidable` is a structure built with `Decidable.intro` and a `Bool` field, so that term no longer reduces and `decide (Nat.pred 0 = 0)` does not reach `true`. Ansatz accepts the Lean 4.33.1 `Nat.zero_sub` in init-medium. It rejects `tests/data/warrant-semantics.ndjson.gz` the same way, with or without its `mdata` nodes. | None: Lean accepts the file |
+| translated M4 corpus; the M5a certificate and its tampered copy | Ansatz rejects `Nat.zero_sub` (declaration 583 of 2,955 in M4, of 2,879 in M5a) | **A version difference.** The corpus contains the Lean 4.35.0 semantics bundle, and Ansatz targets Lean 4.33.1. Ansatz short-cuts `Nat.decEq` on literals by building `Decidable.isTrue (Eq.refl n)`. In Lean 4.35.0, `Decidable` is a structure built with `Decidable.intro` and a `Bool` field, so that term no longer reduces and `decide (Nat.pred 0 = 0)` does not reach `true`. Ansatz accepts the Lean 4.33.1 `Nat.zero_sub` in init-medium. It rejects `tests/data/warrant-semantics.ndjson.gz` the same way, with or without its `mdata` nodes. Both certificates hold the same bundle, so Ansatz stops there before any M5a declaration; on the tampered copy its reject is therefore not a verdict on the replaced proof. | None: Lean accepts the M4 corpus and the M5a certificate, and rejects the tampered copy at the replaced proof |
 
 ### Rows without a verdict
 

@@ -11,13 +11,15 @@ The outcomes are M4's, with these additions:
 |---|---|
 | `"by": "script"` | A theorem proved by its `.By(...)` script. |
 | `"recursive": true` | A self-recursive method whose block body starts with `Spec.Decreases`. |
-| `"goal"` | For a `false` theorem, the goal WRT0001 shows, in Lean's layout with C# names. |
-| `"counterexample"` | For a `false` theorem, the parameter values the counterexample search reports. |
-| `"obligation": "decreases"` | For a `false` recursive method, the decrease obligation is what fails. |
+| `"outcome": "unproved"` | A theorem or recursive method that was not proved, under the name the reports and `warrant verify` use. An unproved claim is never reported false; the counterexample is what shows it is. |
+| `"code"` | For an `unproved` member, its diagnostic code (WRT0001). |
+| `"goal"` | For an `unproved` member, the goal WRT0001 shows, in Lean's layout with C# names: for a theorem, the goal of the tactic that failed. |
+| `"counterexample"` | For an `unproved` member, the parameter values the counterexample search reports; absent when it finds none. |
+| `"obligation": "decreases"` | For an `unproved` recursive method, the decrease obligation is what fails. |
 
 Each outcome is the one the finished milestone gives.
 Extraction's tests check what extraction decides: which members become units and which are rejected with which diagnostics; that a theorem's parameters, script and statement are read; and that a recursive method's measure is.
-The proofs, goals and counterexamples are checked by the units that build them.
+`tests/Warrant.Engine.Tests/CorpusTests.cs` checks the rest in one test, the exit criterion (plan U19): every member's outcome, proof kind, code, goal, counterexample and diagnostics.
 
 ## Files
 

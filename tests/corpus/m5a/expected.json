@@ -15,6 +15,9 @@
       "M:Corpus.Increments.Increment(System.Int32)": { "outcome": "translated" },
       "M:Corpus.Increments.LargerBelowMax(System.Int32)": { "outcome": "proved", "by": "script" },
 
+      "M:Corpus.Clamps.Clamp(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.Clamps.AtMostOneHundred(System.Int32)": { "outcome": "proved", "by": "script" },
+
       "M:Corpus.Recursion.Sum(System.Int32)": { "outcome": "translated", "recursive": true },
       "M:Corpus.Recursion.Add(System.Int32,System.Int32)": { "outcome": "translated", "recursive": true },
       "M:Corpus.Recursion.SumLong(System.Int64)": { "outcome": "translated", "recursive": true },

@@ -41,7 +41,8 @@ public static class OutcomeText
     {
         ArgumentNullException.ThrowIfNull(outcome);
         var line = $"Theorem '{theorem}' could not be proved: {FirstLine(outcome.Message)}";
-        return outcome.Counterexample.IsEmpty ? line : $"{line.TrimEnd('.')}. Counterexample: {Counterexample(outcome.Counterexample)}.";
+        // A first line that introduces the next, such as omega's "could not prove the goal:", ends the sentence instead.
+        return outcome.Counterexample.IsEmpty ? line : $"{line.TrimEnd('.', ':')}. Counterexample: {Counterexample(outcome.Counterexample)}.";
     }
 
     /// <summary>

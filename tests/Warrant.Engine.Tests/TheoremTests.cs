@@ -417,7 +417,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     [Fact]
-    public void UnfoldShowsTheBodyAndAnUnavailableTacticFailsAtItsCall()
+    public void UnfoldShowsTheBodyAndAFailedTryLeavesItsGoal()
     {
         const string Source = """
             public static class Increments
@@ -430,22 +430,25 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
             }
             """;
         var outcome = Assert.IsType<NotProvedOutcome>(Script(Source).Find("M:Increments.AlwaysLarger(System.Int32)"));
-        Assert.Equal("Tactic `omega` is not available yet", outcome.Message);
+        // omega fails on the false claim, and Try leaves the goal Unfold made.
+        Assert.Equal("unsolved goals", outcome.Message);
         Assert.Equal("x : Int32\n⊢ x + 1 > x", outcome.Goals);
-        Assert.Equal("Tactic.Omega()", InlineText(Source, outcome.TacticSpan));
+        Assert.Null(outcome.TacticSpan);
         Assert.Equal([new CounterexampleValue("x", "2147483647")], outcome.Counterexample.AsEnumerable());
     }
 
     [Fact]
-    public void ATacticOfALaterUnitIsNotAvailableYet()
+    public void OmegaWithoutArithmeticFailsAtItsCallShowingTheGoal()
     {
-        var outcome = Assert.IsType<NotProvedOutcome>(Script("""
+        const string Source = """
             public static class S
             {
                 [Theorem] static Proof T(bool b) => Prove.That(b == b).By(Tactic.AllGoals(Tactic.Omega()));
             }
-            """).Find("M:S.T(System.Boolean)"));
-        Assert.Equal("Tactic `omega` is not available yet", outcome.Message);
+            """;
+        var outcome = Assert.IsType<NotProvedOutcome>(Script(Source).Find("M:S.T(System.Boolean)"));
+        Assert.StartsWith("omega could not prove the goal:\nNo usable constraints found.", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal("Tactic.Omega()", InlineText(Source, outcome.TacticSpan));
         Assert.Equal("b : Bool\n⊢ b = b", outcome.Goals);
         Assert.Empty(outcome.Counterexample);
     }
@@ -557,12 +560,10 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     [Fact]
-    public void TheM5aCorpusTheoremsThatNeedOnlySimpAreProvedAndTheRestReachOmega()
+    public void EveryM5aCorpusScriptIsProvedButTheFalseClaim()
     {
-        // With simp (U17), every M5a corpus script whose tactics all exist is proved; the rest stop cleanly at omega (U18)
-        // with WRT0001, and none is reported false.
+        // With omega (U18), every M5a corpus script is proved except AlwaysLarger, the false claim.
         var proved = new List<string>();
-        var atOmega = new List<string>();
         foreach (var compilation in new[] { "accepted", "refuted" })
         {
             var result = engine.Run($"m5a/{compilation}");
@@ -573,21 +574,61 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
                     proved.Add(outcome.Key);
                     continue;
                 }
-                var notProved = Assert.IsType<NotProvedOutcome>(outcome);
-                Assert.Equal("Tactic `omega` is not available yet", notProved.Message);
-                Assert.NotNull(notProved.TacticSpan);
-                atOmega.Add(outcome.Key);
+                Assert.Equal("M:Corpus.Refuted.Increments.AlwaysLarger(System.Int32)", outcome.Key);
+                Assert.IsType<NotProvedOutcome>(outcome);
             }
         }
         Assert.Equal(
-            ["M:Claims.Payments.ValidImpliesPositive(Claims.Payment)", "M:Corpus.Quantifiers.AndTrueIsIdentity(System.Boolean)",
-             "M:Corpus.Quantifiers.FlipTwice(System.Boolean)", "M:Corpus.Quantifiers.RankIsSmall(Corpus.Light)"],
+            ["M:Claims.Payments.ValidImpliesPositive(Claims.Payment)", "M:Corpus.Clamps.AtMostOneHundred(System.Int32)",
+             "M:Corpus.Increments.LargerBelowMax(System.Int32)", "M:Corpus.Quantifiers.AndTrueIsIdentity(System.Boolean)",
+             "M:Corpus.Quantifiers.FlipTwice(System.Boolean)", "M:Corpus.Quantifiers.RankIsSmall(Corpus.Light)",
+             "M:Corpus.Quantifiers.ZeroIsNeutral"],
             proved.Order(StringComparer.Ordinal));
+    }
+
+    // ---- omega (M5a U18) ----
+
+    [Fact]
+    public void LargerBelowMaxIsProvedByUnfoldSimpAndOmega()
+    {
+        // The plan's Success Criterion: Spec.Implies(x < int.MaxValue, Increment(x) > x), through the omega-prep set's
+        // bmod_def and omega's reflective proof, which the kernel checked before the outcome was reported.
+        var result = engine.Run("m5a/accepted");
+        var proved = Assert.IsType<ProvedOutcome>(result.Find("M:Corpus.Increments.LargerBelowMax(System.Int32)"));
+        var proof = proved.Certificate.Value.Proof;
+        var text = proof.ToString();
+        // Int.bmod_def is a definitional rewrite, so it leaves no trace; the if it makes is the disjunction omega splits.
+        Assert.Contains("Int32.toInt_add", text, StringComparison.Ordinal);
+        Assert.Contains("Lean.Omega.ite_disjunction", text, StringComparison.Ordinal);
+        Assert.Contains("Lean.Omega.LinearCombo.coordinate_eval_0", text, StringComparison.Ordinal);
+        Assert.Contains("Int32.le_toInt", text, StringComparison.Ordinal);
+        Assert.Equal(["Classical.choice", "Quot.sound", "propext"], Axioms(result.Environment, proof));
+    }
+
+    [Fact]
+    public void ClampIsBoundedThroughItsLiterals()
+    {
+        var proved = Assert.IsType<ProvedOutcome>(engine.Run("m5a/accepted").Find("M:Corpus.Clamps.AtMostOneHundred(System.Int32)"));
+        var text = proved.Certificate.Value.Proof.ToString();
+        Assert.Contains("Warrant.Int32.toInt_ofNat_lit", text, StringComparison.Ordinal);
+        Assert.Contains("apply_ite", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AlwaysLargerFailsAtOmegaWithItsConstraintsAndTheCounterexample()
+    {
+        // The exit criterion's false claim: the goal omega was given (after Unfold, before the prep step) with C# names,
+        // omega's constraints with its atoms printed the same way, and the boundary search's counterexample.
+        var outcome = Assert.IsType<NotProvedOutcome>(engine.Run("m5a/refuted").Find("M:Corpus.Refuted.Increments.AlwaysLarger(System.Int32)"));
+        Assert.Equal("WRT0001", NotProvedOutcome.Code);
+        Assert.Equal("x : Int32\n⊢ x + 1 > x", outcome.Goals);
+        Assert.StartsWith("omega could not prove the goal:\na possible counterexample may satisfy the constraints\n", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("\n b := (x.toInt + ↑1) / 4294967296", outcome.Message, StringComparison.Ordinal);
+        Assert.NotNull(outcome.TacticSpan);
+        Assert.Equal([new CounterexampleValue("x", "2147483647")], outcome.Counterexample.AsEnumerable());
         Assert.Equal(
-            ["M:Corpus.Increments.LargerBelowMax(System.Int32)", "M:Corpus.Quantifiers.ZeroIsNeutral", "M:Corpus.Refuted.Increments.AlwaysLarger(System.Int32)"],
-            atOmega.Order(StringComparer.Ordinal));
-        var alwaysLarger = Assert.IsType<NotProvedOutcome>(engine.Run("m5a/refuted").Find("M:Corpus.Refuted.Increments.AlwaysLarger(System.Int32)"));
-        Assert.Equal([new CounterexampleValue("x", "2147483647")], alwaysLarger.Counterexample.AsEnumerable());
+            "Theorem 'AlwaysLarger' could not be proved: omega could not prove the goal. Counterexample: x = 2147483647.",
+            Reports.OutcomeText.NotProvedMessage("AlwaysLarger", outcome));
     }
 
     [Fact]

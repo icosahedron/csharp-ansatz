@@ -139,9 +139,11 @@ public sealed partial class MetaM
 
     /// <summary>
     /// The simp theorems made from a hypothesis or other proof <paramref name="proof"/> (Lean's
-    /// <c>mkSimpTheoremFromExpr</c> on a non-constant): preprocessed as a lemma is, keyed with its arguments not indexed.
+    /// <c>mkSimpTheoremFromExpr</c> on a non-constant): preprocessed as a lemma is, keyed with its arguments not indexed
+    /// for a hypothesis (<paramref name="noIndexAtArgs"/>), and indexed for a term simp argument such as <c>apply_ite f</c>
+    /// (Lean's <c>SimpTheorems.add</c> through <c>mkSimpTheorems</c>).
     /// </summary>
-    public IReadOnlyList<SimpTheorem> MkSimpTheoremsFromProof(Expr proof, int priority = DefaultSimpPriority)
+    public IReadOnlyList<SimpTheorem> MkSimpTheoremsFromProof(Expr proof, int priority = DefaultSimpPriority, bool noIndexAtArgs = true)
     {
         ArgumentNullException.ThrowIfNull(proof);
         return WithReducible(() =>
@@ -152,7 +154,7 @@ public sealed partial class MetaM
                 throw new MetaException($"invalid 'simp', proposition expected\n  {type}");
             }
             return PreprocessSimpProof(proof, type, inv: false)
-                .Select(p => new SimpTheorem(null, proof is FVarExpr ? proof : null, SimpTheoremKeys(p.Type, noIndexAtArgs: true), [], p.Proof, p.Type, priority, post: true, rfl: false))
+                .Select(p => new SimpTheorem(null, proof is FVarExpr ? proof : null, SimpTheoremKeys(p.Type, noIndexAtArgs), [], p.Proof, p.Type, priority, post: true, rfl: false))
                 .ToList();
         });
     }

@@ -25,6 +25,7 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
         ["cases"] = Cases,
         ["induction"] = Induction,
         ["simp"] = Simp,
+        ["omega"] = Omega,
         ["all_goals"] = AllGoals,
         ["try"] = Try,
     };
@@ -184,6 +185,12 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
             return m.SimpGoal(g, DefaultSimpSet.Context(m, config, extra)) is { } result ? [result.Goal] : [];
         });
     }
+
+    /// <summary>
+    /// <c>Tactic.Omega()</c>: the omega-prep set at every hypothesis and the goal, then <c>omega</c> (KTD12, KTD13). A
+    /// failure names the goal as <c>omega</c> was given it, with <c>omega</c>'s constraints.
+    /// </summary>
+    private static void Omega(TacticRunner r, TacticNode _) => r.State.LiftMetaFinishingTactic(r.State.Meta.OmegaTactic);
 
     /// <summary><c>Tactic.AllGoals(t)</c>.</summary>
     private static void AllGoals(TacticRunner r, TacticNode node)

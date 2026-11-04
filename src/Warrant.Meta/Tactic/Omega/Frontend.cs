@@ -47,8 +47,7 @@ namespace Warrant.Meta.Omega
         /// <summary><c>mkCoordinateEvalAtomsEq</c>: for the <c>n</c>-th atom <c>e</c>, <c>e = (coordinate n).eval atoms</c>.</summary>
         private Proof MkCoordinateEvalAtomsEq(Expr e, int n) => () =>
         {
-            // coordinate_eval_n is used when the bundle has it; the general lemma proves the same equation.
-            if (n < 10 && M.Env.Find(OmegaNames.CoordinateEval(n)) is not null)
+            if (n < 10)
             {
                 var tail = IntList(Atoms.Skip(n + 1));
                 var args = Atoms.Take(n + 1).Append(tail).ToArray();
@@ -636,7 +635,7 @@ namespace Warrant.Meta
         /// The <c>omega</c> decision procedure on a goal (Lean's <c>omegaTactic</c>, Lean/Elab/Tactic/Omega/Frontend.lean
         /// 680, KTD12): turns the goal into <c>False</c> (<see cref="FalseOrByContra"/>), collects every hypothesis, and
         /// assigns the goal a proof of <c>False</c> from the linear facts over <c>Int</c> and <c>Nat</c> among them. Lean's
-        /// <c>omega</c> tactic first tries <c>assumption</c>; that, and the omega-prep step, are the caller's.
+        /// <c>omega</c> tactic first tries <c>assumption</c>; that, and the omega-prep step, are <see cref="OmegaTactic"/>'s.
         /// </summary>
         /// <remarks>
         /// The proof is reflective: it restates the derivation with <c>Init/Omega</c>'s lemmas on literal lists, which the

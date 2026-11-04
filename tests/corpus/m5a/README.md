@@ -25,6 +25,7 @@ The proofs, goals and counterexamples are checked by the units that build them.
 |---|---|---|
 | `accepted/Payments.cs` | `Validate`, `ValidImpliesPositive` | Design §5.1's example, proved by `Unfold` and `Simp`. |
 | `accepted/Increment.cs` | `Increment`, `LargerBelowMax` | The true variant of the false claim, proved by `Unfold`, `Simp` and `Omega`. |
+| `accepted/Clamp.cs` | `Clamp`, `AtMostOneHundred` | A bound through `int` literals, proved by `Unfold` and `Omega`. |
 | `accepted/Recursion.cs` | `Sum`, `Add`, `SumLong` | Well-founded recursion over `int`, with two parameters, and over `long`. |
 | `accepted/Quantifiers.cs` | `ZeroIsNeutral`, `FlipTwice`, `RankIsSmall`, `AndTrueIsIdentity` | `Spec.ForAll` with `Intro`; `Cases` over `bool` and a `[Closed]` enum; `Induction`; `AllGoals`, `Try` and simp options. |
 | `refuted/Increment.cs` | `AlwaysLarger` | The exit criterion's false claim, with its goal and counterexample. |

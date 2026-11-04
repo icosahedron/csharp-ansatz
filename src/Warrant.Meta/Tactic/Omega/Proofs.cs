@@ -197,9 +197,8 @@ public static class OmegaNames
     internal static readonly Name IntEmodPosOfNotDvd = N("Int.emod_pos_of_not_dvd");
 
     /// <summary>
-    /// <c>Lean.Omega.LinearCombo.coordinate_eval_n</c> for <c>n &lt; 10</c>. These are not bundle roots: the bundle has
-    /// those Init's own proofs depend on (not <c>coordinate_eval_6</c>), and <c>omega</c> uses one only when the bundle
-    /// has it, else the general <c>coordinate_eval</c>, as Lean does from the tenth atom on.
+    /// <c>Lean.Omega.LinearCombo.coordinate_eval_n</c> for <c>n &lt; 10</c>, which <c>omega</c> uses for its first ten
+    /// atoms, and the general <c>coordinate_eval</c> from the tenth on, as Lean does.
     /// </summary>
     internal static Name CoordinateEval(int n) => N($"Lean.Omega.LinearCombo.coordinate_eval_{n}");
 
@@ -209,6 +208,7 @@ public static class OmegaNames
         .. typeof(OmegaNames).GetFields(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)
             .Where(f => f.FieldType == typeof(Name))
             .Select(f => (Name)f.GetValue(null)!),
+        .. Enumerable.Range(0, 10).Select(CoordinateEval),
     ];
 }
 

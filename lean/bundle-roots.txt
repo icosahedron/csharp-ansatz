@@ -410,3 +410,36 @@ Warrant.Int32.toInt_ofNat_lit
 Warrant.Int32.toInt_neg_ofNat_lit
 Warrant.Int64.toInt_ofNat_lit
 Warrant.Int64.toInt_neg_ofNat_lit
+
+# Constants omega's and simp's proofs are built from that no section above lists (M5a U18, KTD29):
+# omega's literal lists, options, instances and decidability instances (OmegaNames), its
+# coordinate_eval_n for the first ten atoms, and True, Decidable and instOfNatNat, which simp emits.
+True
+Iff
+Subtype
+Dvd.dvd
+Decidable
+instOfNatNat
+instOfNat
+Int.instNegInt
+instHDiv
+Int.instDiv
+List.cons
+List.nil
+Option.some
+Option.none
+Nat.decLe
+Nat.decLt
+Int.decLt
+Int.instDecidableEq
+List.decidableBAll
+Lean.Omega.LinearCombo.coordinate_eval_0
+Lean.Omega.LinearCombo.coordinate_eval_1
+Lean.Omega.LinearCombo.coordinate_eval_2
+Lean.Omega.LinearCombo.coordinate_eval_3
+Lean.Omega.LinearCombo.coordinate_eval_4
+Lean.Omega.LinearCombo.coordinate_eval_5
+Lean.Omega.LinearCombo.coordinate_eval_6
+Lean.Omega.LinearCombo.coordinate_eval_7
+Lean.Omega.LinearCombo.coordinate_eval_8
+Lean.Omega.LinearCombo.coordinate_eval_9

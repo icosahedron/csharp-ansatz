@@ -26,8 +26,9 @@ internal sealed partial class OmegaM
     private ImmutableDictionary<Expr, int> _atomIndex = ImmutableDictionary<Expr, int>.Empty;
     private ImmutableDictionary<Expr, (LinearCombo Lc, Proof Prf)> _cache = ImmutableDictionary<Expr, (LinearCombo, Proof)>.Empty;
 
-    // The Coeffs.ofList literal of the current atoms, rebuilt when an atom is added.
-    private (int Count, Expr Expr)? _atomsCoeffs;
+    // The Coeffs.ofList literal of the current atoms, rebuilt when the atom list changes. It is keyed by the list itself,
+    // not its length: a restored state can hold as many atoms as the one it replaced, in another order.
+    private (ImmutableList<Expr> Atoms, Expr Expr)? _atomsCoeffs;
 
     public OmegaM(MetaM meta)
     {
@@ -46,9 +47,9 @@ internal sealed partial class OmegaM
     /// <summary><c>atomsCoeffs</c>: <c>Coeffs.ofList</c> of the atoms.</summary>
     public Expr AtomsCoeffs()
     {
-        if (_atomsCoeffs is not { } cached || cached.Count != _atoms.Count)
+        if (_atomsCoeffs is not { } cached || !ReferenceEquals(cached.Atoms, _atoms))
         {
-            cached = (_atoms.Count, Expr.App(Expr.Const(OmegaNames.CoeffsOfList), AtomsList()));
+            cached = (_atoms, Expr.App(Expr.Const(OmegaNames.CoeffsOfList), AtomsList()));
             _atomsCoeffs = cached;
         }
         return cached.Expr;

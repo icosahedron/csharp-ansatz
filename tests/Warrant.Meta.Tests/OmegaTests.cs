@@ -212,4 +212,72 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
             "omega could not prove the goal:\nNo usable constraints found. You may need to unfold definitions so `omega` can see linear arithmetic facts about `Nat` and `Int`, which may also involve multiplication, division, and modular remainder by constants.",
             empty);
     }
+
+    // ---- Tactic.Omega(): the omega-prep set, then omega (KTD13, docs/m5a/06) ----
+
+    /// <summary>Runs <c>Tactic.Omega()</c> (<see cref="MetaM.OmegaTactic"/>) on the statement and has the kernel admit the proof.</summary>
+    private void PrepProves(Expr statement)
+    {
+        var m = fixture.NewMeta();
+        var goal = m.MkFreshExprSyntheticOpaqueMVar(statement);
+        m.OmegaTactic(goal.Id);
+        var proof = m.InstantiateMVars(goal);
+        Assert.False(proof.HasExprMVar || proof.HasLevelMVar || proof.HasFVar, $"proof is not ground: {proof}");
+        KernelThread.Run(() => Kernel.Kernel.Add(fixture.Bundle.Fork(), new TheoremDecl(new TheoremInfo(N("t"), [], statement, proof, [N("t")]))));
+    }
+
+    /// <summary>The C# integer types as M4 translates them: <c>int</c> as <c>Int32</c>, <c>long</c> as <c>Int64</c>.</summary>
+    public static TheoryData<string> CSharpIntegers => new() { "Int32", "Int64" };
+
+    private static Expr Lit(string t, BigInteger n) =>
+        Expr.App(C("OfNat.ofNat", Level.Zero), C(t), Expr.NatLit(n), Expr.App(C(t + ".instOfNat"), Expr.NatLit(n)));
+
+    private static Expr Op(string t, string op, string instH, string inst, Expr a, Expr b) =>
+        Expr.App(C(op, Level.Zero, Level.Zero, Level.Zero), C(t), C(t), C(t), Expr.App(C(instH, Level.Zero), C(t), C(inst + t)), a, b);
+
+    private static Expr Add(string t, Expr a, Expr b) => Op(t, "HAdd.hAdd", "instHAdd", "instAdd", a, b);
+
+    private static Expr Cmp(string t, string rel, string inst, Expr a, Expr b) => Expr.App(C(rel, Level.Zero), C(t), C(inst + t), a, b);
+
+    [Theory]
+    [MemberData(nameof(CSharpIntegers))]
+    public void ZeroIsNeutral(string t)
+    {
+        // ∀ y, y + 0 = y: ← toInt_inj, toInt_add, the literal lemma and bmod_def turn it into Int arithmetic.
+        PrepProves(IntTerms.ForallN(C(t), ["y"], v => IntTerms.Eq(C(t), Add(t, v[0], Lit(t, 0)), v[0])));
+    }
+
+    [Theory]
+    [MemberData(nameof(CSharpIntegers))]
+    public void IncrementBelowTheMaximumIsLarger(string t)
+    {
+        // ∀ x, x < maxValue → x + 1 > x, the goal of LargerBelowMax after Unfold.
+        PrepProves(IntTerms.ForallN(C(t), ["x"], v => IntTerms.Arrow(
+            Cmp(t, "LT.lt", "instLT", v[0], C(t + ".maxValue")),
+            Cmp(t, "GT.gt", "instLT", Add(t, v[0], Lit(t, 1)), v[0]))));
+    }
+
+    [Theory]
+    [MemberData(nameof(CSharpIntegers))]
+    public void TheDecreaseShapeIsProved(string t)
+    {
+        // ∀ n, ¬ n ≤ 0 → (n - 1).toInt.toNat < n.toInt.toNat, Sum's decrease obligation (docs/m5a/06).
+        Expr ToNat(Expr x) => IntTerms.ToNat(Expr.App(C(t + ".toInt"), x));
+        PrepProves(IntTerms.ForallN(C(t), ["n"], v => IntTerms.Arrow(
+            Expr.App(C("Not"), Cmp(t, "LE.le", "instLE", v[0], Lit(t, 0))),
+            IntTerms.NLt(ToNat(Op(t, "HSub.hSub", "instHSub", "instSub", v[0], Lit(t, 1))), ToNat(v[0])))));
+    }
+
+    [Theory]
+    [MemberData(nameof(CSharpIntegers))]
+    public void IncrementFailsAgainstTheGoalAsGiven(string t)
+    {
+        // ∀ x, x + 1 > x is false at maxValue: omega's constraints, reported against the goal before the prep step.
+        var m = fixture.NewMeta();
+        var goal = m.MkFreshExprSyntheticOpaqueMVar(IntTerms.ForallN(C(t), ["x"], v => Cmp(t, "GT.gt", "instLT", Add(t, v[0], Lit(t, 1)), v[0])));
+        var ex = Assert.Throws<TacticException>(() => m.OmegaTactic(goal.Id));
+        Assert.Equal("omega", ex.Tactic);
+        Assert.Equal(goal.Id, ex.Goal);
+        Assert.StartsWith("omega could not prove the goal:\na possible counterexample may satisfy the constraints\n", ex.Message, StringComparison.Ordinal);
+    }
 }

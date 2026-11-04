@@ -1,5 +1,6 @@
 using Warrant.Cic;
 using Warrant.Meta;
+using Warrant.Meta.Omega;
 
 namespace Warrant.Engine;
 
@@ -24,14 +25,20 @@ public static class EmittedConstants
         TacticNames.Id,
 
         // simp's proofs (Lean's Simp/Main, Types, Rewrite, AppBuilder, reduceIte and reduceDIte; docs/m5a/05), its
-        // @[congr] lemmas, and the lemmas of the default set, whose proofs it puts into the term. simp also emits True,
-        // Decidable and instOfNatNat (an orphan literal folded into OfNat.ofNat), which are not roots but are in the
-        // bundle as the types of the roots True.intro and Decidable.decide and through the Nat literal lemmas; and the
-        // instances instance resolution finds, which are sidecar entries and so in the bundle (KTD9).
+        // @[congr] lemmas, the lemmas of the default set, whose proofs it puts into the term, and True, Decidable and
+        // instOfNatNat (an orphan literal folded into OfNat.ofNat). simp also emits the instances instance resolution
+        // finds, which are sidecar entries and so in the bundle (KTD9).
         .. SimpNames.ProofConstants,
+        Name.Parse("True"),
+        Name.Parse("Decidable"),
+        Name.Parse("instOfNatNat"),
         Name.Parse("ite_congr"),
         Name.Parse("dite_congr"),
         .. DefaultSimpSet.CuratedLemmas,
         .. DefaultSimpSet.WarrantLemmas,
+
+        // Tactic.Omega(): the omega-prep set (KTD13) and every constant omega's proofs are built from (KTD12).
+        .. OmegaPrepSet.Names,
+        .. OmegaNames.All,
     ];
 }

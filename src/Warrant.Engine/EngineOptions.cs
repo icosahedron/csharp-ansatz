@@ -11,11 +11,10 @@ namespace Warrant.Engine;
 public sealed record EngineOptions
 {
     /// <summary>
-    /// The default tactic fuel: ten times the most any M5a corpus theorem uses, 13,563 steps for ValidImpliesPositive's
-    /// unfold and simp (measured in U17, docs/m5a/07, "Budgets"). The corpus scripts stop at the first tactic a later unit
-    /// provides, so each unit that adds a tactic measures again.
+    /// The default tactic fuel: ten times the most any M5a corpus theorem uses, 17,197 steps for ZeroIsNeutral's intro and
+    /// omega (measured in U18, docs/m5a/07, "Budgets"). Each unit that adds a tactic measures again.
     /// </summary>
-    public const long DefaultTacticFuel = 135_630;
+    public const long DefaultTacticFuel = 171_970;
 
     /// <summary>The defaults for a build: 20M kernel steps, <see cref="DefaultTacticFuel"/>, 30 seconds per theorem.</summary>
     public static EngineOptions Default { get; } = new();

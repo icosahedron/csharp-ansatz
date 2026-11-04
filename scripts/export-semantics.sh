@@ -31,7 +31,7 @@ lake build >/dev/null
 raw="$WORKDIR/warrant-semantics.ndjson"
 err="$WORKDIR/warrant-semantics.stderr"
 set +e
-LEAN_ABORT_ON_PANIC=1 lake env "$exe" Warrant -- "${roots[@]}" > "$raw" 2> "$err"
+LEAN_ABORT_ON_PANIC=1 lake env "$exe" --export-mdata Warrant -- "${roots[@]}" > "$raw" 2> "$err"
 status=$?
 set -e
 if [ "$status" -ne 0 ] || grep -q PANIC "$err"; then

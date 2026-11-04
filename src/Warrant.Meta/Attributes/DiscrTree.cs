@@ -443,12 +443,18 @@ public static class DiscrTree
     private static readonly Name NatAddName = Name.From("Nat", "add");
     private static readonly Name AddAddName = Name.From("Add", "add");
 
-    /// <summary><c>no_index e</c> (Lean's <c>mkNoindexAnnotation</c>).</summary>
-    public static Expr MkNoIndexAnnotation(Expr e) => Expr.MData(new KVMap([new KVMapEntry(NoIndexKey, "true")]), e);
+    // lean4export writes a KVMap value as its Lean DataValue, so a true Bool is "Lean.DataValue.ofBool true".
+    private const string TrueValue = "Lean.DataValue.ofBool true";
 
-    /// <summary>Whether <paramref name="e"/> is <c>no_index _</c> (Lean's <c>hasNoindexAnnotation</c>).</summary>
+    /// <summary><c>no_index e</c> (Lean's <c>mkNoindexAnnotation</c>), with the value spelled as lean4export writes it.</summary>
+    public static Expr MkNoIndexAnnotation(Expr e) => Expr.MData(new KVMap([new KVMapEntry(NoIndexKey, TrueValue)]), e);
+
+    /// <summary>
+    /// Whether <paramref name="e"/> is <c>no_index _</c> (Lean's <c>hasNoindexAnnotation</c>: a single <c>noindex</c> entry whose Bool is true).
+    /// Accepts the lean4export spelling and a bare <c>true</c>.
+    /// </summary>
     public static bool HasNoIndexAnnotation(Expr e) =>
-        e is MDataExpr m && m.Data.Entries.Count == 1 && m.Data.Entries[0] is { Key: NoIndexKey, Value: "true" };
+        e is MDataExpr m && m.Data.Entries.Count == 1 && m.Data.Entries[0] is { Key: NoIndexKey, Value: TrueValue or "true" };
 
     /// <summary>The key path of <paramref name="e"/>, computed at <c>reducible</c> transparency (Lean's <c>mkPath</c>).</summary>
     /// <param name="m">The Meta computation.</param>

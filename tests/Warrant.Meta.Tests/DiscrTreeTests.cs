@@ -13,12 +13,6 @@ public sealed class DiscrTreeTests(AttributeSidecarFixture fixture, ITestOutputH
 {
     private static string Format(IEnumerable<DiscrTreeKey> keys) => string.Join(", ", keys.Select(k => k.Format()));
 
-    // Lemmas whose left side Lean marks `no_index`: lean4export drops metadata unless run with
-    // --export-mdata, which scripts/export-semantics.sh does not pass, so the bundle's types lack the
-    // annotation and the recomputed keys index the term Lean does not. Each must still differ from
-    // Lean's keys only by that: its type in the bundle carries no metadata at all.
-    private static readonly HashSet<Name> NoIndexLostInExport = [N("Int32.toBitVec_ofNat"), N("Int64.toBitVec_ofNat")];
-
     [Fact]
     public void EverySimpEntrysKeysAreLeans()
     {
@@ -27,7 +21,6 @@ public sealed class DiscrTreeTests(AttributeSidecarFixture fixture, ITestOutputH
         var computed = new Dictionary<(Name, bool), IReadOnlyList<string>>();
         var seen = new Dictionary<(Name, bool), int>();
         var mismatches = new List<string>();
-        int residue = 0;
         foreach (var e in entries)
         {
             var key = (e.Name, e.Inverse);
@@ -48,25 +41,18 @@ public sealed class DiscrTreeTests(AttributeSidecarFixture fixture, ITestOutputH
             seen[key] = i + 1;
             var mine = paths[i % paths.Count];
             var lean = string.Join(", ", e.LeanKeys);
-            if (mine != lean && NoIndexLostInExport.Contains(e.Name) && !HasMData(m.GetConstInfo(e.Name).Type))
-            {
-                output.WriteLine($"{e.Name}: no_index lost in export; Lean [{lean}], Warrant [{mine}]");
-                residue++;
-            }
-            else if (mine != lean)
+            if (mine != lean)
             {
                 mismatches.Add($"{e.Name}{(e.Inverse ? " (←)" : "")}: Lean [{lean}], Warrant [{mine}]");
             }
         }
-        output.WriteLine($"{entries.Count - mismatches.Count - residue} of {entries.Count} simp entries agree with Lean's keys; {residue} differ only by a no_index the bundle lost");
+        output.WriteLine($"{entries.Count - mismatches.Count} of {entries.Count} simp entries agree with Lean's keys");
         foreach (var mm in mismatches)
         {
             output.WriteLine(mm);
         }
         Assert.True(mismatches.Count == 0, string.Join('\n', mismatches));
     }
-
-    private static bool HasMData(Expr e) => Kernel.ExprOps.Find(e, (x, _) => x is MDataExpr) is not null;
 
     [Fact]
     public void InstanceArgumentsAreIgnoredAndNumeralsAreLiterals()

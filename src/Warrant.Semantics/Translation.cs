@@ -94,7 +94,14 @@ public sealed class TheoremShell
 /// <summary>One translated VIR unit.</summary>
 public sealed class TranslatedUnit
 {
-    internal TranslatedUnit(string key, VirUnitKind kind, Name name, string displayName, IReadOnlyList<KernelDeclaration> declarations, TheoremShell? theorem)
+    internal TranslatedUnit(
+        string key,
+        VirUnitKind kind,
+        Name name,
+        string displayName,
+        IReadOnlyList<KernelDeclaration> declarations,
+        TheoremShell? theorem,
+        RecursiveDefinition? recursion = null)
     {
         Key = key;
         Kind = kind;
@@ -102,6 +109,7 @@ public sealed class TranslatedUnit
         DisplayName = displayName;
         Declarations = [.. declarations];
         Theorem = theorem;
+        Recursion = recursion;
     }
 
     /// <summary>The unit's documentation-comment ID.</summary>
@@ -117,13 +125,20 @@ public sealed class TranslatedUnit
     public string DisplayName { get; }
 
     /// <summary>
-    /// The declarations to admit, in order: one <see cref="DefinitionDecl"/> for a function; for a type, its
+    /// The declarations to admit, in order: one <see cref="DefinitionDecl"/> for a function (for a recursive one, after the
+    /// theorems of <see cref="Recursion"/>); for a type, its
     /// <see cref="InductiveDecl"/> and then <c>$eq</c> or <c>$index</c>, or an open enum's definitions; empty for a theorem.
     /// </summary>
     public ImmutableArray<KernelDeclaration> Declarations { get; }
 
     /// <summary>A theorem's statement; null for other units.</summary>
     public TheoremShell? Theorem { get; }
+
+    /// <summary>
+    /// For a recursive method (M5a KTD14, KTD15), its decrease theorems, to admit before <see cref="Declarations"/>, and its
+    /// equation lemma, to admit after them; null for other units.
+    /// </summary>
+    public RecursiveDefinition? Recursion { get; }
 }
 
 /// <summary>The translation of a set of units (docs/m4/05): declarations in dependency order, and a display-name table.</summary>

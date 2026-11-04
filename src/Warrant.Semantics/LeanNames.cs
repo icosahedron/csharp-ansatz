@@ -1,3 +1,4 @@
+using System.Globalization;
 using Warrant.Cic;
 
 namespace Warrant.Semantics;
@@ -65,6 +66,23 @@ public static class LeanNames
     /// <param name="typeKey">The type's key.</param>
     /// <returns>The name.</returns>
     public static Name Recursor(string typeKey) => ForKey(typeKey).Append("rec");
+
+    /// <summary>
+    /// The decrease theorem of a recursive method's <paramref name="index"/>-th recursive call in source order,
+    /// <c>f.$dec_k</c> (M5a KTD15).
+    /// </summary>
+    /// <param name="key">The method's key.</param>
+    /// <param name="index">The call's number, from 1.</param>
+    /// <returns>The name.</returns>
+    public static Name Decrease(string key, int index) => ForKey(key).Append(string.Create(CultureInfo.InvariantCulture, $"$dec_{index}"));
+
+    /// <summary>The component that names a recursive method's equation lemma, <c>$eq_def</c>.</summary>
+    public const string EquationLemmaComponent = "$eq_def";
+
+    /// <summary>A recursive method's equation lemma, <c>f.$eq_def : ∀ p, f p = body</c> (M5a KTD15).</summary>
+    /// <param name="key">The method's key.</param>
+    /// <returns>The name.</returns>
+    public static Name EquationLemma(string key) => ForKey(key).Append(EquationLemmaComponent);
 
     /// <summary>The display name used when no display name is supplied: the key without its kind prefix.</summary>
     /// <param name="key">The documentation-comment ID.</param>

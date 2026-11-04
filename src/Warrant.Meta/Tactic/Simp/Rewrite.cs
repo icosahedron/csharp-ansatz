@@ -8,10 +8,22 @@ namespace Warrant.Meta;
 public sealed partial class Simplifier
 {
     // Lean's preDefault: rewritePre >> simpMatch >> the pre simprocs (reduceIte, reduceDIte) >> simpUsingDecide.
-    private SimpStep Pre(Expr e) => AndThen(e, RewritePre, SimpMatch, ReduceIte, ReduceDIte, SimpUsingDecide);
+    // For unfold, Unfold.lean's pre: the equation lemma at reducible transparency, and done when it rewrites.
+    private SimpStep Pre(Expr e) =>
+        _unfold is { } thm ? UnfoldPre(e, thm) : AndThen(e, RewritePre, SimpMatch, ReduceIte, ReduceDIte, SimpUsingDecide);
+
+    private SimpStep UnfoldPre(Expr e, SimpTheorem thm)
+    {
+        if (m.WithReducible(() => TryTheoremWithExtraArgs(e, thm, 0)) is not { } r)
+        {
+            return SimpStep.Continue;
+        }
+        return m.ReduceMatcher(r.Expr) is (ReduceMatcherKind.Reduced, { } reduced) ? SimpStep.Done(r with { Expr = reduced }) : SimpStep.Done(r);
+    }
 
     // Lean's postDefault: rewritePost >> simpUsingDecide (the ground and arith steps are off by default).
-    private SimpStep Post(Expr e) => AndThen(e, RewritePost, SimpUsingDecide);
+    // For unfold, Simp.Methods' default post: done.
+    private SimpStep Post(Expr e) => _unfold is null ? AndThen(e, RewritePost, SimpUsingDecide) : SimpStep.Done(new(e));
 
     // Lean's andThen, over a list: the first done or visit wins; continue passes its term on.
     private SimpStep AndThen(Expr e, params Func<Expr, SimpStep>[] procs)

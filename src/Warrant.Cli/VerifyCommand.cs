@@ -223,7 +223,7 @@ internal static class VerifyCommand
                     report.Diagnostic("error", FalseOutcome.Code, location, OutcomeText.FalseMessage(name), lines);
                     break;
                 case NotProvedOutcome n:
-                    report.Diagnostic("error", NotProvedOutcome.Code, n.TacticSpan ?? location, OutcomeText.NotProvedMessage(name, n), OutcomeText.NotProvedDetails(n), n.Goals);
+                    report.Diagnostic("error", NotProvedOutcome.Code, n.TacticSpan ?? location, OutcomeText.NotProvedMessage(name, n, report.Sources.Text), OutcomeText.NotProvedDetails(n), n.Goals);
                     break;
                 case UndecidedOutcome u:
                     report.Diagnostic("error", UndecidedOutcome.Code, location, OutcomeText.UndecidedMessage(name, u.Reason));

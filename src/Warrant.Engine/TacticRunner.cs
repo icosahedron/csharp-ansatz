@@ -98,18 +98,14 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
     }
 
     /// <summary>
-    /// <c>Tactic.Unfold(f, …)</c>, each name in turn, for non-recursive definitions (delta expansion); a recursive one
-    /// unfolds through its equation lemma, which needs simp's rewriting (chapter 5).
+    /// <c>Tactic.Unfold(f, …)</c>, each name in turn: a non-recursive definition by delta expansion, a recursive one by
+    /// rewriting with its equation lemma <c>f.$eq_def</c> through simp's traversal (chapter 5, KTD15).
     /// </summary>
     private static void Unfold(TacticRunner r, TacticNode node)
     {
         foreach (var arg in node.Args.Where(a => a is not OptionArg))
         {
             var c = r.Constant(node, arg);
-            if (r.State.Meta.Env.Find(c.Append("$eq_def")) is not null)
-            {
-                throw new TacticUnavailableException(node.Name, $"Tactic `unfold` is not available yet for the recursive definition `{r.State.Meta.PpConst(c)}`");
-            }
             r.State.LiftMetaTactic1(g => r.State.Meta.UnfoldTarget(g, c));
         }
     }

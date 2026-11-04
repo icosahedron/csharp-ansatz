@@ -836,7 +836,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     /// <summary>The axioms a proof depends on, through every constant it mentions (Lean's <c>collectAxioms</c>).</summary>
-    private static List<string> Axioms(KernelEnvironment env, Expr proof)
+    internal static List<string> Axioms(KernelEnvironment env, Expr proof)
     {
         var seen = new HashSet<Name>();
         var axioms = new SortedSet<string>(StringComparer.Ordinal);

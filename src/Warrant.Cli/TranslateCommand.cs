@@ -147,7 +147,7 @@ internal static class TranslateCommand
                     break;
                 case NotProvedOutcome n:
                     errors++;
-                    output.WriteLine(sources.Format(n.TacticSpan ?? location, "error", NotProvedOutcome.Code, OutcomeText.NotProvedMessage(theorem, n)));
+                    output.WriteLine(sources.Format(n.TacticSpan ?? location, "error", NotProvedOutcome.Code, OutcomeText.NotProvedMessage(theorem, n, sources.Text)));
                     foreach (var line in OutcomeText.NotProvedDetails(n))
                     {
                         output.WriteLine(line.Length == 0 ? "" : $"  {line}");

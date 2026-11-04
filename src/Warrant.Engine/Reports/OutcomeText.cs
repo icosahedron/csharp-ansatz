@@ -32,7 +32,8 @@ public static class OutcomeText
     /// <summary>
     /// The diagnostic message for a theorem that was not proved (WRT0001, docs/m5a/04, "What a failure reports"): one
     /// line, complete on its own, e.g. <c>Theorem 'AlwaysLarger' could not be proved: unsolved goals. Counterexample: x =
-    /// 2147483647.</c>; the message's later lines and the goals follow in <see cref="NotProvedDetails"/>.
+    /// 2147483647.</c>; the message's later lines and the goals follow in <see cref="NotProvedDetails"/>. For a recursive
+    /// method's decrease failure, the overload that takes the source text names the call and the measure.
     /// </summary>
     /// <param name="theorem">The theorem's short name, from <see cref="ShortName"/>.</param>
     /// <param name="outcome">The outcome.</param>
@@ -46,7 +47,29 @@ public static class OutcomeText
     }
 
     /// <summary>
-    /// The lines that follow <see cref="NotProvedMessage"/>: the message's later lines, then the goals, as Lean's
+    /// <see cref="NotProvedMessage(string, NotProvedOutcome)"/>, except that for a recursive method whose decrease
+    /// obligation was not proved it names the call and the measure (docs/m5a/03, "Decrease theorems"), e.g. <c>The
+    /// recursive call 'Bad(n - 1)' could not be shown to decrease 'n': omega could not prove the goal.</c>
+    /// </summary>
+    /// <param name="unit">The unit's short name, from <see cref="ShortName"/>.</param>
+    /// <param name="outcome">The outcome.</param>
+    /// <param name="sourceText">The source text of a span; null when it cannot be read.</param>
+    /// <returns>The message.</returns>
+    public static string NotProvedMessage(string unit, NotProvedOutcome outcome, Func<VirSpan, string?> sourceText)
+    {
+        ArgumentNullException.ThrowIfNull(outcome);
+        ArgumentNullException.ThrowIfNull(sourceText);
+        if (outcome.Decrease is not { } decrease)
+        {
+            return NotProvedMessage(unit, outcome);
+        }
+        var call = decrease.CallSpan is { } c && sourceText(c) is { } callText ? $"The recursive call '{callText}'" : $"Recursive call {decrease.Index} of '{unit}'";
+        var measure = decrease.MeasureSpan is { } m && sourceText(m) is { } measureText ? $"'{measureText}'" : "its measure";
+        return $"{call} could not be shown to decrease {measure}: {FirstLine(outcome.Message).TrimEnd('.', ':')}.";
+    }
+
+    /// <summary>
+    /// The lines that follow <see cref="NotProvedMessage(string, NotProvedOutcome)"/>: the message's later lines, then the goals, as Lean's
     /// "unsolved goals" message shows them.
     /// </summary>
     /// <param name="outcome">The outcome.</param>
@@ -72,6 +95,10 @@ public static class OutcomeText
     public static string NotProvedDetail(NotProvedOutcome outcome)
     {
         ArgumentNullException.ThrowIfNull(outcome);
+        if (outcome.Decrease is { } decrease)
+        {
+            return $"recursive call {decrease.Index} was not shown to decrease ({NotProvedOutcome.Code}): {FirstLine(outcome.Message)}";
+        }
         var detail = $"the claim was not proved ({NotProvedOutcome.Code}): {FirstLine(outcome.Message)}";
         return outcome.Counterexample.IsEmpty ? detail : $"{detail}; counterexample {Counterexample(outcome.Counterexample)}";
     }

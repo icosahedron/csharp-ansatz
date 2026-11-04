@@ -32,19 +32,8 @@ internal sealed partial class BodyTranslator
     /// <summary>A function unit's type (<c>∀</c> over <c>self</c> and the parameters) and value (<c>fun</c> over the same).</summary>
     public (Expr Type, Expr Value) Function(VirUnit unit)
     {
-        var binders = new List<Expr>();
-        if (unit.Self is { } self)
-        {
-            _self = _lctx.MkLocalDecl(_ngen, Name.From("self"), _types.Cic(VirType.Ref(self)));
-            binders.Add(_self);
-        }
-        foreach (var p in unit.Params ?? VirList<VirParam>.Empty)
-        {
-            var fvar = _lctx.MkLocalDecl(_ngen, Name.From(p.Name), _types.Cic(p.Type));
-            _params.Add(fvar);
-            binders.Add(fvar);
-        }
-        var returns = _types.Cic(unit.Returns ?? throw new TranslationException(unit.Key, "a function has no return type."));
+        var binders = Binders(unit);
+        var returns = ReturnType(unit);
         Expr body;
         switch (unit.Body)
         {
@@ -61,6 +50,27 @@ internal sealed partial class BodyTranslator
         }
         return (_lctx.MkPi(binders, returns), _lctx.MkLambda(binders, body));
     }
+
+    /// <summary>A function's binders as free variables: <c>self</c> for an instance member, then the parameters.</summary>
+    private List<Expr> Binders(VirUnit unit)
+    {
+        var binders = new List<Expr>();
+        if (unit.Self is { } self)
+        {
+            _self = _lctx.MkLocalDecl(_ngen, Name.From("self"), _types.Cic(VirType.Ref(self)));
+            binders.Add(_self);
+        }
+        foreach (var p in unit.Params ?? VirList<VirParam>.Empty)
+        {
+            var fvar = _lctx.MkLocalDecl(_ngen, Name.From(p.Name), _types.Cic(p.Type));
+            _params.Add(fvar);
+            binders.Add(fvar);
+        }
+        return binders;
+    }
+
+    private Expr ReturnType(VirUnit unit) =>
+        _types.Cic(unit.Returns ?? throw new TranslationException(unit.Key, "a function has no return type."));
 
     /// <summary>
     /// A theorem's statement, translated as a condition (docs/m4/06, "The statement"). The parameters become free
@@ -126,7 +136,15 @@ internal sealed partial class BodyTranslator
             case ConvertExpr c:
                 return Convert(c, env);
             case CondExpr c:
-                return Operators.Ite(_types.Cic(c.Type), Cond(c.C, env), Value(c.Then, env), Value(c.Else, env));
+                {
+                    var condition = Cond(c.C, env);
+                    var (hThen, hElse) = Hypotheses(condition);
+                    var then = InScope(hThen, () => Value(c.Then, env));
+                    var @else = InScope(hElse, () => Value(c.Else, env));
+                    return IfThenElse(_types.Cic(c.Type), condition, hThen, then, hElse, @else);
+                }
+            case CallExpr c when _rec is { } rec && string.Equals(c.Target, rec.Key, StringComparison.Ordinal):
+                return RecursiveCall(c, env);
             case CallExpr c:
                 return Expr.App(Expr.Const(LeanNames.ForKey(c.Target)), [.. c.Args.Select(a => Value(a, env))]);
             case NewExpr n:

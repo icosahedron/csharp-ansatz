@@ -222,6 +222,10 @@ public static class Pipeline
                     : RunScript(unit, shell, display, assumptions, budget);
             }
             var admitted = new List<KernelDeclaration>();
+            if (translated.Recursion is { } recursion)
+            {
+                return AdmitRecursive(unit, translated, recursion, assumptions, admitted);
+            }
             foreach (var declaration in translated.Declarations)
             {
                 try
@@ -250,6 +254,121 @@ public static class Pipeline
             }
             return new TranslatedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, [.. admitted]);
         }
+
+        /// <summary>
+        /// A recursive method (M5a KTD14, KTD15): each decrease theorem proved by the omega pipeline and admitted, then the
+        /// definition, which refers to them, marked irreducible for Meta as Lean marks its well-founded definitions, then
+        /// the equation lemma with its bare <c>Nat.fix_eq</c> proof. A decrease theorem that is not proved is WRT0001 at
+        /// its call, with its goal; an equation lemma the kernel rejects fails the unit.
+        /// </summary>
+        private UnitOutcome AdmitRecursive(
+            EngineUnit unit, TranslatedUnit translated, RecursiveDefinition recursion, ImmutableArray<UnitAssumption> assumptions, List<KernelDeclaration> admitted)
+        {
+            var key = unit.Unit.Key;
+            var kind = unit.Unit.Kind;
+            var display = translated.DisplayName;
+            foreach (var decrease in recursion.Decreases)
+            {
+                if (ProveDecrease(unit, decrease, display, assumptions, admitted) is { } failure)
+                {
+                    return failure;
+                }
+            }
+            try
+            {
+                foreach (var declaration in translated.Declarations)
+                {
+                    AddDeclaration(declaration, admitted);
+                }
+                Attributes.SetReducibilityStatus(translated.Name, ReducibilityStatus.Irreducible);
+            }
+            catch (KernelException ex)
+            {
+                return new FailedOutcome(key, kind, display, assumptions, ex.Message);
+            }
+            try
+            {
+                AddDeclaration(recursion.Equation.WithProof(recursion.EquationProof), admitted);
+            }
+            catch (KernelException ex)
+            {
+                return new FailedOutcome(key, kind, display, assumptions, $"the kernel rejected the equation lemma {recursion.Equation.Name}: {ex.Message}");
+            }
+            return new TranslatedOutcome(key, kind, display, assumptions, [.. admitted]);
+        }
+
+        /// <summary>
+        /// One decrease theorem (KTD15): its binders introduced under their own names, then <c>Tactic.Omega()</c>'s
+        /// pipeline; the proof the kernel admits. Null when it was admitted, else the unit's outcome.
+        /// </summary>
+        private UnitOutcome? ProveDecrease(
+            EngineUnit unit, DecreaseObligation decrease, string display, ImmutableArray<UnitAssumption> assumptions, List<KernelDeclaration> admitted)
+        {
+            var key = unit.Unit.Key;
+            var kind = unit.Unit.Kind;
+            var shell = decrease.Theorem;
+            var budget = new TheoremBudget(options, null);
+            var meta = new MetaM(Env, budget.Meta) { Attributes = Attributes, DisplayNames = _names };
+            var goal = meta.MkFreshExprSyntheticOpaqueMVar(shell.Type);
+            MVarId? current = null;
+            Expr proof;
+            try
+            {
+                var introduced = meta.IntroN(goal.Id, decrease.Binders).Goal;
+                current = introduced;
+                meta.OmegaTactic(introduced);
+                proof = meta.InstantiateMVars(goal);
+            }
+            catch (MetaResourceException ex)
+            {
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while proving the decrease of {Describe(unit, decrease)}.");
+            }
+            catch (KernelResourceException ex)
+            {
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while proving the decrease of {Describe(unit, decrease)}.");
+            }
+            catch (InsufficientExecutionStackException)
+            {
+                return new UndecidedOutcome(key, kind, display, assumptions, "proving a decrease obligation ran out of stack.");
+            }
+            catch (MetaException ex)
+            {
+                var failed = ex is TacticException { Goal: { } g } && meta.MCtx.FindDecl(g) is not null ? g : current ?? goal.Id;
+                var printer = new GoalPrinter(Env, _names);
+                return new NotProvedOutcome(key, kind, display, assumptions, ex.Message, printer.PpGoals(meta.MCtx, [failed]), SpanOf(unit, decrease.Call), [])
+                {
+                    Decrease = new DecreaseFailure(decrease.Index, SpanOf(unit, decrease.Call), SpanOf(unit, decrease.Measure)),
+                };
+            }
+#pragma warning disable CA1031 // KTD19: an unexpected failure in Meta ends this unit as Warrant's bug, not the whole run.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                return new InternalErrorOutcome(key, kind, display, assumptions, $"Meta failed unexpectedly: {ex.GetType().Name}: {ex.Message}");
+            }
+            if (proof.HasExprMVar || proof.HasLevelMVar || proof.HasFVar)
+            {
+                return new InternalErrorOutcome(key, kind, display, assumptions, $"omega closed the decrease obligation {shell.Name}, but the proof term still has a hole.");
+            }
+            try
+            {
+                AddDeclaration(shell.WithProof(proof), admitted);
+            }
+            catch (KernelResourceException ex)
+            {
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked a decrease proof.");
+            }
+            catch (KernelException ex)
+            {
+                return new InternalErrorOutcome(key, kind, display, assumptions, $"the kernel rejected the decrease proof Warrant built for {shell.Name}: {ex.Message}");
+            }
+            return null;
+        }
+
+        private static VirSpan? SpanOf(EngineUnit unit, VirNode node) =>
+            unit.Spans is { } spans && VirTree.IdOf(unit.Unit, node) is { } id && spans.TryGetSpan(id, out var span) ? span : null;
+
+        private static string Describe(EngineUnit unit, DecreaseObligation decrease) => $"recursive call {decrease.Index} of {Display(unit)}";
 
         private void AddDeclaration(KernelDeclaration declaration, List<KernelDeclaration> admitted)
         {

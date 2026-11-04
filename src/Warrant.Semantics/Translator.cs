@@ -39,6 +39,18 @@ public static class Translator
         return new Translation(result, run.DisplayNames);
     }
 
+    /// <summary>
+    /// Whether a unit is a recursive method, which translates to a well-founded definition (M5a KTD14): a function whose
+    /// block body starts with <c>Spec.Decreases</c>.
+    /// </summary>
+    /// <param name="unit">The unit.</param>
+    /// <returns>Whether it is recursive.</returns>
+    public static bool IsRecursive(VirUnit unit)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+        return BodyTranslator.IsRecursive(unit);
+    }
+
     /// <summary>Every unit after the units it depends on, ties broken by key (ordinal), so the order is deterministic.</summary>
     private static List<VirUnit> DependencyOrder(List<VirUnit> units)
     {
@@ -104,6 +116,21 @@ public static class Translator
             var name = LeanNames.ForKey(unit.Key);
             switch (unit.Kind)
             {
+                case VirUnitKind.Function when BodyTranslator.IsRecursive(unit):
+                    {
+                        // M5a KTD14, KTD15: the decrease theorems, the Nat.fix definition, then the equation lemma.
+                        var (type, value, decreases, proof) = new BodyTranslator(types).Recursive(unit);
+                        var decl = TypeDeclarations.Definition(name, type, value, Regular);
+                        Declare(unit.Key, name, display, decl.Value.Hints);
+                        foreach (var decrease in decreases)
+                        {
+                            Declare(unit.Key, decrease.Theorem.Name, $"{display} (decrease {decrease.Index})", null);
+                        }
+                        var equationName = LeanNames.EquationLemma(unit.Key);
+                        var equation = new TheoremShell(equationName, new BodyTranslator(types).Equation(unit, name), null, null);
+                        Declare(unit.Key, equationName, $"{display} (equation)", null);
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null, new RecursiveDefinition(decreases, equation, proof));
+                    }
                 case VirUnitKind.Function:
                     {
                         var (type, value) = new BodyTranslator(types).Function(unit);

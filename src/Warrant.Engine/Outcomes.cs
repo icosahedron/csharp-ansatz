@@ -108,7 +108,19 @@ public sealed record NotProvedOutcome(
 {
     /// <summary>The diagnostic code: the claim was not proved.</summary>
     public const string Code = "WRT0001";
+
+    /// <summary>
+    /// For a recursive method, the recursive call whose decrease obligation was not proved (M5a KTD15); null for a theorem.
+    /// The goals are that obligation's, and <see cref="TacticSpan"/> is the call's span.
+    /// </summary>
+    public DecreaseFailure? Decrease { get; init; }
 }
+
+/// <summary>A recursive call whose decrease obligation <c>f.$dec_k</c> was not proved (M5a KTD15, docs/m5a/03).</summary>
+/// <param name="Index">The call's number among the method's recursive calls, from 1, in source order.</param>
+/// <param name="CallSpan">The call's span, when the unit came with spans.</param>
+/// <param name="MeasureSpan">The span of <c>Spec.Decreases</c>'s argument, when the unit came with spans.</param>
+public sealed record DecreaseFailure(int Index, VirSpan? CallSpan, VirSpan? MeasureSpan);
 
 /// <summary>One parameter's value in a counterexample.</summary>
 /// <param name="Parameter">The C# parameter's name.</param>

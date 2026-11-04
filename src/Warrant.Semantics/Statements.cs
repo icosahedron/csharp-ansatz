@@ -28,14 +28,28 @@ internal sealed partial class BodyTranslator
             DeclStmt d => Let(d.Local, Value(d.Init, env), env, rest),
             AssignStmt a => Let(a.Local, Value(a.Value, env), env, rest),
             BlockStmt b => Statements(b.Stmts, 0, env, rest),
-            IfStmt s => Branches(
-                [s.Then, s.Else ?? EmptyBlock],
-                (terms, type) => Operators.Ite(type, Cond(s.C, env), terms[0], terms[1]),
-                env,
-                rest),
+            IfStmt s => If(s, env, rest),
             SwitchStmt s => SwitchStatement(s, env, rest),
+            // The measure is read on entry; it is the recursion's, not a statement of the body (M5a KTD14).
+            DecreasesStmt => rest.Invoke(env),
             var other => throw new TranslationException(null, $"unsupported statement {other.GetType().Name}."),
         };
+    }
+
+    /// <summary>
+    /// An <c>if</c> statement: <c>ite</c>, or, on the way to a recursive call, <c>dite</c>, whose hypotheses are in scope in
+    /// the branches (M5a KTD15).
+    /// </summary>
+    private Expr If(IfStmt s, Env env, Continuation k)
+    {
+        var c = Cond(s.C, env);
+        var (hThen, hElse) = Hypotheses(c);
+        return Branches(
+            [s.Then, s.Else ?? EmptyBlock],
+            hThen is null ? null : [[hThen], [hElse!]],
+            (terms, type) => IfThenElse(type, c, hThen, terms[0], hElse, terms[1]),
+            env,
+            k);
     }
 
     /// <summary>One statement, then <paramref name="k"/>.</summary>
@@ -47,7 +61,7 @@ internal sealed partial class BodyTranslator
     {
         var decl = Local(local);
         var fvar = _lctx.MkLetDecl(_ngen, Name.From(decl.Name), _types.Cic(decl.Init.Type), value);
-        return _lctx.MkLambda([fvar], k.Invoke(env.Set(local, fvar)));
+        return _lctx.MkLambda([fvar], InScope(fvar, () => k.Invoke(env.Set(local, fvar))));
     }
 
     /// <summary>
@@ -60,14 +74,22 @@ internal sealed partial class BodyTranslator
     ///    <c>let x := combine(x after each branch); k</c>;
     /// 4. neither contains a <c>return</c>, and they change no local <paramref name="k"/> reads: <paramref name="k"/> alone;
     /// 5. otherwise a join point over the locals <paramref name="k"/> reads and some branch changes.
+    /// Each branch is translated with its <paramref name="hypotheses"/> in scope, when there are any.
     /// </summary>
-    private Expr Branches(IReadOnlyList<VirStmt> branches, Func<IReadOnlyList<Expr>, Expr, Expr> combine, Env env, Continuation k)
+    private Expr Branches(
+        IReadOnlyList<VirStmt> branches,
+        IReadOnlyList<IReadOnlyList<Expr>>? hypotheses,
+        Func<IReadOnlyList<Expr>, Expr, Expr> combine,
+        Env env,
+        Continuation k)
     {
+        Expr Branch(int i, Continuation then) => InScope(hypotheses?[i] ?? [], () => Statement(branches[i], env, then));
+
         int falling = branches.Count(FallsThrough);
         if (falling <= 1)
         {
             var unreachable = new Unreachable(k.ResultType);
-            return combine([.. branches.Select(b => Statement(b, env, FallsThrough(b) ? k : unreachable))], k.ResultType);
+            return combine([.. branches.Select((b, i) => Branch(i, FallsThrough(b) ? k : unreachable))], k.ResultType);
         }
         bool returns = branches.Any(b => Nodes(b).Any(n => n is ReturnStmt));
         var live = branches
@@ -83,17 +105,23 @@ internal sealed partial class BodyTranslator
         if (!returns && live.Count == 1)
         {
             var leaf = new Leaf(live[0], _types.Cic(Local(live[0]).Init.Type));
-            var value = combine([.. branches.Select(b => Statement(b, env, leaf))], leaf.ResultType);
+            var value = combine([.. branches.Select((_, i) => Branch(i, leaf))], leaf.ResultType);
             return Let(live[0], value, env, k);
         }
-        return JoinPoint(branches, combine, live, env, k);
+        return JoinPoint(branches, Branch, combine, live, env, k);
     }
 
     /// <summary>
     /// Rule 5: <c>let jp := fun (x₁ … xₙ) =&gt; k; combine(branches)</c>, where every point a branch falls through becomes
     /// <c>jp</c> applied to the current values of <c>x₁ … xₙ</c>.
     /// </summary>
-    private Expr JoinPoint(IReadOnlyList<VirStmt> branches, Func<IReadOnlyList<Expr>, Expr, Expr> combine, List<int> live, Env env, Continuation k)
+    private Expr JoinPoint(
+        IReadOnlyList<VirStmt> branches,
+        Func<int, Continuation, Expr> branch,
+        Func<IReadOnlyList<Expr>, Expr, Expr> combine,
+        List<int> live,
+        Env env,
+        Continuation k)
     {
         var parameters = live.Select(x => (Expr)_lctx.MkLocalDecl(_ngen, Name.From(Local(x).Name), _types.Cic(Local(x).Init.Type))).ToList();
         var inner = env;
@@ -101,11 +129,11 @@ internal sealed partial class BodyTranslator
         {
             inner = inner.Set(live[i], parameters[i]);
         }
-        var body = _lctx.MkLambda(parameters, k.Invoke(inner));
+        var body = _lctx.MkLambda(parameters, InScope(parameters, () => k.Invoke(inner)));
         var jp = _lctx.MkLetDecl(_ngen, JoinPointName, _lctx.MkPi(parameters, k.ResultType), body);
         var jump = new Jump(jp, live, k.ResultType);
         var unreachable = new Unreachable(k.ResultType);
-        var term = combine([.. branches.Select(b => Statement(b, env, FallsThrough(b) ? jump : unreachable))], k.ResultType);
+        var term = InScope(jp, () => combine([.. Enumerable.Range(0, branches.Count).Select(i => branch(i, FallsThrough(branches[i]) ? jump : unreachable))], k.ResultType));
         return _lctx.MkLambda([jp], term);
     }
 

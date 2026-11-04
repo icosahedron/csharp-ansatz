@@ -99,6 +99,21 @@ public sealed record SimpConfig
     /// <summary>Warrant's defaults: Lean's, with <c>decide</c> and <c>contextual</c> on.</summary>
     public static SimpConfig Default { get; } = new();
 
+    /// <summary>
+    /// Lean's <c>Simp.neutralConfig</c>, which <c>unfold</c> uses: no reduction of any kind and no <c>decide</c>, so the
+    /// only change is the rewrite itself.
+    /// </summary>
+    public static SimpConfig Neutral { get; } = new()
+    {
+        Contextual = false,
+        Decide = false,
+        Beta = false,
+        Proj = false,
+        Iota = false,
+        Zeta = false,
+        ZetaUnused = false,
+    };
+
     /// <summary>The most terms one run may visit (Lean's <c>maxSteps</c>).</summary>
     public int MaxSteps { get; init; } = 100_000;
 

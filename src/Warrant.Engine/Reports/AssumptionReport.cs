@@ -57,7 +57,14 @@ public sealed record UnitReport(
     string? By,
     string? Claim,
     string? Detail,
-    ImmutableArray<ReportAssumption> Assumptions);
+    ImmutableArray<ReportAssumption> Assumptions)
+{
+    /// <summary>
+    /// What the unit's model leaves out besides the report's <see cref="AssumptionReport.Global"/> assumptions: for a
+    /// recursive method, and a theorem about one, that each recursive call returns (M5a KTD31). Empty for other units.
+    /// </summary>
+    public ImmutableArray<string> Global { get; init; } = [];
+}
 
 /// <summary>One assumption, rendered for people.</summary>
 /// <param name="Kind">What is assumed.</param>
@@ -84,6 +91,12 @@ public static class AssumptionReports
 
     /// <summary>The overflow assumption when overflow checking is on.</summary>
     public const string Throws = "Arithmetic throws on overflow (overflow checking is on)";
+
+    /// <summary>
+    /// The model has no stack (M5a KTD31): a recursive method's proofs are about the calls that return, and a call that
+    /// would exhaust the CLR's stack, which .NET cannot catch, is outside them.
+    /// </summary>
+    public const string Stack = "Each recursive call returns without exhausting the stack";
 
     /// <summary>The kernel's name and version, from the kernel assembly.</summary>
     public static string DefaultKernel { get; } = KernelName();
@@ -129,11 +142,41 @@ public static class AssumptionReports
                 .Select(a => Render(a, outcome.Key, Name))
                 .OrderBy(a => a.Inherited)
                 .ToImmutableArray();
-            reports.Add(new UnitReport(outcome.Key, outcome.UnitKind, outcome.DisplayName, status, OutcomeName(outcome), by, claim, detail, assumptions));
+            reports.Add(new UnitReport(outcome.Key, outcome.UnitKind, outcome.DisplayName, status, OutcomeName(outcome), by, claim, detail, assumptions)
+            {
+                Global = ReliesOnRecursion(outcome.Key, byKey) ? [Stack] : [],
+            });
         }
 
         var global = ImmutableArray.Create(settings.CheckOverflow ? Throws : Wraps, BundleModels);
         return new AssumptionReport(settings.Kernel ?? DefaultKernel, settings.Bundle, global, reports.MoveToImmutable());
+    }
+
+    /// <summary>
+    /// Whether a unit is a recursive method, or depends on one, transitively, through the units the engine was given
+    /// (KTD31).
+    /// </summary>
+    private static bool ReliesOnRecursion(string key, Dictionary<string, EngineUnit> units)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var work = new Stack<string>([key]);
+        while (work.Count > 0)
+        {
+            var next = work.Pop();
+            if (!seen.Add(next) || !units.TryGetValue(next, out var unit))
+            {
+                continue;
+            }
+            if (Translator.IsRecursive(unit.Unit))
+            {
+                return true;
+            }
+            foreach (var dep in unit.Unit.Deps)
+            {
+                work.Push(dep);
+            }
+        }
+        return false;
     }
 
     /// <summary>The span of a theorem's claim: the statement's node, numbered in pre-order (docs/m4/04).</summary>

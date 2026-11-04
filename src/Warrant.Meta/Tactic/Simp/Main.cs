@@ -50,6 +50,12 @@ public sealed partial class Simplifier
     private int _dischargeDepth;
     private readonly int _lctxInitSize;
 
+    /// <summary>
+    /// The one theorem <c>unfold</c> rewrites with, when this run is Lean's <c>unfold</c> rather than <c>simp</c> (its
+    /// <c>Simp.Methods</c>: that theorem as <c>pre</c>, the default <c>post</c> that stops); null for <c>simp</c>.
+    /// </summary>
+    private readonly SimpTheorem? _unfold;
+
     /// <summary>Creates a run over <paramref name="meta"/>'s current local context.</summary>
     public Simplifier(MetaM meta, SimpContext context)
     {
@@ -58,6 +64,10 @@ public sealed partial class Simplifier
         _theorems = context.Theorems;
         _lctxInitSize = meta.LCtx.NumIndices;
     }
+
+    /// <summary>A run of Lean's <c>unfold</c> with the equation lemma <paramref name="unfold"/> (Lean/Meta/Tactic/Unfold.lean 19-30).</summary>
+    internal Simplifier(MetaM meta, SimpContext context, SimpTheorem unfold)
+        : this(meta, context) => _unfold = unfold;
 
     /// <summary>The context.</summary>
     public SimpContext Context { get; }

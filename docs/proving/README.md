@@ -22,6 +22,9 @@ in four parts that answer four different needs:
 | **Reference** | looking up an attribute, a `Spec` method, a tactic or a diagnostic | [Reference](reference.md) |
 | **Explanation** | wondering why it works this way | [How Warrant thinks about your code](explanation.md) |
 
+[Proofs that work today](proofs-that-work.md) lists every theorem the corpus proves, how each is proved, and the
+three kernels that check them.
+
 If you only read one page, read the tutorial. If a proof is failing and you don't
 know why, start with [Reading a failed proof](how-to.md#read-a-failed-proof).
 

@@ -73,17 +73,20 @@ public sealed class Notation
         [Name.Parse("HMul.hMul")] = new(" * ", 70, 70, 71, 6),
         [Name.Parse("HDiv.hDiv")] = new(" / ", 70, 70, 71, 6),
         [Name.Parse("HMod.hMod")] = new(" % ", 70, 70, 71, 6),
+        [Name.Parse("HPow.hPow")] = new(" ^ ", 75, 76, 75, 6),
     };
 
     /// <summary>Functions printed in field notation, <c>x.toInt</c>, on their only argument.</summary>
     private static readonly Dictionary<Name, string> FieldFunctions = new()
     {
         [Name.Parse("Int32.toInt")] = "toInt",
+        [Name.Parse("Int64.toInt")] = "toInt",
         [Name.Parse("Int.toNat")] = "toNat",
     };
 
     private static readonly Name NotName = Name.Parse("Not");
     private static readonly Name NegName = Name.Parse("Neg.neg");
+    private static readonly Name NatCastName = Name.Parse("Nat.cast");
     private static readonly Name OfNatName = Name.Parse("OfNat.ofNat");
     private static readonly Name IteName = Name.Parse("ite");
     private static readonly Name DiteName = Name.Parse("dite");
@@ -256,6 +259,11 @@ public sealed class Notation
         if (name == NegName && args.Length >= 3)
         {
             return (Prefix("-", 75, 75, Pp(args[2])), 3);
+        }
+        if (name == NatCastName && args.Length >= 3)
+        {
+            // Lean's coercion arrow, which omega's messages show for Nat atoms.
+            return (Prefix("↑", MaxPrec, MaxPrec, Pp(args[2])), 3);
         }
         if (name == OfNatName && args.Length >= 3 && args[1] is NatLitExpr n)
         {

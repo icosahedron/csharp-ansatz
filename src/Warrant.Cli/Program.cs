@@ -45,7 +45,7 @@ internal static class Cli
                   --report DIR              write report.md and report.json
                   --keep-conditional-check  compare every #if combination even with the build's defines
                   --kernel-fuel N           kernel steps per theorem (default 20000000; 100000000 for a directory)
-                  --tactic-fuel N           tactic steps per theorem (default 910)
+                  --tactic-fuel N           tactic steps per theorem (default 135630)
                   --timeout SECONDS         wall-clock limit per theorem (default 30)
                   --bundle PATH             the semantics bundle; the attribute sidecar must be beside it
         """;

@@ -22,5 +22,16 @@ public static class EmittedConstants
 
         // Unfold's definitional change and every replaceTargetDefEq: @id T e.
         TacticNames.Id,
+
+        // simp's proofs (Lean's Simp/Main, Types, Rewrite, AppBuilder, reduceIte and reduceDIte; docs/m5a/05), its
+        // @[congr] lemmas, and the lemmas of the default set, whose proofs it puts into the term. simp also emits True,
+        // Decidable and instOfNatNat (an orphan literal folded into OfNat.ofNat), which are not roots but are in the
+        // bundle as the types of the roots True.intro and Decidable.decide and through the Nat literal lemmas; and the
+        // instances instance resolution finds, which are sidecar entries and so in the bundle (KTD9).
+        .. SimpNames.ProofConstants,
+        Name.Parse("ite_congr"),
+        Name.Parse("dite_congr"),
+        .. DefaultSimpSet.CuratedLemmas,
+        .. DefaultSimpSet.WarrantLemmas,
     ];
 }

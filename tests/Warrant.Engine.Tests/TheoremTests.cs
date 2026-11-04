@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using Warrant.Cic;
 using Warrant.Kernel;
@@ -435,18 +436,16 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Equal([new CounterexampleValue("x", "2147483647")], outcome.Counterexample.AsEnumerable());
     }
 
-    [Theory]
-    [InlineData("Tactic.Simp()", "simp")]
-    [InlineData("Tactic.AllGoals(Tactic.Omega())", "omega")]
-    public void ATacticOfALaterUnitIsNotAvailableYet(string tactic, string name)
+    [Fact]
+    public void ATacticOfALaterUnitIsNotAvailableYet()
     {
-        var outcome = Assert.IsType<NotProvedOutcome>(Script($$"""
+        var outcome = Assert.IsType<NotProvedOutcome>(Script("""
             public static class S
             {
-                [Theorem] static Proof T(bool b) => Prove.That(b == b).By({{tactic}});
+                [Theorem] static Proof T(bool b) => Prove.That(b == b).By(Tactic.AllGoals(Tactic.Omega()));
             }
             """).Find("M:S.T(System.Boolean)"));
-        Assert.Equal($"Tactic `{name}` is not available yet", outcome.Message);
+        Assert.Equal("Tactic `omega` is not available yet", outcome.Message);
         Assert.Equal("b : Bool\n⊢ b = b", outcome.Goals);
         Assert.Empty(outcome.Counterexample);
     }
@@ -558,23 +557,35 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     [Fact]
-    public void EveryM5aCorpusTheoremNeedsATacticOfALaterUnit()
+    public void TheM5aCorpusTheoremsThatNeedOnlySimpAreProvedAndTheRestReachOmega()
     {
-        // Every M5a corpus script needs simp or omega (docs/m5a/01), so none is proved yet; each fails cleanly with WRT0001
-        // naming the tactic, and none is reported false. Cases and Induction (U14) run before the simp they reach.
-        int theorems = 0;
+        // With simp (U17), every M5a corpus script whose tactics all exist is proved; the rest stop cleanly at omega (U18)
+        // with WRT0001, and none is reported false.
+        var proved = new List<string>();
+        var atOmega = new List<string>();
         foreach (var compilation in new[] { "accepted", "refuted" })
         {
             var result = engine.Run($"m5a/{compilation}");
             foreach (var outcome in result.Units.Where(u => u.UnitKind == VirUnitKind.Theorem))
             {
+                if (outcome is ProvedOutcome { By: ProofKind.Script })
+                {
+                    proved.Add(outcome.Key);
+                    continue;
+                }
                 var notProved = Assert.IsType<NotProvedOutcome>(outcome);
-                Assert.Matches("^Tactic `(simp|omega)` is not available yet$", notProved.Message);
+                Assert.Equal("Tactic `omega` is not available yet", notProved.Message);
                 Assert.NotNull(notProved.TacticSpan);
-                theorems++;
+                atOmega.Add(outcome.Key);
             }
         }
-        Assert.Equal(7, theorems); // six accepted, one refuted
+        Assert.Equal(
+            ["M:Claims.Payments.ValidImpliesPositive(Claims.Payment)", "M:Corpus.Quantifiers.AndTrueIsIdentity(System.Boolean)",
+             "M:Corpus.Quantifiers.FlipTwice(System.Boolean)", "M:Corpus.Quantifiers.RankIsSmall(Corpus.Light)"],
+            proved.Order(StringComparer.Ordinal));
+        Assert.Equal(
+            ["M:Corpus.Increments.LargerBelowMax(System.Int32)", "M:Corpus.Quantifiers.ZeroIsNeutral", "M:Corpus.Refuted.Increments.AlwaysLarger(System.Int32)"],
+            atOmega.Order(StringComparer.Ordinal));
         var alwaysLarger = Assert.IsType<NotProvedOutcome>(engine.Run("m5a/refuted").Find("M:Corpus.Refuted.Increments.AlwaysLarger(System.Int32)"));
         Assert.Equal([new CounterexampleValue("x", "2147483647")], alwaysLarger.Counterexample.AsEnumerable());
     }
@@ -675,24 +686,6 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     [Fact]
-    public void TheCorpusCasesAndInductionReachTheirSimp()
-    {
-        var result = engine.Run("m5a/accepted");
-        foreach (var (key, goals) in new[]
-        {
-            ("M:Corpus.Quantifiers.FlipTwice(System.Boolean)", "case false\n⊢ Bool.not (Bool.not Bool.false) = Bool.false"),
-            ("M:Corpus.Quantifiers.RankIsSmall(Corpus.Light)", "case Red\n⊢ Light (recursor) 0 1 2 Light.Red ≤ 2"),
-            ("M:Corpus.Quantifiers.AndTrueIsIdentity(System.Boolean)", "case false\n⊢ Bool.and Bool.false Bool.true = Bool.false"),
-        })
-        {
-            var outcome = Assert.IsType<NotProvedOutcome>(result.Find(key));
-            Assert.Equal("Tactic `simp` is not available yet", outcome.Message);
-            // AllGoals stops at the first goal, where simp is not available yet.
-            Assert.Equal(goals, outcome.Goals);
-        }
-    }
-
-    [Fact]
     public void CasesOnAnEquationReportsThatIndexedFamiliesAreNotSupportedYet()
     {
         var outcome = Assert.IsType<NotProvedOutcome>(Script("""
@@ -704,6 +697,140 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
             """).Find("M:S.Symmetric(System.Int32,System.Int32)"));
         Assert.Equal("Tactic `cases` failed: cases on an indexed family is not supported yet", outcome.Message);
         Assert.Equal("a b : Int32\nh : a = b\n⊢ b = a", outcome.Goals);
+    }
+
+    // ---- simp (M5a U17) ----
+
+    [Fact]
+    public void ValidImpliesPositiveIsProvedByUnfoldAndSimpDependingOnlyOnPropext()
+    {
+        // The plan's Success Criterion: design §5.1's theorem, Unfold(nameof(Validate)) then Simp(), end to end.
+        var result = engine.Run("m5a/accepted");
+        var proved = Assert.IsType<ProvedOutcome>(result.Find("M:Claims.Payments.ValidImpliesPositive(Claims.Payment)"));
+        Assert.Equal(ProofKind.Script, proved.By);
+        var proof = proved.Certificate.Value.Proof;
+        var text = proof.ToString();
+        Assert.Contains("Warrant.ite_eq_iff", text, StringComparison.Ordinal);
+        Assert.Contains("eq_false_of_decide", text, StringComparison.Ordinal);
+        Assert.Contains("implies_congr_ctx", text, StringComparison.Ordinal);
+        Assert.Equal(["propext"], Axioms(result.Environment, proof));
+    }
+
+    [Fact]
+    public void WithoutDecideSimpLeavesTheClosedComparisonsAndShowsTheGoal()
+    {
+        const string Source = """
+            public enum PaymentStatus { Pending, Processed, Failed }
+            public sealed record Payment(int Id, int Amount, PaymentStatus Status);
+            public enum PaymentResult { Valid, InvalidAmount, InvalidStatus }
+
+            public static class Payments
+            {
+                [Verified]
+                public static PaymentResult Validate(Payment p)
+                {
+                    if (p.Amount <= 0) return PaymentResult.InvalidAmount;
+                    if (p.Status != PaymentStatus.Pending) return PaymentResult.InvalidStatus;
+                    return PaymentResult.Valid;
+                }
+
+                [Theorem]
+                static Proof ValidImpliesPositive(Payment p) =>
+                    Prove.That(Spec.Implies(Validate(p) == PaymentResult.Valid, p.Amount > 0))
+                         .By(Tactic.Unfold(nameof(Validate)), Tactic.Simp().With(decide: false));
+            }
+            """;
+        var outcome = Assert.IsType<NotProvedOutcome>(Script(Source).Find("M:Payments.ValidImpliesPositive(Payment)"));
+        Assert.Equal("unsolved goals", outcome.Message);
+        // Without decide, nothing turns InvalidAmount = Valid or InvalidStatus = Valid into False.
+        Assert.Equal(
+            "p : Payment\n⊢ p.Amount ≤ 0 ∧ PaymentResult.InvalidAmount = PaymentResult.Valid ∨ 0 < p.Amount ∧ "
+            + "(¬p.Status = PaymentStatus.Pending → PaymentResult.InvalidStatus = PaymentResult.Valid) → 0 < p.Amount",
+            outcome.Goals);
+    }
+
+    [Fact]
+    public void SimpWithACSharpTheoremRewritesWithIt()
+    {
+        var result = Script("""
+            public static class S
+            {
+                [Verified] public static int Twice(int x) => x + x;
+
+                [Theorem]
+                static Proof TwiceIsDoubling() =>
+                    Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+
+                [Theorem] static Proof WithIt(int a) => Prove.That(Twice(a) == a + a).By(Tactic.Simp(nameof(TwiceIsDoubling)));
+
+                [Theorem] static Proof WithoutIt(int a) => Prove.That(Twice(a) == a + a).By(Tactic.Simp());
+            }
+            """);
+        var proved = Assert.IsType<ProvedOutcome>(result.Find("M:S.WithIt(System.Int32)"));
+        Assert.Contains("Cs.S.TwiceIsDoubling", proved.Certificate.Value.Proof.ToString(), StringComparison.Ordinal);
+        var without = Assert.IsType<NotProvedOutcome>(result.Find("M:S.WithoutIt(System.Int32)"));
+        Assert.Equal("`simp` made no progress", without.Message);
+        Assert.Equal("a : Int32\n⊢ Twice a = a + a", without.Goals);
+    }
+
+    [Fact]
+    public void ALoopingLemmaStopsAtTheTacticFuel()
+    {
+        var outcome = Assert.IsType<UndecidedOutcome>(Script("""
+            public static class S
+            {
+                [Verified] public static int Same(int x) => x;
+
+                [Theorem]
+                static Proof Grows() =>
+                    Prove.That(Spec.ForAll<int>(x => Same(x) == Same(Same(x)))).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+
+                [Theorem] static Proof Loops(int a) => Prove.That(Same(a) == a).By(Tactic.Simp(nameof(Grows)));
+            }
+            """).Find("M:S.Loops(System.Int32)"));
+        Assert.Equal("WRT0006", UndecidedOutcome.Code);
+        Assert.Equal(
+            string.Create(CultureInfo.InvariantCulture, $"tactic fuel ran out ({EngineOptions.DefaultTacticFuel:N0} steps) while running the proof script."),
+            outcome.Reason);
+    }
+
+    /// <summary>The axioms a proof depends on, through every constant it mentions (Lean's <c>collectAxioms</c>).</summary>
+    private static List<string> Axioms(KernelEnvironment env, Expr proof)
+    {
+        var seen = new HashSet<Name>();
+        var axioms = new SortedSet<string>(StringComparer.Ordinal);
+        var pending = new Stack<Expr>([proof]);
+        while (pending.Count > 0)
+        {
+            ExprOps.ForEach(pending.Pop(), (x, _) =>
+            {
+                if (x is ConstExpr c && seen.Add(c.Name) && env.Find(c.Name) is { } info)
+                {
+                    if (info is AxiomInfo)
+                    {
+                        axioms.Add(c.Name.ToString());
+                    }
+                    pending.Push(info.Type);
+                    if (info is DefinitionInfo d)
+                    {
+                        pending.Push(d.Value);
+                    }
+                    else if (info is TheoremInfo t)
+                    {
+                        pending.Push(t.Proof);
+                    }
+                    else if (info is InductiveInfo ind)
+                    {
+                        foreach (var ctor in ind.Constructors)
+                        {
+                            pending.Push(Expr.Const(ctor));
+                        }
+                    }
+                }
+                return true;
+            });
+        }
+        return [.. axioms];
     }
 
     // ---- Helpers ----

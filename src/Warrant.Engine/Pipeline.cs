@@ -227,6 +227,12 @@ public static class Pipeline
                 try
                 {
                     AddDeclaration(declaration, admitted);
+                    if (declaration is DefinitionDecl { Value: { Hints.Kind: ReducibilityHintsKind.Abbrev } abbrev })
+                    {
+                        // KTD9: an open enum and its members are `abbrev`s (docs/m4/05), reducible as Lean's are, so simp
+                        // and instance resolution see through them (docs/m5a/05).
+                        Attributes.SetReducibilityStatus(abbrev.Name, ReducibilityStatus.Reducible);
+                    }
                     if (declaration is InductiveDecl inductive)
                     {
                         // KTD8: casesOn and ctorIdx, which Lean's elaborator would have made, each built after the last is admitted.

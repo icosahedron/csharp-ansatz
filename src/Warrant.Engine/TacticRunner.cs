@@ -24,6 +24,7 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
         ["unfold"] = Unfold,
         ["cases"] = Cases,
         ["induction"] = Induction,
+        ["simp"] = Simp,
         ["all_goals"] = AllGoals,
         ["try"] = Try,
     };
@@ -141,6 +142,46 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
             }
             var rec = ival.Name.Append("rec");
             return [.. m.Induction(g, major.FVarId, rec).Select(s => s.MVarId)];
+        });
+    }
+
+    /// <summary>
+    /// <c>Tactic.Simp(lemmas…)</c> with options from <c>.With(decide:, contextual:)</c>: Warrant's default simp set and
+    /// configuration (plan Key Decisions, KTD11), the named lemmas added, on the goal's target.
+    /// </summary>
+    private static void Simp(TacticRunner r, TacticNode node)
+    {
+        var m = r.State.Meta;
+        var config = SimpConfig.Default;
+        foreach (var option in node.Args.OfType<OptionArg>())
+        {
+            config = (option.Name, option.Value) switch
+            {
+                ("decide", BoolArg b) => config with { Decide = b.Value },
+                ("contextual", BoolArg b) => config with { Contextual = b.Value },
+                _ => throw TacticException.Failed(node.Name, r.State.GetMainGoal(), $"unknown option '{option.Name}'"),
+            };
+        }
+        var lemmas = node.Args.Where(a => a is not OptionArg).Select(a => r.Constant(node, a)).ToList();
+        r.State.LiftMetaTactic(g =>
+        {
+            SimpTheorems? extra = null;
+            if (lemmas.Count > 0)
+            {
+                extra = new SimpTheorems();
+                foreach (var lemma in lemmas)
+                {
+                    try
+                    {
+                        extra.AddRange(m.MkSimpTheoremsFromConst(lemma));
+                    }
+                    catch (MetaException ex) when (ex is not MetaResourceException)
+                    {
+                        throw TacticException.Failed(node.Name, g, $"cannot use `{m.PpConst(lemma)}` as a simp lemma: {ex.Message}");
+                    }
+                }
+            }
+            return m.SimpGoal(g, DefaultSimpSet.Context(m, config, extra)) is { } result ? [result.Goal] : [];
         });
     }
 

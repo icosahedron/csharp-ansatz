@@ -823,7 +823,7 @@ public sealed partial class MetaM
             () =>
             {
                 var types = inverse || ShouldPreprocessSimp(type) ? PreprocessSimp(type, inverse) : [type];
-                return types.Select(SimpTheoremKeys).ToList();
+                return types.Select(t => SimpTheoremKeys(t)).ToList();
             });
     }
 
@@ -837,7 +837,7 @@ public sealed partial class MetaM
 
     private static Expr MkBoolEq(Expr lhs, bool rhs) => MkEqAt(Level.One, Expr.Const(BoolName), lhs, MetaNames.MkBool(rhs));
 
-    private bool ShouldPreprocessSimp(Expr type) =>
+    internal bool ShouldPreprocessSimp(Expr type) =>
         ForallTelescopeReducing(type, (_, result) => EqSides(result) is null);
 
     private List<Expr> PreprocessSimp(Expr type, bool inv)
@@ -902,12 +902,12 @@ public sealed partial class MetaM
             : MkPropEq(MkEqAt(u, type, lhs, rhs), Expr.Const(FalseName));
     }
 
-    private ImmutableArray<DiscrTreeKey> SimpTheoremKeys(Expr type) => WithNewMCtxDepth(() =>
+    internal ImmutableArray<DiscrTreeKey> SimpTheoremKeys(Expr type, bool noIndexAtArgs = false) => WithNewMCtxDepth(() =>
     {
         var (_, _, body) = ForallMetaTelescopeReducing(type);
         body = WhnfR(body);
         return EqSides(body) is var (lhs, _)
-            ? DiscrTree.MkPath(this, lhs)
+            ? DiscrTree.MkPath(this, lhs, noIndexAtArgs)
             : throw new MetaException($"Unexpected kind of simp theorem {body}");
     });
 }

@@ -179,7 +179,11 @@ public static class CompilationFactory
     {
         ArgumentNullException.ThrowIfNull(compilation);
         var errors = compilation.GetDiagnostics(cancellationToken).Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
-        return errors.Count == 0 ? null : new CompilationFailure(errors, generatorProblems ?? []);
+        var problems = generatorProblems ?? [];
+        // A generator that did not run fails the compilation even when the code compiles without its output: Csc may
+        // have run it (a newer compiler, a different loader), and output such as an interceptor or a closer overload
+        // changes what the code means without any error here.
+        return errors.Count == 0 && problems.Count == 0 ? null : new CompilationFailure(errors, problems);
     }
 
     private static PortableExecutableReference LoadWarrant()

@@ -188,14 +188,14 @@ dotnet build
 dotnet test
 ```
 
-Expected result: **976 tests pass and 17 are skipped**. The skipped ones are
+Expected result: **983 tests pass and 17 are skipped**. The skipped ones are
 opt-in tests that need external files or tools: `AcceptsFullInit` and
 `WritesFixturesForLean` (the kernel's Lean cross-checks), the export-script test
 (needs `LEAN_TOOLCHAIN_BIN`), the two differential-cost measurements (need
 `WARRANT_DIFFERENTIAL_COST`), and the 12 build tests that pack the packages and
 run real builds (need `WARRANT_BUILD_INTEGRATION=1`, step 7b). By project:
-33 Cic, 43 Vir, 315 Extraction, 82 Semantics, 117 Meta, 42 Lean4Export,
-104 Kernel, 175 Engine, 29 Cli and 36 Build. No Lean toolchain is needed; the
+33 Cic, 43 Vir, 321 Extraction, 82 Semantics, 117 Meta, 42 Lean4Export,
+104 Kernel, 175 Engine, 30 Cli and 36 Build. No Lean toolchain is needed; the
 whole suite takes about two minutes.
 
 ### 3. Run the kernel on the committed corpus

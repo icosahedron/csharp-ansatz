@@ -77,16 +77,68 @@ public static class SourceGeneratorAssemblies
         }
         """";
 
+    /// <summary>
+    /// An incremental generator that adds <c>FromInputs</c>, whose constants hold the first additional file's text and
+    /// the global analyzer-config option <c>build_property.WarrantTest</c>, as a generator sees them.
+    /// </summary>
+    public const string ReadingInputs = """"
+        using System.Linq;
+        using Microsoft.CodeAnalysis;
+        [Generator]
+        public sealed class ReadingGenerator : IIncrementalGenerator
+        {
+            public void Initialize(IncrementalGeneratorInitializationContext context)
+            {
+                var inputs = context.AdditionalTextsProvider.Collect().Combine(context.AnalyzerConfigOptionsProvider);
+                context.RegisterSourceOutput(inputs, (c, pair) =>
+                {
+                    var text = pair.Left.Length == 0 ? "" : pair.Left[0].GetText()!.ToString().Trim();
+                    pair.Right.GlobalOptions.TryGetValue("build_property.WarrantTest", out var option);
+                    c.AddSource("FromInputs.g.cs",
+                        "public static class FromInputs { public const string Text = \"" + text + "\"; public const string Option = \"" + option + "\"; }");
+                });
+            }
+        }
+        """";
+
+    /// <summary>
+    /// Builds a generator (or, with <paramref name="generator"/> false, an analyzer that declares no generator) against
+    /// a stub <c>Microsoft.CodeAnalysis</c> version 99.0.0.0, newer than any compiler, so Roslyn refuses to load it
+    /// (<c>ReferencesNewerCompiler</c>), as it refuses a real one built for a newer SDK.
+    /// </summary>
+    /// <param name="directory">The directory to write the assembly to; the stub goes in a subdirectory of its own.</param>
+    /// <param name="generator">Whether the assembly declares a <c>[Generator]</c> type.</param>
+    /// <returns>The assembly's full path.</returns>
+    public static string BuildForNewerCompiler(string directory, bool generator)
+    {
+        var stub = Compile(Path.Combine(directory, "stub"), "Microsoft.CodeAnalysis", """
+            [assembly: System.Reflection.AssemblyVersion("99.0.0.0")]
+            namespace Microsoft.CodeAnalysis
+            {
+                public sealed class GeneratorAttribute : System.Attribute { }
+                public interface IIncrementalGenerator { }
+                public sealed class MarkerAttribute : System.Attribute { }
+            }
+            """, Net100.References.All);
+        var source = generator
+            ? "[Microsoft.CodeAnalysis.Generator] public sealed class NewGenerator : Microsoft.CodeAnalysis.IIncrementalGenerator { }"
+            : "[Microsoft.CodeAnalysis.Marker] public sealed class NewAnalyzer { }";
+        return Compile(directory, generator ? "NewerGenerator" : "NewerAnalyzer", source,
+            Net100.References.All.Append(MetadataReference.CreateFromFile(stub)));
+    }
+
     /// <summary>Compiles a generator's source to <c>&lt;directory&gt;/&lt;name&gt;.dll</c> against this process's Roslyn.</summary>
     /// <param name="directory">The directory to write the assembly to.</param>
     /// <param name="name">The assembly name.</param>
     /// <param name="source">The generator's source.</param>
     /// <returns>The assembly's full path.</returns>
-    public static string Build(string directory, string name, string source)
-    {
-        var references = Net100.References.All
+    public static string Build(string directory, string name, string source) =>
+        Compile(directory, name, source, Net100.References.All
             .Append(MetadataReference.CreateFromFile(typeof(ISourceGenerator).Assembly.Location))
-            .Append(MetadataReference.CreateFromFile(typeof(CSharpCompilation).Assembly.Location));
+            .Append(MetadataReference.CreateFromFile(typeof(CSharpCompilation).Assembly.Location)));
+
+    private static string Compile(string directory, string name, string source, IEnumerable<MetadataReference> references)
+    {
         var compilation = CSharpCompilation.Create(
             name,
             [CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.CSharp14))],

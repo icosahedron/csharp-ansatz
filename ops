@@ -1,1 +1,1 @@
-{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":3,"timestamp":1793861970,"nonce":"7zyqdyNuisENoxtWGwQRopFzW5I=","message":"Done in PR #2 (merge 56a697a): the kernel's §10.3 properties (defeq transitivity, universe instantiation) run under FsCheck.","files":null}]}
+{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":4,"timestamp":1793861973,"nonce":"svqRumO5nVzEgnllWA2Zz9XeXPk=","status":2}]}

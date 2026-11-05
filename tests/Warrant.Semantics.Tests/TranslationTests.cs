@@ -56,7 +56,8 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
                 Assert.True(checker.IsProp(shell.Type), $"{unit.Key}: not a proposition");
                 // D is a Decidable instance for exactly P.
                 var decidable = Expr.App(C("Decidable"), shell.Statement.Prop);
-                Assert.True(checker.IsDefEq(checker.Check(shell.Statement.Instance), decidable), $"{unit.Key}: instance type");
+                var instance = Assert.IsAssignableFrom<Expr>(shell.Statement.Instance);
+                Assert.True(checker.IsDefEq(checker.Check(instance), decidable), $"{unit.Key}: instance type");
             }
         });
     }
@@ -104,6 +105,19 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
         string first = Export(TranslationCorpus.Translate(TranslationCorpus.ExtractFresh("accepted"), bundle.Env));
         string second = Export(TranslationCorpus.Translate(TranslationCorpus.ExtractFresh("accepted"), bundle.Env));
         Assert.Equal(first, second);
+    }
+
+    /// <summary>
+    /// M5a's quantified statements leave every M4 unit as it was (plan U10): the export of each M4 compilation, every
+    /// definition and every theorem's statement and instance, hashes to what the M4 translator wrote.
+    /// </summary>
+    [Theory]
+    [InlineData("accepted", "e7d6c3472056c5088cb1f72ba81436e40bd98a5941d80df29fac7b139495e5fc")]
+    [InlineData("refuted", "31d43214fdc2f26791703a217d450e6c29c8efa346456542cafe7dc17cc08e96")]
+    public void TheM4CorpusTranslatesByteIdentically(string compilation, string sha256)
+    {
+        var export = Export(TranslationCorpus.Translate(TranslationCorpus.Extract(compilation), bundle.Env));
+        Assert.Equal(sha256, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(export))));
     }
 
     [Fact]
@@ -168,6 +182,153 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
             Assert.True(checker.IsProp(shell.Type));
             Assert.Equal(Literals.Bool(holds), checker.Whnf(Operators.Decide(shell.Statement)));
         });
+    }
+
+    private const string Quantified = """
+        public enum PaymentStatus { Pending, Processed, Failed }
+        public sealed record Payment(int Id, int Amount, PaymentStatus Status);
+        public enum PaymentResult { Valid, InvalidAmount, InvalidStatus }
+        public static class Q
+        {
+            [Verified] public static int Increment(int x) => x + 1;
+
+            [Verified]
+            public static PaymentResult Validate(Payment p)
+            {
+                if (p.Amount <= 0) return PaymentResult.InvalidAmount;
+                if (p.Status != PaymentStatus.Pending) return PaymentResult.InvalidStatus;
+                return PaymentResult.Valid;
+            }
+
+            [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
+
+            [Theorem]
+            static Proof ValidImpliesPositive(Payment p) =>
+                Prove.That(Spec.Implies(Validate(p) == PaymentResult.Valid, p.Amount > 0));
+
+            [Theorem(TimeoutSeconds = 5)]
+            static Proof ZeroIsNeutral() => Prove.That(Spec.ForAll<int>(y => y + 0 == y)).By(Tactic.Intro("y"), Tactic.Omega());
+
+            [Theorem] static Proof SomeBool() => Prove.That(Spec.Exists<bool>(b => b));
+
+            [Theorem]
+            static Proof Nested(int x) => Prove.That(Spec.ForAll<int>(y => Spec.Implies(y >= x, Spec.Exists<long>(z => z == y))));
+
+            [Theorem] static Proof ClosedLarger() => Prove.That(Increment(41) > 41);
+        }
+        """;
+
+    private (Translation Translation, KernelEnvironment Env) TranslateQuantified()
+    {
+        var translation = TranslationCorpus.Translate(TranslationCorpus.Inline(Quantified), bundle.Env);
+        return (translation, TranslationCorpus.Admit(bundle, translation));
+    }
+
+    [Fact]
+    public void AParameterBecomesAnOuterForallAndGreaterIsGtGt()
+    {
+        var (translation, _) = TranslateQuantified();
+        var shell = translation.Find("M:Q.AlwaysLarger(System.Int32)")!.Theorem!;
+        var lctx = new LocalContext();
+        var x = lctx.MkLocalDecl(new NameGenerator(N("expected")), N("x"), C("Int32"));
+        var increment = App(Expr.Const(translation.Find("M:Q.Increment(System.Int32)")!.Name), x);
+        var expected = lctx.MkPi([x], App(C("GT.gt", Level.Zero), C("Int32"), C("instLTInt32"), increment, x));
+        Assert.True(expected.AlphaEquals(shell.Type), $"expected\n{expected}\nactual\n{shell.Type}");
+        Assert.Equal(N("x"), ((ForallExpr)shell.Type).BinderName);
+        Assert.Null(shell.Statement.Instance);
+    }
+
+    [Fact]
+    public void ValidImpliesPositiveIsAForallOverAnImplication()
+    {
+        var (translation, _) = TranslateQuantified();
+        var shell = translation.Find("M:Q.ValidImpliesPositive(Payment)")!.Theorem!;
+        var payment = translation.Find("T:Payment")!.Name;
+        var lctx = new LocalContext();
+        var p = lctx.MkLocalDecl(new NameGenerator(N("expected")), N("p"), Expr.Const(payment));
+        var validate = App(Expr.Const(translation.Find("M:Q.Validate(Payment)")!.Name), p);
+        var valid = Expr.Const(translation.Find("T:PaymentResult")!.Name.Append("Valid"));
+        // An open enum compares at its underlying type (docs/m4/05), as M4 does.
+        var premise = App(C("Eq", Level.One), C("Int32"), validate, valid);
+        var conclusion = App(C("GT.gt", Level.Zero), C("Int32"), C("instLTInt32"), Expr.Proj(payment, 1, p), Int32Lit(0));
+        var expected = lctx.MkPi([p], Expr.Forall(N("x"), premise, conclusion));
+        Assert.True(expected.AlphaEquals(shell.Type), $"expected\n{expected}\nactual\n{shell.Type}");
+    }
+
+    [Fact]
+    public void SpecForAllAndSpecExistsBindTheirVariables()
+    {
+        var (translation, _) = TranslateQuantified();
+        var lctx = new LocalContext();
+        var ngen = new NameGenerator(N("expected"));
+
+        var y = lctx.MkLocalDecl(ngen, N("y"), C("Int32"));
+        var neutral = Conditions.Eq(VirPrimitive.Int32, Operators.Binary(BinaryOp.Add, VirPrimitive.Int32, y, Int32Lit(0)), y).Prop;
+        var zero = translation.Find("M:Q.ZeroIsNeutral")!.Theorem!;
+        Assert.True(lctx.MkPi([y], neutral).AlphaEquals(zero.Type), $"actual\n{zero.Type}");
+        Assert.Equal(N("y"), ((ForallExpr)zero.Type).BinderName);
+        Assert.Null(zero.Statement.Instance);
+
+        var b = lctx.MkLocalDecl(ngen, N("b"), C("Bool"));
+        var exists = App(C("Exists", Level.One), C("Bool"), lctx.MkLambda([b], Conditions.IsTrue(b).Prop));
+        var some = translation.Find("M:Q.SomeBool")!.Theorem!;
+        Assert.True(exists.AlphaEquals(some.Type), $"actual\n{some.Type}");
+        Assert.Null(some.Statement.Instance);
+    }
+
+    [Fact]
+    public void QuantifiersNestInsideAStatementAndGreaterOrEqualIsGeGe()
+    {
+        var (translation, _) = TranslateQuantified();
+        var lctx = new LocalContext();
+        var ngen = new NameGenerator(N("expected"));
+        var x = lctx.MkLocalDecl(ngen, N("x"), C("Int32"));
+        var y = lctx.MkLocalDecl(ngen, N("y"), C("Int32"));
+        var z = lctx.MkLocalDecl(ngen, N("z"), C("Int64"));
+        var exists = App(C("Exists", Level.One), C("Int64"), lctx.MkLambda([z], Conditions.Eq(VirPrimitive.Int64, z, App(C("Int32.toInt64"), y)).Prop));
+        var ge = App(C("GE.ge", Level.Zero), C("Int32"), C("instLEInt32"), y, x);
+        var expected = lctx.MkPi([x], lctx.MkPi([y], Expr.Forall(N("x"), ge, exists)));
+        var shell = translation.Find("M:Q.Nested(System.Int32)")!.Theorem!;
+        Assert.True(expected.AlphaEquals(shell.Type), $"expected\n{expected}\nactual\n{shell.Type}");
+    }
+
+    [Fact]
+    public void AClosedStatementKeepsM4sFlippedLessThanAndItsInstance()
+    {
+        var (translation, _) = TranslateQuantified();
+        var shell = translation.Find("M:Q.ClosedLarger")!.Theorem!;
+        var call = App(Expr.Const(translation.Find("M:Q.Increment(System.Int32)")!.Name), Int32Lit(41));
+        Assert.Equal(App(C("LT.lt", Level.Zero), C("Int32"), C("instLTInt32"), Int32Lit(41), call), shell.Type);
+        Assert.Equal(App(C("Int32.decLt"), Int32Lit(41), call), shell.Statement.Instance);
+    }
+
+    [Fact]
+    public void EveryQuantifiedStatementIsAWellTypedProposition()
+    {
+        var (translation, env) = TranslateQuantified();
+        var theorems = translation.Units.Select(u => u.Theorem).OfType<TheoremShell>().ToList();
+        Assert.Equal(6, theorems.Count);
+        KernelThread.Run(() =>
+        {
+            foreach (var shell in theorems)
+            {
+                var checker = new TypeChecker(env);
+                checker.Check(shell.Type);
+                Assert.True(checker.IsProp(shell.Type), $"{shell.Name}: not a proposition");
+            }
+        });
+    }
+
+    [Fact]
+    public void ATheoremShellCarriesItsScriptAndBudget()
+    {
+        var (translation, _) = TranslateQuantified();
+        var zero = translation.Find("M:Q.ZeroIsNeutral")!.Theorem!;
+        Assert.Equal(["intro", "omega"], zero.Script!.Select(t => t.Name));
+        Assert.Equal(new VirBudget(5, 0, 0), zero.Budget);
+        var larger = translation.Find("M:Q.AlwaysLarger(System.Int32)")!.Theorem!;
+        Assert.Null(larger.Script);
+        Assert.Null(larger.Budget);
     }
 
     // ---- Shapes ----
@@ -468,7 +629,7 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
         App(C("OfNat.ofNat", Level.Zero), C(type), Expr.NatLit(n), App(C(type + ".instOfNat"), Expr.NatLit(n)));
 
     private static Expr Decide(TheoremShell shell) =>
-        App(C("of_decide_eq_true"), shell.Statement.Prop, shell.Statement.Instance, App(C("Eq.refl", Level.One), C("Bool"), C("Bool.true")));
+        App(C("of_decide_eq_true"), shell.Statement.Prop, shell.Statement.Instance!, App(C("Eq.refl", Level.One), C("Bool"), C("Bool.true")));
 
     private static DefinitionInfo Definition(Translation translation, string key)
     {
@@ -508,7 +669,10 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
         if (unit.Theorem is { } shell)
         {
             yield return shell.Statement.Prop;
-            yield return shell.Statement.Instance;
+            if (shell.Statement.Instance is { } instance)
+            {
+                yield return instance;
+            }
         }
     }
 
@@ -550,7 +714,10 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
             foreach (var shell in translation.Units.Select(u => u.Theorem).OfType<TheoremShell>())
             {
                 writer.Write(new ConstantDeclaration(new AxiomInfo(shell.Name, [], shell.Type, false)));
-                writer.Write(new ConstantDeclaration(new AxiomInfo(shell.Name.Append("$instance"), [], shell.Statement.Instance, false)));
+                if (shell.Statement.Instance is { } instance)
+                {
+                    writer.Write(new ConstantDeclaration(new AxiomInfo(shell.Name.Append("$instance"), [], instance, false)));
+                }
             }
         }
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());

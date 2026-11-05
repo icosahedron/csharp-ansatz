@@ -1,5 +1,5 @@
 using System.Globalization;
-using System.Security.Cryptography;
+using Microsoft.CodeAnalysis;
 using Warrant.Engine;
 using Warrant.Engine.Reports;
 using Warrant.Extraction;
@@ -21,7 +21,7 @@ internal static class TranslateCommand
     /// <param name="output">Where member lines, diagnostics and the summary go.</param>
     /// <param name="error">Where usage errors and declines go.</param>
     /// <returns>
-    /// 0 when every member translated and every theorem was proved; 1 when anything was rejected, false, undecided, failed
+    /// 0 when every member translated and every theorem was proved; 1 when anything was rejected, false, unproved, undecided, an internal error, failed
     /// or skipped, or the compilation has errors; 2 for bad arguments or unreadable input.
     /// </returns>
     public static int Run(string[] args, TextWriter output, TextWriter error)
@@ -83,14 +83,12 @@ internal static class TranslateCommand
     private static int Translate(string directory, string? outPath, string? reportPath, string bundlePath, bool checkOverflow, TextWriter output)
     {
         var root = Path.GetFullPath(directory);
-        var files = Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
-            .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
-            .Order(StringComparer.Ordinal)
-            .ToList();
+        var files = SourceFiles(root);
         var sources = new Sources(directory, root);
         output.WriteLine($"translating {files.Count} file(s) in {directory}");
 
-        var extraction = Extractor.Extract(CompilationFactory.FromFiles(root, files, checkOverflow));
+        var compilation = CompilationFactory.FromFiles(root, files, checkOverflow);
+        var extraction = Extractor.Extract(compilation);
         if (extraction.HasCompileErrors)
         {
             foreach (var d in extraction.Diagnostics)
@@ -129,25 +127,36 @@ internal static class TranslateCommand
         foreach (var unit in result.Units)
         {
             var location = units.TryGetValue(unit.Key, out var extracted) ? extracted.Location : null;
-            var theorem = ShortName(unit.DisplayName);
+            var theorem = MessageName(compilation, unit);
             switch (unit)
             {
                 case FalseOutcome f:
                     errors++;
-                    output.WriteLine(sources.Format(location, "error", FalseOutcome.Code, $"Theorem '{theorem}' is false."));
+                    output.WriteLine(sources.Format(location, "error", FalseOutcome.Code, OutcomeText.FalseMessage(theorem)));
                     if (AssumptionReports.ClaimSpan(engineUnits[unit.Key]) is { } claimSpan && sources.Text(claimSpan) is { } claim)
                     {
                         output.WriteLine($"  Claim:  {claim}");
                     }
                     if (f.Sides.Length > 0)
                     {
-                        var values = f.Sides.Select((s, i) => $"{(s.Span is { } span ? sources.Text(span) : null) ?? (i == 0 ? "left" : "right")} = {s.Value}");
-                        output.WriteLine($"  Values: {string.Join(", ", values)}");
+                        output.WriteLine($"  Values: {OutcomeText.Values(f.Sides, sources.Text)}");
+                    }
+                    break;
+                case NotProvedOutcome n:
+                    errors++;
+                    output.WriteLine(sources.Format(n.TacticSpan ?? location, "error", NotProvedOutcome.Code, OutcomeText.NotProvedMessage(theorem, n, sources.Text)));
+                    foreach (var line in OutcomeText.NotProvedDetails(n))
+                    {
+                        output.WriteLine(line.Length == 0 ? "" : $"  {line}");
                     }
                     break;
                 case UndecidedOutcome u:
                     errors++;
-                    output.WriteLine(sources.Format(location, "error", UndecidedOutcome.Code, $"Theorem '{theorem}' was not decided: {u.Reason}"));
+                    output.WriteLine(sources.Format(location, "error", UndecidedOutcome.Code, OutcomeText.UndecidedMessage(theorem, u.Reason)));
+                    break;
+                case InternalErrorOutcome i:
+                    errors++;
+                    output.WriteLine(sources.Format(location, "error", InternalErrorOutcome.Code, OutcomeText.InternalErrorMessage(theorem, i.Reason)));
                     break;
             }
         }
@@ -160,7 +169,7 @@ internal static class TranslateCommand
         }
         if (reportPath is not null)
         {
-            var settings = new ReportSettings(checkOverflow, BundleName(bundlePath));
+            var settings = new ReportSettings(checkOverflow, OutcomeText.BundleName(bundlePath));
             File.WriteAllText(reportPath, MarkdownReport.Render(AssumptionReports.Build(result, inputs, settings, sources.Text)));
             output.WriteLine($"wrote the assumption report to {reportPath}");
         }
@@ -170,14 +179,34 @@ internal static class TranslateCommand
         output.WriteLine(string.Create(
             CultureInfo.InvariantCulture,
             $"{result.Units.Length} unit(s): {Count("translated")} translated, {Count("proved")} proved, {Count("false")} false, "
-            + $"{Count("undecided")} undecided, {Count("failed")} failed, {Count("skipped")} skipped; {errors} error(s), {warnings} warning(s)"));
+            + $"{Count("unproved")} unproved, {Count("undecided")} undecided, {Count("internal")} internal error(s), "
+            + $"{Count("failed")} failed, {Count("skipped")} skipped; {errors} error(s), {warnings} warning(s)"));
 
         bool clean = extraction.Diagnostics.All(d => d.Severity != ExtractionSeverity.Error)
             && result.Units.All(u => u is TranslatedOutcome or ProvedOutcome);
         return clean ? 0 : 1;
     }
 
-    private static string Describe(UnitOutcome unit) => unit switch
+    /// <summary>
+    /// A unit's name as diagnostics print it (docs/m5a/04): the C# display name with containing types and parameter types
+    /// but no namespace, e.g. <c>Increments.AlwaysLarger(int)</c>; the short name when the symbol cannot be found.
+    /// </summary>
+    internal static string MessageName(Compilation compilation, UnitOutcome unit) =>
+        DocumentationCommentId.GetFirstSymbolForDeclarationId(unit.Key, compilation) is { } symbol
+            ? symbol.ToDisplayString(MessageNameFormat)
+            : OutcomeText.ShortName(unit.DisplayName);
+
+    private static readonly SymbolDisplayFormat MessageNameFormat =
+        new(
+            globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+            typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypes,
+            genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+            memberOptions: SymbolDisplayMemberOptions.IncludeParameters | SymbolDisplayMemberOptions.IncludeContainingType
+                | SymbolDisplayMemberOptions.IncludeExplicitInterface,
+            parameterOptions: SymbolDisplayParameterOptions.IncludeType | SymbolDisplayParameterOptions.IncludeParamsRefOut,
+            miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes | SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers);
+
+    internal static string Describe(UnitOutcome unit) => unit switch
     {
         ProvedOutcome p => $"proved ({AssumptionReports.ProofName(p.By)})",
         FailedOutcome f => $"failed: {f.Reason}",
@@ -185,31 +214,20 @@ internal static class TranslateCommand
         _ => AssumptionReports.OutcomeName(unit),
     };
 
-    private static string Severity(ExtractionSeverity severity) => severity == ExtractionSeverity.Error ? "error" : "warning";
+    /// <summary>Every .cs file under the root, as '/'-separated paths relative to it, in ordinal order.</summary>
+    internal static List<string> SourceFiles(string root) =>
+        Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(root, f).Replace('\\', '/'))
+            .Order(StringComparer.Ordinal)
+            .ToList();
 
-    /// <summary>A theorem's name without its type, as messages print it (docs/m4/06).</summary>
-    private static string ShortName(string displayName)
-    {
-        var paren = displayName.IndexOf('(', StringComparison.Ordinal);
-        var head = paren < 0 ? displayName : displayName[..paren];
-        return head[(head.LastIndexOf('.') + 1)..];
-    }
+    internal static string Severity(ExtractionSeverity severity) => severity == ExtractionSeverity.Error ? "error" : "warning";
 
-    /// <summary>The bundle's file name and the start of its SHA-256, which identify it in reports.</summary>
-    private static string BundleName(string path)
-    {
-        using var stream = File.OpenRead(path);
-        var hash = Convert.ToHexStringLower(SHA256.HashData(stream));
-        var name = Path.GetFileName(path);
-        name = name.EndsWith(".ndjson.gz", StringComparison.Ordinal) ? name[..^".ndjson.gz".Length] : name;
-        return $"{name} sha256:{hash[..12]}";
-    }
-
-    private static string AppDirectory() =>
+    internal static string AppDirectory() =>
         Path.GetDirectoryName(typeof(TranslateCommand).Assembly.Location) is { Length: > 0 } dir ? dir : AppContext.BaseDirectory;
 
     /// <summary>The source files on disk, for diagnostic paths and the text of spans.</summary>
-    private sealed class Sources(string directory, string root)
+    internal sealed class Sources(string directory, string root)
     {
         private readonly Dictionary<string, string[]?> _lines = new(StringComparer.Ordinal);
 
@@ -219,7 +237,7 @@ internal static class TranslateCommand
                 : string.Create(CultureInfo.InvariantCulture, $"{FilePath(location.Path)}({location.StartLine},{location.StartColumn}): {severity} {id}: {message}");
 
         /// <summary>A source path under the directory as the user named it, in the separator style they used.</summary>
-        private string FilePath(string relative)
+        public string FilePath(string relative)
         {
             var separator = directory.Contains('\\', StringComparison.Ordinal) ? '\\' : '/';
             return directory.TrimEnd('/', '\\') + separator + relative.Replace('/', separator);

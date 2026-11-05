@@ -35,12 +35,11 @@ internal sealed partial class BodyTranslator
             throw new TranslationException(null, "a switch expression over an integer or open enum has no discard arm.");
         }
         var prim = _types.Underlying(s.Scrutinee.Type);
-        var result = Value(s.Arms[discard].Value, env);
-        for (int i = discard - 1; i >= 0; i--)
-        {
-            result = Operators.Ite(type, Matches(s.Arms[i].Pattern, scrutinee, prim, env), Value(s.Arms[i].Value, env), result);
-        }
-        return result;
+        var tests = s.Arms.Take(discard).Select(a => Matches(a.Pattern, scrutinee, prim, env)).ToList();
+        var hyps = ChainHypotheses(tests);
+        var arms = tests.Select((_, i) => InScope(ChainScope(hyps, i), () => Value(s.Arms[i].Value, env))).ToList();
+        var fallback = InScope(ChainScope(hyps, discard), () => Value(s.Arms[discard].Value, env));
+        return Chain(type, tests, arms, fallback, hyps);
     }
 
     /// <summary>
@@ -66,7 +65,7 @@ internal sealed partial class BodyTranslator
                 branches.Add(EmptyBlock);
                 cover = [.. cover.Select(i => i >= 0 ? i : branches.Count - 1)];
             }
-            return Branches(branches, (terms, type) => SharedRecursor(s.Scrutinee.Type, type, terms, cover, scrutinee), env, k);
+            return Branches(branches, null, (terms, type) => SharedRecursor(s.Scrutinee.Type, type, terms, cover, scrutinee), env, k);
         }
 
         if (@default >= 0 && sections[@default].Labels.Count > 1)
@@ -79,21 +78,16 @@ internal sealed partial class BodyTranslator
         }
         int fallback = @default >= 0 ? @default : branches.Count - 1;
         var prim = _types.Underlying(s.Scrutinee.Type);
+        // The sections tested in order, the default (or the empty branch) last: a chain of ite, or dite on the way to a
+        // recursive call (M5a KTD15).
+        var tested = Enumerable.Range(0, sections.Count).Where(i => i != @default).ToList();
+        var tests = tested.Select(i => sections[i].Labels.Select(l => Matches(l, scrutinee, prim, env)).Aggregate(Conditions.Or)).ToList();
+        var hyps = ChainHypotheses(tests);
+        var scopes = branches.Select((_, i) => ChainScope(hyps, tested.IndexOf(i) is >= 0 and var j ? j : tested.Count)).ToList();
         return Branches(
             branches,
-            (terms, type) =>
-            {
-                var result = terms[fallback];
-                for (int i = sections.Count - 1; i >= 0; i--)
-                {
-                    if (i != @default)
-                    {
-                        var test = sections[i].Labels.Select(l => Matches(l, scrutinee, prim, env)).Aggregate(Conditions.Or);
-                        result = Operators.Ite(type, test, terms[i], result);
-                    }
-                }
-                return result;
-            },
+            hyps is null ? null : scopes,
+            (terms, type) => Chain(type, tests, [.. tested.Select(i => terms[i])], terms[fallback], hyps),
             env,
             k);
     }

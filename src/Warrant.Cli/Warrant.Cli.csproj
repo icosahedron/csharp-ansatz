@@ -14,8 +14,10 @@
     <ProjectReference Include="..\Warrant.Engine\Warrant.Engine.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <!-- `warrant translate` loads the semantics bundle from beside its own assembly by default. -->
+    <!-- `warrant translate` and `warrant verify` load the semantics bundle from beside their own assembly by default. -->
     <None Include="..\..\tests\data\warrant-semantics.ndjson.gz" Link="warrant-semantics.ndjson.gz" CopyToOutputDirectory="PreserveNewest" />
+    <!-- `warrant verify` loads the attribute sidecar (KTD9) from beside the bundle, and checks it was made for that bundle. -->
+    <None Include="..\..\tests\data\warrant-attributes.ndjson.gz" Link="warrant-attributes.ndjson.gz" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Warrant.Cli.Tests" />

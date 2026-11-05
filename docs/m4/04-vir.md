@@ -19,6 +19,7 @@ Declaring the later milestones' nodes now would not help with that, and it would
 The additions already known are:
 
 - **M5a:** binders and quantifiers, for `Spec.ForAll`, `Spec.Exists` and theorems with parameters; proof hints, for `.By(...)`; `decreases`.
+  M5a added them as schema version 2 (docs/m5a/01): `forall` and `exists` expressions, a `decreases` statement, and a theorem's `params`, `script` and `budget`. A unit that uses none of them encodes as below apart from its `vir` field.
 - **M6:** contracts, `throw`, `null`, `await` and calls to externals.
 - **M7:** loops, heap reads and writes, object creation and regions.
 
@@ -28,7 +29,7 @@ A unit is a member, a theorem or a type (KTD21).
 
 | Field | Meaning |
 |---|---|
-| `vir` | The schema version. `1` in M4. |
+| `vir` | The schema version. `1` in M4; M5a writes `2` (docs/m5a/01). |
 | `key` | The documentation-comment ID, e.g. `M:Payouts.PayoutRules.Payout(System.Int32,System.Int32,System.Int32)` or `T:Payouts.Payment`. |
 | `kind` | `function` (a `[Verified]` method or property), `theorem`, or `type`. |
 | `self` | For an instance member of a record, the record's type key. |
@@ -132,7 +133,7 @@ Extraction's own diagnostics carry source locations directly, because they are p
 
 ## The running example in VIR
 
-`Payout`'s unit, laid out for reading (the canonical form has no whitespace; it is `tests/Warrant.Vir.Tests/golden/payout.json`):
+`Payout`'s unit as M4 wrote it, laid out for reading (the canonical form has no whitespace; it is `tests/Warrant.Vir.Tests/golden/payout.json`, which since M5a has `"vir": 2` and is otherwise the same):
 
 ```json
 {

@@ -78,21 +78,23 @@ Functions and types end in `translated`, `failed` or `skipped` in the same way.
 Telling "false" from "not decided" takes one more computation: the engine asks the kernel to reduce `decide P D` to weak head normal form.
 A false claim is not a crash or a timeout, and it should read like the counterexample the [tutorial](../proving/tutorial.md) promises.
 So for a false claim that is a single `==`, `<`, `<=`, `>` or `>=`, the message also gives the value each side computes to, read back from the kernel (chapter 7).
-This is `warrant translate tests/corpus/m4/refuted`, which exits 1:
+This is `warrant translate tests/corpus/m4/refuted`, which exits 1, as it runs since M5a:
 
 ```text
 translating 1 file(s) in tests/corpus/m4/refuted
   Corpus.Refuted.Increments.Increment(int)  translated
   Corpus.Refuted.Increments.NeverWraps()    false
   Corpus.Refuted.Increments.WrongSum()      false
-tests/corpus/m4/refuted/Increment.cs(12,18): error WRT0001: Theorem 'NeverWraps' is false.
+tests/corpus/m4/refuted/Increment.cs(12,18): error WRT0001: Theorem 'Increments.NeverWraps()' is false.
   Claim:  Increment(int.MaxValue) > int.MaxValue
   Values: Increment(int.MaxValue) = -2147483648, int.MaxValue = 2147483647
-tests/corpus/m4/refuted/Increment.cs(15,18): error WRT0001: Theorem 'WrongSum' is false.
+tests/corpus/m4/refuted/Increment.cs(15,18): error WRT0001: Theorem 'Increments.WrongSum()' is false.
   Claim:  Increment(2) == 4
   Values: Increment(2) = 3, 4 = 4
-3 unit(s): 1 translated, 0 proved, 2 false, 0 undecided, 0 failed, 0 skipped; 2 error(s), 0 warning(s)
+3 unit(s): 1 translated, 0 proved, 2 false, 0 unproved, 0 undecided, 0 internal error(s), 0 failed, 0 skipped; 2 error(s), 0 warning(s)
 ```
+
+In M4 the message named the theorem by its short name, `'NeverWraps'`, and the summary had no `unproved` or `internal error(s)` counts; M5a added both (docs/m5a/04).
 
 The location is the theorem's name in its declaration (`NeverWraps` starts at line 12, column 18), and the claim is the source text of the `Prove.That` argument.
 Read-back has limits, and the message shows them rather than guessing:

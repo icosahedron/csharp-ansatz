@@ -11,7 +11,15 @@ Every accepted corpus function is run on the CLR and in the model on the same in
   - Closed enums and classes: every member.
   - Records: every combination of their fields' values.
 
-  Every combination of boundary values is tried, because no corpus function has more than three parameters. After the boundaries, each function gets `RandomInputsPerFunction` random inputs (`DifferentialTests.cs`).
+  Every combination of boundary values is tried, because no corpus function has more than three parameters (`AgreesOnEveryBoundaryCombination`, deterministic). Separately, each function's agreement is an FsCheck property over random inputs (`AgreesOnRandomInputs`; see "Properties" below).
+- **Properties** (M5a KTD26, `Warrant.TestSupport/Pbt.cs`). `AgreesOnRandomInputs` checks `Prop.ForAll(inputs, args => model(args) = clr(args))` with `RandomInputsPerFunction` (1,000) cases per function. A failing input is shrunk: `int` and `long` toward 0 and the boundary values, `bool` to `false`, enums and closed values toward their first member, records field by field, and a function's arguments one at a time. The failure message shows the original and shrunk input, the disagreement, and a line `Replay with WARRANT_PBT_SEED=seed,gamma`. The same helper runs the CLR-agreement properties in `Warrant.Semantics.Tests`.
+
+  | Variable | Effect |
+  |---|---|
+  | `WARRANT_PBT_SEED` | Unset: the pinned seed `20261103,1`, so every run tests the same inputs. `seed,gamma` (as a failure prints it): replay that run. `random`: a seed from the clock, which a failure prints. `gamma` must be odd. |
+  | `WARRANT_PBT_COUNT` | Cases per property, for every property. |
+  | `WARRANT_PBT_LONG=1` | 10,000 cases per property, unless `WARRANT_PBT_COUNT` is set. For a nightly or pre-release run: `WARRANT_PBT_LONG=1 dotnet test --filter Differential`. |
+
 - **Other tests.**
   - `NullTests`: null arguments and null record fields on the CLR, and the non-null assumptions that exclude them.
   - `ClosedEqualityTests`: identity equality of closed-class instances (KTD11).
@@ -52,4 +60,32 @@ The fuel column is the fuel a fresh `TypeChecker` uses for the checks `Kernel.Ad
 
 In all, 8,509 boundary checks used 432 fuel each on average and at most 2,203. The limit, `KernelLimits.Corpus`, is 100,000,000. A check takes between 0.1 and 0.9 ms.
 
-**Random-input count.** With `RandomInputsPerFunction = 1000`, the suite runs 8,509 boundary checks and 24,000 random ones, and every differential test together takes about 15 seconds. Each function's checks take from 0.03 s (`StatusCode`) to 1.1 s (`SamePlace`), and loading the bundle and running the engine once take most of the rest. That is well within the budget of a few minutes. The count can grow about tenfold before the suite reaches two minutes. The boundary combinations are never reduced.
+**Random-input count.** With `RandomInputsPerFunction = 1000`, the M4 suite of 24 functions ran 8,509 boundary checks and 24,000 random ones, and every differential test together took about 15 seconds. Each function's checks take from 0.03 s (`StatusCode`) to 1.1 s (`SamePlace`), and loading the bundle and running the engine once take most of the rest. That is well within the budget of a few minutes. The count can grow about tenfold before the suite reaches two minutes. The boundary combinations are never reduced.
+
+Measured again on 2026-11-03, with the random inputs as properties and 37 functions: the default run of every differential test takes about 20 seconds (each property from 0.02 s to 1.2 s), and the long run (`WARRANT_PBT_LONG=1`, 370,000 random checks) about 2.2 minutes.
+
+## Recursive units
+
+The M5a corpus's recursive functions (`Sum`, `Add`, `SumLong` in `tests/corpus/m5a/accepted/Recursion.cs`) are tested in `RecursiveDifferentialTests`, over the M5a accepted compilation (docs/m5a/08, "Recursive methods"; plan M5a U15).
+
+- **Bounded inputs.** M4's boundary values would recurse 2³¹ times: the CLR would die of an uncatchable `StackOverflowException` and the kernel would run out of fuel. The parameter `Spec.Decreases` names is drawn from -1,000 to 1,000 (`MeasureBound`; a negative measure clamps to 0 and returns at once), and shrinks only within that range; the other parameters come from the M4 generators. `AgreesOnBoundedRandomInputs` checks 100 inputs per function (`RandomInputsPerFunction`) by kernel `Eq.refl`, as for M4 units: `Nat.fix` computes in the kernel.
+- **Skipped inputs.** An input whose check runs out of kernel fuel is counted as skipped, not as a disagreement, and a test whose inputs were all skipped fails, so it cannot pass by testing nothing (`AnInputOverTheFuelBudgetIsSkipped`, `ATestWhoseInputsAreAllSkippedFails`). At the bound no corpus input is skipped.
+- **A second evaluation.** `AgreesByRewritingWithTheEquationLemma` evaluates five inputs per function (measures -3, 0, 1, 5 and 12) by rewriting with `f.$eq_def` instead (`EquationEvaluator`): each call is rewritten with an instance of the equation lemma at its arguments' values, each `if` is decided and each argument evaluated by the kernel, and congruence (`congrArg`) carries the results out, all as one `Eq.trans` chain that the kernel checks as the proof of `f a = r`. It rewrites once per level of recursion and once where the guard stops it. `RewritingCatchesAWrongResult` checks that the chain for a wrong result is rejected.
+
+### Measured fuel per level of recursion
+
+Measured on 2026-11-04 on the development machine (Windows 11, .NET 10.0, Debug build), with `WARRANT_DIFFERENTIAL_COST=1` and `RecursiveDifferentialTests.MeasureTheFuelPerLevelOfRecursion`. The fuel is that of a fresh `TypeChecker` for the checks `Kernel.Add` makes on `f a = r` by `Eq.refl`; the measure parameter is the depth and the others are 1.
+
+| Function | Levels | Fuel | Fuel per level | ms |
+|---|---|---|---|---|
+| `Corpus.Recursion.Add(int, int)` | 10 | 6,406 | 640 | 25 |
+| `Corpus.Recursion.Add(int, int)` | 100 | 54,376 | 543 | 50 |
+| `Corpus.Recursion.Add(int, int)` | 1,000 | 534,076 | 534 | 563 |
+| `Corpus.Recursion.Sum(int)` | 10 | 6,348 | 634 | 5 |
+| `Corpus.Recursion.Sum(int)` | 100 | 53,958 | 539 | 63 |
+| `Corpus.Recursion.Sum(int)` | 1,000 | 530,058 | 530 | 612 |
+| `Corpus.Recursion.SumLong(long)` | 10 | 6,348 | 634 | 3 |
+| `Corpus.Recursion.SumLong(long)` | 100 | 53,958 | 539 | 38 |
+| `Corpus.Recursion.SumLong(long)` | 1,000 | 530,058 | 530 | 569 |
+
+The cost is linear, about 540 fuel per level after a fixed cost of about 1,000. At `KernelLimits.Corpus` (100,000,000) that allows about 185,000 levels, and at the build limit (20,000,000) about 37,000, so fuel does not lower the starting bound of 1,000: 1,000 levels use about 0.5% of the corpus fuel. Time does bind: about 0.6 s per check at full depth, so the default run of the three properties takes about 35 s, and the bound stays at 1,000 rather than rising. A long run (`WARRANT_PBT_LONG=1`) checks 10,000 inputs per function, about an hour for the three.

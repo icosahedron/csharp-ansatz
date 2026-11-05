@@ -39,8 +39,8 @@ public class ExtractionTests
                 [Verified] public static int Unrelated(int n) => n;
             }
             """);
-        Assert.Equal("WRT0002 | recursion", Only(result, "M:C.A(System.Int32)"));
-        Assert.Equal("WRT0002 | recursion", Only(result, "M:C.B(System.Int32)"));
+        Assert.Equal("WRT0002 | mutual recursion", Only(result, "M:C.A(System.Int32)"));
+        Assert.Equal("WRT0002 | mutual recursion", Only(result, "M:C.B(System.Int32)"));
         Assert.Equal("WRT0002 | depends on a rejected unit", Only(result, "M:C.Caller(System.Int32)"));
         Assert.Empty(result.DiagnosticsFor("M:C.Unrelated(System.Int32)"));
         Assert.Equal(["M:C.Unrelated(System.Int32)"], result.Units.Select(u => u.Key));
@@ -382,7 +382,8 @@ public class ExtractionTests
         var unit = Corpus.Extract("accepted").Find("M:Payouts.PayoutRules.Payout(System.Int32,System.Int32,System.Int32)");
         Assert.NotNull(unit);
         var golden = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "golden", "payout.json"));
-        Assert.Equal(golden, VirWriter.Write(unit.Unit));
+        // The golden file records Roslyn 5.0.0, the compiler it was written with; the Roslyn version is provenance.
+        Assert.Equal(golden, VirWriter.Write(unit.Unit with { Facts = unit.Unit.Facts with { Roslyn = "5.0.0" } }));
     }
 
     [Fact]

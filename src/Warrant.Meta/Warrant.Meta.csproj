@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Keep signatures parallel to Lean's Array-taking functions rather than narrowing parameter types. -->
+    <NoWarn>$(NoWarn);CA1859</NoWarn>
+    <Description>Warrant's untrusted Meta layer: a port of Lean 4's metavariable context, local context, MetaM and binder construction, on which the tactics build proof terms for the kernel to check.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Pure helpers only (substitution, level normalisation, names); the kernel's checker never sees a metavariable. -->
+    <ProjectReference Include="..\Warrant.Cic\Warrant.Cic.csproj" />
+    <ProjectReference Include="..\Warrant.Kernel\Warrant.Kernel.csproj" />
+    <InternalsVisibleTo Include="Warrant.Meta.Tests" />
+  </ItemGroup>
+</Project>

@@ -377,4 +377,328 @@ public class PropertyTests(InitMediumFixture initMedium) : IClassFixture<InitMed
                 return true;
             }
         })).Check(Runs);
+
+    // ================================================================== definitional equality (design §10.3)
+
+    private static readonly Ty[] AllTys = [Ty.Nat, Ty.Bool, Ty.ListNat, Ty.PairNatBool];
+
+    /// <summary>A closed well-typed term of type <paramref name="ty"/>.</summary>
+    private static Gen<Expr> TypedOf(Ty ty) => Gen.Sized(s => TypedGen(ty, Math.Min(s, 10), []));
+
+    /// <summary>A rewrite that is sound for definitional equality: where it applies, and what it gives.</summary>
+    private sealed record Rule(Func<Expr, bool> Applies, Func<Expr, Expr> Apply);
+
+    /// <summary>
+    /// The known reductions, each usable in both directions: beta (contract a redex, or wrap a term
+    /// in a redex that discards a Nat argument), delta (unfold a definition at its levels) and Nat
+    /// literals (<c>n</c> to <c>succ (n-1)</c> or <c>k + (n-k)</c>, and back).
+    /// </summary>
+    private Rule[] Rules(int seed) =>
+    [
+        new(_ => true, m => Expr.App(Expr.Lam(Name.Parse("x"), NatConst, ExprOps.LiftLooseBVars(m, 0, 1)), Expr.NatLit(seed))),
+        new(m => m is AppExpr { Fn: LamExpr }, m => ExprOps.Instantiate(((LamExpr)((AppExpr)m).Fn).Body, ((AppExpr)m).Arg)),
+        new(
+            m => m is ConstExpr c && initMedium.Env.Find(c.Name) is DefinitionInfo d && d.LevelParams.Count == c.Levels.Count,
+            m => ExprOps.InstantiateValueLevelParams(initMedium.Env.Get(((ConstExpr)m).Name), ((ConstExpr)m).Levels)),
+        new(m => m is NatLitExpr, m =>
+        {
+            var n = ((NatLitExpr)m).Value;
+            if (n.IsZero)
+            {
+                return C("Nat.zero");
+            }
+            if (seed % 2 == 0)
+            {
+                return Expr.App(C("Nat.succ"), Expr.NatLit(n - 1));
+            }
+            var k = seed % (n + 1);
+            return Expr.App(C("Nat.add"), Expr.NatLit(k), Expr.NatLit(n - k));
+        }),
+        new(
+            m => m.Equals(C("Nat.zero")) || (m is AppExpr { Fn: ConstExpr f, Arg: NatLitExpr } && f.Equals(C("Nat.succ"))),
+            m => m is AppExpr a ? Expr.NatLit(((NatLitExpr)a.Arg).Value + 1) : Expr.NatLit(0)),
+    ];
+
+    /// <summary>
+    /// Applies <paramref name="rule"/> at the <paramref name="k"/>-th site (pre-order) where it applies;
+    /// each applicable site decrements <paramref name="k"/>, so a run with a large <paramref name="k"/> counts the sites.
+    /// </summary>
+    private static Expr AtSite(Expr e, Rule rule, ref int k)
+    {
+        if (k < 0)
+        {
+            return e;
+        }
+        if (rule.Applies(e) && k-- == 0)
+        {
+            return rule.Apply(e);
+        }
+        switch (e)
+        {
+            case AppExpr a:
+                {
+                    var f = AtSite(a.Fn, rule, ref k);
+                    var x = AtSite(a.Arg, rule, ref k);
+                    return ReferenceEquals(f, a.Fn) && ReferenceEquals(x, a.Arg) ? e : Expr.App(f, x);
+                }
+            case LamExpr l:
+                {
+                    var t = AtSite(l.BinderType, rule, ref k);
+                    var b = AtSite(l.Body, rule, ref k);
+                    return ReferenceEquals(t, l.BinderType) && ReferenceEquals(b, l.Body) ? e : Expr.Lam(l.BinderName, t, b, l.BinderInfo);
+                }
+            case ForallExpr p:
+                {
+                    var t = AtSite(p.BinderType, rule, ref k);
+                    var b = AtSite(p.Body, rule, ref k);
+                    return ReferenceEquals(t, p.BinderType) && ReferenceEquals(b, p.Body) ? e : Expr.Forall(p.BinderName, t, b, p.BinderInfo);
+                }
+            case LetExpr l:
+                {
+                    var t = AtSite(l.BinderType, rule, ref k);
+                    var v = AtSite(l.Value, rule, ref k);
+                    var b = AtSite(l.Body, rule, ref k);
+                    return ReferenceEquals(t, l.BinderType) && ReferenceEquals(v, l.Value) && ReferenceEquals(b, l.Body)
+                        ? e
+                        : Expr.Let(l.BinderName, t, v, b, l.NonDependent);
+                }
+            case ProjExpr p:
+                {
+                    var s = AtSite(p.Struct, rule, ref k);
+                    return ReferenceEquals(s, p.Struct) ? e : Expr.Proj(p.TypeName, p.Index, s);
+                }
+            default:
+                return e;
+        }
+    }
+
+    private static int CountSites(Expr e, Rule rule)
+    {
+        int k = int.MaxValue;
+        AtSite(e, rule, ref k);
+        return int.MaxValue - k;
+    }
+
+    /// <summary>One known reduction, in either direction, at a random site: the result is definitionally equal to <paramref name="e"/>.</summary>
+    private Gen<Expr> Step(Expr e) =>
+        Zip(Gen.Choose(0, 4), Gen.Choose(0, int.MaxValue - 1), Gen.Choose(0, 9)).Select(t =>
+        {
+            var rules = Rules(t.Item3);
+            var rule = rules[t.Item1];
+            int sites = CountSites(e, rule);
+            if (sites == 0)
+            {
+                rule = rules[0];
+                sites = CountSites(e, rule);
+            }
+            int k = t.Item2 % sites;
+            return AtSite(e, rule, ref k);
+        });
+
+    /// <summary>A chain of <paramref name="n"/> known reductions from <paramref name="e"/>.</summary>
+    private Gen<Expr> Steps(Expr e, int n) => n == 0 ? Gen.Constant(e) : Step(e).SelectMany(x => Steps(x, n - 1));
+
+    private Gen<Expr> Related(Expr e) => Gen.Choose(1, 3).SelectMany(n => Steps(e, n));
+
+    private bool DefEq(Expr a, Expr b) => new TypeChecker(initMedium.Env).IsDefEq(a, b);
+
+    [Fact]
+    public void DefinitionalEqualityIsReflexive()
+    {
+        // The rewritten term carries unfolded definitions, so the property also covers the
+        // shapes those bring (recursors, projections, lets), not only the generator's own.
+        var cases = TypedTerms.Generator.SelectMany(t => Related(t.Term).Select(b => (t.Term, b))).ToArbitrary();
+        Prop.ForAll(cases, p => KernelThread.Run(() => DefEq(p.Item1, p.Item1) && DefEq(p.Item2, p.Item2))).Check(Runs);
+    }
+
+    [Fact]
+    public void DefinitionalEqualityIsSymmetric()
+    {
+        // Half the pairs are related by known reductions, half are independent terms of the same
+        // type (defeq only when they compute to the same value), so both verdicts occur.
+        var pairs = TypedTerms.Generator.SelectMany(t =>
+            Gen.Frequency((1, Related(t.Term)), (1, TypedOf(t.Ty))).Select(b => (t.Term, b))).ToArbitrary();
+        Prop.ForAll(pairs, p => KernelThread.Run(() => DefEq(p.Item1, p.Item2) == DefEq(p.Item2, p.Item1))).Check(Runs);
+    }
+
+    [Fact]
+    public void DefinitionalEqualityIsTransitive()
+    {
+        // a → b → c by chains of known reductions, or c independent of a and b. Given a ≡ b,
+        // transitivity in both directions (with symmetry) means b ≡ c exactly when a ≡ c; and every
+        // reduction chain must be accepted, so the chains are non-trivial.
+        var triples = TypedTerms.Generator.SelectMany(t =>
+            Related(t.Term).SelectMany(b =>
+                Gen.Frequency(
+                    (1, Related(b).Select(c => (Related: true, C: c))),
+                    (1, TypedOf(t.Ty).Select(c => (Related: false, C: c))))
+                .Select(c => (A: t.Term, B: b, c.C, c.Related)))).ToArbitrary();
+        Prop.ForAll(triples, t => KernelThread.Run(() =>
+        {
+            bool ab = DefEq(t.A, t.B), bc = DefEq(t.B, t.C), ac = DefEq(t.A, t.C);
+            return ab && bc == ac && (!t.Related || bc);
+        })).Check(Runs);
+    }
+
+    // ================================================================== substitution and instantiation (design §10.3)
+
+    /// <summary>A context of one or two variables, a well-typed body in it and closed well-typed arguments for it.</summary>
+    private static readonly Arbitrary<(Ty[] Ctx, Expr Body, Expr[] Args)> Bodies =
+        Zip(Gen.Choose(1, 2), Gen.Elements(AllTys), Gen.Elements(AllTys))
+            .Select(t => t.Item1 == 1 ? new[] { t.Item2 } : [t.Item2, t.Item3])
+            .SelectMany(ctx => Zip(
+                Gen.Elements(AllTys).SelectMany(ty => Gen.Sized(s => TypedGen(ty, Math.Min(s, 10), ctx))),
+                ctx.Length == 1 ? TypedOf(ctx[0]).Select(a => new[] { a }) : Zip(TypedOf(ctx[0]), TypedOf(ctx[1])).Select(p => new[] { p.Item1, p.Item2 }))
+                .Select(p => (ctx, p.Item1, p.Item2)))
+            .ToArbitrary();
+
+    [Fact]
+    public void InstantiationPreservesTyping() =>
+        Prop.ForAll(Bodies, t => KernelThread.Run(() =>
+        {
+            // Close the body under its binders (#0 innermost); the kernel's type for the lambda is a
+            // Pi whose innermost body is the body's type, with the same loose variables.
+            Expr lam = t.Body;
+            foreach (var ty in t.Ctx)
+            {
+                lam = Expr.Lam(Name.Parse("x"), TypeOf(ty), lam);
+            }
+            var tc = new TypeChecker(initMedium.Env);
+            var bodyType = tc.Check(lam, []);
+            for (int i = 0; i < t.Ctx.Length; i++)
+            {
+                bodyType = ((ForallExpr)bodyType).Body;
+            }
+            var instantiated = ExprOps.Instantiate(t.Body, t.Args);
+            return tc.IsDefEq(tc.Check(instantiated, []), ExprOps.Instantiate(bodyType, t.Args));
+        })).Check(Runs);
+
+    [Fact]
+    public void SubstitutionPreservesTyping() =>
+        Prop.ForAll(Bodies, t => KernelThread.Run(() =>
+        {
+            // Γ, x : σ ⊢ e : T and ⊢ a : σ give ⊢ e[a/x] : T[a/x], with x a free variable of a local context.
+            var lctx = new LocalContext();
+            var ngen = new NameGenerator(Name.Parse("_subst"));
+            Expr[] xs = [.. t.Ctx.Select(ty => (Expr)lctx.MkLocalDecl(ngen, Name.Parse("x"), TypeOf(ty)))];
+            var open = ExprOps.Instantiate(t.Body, xs);
+            var type = new TypeChecker(initMedium.Env, localContext: lctx).Check(open, []);
+            Expr Subst(Expr e) => ExprOps.Replace(e, (m, _) =>
+                !m.HasFVar ? m : Array.IndexOf(xs, m) is var i and >= 0 ? t.Args[i] : null);
+            var tc = new TypeChecker(initMedium.Env);
+            return tc.IsDefEq(tc.Check(Subst(open), []), Subst(type));
+        })).Check(Runs);
+
+    // ================================================================== universe instantiation (design §10.3)
+
+    /// <summary>The types of a small universe-polymorphic language over <c>α : Sort U</c> and <c>β : Type V</c>.</summary>
+    private enum PTy
+    {
+        A,
+        B,
+        ListB,
+        PairAB,
+        FunAB,
+    }
+
+    private static readonly EquatableArray<Name> PolyParams = new([.. ParamNames]);
+
+    /// <summary>
+    /// The type <paramref name="p"/> under the term variables <paramref name="ctx"/>, which sit
+    /// inside the binders <c>α</c> (at <c>#(n+1)</c>) and <c>β</c> (at <c>#n</c>).
+    /// </summary>
+    private static Expr PTypeOf(PTy p, int n, Level u, Level v) => p switch
+    {
+        PTy.A => Expr.BVar(n + 1),
+        PTy.B => Expr.BVar(n),
+        PTy.ListB => Expr.App(C("List", v), Expr.BVar(n)),
+        PTy.PairAB => Expr.App(C("PProd", u, Level.Succ(v)), Expr.BVar(n + 1), Expr.BVar(n)),
+        _ => Expr.Forall(Name.Parse("x"), Expr.BVar(n + 1), Expr.BVar(n + 1)),
+    };
+
+    /// <summary>A well-typed term of type <paramref name="p"/> in the polymorphic language, built only by its typing rules.</summary>
+    private static Gen<Expr> PolyGen(PTy p, int size, PTy[] ctx, Level u, Level v)
+    {
+        int n = ctx.Length;
+        Expr alpha = Expr.BVar(n + 1), beta = Expr.BVar(n);
+        var vs = Level.Succ(v);
+        Gen<Expr> Var(PTy q) => Gen.Elements(Enumerable.Range(0, n).Where(i => ctx[i] == q).Select(i => (Expr)Expr.BVar(i)).ToArray());
+        // The base context always holds a : α and b : β, so A and B always have a variable.
+        var leaf = p switch
+        {
+            PTy.A or PTy.B => Var(p),
+            PTy.ListB => Gen.Constant((Expr)Expr.App(C("List.nil", v), beta)),
+            PTy.PairAB => Zip(Var(PTy.A), Var(PTy.B)).Select(q => Expr.App(C("PProd.mk", u, vs), alpha, beta, q.Item1, q.Item2)),
+            _ => PolyGenLazy(PTy.B, 0, [PTy.A, .. ctx], u, v).Select(b => (Expr)Expr.Lam(Name.Parse("x"), alpha, b)),
+        };
+        if (size <= 0)
+        {
+            return leaf;
+        }
+        int h = size / 2;
+        Gen<Expr> Sub(PTy q, int s, PTy[]? c = null) => PolyGenLazy(q, s, c ?? ctx, u, v);
+        var specific = p switch
+        {
+            PTy.A => Gen.OneOf(
+                Sub(PTy.A, size - 1).Select(a => Expr.App(C("id", u), alpha, a)),
+                Sub(PTy.PairAB, size - 1).Select(q => (Expr)Expr.Proj(Name.Parse("PProd"), 0, q))),
+            PTy.B => Gen.OneOf(
+                Sub(PTy.B, size - 1).Select(b => Expr.App(C("id", vs), beta, b)),
+                Sub(PTy.PairAB, size - 1).Select(q => (Expr)Expr.Proj(Name.Parse("PProd"), 1, q)),
+                Zip(Sub(PTy.FunAB, h), Sub(PTy.A, h)).Select(q => (Expr)Expr.App(q.Item1, q.Item2)),
+                Zip(Gen.Elements(C("Bool.true"), C("Bool.false")), Sub(PTy.B, h), Sub(PTy.B, h))
+                    .Select(q => Expr.App(C("cond", vs), beta, q.Item1, q.Item2, q.Item3))),
+            PTy.ListB => Gen.OneOf(
+                Zip(Sub(PTy.B, h), Sub(PTy.ListB, h)).Select(q => Expr.App(C("List.cons", v), beta, q.Item1, q.Item2)),
+                Zip(Sub(PTy.ListB, h), Sub(PTy.ListB, h)).Select(q => Expr.App(C("List.append", v), beta, q.Item1, q.Item2)),
+                Sub(PTy.ListB, size - 1).Select(l => Expr.App(C("List.reverse", v), beta, l))),
+            PTy.PairAB => Zip(Sub(PTy.A, h), Sub(PTy.B, h)).Select(q => Expr.App(C("PProd.mk", u, vs), alpha, beta, q.Item1, q.Item2)),
+            _ => Sub(PTy.B, size - 1, [PTy.A, .. ctx]).Select(b => (Expr)Expr.Lam(Name.Parse("x"), alpha, b)),
+        };
+        // (fun x : σ => body) arg, for σ one of the type variables.
+        var beta2 = Gen.Elements(PTy.A, PTy.B).SelectMany(sigma =>
+            Zip(Sub(p, h, [sigma, .. ctx]), Sub(sigma, h)).Select(q =>
+                (Expr)Expr.App(Expr.Lam(Name.Parse("x"), PTypeOf(sigma, n, u, v), q.Item1), q.Item2)));
+        return Gen.Frequency((2, leaf), (4, specific), (1, beta2));
+    }
+
+    private static Gen<Expr> PolyGenLazy(PTy p, int size, PTy[] ctx, Level u, Level v) =>
+        size <= 0 ? PolyGen(p, 0, ctx, u, v) : Defer(() => PolyGen(p, size, ctx, u, v));
+
+    /// <summary>The definition <c>test.poly</c> over the universe parameters u, v, w.</summary>
+    private static DefinitionDecl PolyDefinition(Expr value, Expr type)
+    {
+        var name = Name.Parse("test.poly");
+        return new DefinitionDecl(new DefinitionInfo(name, PolyParams, type, value, ReducibilityHints.Regular(1), DefinitionSafety.Safe, [name]));
+    }
+
+    [Fact]
+    public void UniverseInstantiationPreservesWellTypedness()
+    {
+        var small = Gen.Sized(s => LevelGen(Math.Min(s, 4)));
+        var cases = Zip(small, small, Gen.Elements(Enum.GetValues<PTy>()))
+            .SelectMany(t =>
+            {
+                var (u, v, p) = t;
+                return Gen.Sized(s => PolyGen(p, Math.Min(s, 8), [PTy.B, PTy.A], u, v)).Select(body =>
+                    (Expr)Expr.Lam(Name.Parse("α"), Expr.Sort(u),
+                        Expr.Lam(Name.Parse("β"), Expr.Sort(Level.Succ(v)),
+                            Expr.Lam(Name.Parse("a"), Expr.BVar(1),
+                                Expr.Lam(Name.Parse("b"), Expr.BVar(1), body)))));
+            })
+            .SelectMany(value => Zip(Levels.Generator, Levels.Generator, Levels.Generator)
+                .Select(l => (Value: value, Levels: new EquatableArray<Level>([l.Item1, l.Item2, l.Item3]))))
+            .ToArbitrary();
+        Prop.ForAll(cases, t => KernelThread.Run(() =>
+        {
+            // The generated declaration is admitted (a generator check), and so is its instance at
+            // well-formed levels over the same parameters.
+            var type = new TypeChecker(initMedium.Env).Check(t.Value, PolyParams);
+            Kernel.Add(initMedium.Env.Fork(), PolyDefinition(t.Value, type));
+            var instValue = ExprOps.InstantiateLevelParams(t.Value, PolyParams, t.Levels);
+            var instType = ExprOps.InstantiateLevelParams(type, PolyParams, t.Levels);
+            Kernel.Add(initMedium.Env.Fork(), PolyDefinition(instValue, instType));
+            return true;
+        })).Check(Runs);
+    }
 }

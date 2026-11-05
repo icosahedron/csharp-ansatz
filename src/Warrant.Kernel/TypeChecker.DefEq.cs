@@ -143,6 +143,8 @@ public sealed partial class TypeChecker
                     return ToTri(tn.Value == ((NatLitExpr)s).Value);
                 case StrLitExpr tstr:
                     return ToTri(string.Equals(tstr.Value, ((StrLitExpr)s).Value, StringComparison.Ordinal));
+                case MVarExpr:
+                    throw MVarUnsupported();
             }
         }
         return Tri.Unknown;

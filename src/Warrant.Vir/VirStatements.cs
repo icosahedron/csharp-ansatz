@@ -37,3 +37,11 @@ public sealed record ReturnStmt(VirExpr Value) : VirStmt;
 /// <summary><c>block{stmts}</c>.</summary>
 /// <param name="Stmts">The statements, in order.</param>
 public sealed record BlockStmt(VirList<VirStmt> Stmts) : VirStmt;
+
+/// <summary>
+/// <c>decreases{measure}</c>: <c>Spec.Decreases(measure)</c>, the first statement of a recursive function's body.
+/// The measure is over the parameters, and its type is <c>int32</c> or <c>int64</c>: an <c>int</c> measure keeps its
+/// type rather than the implicit widening to <c>long</c> that the call's signature adds.
+/// </summary>
+/// <param name="Measure">The measure.</param>
+public sealed record DecreasesStmt(VirExpr Measure) : VirStmt;

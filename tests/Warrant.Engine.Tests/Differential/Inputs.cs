@@ -1,3 +1,4 @@
+using System.Globalization;
 using FsCheck;
 using FsCheck.Fluent;
 using Warrant.Vir;
@@ -103,9 +104,54 @@ internal sealed class Inputs(Values values)
         return result;
     }
 
-    /// <summary><paramref name="count"/> random inputs of a function, from a fresh seed.</summary>
-    public IReadOnlyList<object?[]> RandomInputs(IReadOnlyList<VirType> parameters, int count) =>
-        count == 0 ? [] : Sequence(parameters.Select(Random).ToList()).Sample(count, size: 50);
+    /// <summary>
+    /// Smaller candidates for a failing value of a type (M5a KTD26): <c>int</c> and <c>long</c> toward 0 and the
+    /// boundaries (<see cref="Generators.ShrinkInt32"/>), <c>true</c> to <c>false</c>, an enum or closed value toward
+    /// its first member (an unnamed enum value to any named one), and a record field by field.
+    /// </summary>
+    public IEnumerable<object?> Shrink(VirType type, object? value)
+    {
+        switch (type)
+        {
+            case PrimitiveType { Kind: VirPrimitive.Int32 }:
+                return Generators.ShrinkInt32((int)value!).Select(v => (object?)v);
+            case PrimitiveType { Kind: VirPrimitive.Int64 }:
+                return Generators.ShrinkInt64((long)value!).Select(v => (object?)v);
+            case PrimitiveType { Kind: VirPrimitive.Bool }:
+                return (bool)value! ? [false] : [];
+        }
+        var key = ((RefType)type).Key;
+        var clr = values.Assembly.TypeOf(key);
+        switch (values.Definition(key))
+        {
+            case EnumDefinition e:
+                return Generators.ShrinkTowardFirst([.. e.Members.Select(m => m.Value)], Convert.ToInt64(value, CultureInfo.InvariantCulture))
+                    .Select(v => Enum.ToObject(clr, v));
+            case ClosedDefinition:
+                return Generators.ShrinkTowardFirst(Boundaries(type), value);
+            case RecordDefinition r:
+                {
+                    var fields = r.Fields.Select(f => clr.GetProperty(f.Name)!.GetValue(value)).ToArray();
+                    var shrinkers = r.Fields.Select(f => (Func<object?, IEnumerable<object?>>)(v => Shrink(f.Type, v))).ToList();
+                    return Generators.ShrinkFields(fields, shrinkers).Select(f => Activator.CreateInstance(clr, f));
+                }
+            default:
+                throw new InvalidOperationException($"unknown definition for {key}");
+        }
+    }
+
+    /// <summary>
+    /// The random inputs of a function as an FsCheck arbitrary: the parameters drawn independently by <see cref="Random"/>
+    /// (at size 50, past the generators' boundaries-by-size prefix, which the boundary inputs already cover) and shrunk
+    /// one argument at a time by <see cref="Shrink"/>.
+    /// </summary>
+    public Arbitrary<object?[]> Arbitrary(IReadOnlyList<VirType> parameters)
+    {
+        var shrinkers = parameters.Select(t => (Func<object?, IEnumerable<object?>>)(v => Shrink(t, v))).ToList();
+        return Arb.From(
+            Sequence(parameters.Select(Random).ToList()).Resize(50),
+            args => Generators.ShrinkFields(args, shrinkers));
+    }
 
     /// <summary>
     /// The open enum's named values, then the unnamed ones: the underlying type's <c>MinValue</c> and <c>MaxValue</c>,

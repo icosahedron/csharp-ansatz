@@ -18,6 +18,8 @@ public sealed partial class TypeChecker
                 return e;
             case ExprKind.MData:
                 return Whnf(((MDataExpr)e).Expr);
+            case ExprKind.MVar:
+                throw MVarUnsupported();
             case ExprKind.FVar:
                 if (!IsLetFVar(e))
                 {
@@ -75,6 +77,8 @@ public sealed partial class TypeChecker
                 return e;
             case ExprKind.MData:
                 return WhnfCore(((MDataExpr)e).Expr, cheapRec, cheapProj);
+            case ExprKind.MVar:
+                throw MVarUnsupported();
             case ExprKind.FVar:
                 if (!IsLetFVar(e))
                 {
@@ -129,8 +133,10 @@ public sealed partial class TypeChecker
             case LetExpr l:
                 r = WhnfCore(ExprOps.Instantiate(l.Body, l.Value), cheapRec, cheapProj);
                 break;
+            case MVarExpr:
+                throw MVarUnsupported();
             default:
-                throw new InvalidOperationException("unreachable");
+                throw new KernelException($"unexpected expression kind {e.Kind}");
         }
         if (!cheapRec && !cheapProj)
         {

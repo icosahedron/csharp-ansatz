@@ -20,7 +20,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\data\warrant-semantics.ndjson.gz" LinkBase="data" CopyToOutputDirectory="PreserveNewest" />
-    <!-- The corpus is compiled in memory from these copies (docs/m4/02). -->
+    <None Include="..\data\warrant-attributes.ndjson.gz" LinkBase="data" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\lean\bundle-roots.txt" Link="data\bundle-roots.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The corpora are compiled in memory from these copies (docs/m4/02, docs/m5a/01). -->
     <None Include="..\corpus\m4\**\*" LinkBase="corpus\m4" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\corpus\m5a\**\*" LinkBase="corpus\m5a" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -79,6 +79,23 @@ public static class VirWriter
             w.Name("statement");
             Expr(w, statement);
         }
+        if (unit.Script is { } script)
+        {
+            w.Name("script").OpenArray();
+            foreach (var tactic in script)
+            {
+                Tactic(w, tactic);
+            }
+            w.CloseArray();
+        }
+        if (unit.Budget is { } budget)
+        {
+            w.Name("budget").Open();
+            w.Name("timeoutSeconds").String(Decimal(budget.TimeoutSeconds));
+            w.Name("tacticFuel").String(Decimal(budget.TacticFuel));
+            w.Name("kernelFuel").String(Decimal(budget.KernelFuel));
+            w.Close();
+        }
         if (unit.Definition is { } definition)
         {
             w.Name("definition");
@@ -240,6 +257,10 @@ public static class VirWriter
                 w.Name("block");
                 Stmts(w, s.Stmts);
                 break;
+            case DecreasesStmt s:
+                w.Name("decreases");
+                Expr(w, s.Measure);
+                break;
             default:
                 throw new ArgumentException($"Unknown VIR statement {stmt.GetType().Name}.", nameof(stmt));
         }
@@ -387,6 +408,12 @@ public static class VirWriter
                 w.Name("b");
                 Expr(w, e.B);
                 break;
+            case ForAllExpr e:
+                Binder(w, e.Local, e.Name, e.Domain, e.Body);
+                break;
+            case ExistsExpr e:
+                Binder(w, e.Local, e.Name, e.Domain, e.Body);
+                break;
         }
         w.Close();
         w.Close();
@@ -412,8 +439,73 @@ public static class VirWriter
         MemberExpr => "member",
         SwitchExpr => "switch",
         ImpliesExpr => "implies",
+        ForAllExpr => "forall",
+        ExistsExpr => "exists",
         _ => throw new ArgumentException($"Unknown VIR expression {expr.GetType().Name}.", nameof(expr)),
     };
+
+    private static void Binder(Json w, int local, string name, VirType domain, VirExpr body)
+    {
+        w.Name("local").Number(local);
+        w.Name("name").String(name);
+        w.Name("domain");
+        Type(w, domain);
+        w.Name("body");
+        Expr(w, body);
+    }
+
+    private static void Tactic(Json w, TacticNode tactic)
+    {
+        w.Open();
+        w.Name("tactic").Open();
+        w.Name("name").String(tactic.Name);
+        w.Name("args").OpenArray();
+        foreach (var arg in tactic.Args)
+        {
+            TacticArgument(w, arg);
+        }
+        w.CloseArray();
+        w.Close();
+        w.Close();
+    }
+
+    private static void TacticArgument(Json w, VirTacticArg arg)
+    {
+        if (arg is TacticArg nested)
+        {
+            Tactic(w, nested.Tactic);
+            return;
+        }
+        w.Open();
+        switch (arg)
+        {
+            case UnitRefArg a:
+                w.Name("unit").String(a.Key);
+                break;
+            case LeanRefArg a:
+                w.Name("lean").String(a.Name);
+                break;
+            case StringArg a:
+                w.Name("string").String(a.Value);
+                break;
+            case NumberArg a:
+                w.Name("number").String(Decimal(a.Value));
+                break;
+            case BoolArg a:
+                w.Name("bool").String(a.Value ? "true" : "false");
+                break;
+            case OptionArg a:
+                w.Name("option").Open();
+                w.Name("name").String(a.Name);
+                w.Name("value");
+                TacticArgument(w, a.Value);
+                w.Close();
+                break;
+            default:
+                throw new ArgumentException($"Unknown VIR tactic argument {arg.GetType().Name}.", nameof(arg));
+        }
+        w.Close();
+    }
 
     private static string LitValue(LitExpr lit)
     {

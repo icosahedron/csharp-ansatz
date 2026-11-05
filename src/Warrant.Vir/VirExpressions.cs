@@ -129,3 +129,23 @@ public sealed record SwitchArm(VirPattern Pattern, VirExpr Value);
 /// <param name="A">The hypothesis.</param>
 /// <param name="B">The conclusion.</param>
 public sealed record ImpliesExpr(VirExpr A, VirExpr B) : VirExpr(VirType.Bool);
+
+/// <summary>
+/// <c>forall{local, name, domain, body}</c>: <c>Spec.ForAll&lt;T&gt;(x =&gt; body)</c>, for theorem statements only; its type
+/// is <c>bool</c>. The bound variable is a local, read in the body by a <see cref="LocalExpr"/> with ID <paramref name="Local"/>.
+/// </summary>
+/// <param name="Local">The bound variable's local ID, unique within the unit.</param>
+/// <param name="Name">The bound variable's source name.</param>
+/// <param name="Domain">The type quantified over.</param>
+/// <param name="Body">The claim.</param>
+public sealed record ForAllExpr(int Local, string Name, VirType Domain, VirExpr Body) : VirExpr(VirType.Bool);
+
+/// <summary>
+/// <c>exists{local, name, domain, body}</c>: <c>Spec.Exists&lt;T&gt;(x =&gt; body)</c>, for theorem statements only; its type
+/// is <c>bool</c>. The bound variable is a local, as in <see cref="ForAllExpr"/>.
+/// </summary>
+/// <param name="Local">The bound variable's local ID, unique within the unit.</param>
+/// <param name="Name">The bound variable's source name.</param>
+/// <param name="Domain">The type quantified over.</param>
+/// <param name="Body">The claim.</param>
+public sealed record ExistsExpr(int Local, string Name, VirType Domain, VirExpr Body) : VirExpr(VirType.Bool);

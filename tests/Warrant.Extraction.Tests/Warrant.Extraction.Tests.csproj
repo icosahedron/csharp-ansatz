@@ -18,6 +18,11 @@
   <ItemGroup>
     <!-- The corpus is compiled in memory from these copies (docs/m4/02). -->
     <None Include="..\corpus\m4\**\*" LinkBase="corpus\m4" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\corpus\m5a\**\*" LinkBase="corpus\m5a" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\Warrant.Vir.Tests\golden\payout.json" Link="golden\payout.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- A Csc argument file and the project files it names (plan M5a U12); its sources are data, not this project's code. -->
+    <Compile Remove="cscargs\**" />
+    <None Remove="cscargs\**" />
+    <None Include="cscargs\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

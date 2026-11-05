@@ -6,6 +6,11 @@ namespace Warrant.Kernel;
 /// The universe-level algebra of the kernel: simplifying constructors, normalization, equivalence,
 /// the <c>≥</c> test and parameter instantiation. A port of Lean 4's <c>src/kernel/level.cpp</c>.
 /// </summary>
+/// <remarks>
+/// A universe metavariable is an opaque atom here, as in Lean's <c>Level.normalize</c>: it is never
+/// zero, never instantiated, and ordered by its name. The kernel itself never sees one (it rejects
+/// declarations that contain one); the Meta layer reuses these operations.
+/// </remarks>
 public static class LevelOps
 {
     /// <summary>Whether <paramref name="l"/> is <c>succⁿ 0</c>.</summary>
@@ -104,6 +109,7 @@ public static class LevelOps
         LevelKind.Succ => true,
         LevelKind.Max => IsNotZero(l.Lhs!) || IsNotZero(l.Rhs!),
         LevelKind.IMax => IsNotZero(l.Rhs!),
+        LevelKind.MVar => false,
         _ => false,
     };
 
@@ -113,6 +119,7 @@ public static class LevelOps
         LevelKind.Zero => true,
         LevelKind.Max => NormalizesToZero(l.Lhs!) && NormalizesToZero(l.Rhs!),
         LevelKind.IMax => NormalizesToZero(l.Rhs!),
+        LevelKind.MVar => false,
         _ => false,
     };
 
@@ -124,6 +131,7 @@ public static class LevelOps
         {
             case LevelKind.Zero:
             case LevelKind.Param:
+            case LevelKind.MVar:
                 return l;
             case LevelKind.IMax:
                 return MkSucc(MkIMax(Normalize(r.Lhs!), Normalize(r.Rhs!)), k);
@@ -268,6 +276,8 @@ public static class LevelOps
                 }
                 return l.Kind == LevelKind.Max ? MkMax(a, b) : MkIMax(a, b);
             }
+            case LevelKind.MVar:
+                return l;
             default:
                 return l;
         }
@@ -293,6 +303,8 @@ public static class LevelOps
                 return l.ParamName;
             case LevelKind.Succ:
                 return GetUndefinedParam(l.Lhs!, names);
+            case LevelKind.MVar:
+                return null;
             default:
                 return GetUndefinedParam(l.Lhs!, names) ?? GetUndefinedParam(l.Rhs!, names);
         }
@@ -366,6 +378,8 @@ public static class LevelOps
                 {
                     case LevelKind.Param:
                         return l1.ParamName!.CompareTo(l2.ParamName) < 0;
+                    case LevelKind.MVar:
+                        return l1.MVarId!.Value.Name.CompareTo(l2.MVarId!.Value.Name) < 0;
                     case LevelKind.Max:
                     case LevelKind.IMax:
                         return l1.Lhs != l2.Lhs ? IsNormLt(l1.Lhs!, l2.Lhs!) : IsNormLt(l1.Rhs!, l2.Rhs!);

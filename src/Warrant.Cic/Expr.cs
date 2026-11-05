@@ -4,10 +4,10 @@ using System.Text;
 
 namespace Warrant.Cic;
 
-/// <summary>The twelve expression kinds of the CIC kernel.</summary>
+/// <summary>The thirteen expression kinds: the twelve of the CIC kernel and metavariables.</summary>
 /// <remarks>
-/// Metavariables are deliberately absent: they are an elaborator concept, and the kernel only
-/// checks fully elaborated terms.
+/// Metavariables (<see cref="MVar"/>) are holes that the Meta layer fills. The kernel rejects any
+/// declaration that contains one, and its type checker throws on one.
 /// </remarks>
 public enum ExprKind : byte
 {
@@ -46,6 +46,9 @@ public enum ExprKind : byte
 
     /// <summary>Structure projection.</summary>
     Proj,
+
+    /// <summary>A metavariable: a hole whose type and context live in a metavariable context.</summary>
+    MVar,
 }
 
 /// <summary>How a binder's argument is supplied, mirroring Lean's <c>BinderInfo</c>.</summary>
@@ -72,14 +75,22 @@ public readonly record struct FVarId(Name Name)
     public override string ToString() => Name.ToString();
 }
 
+/// <summary>The identity of an expression metavariable (Lean's <c>MVarId</c>).</summary>
+/// <param name="Name">A name unique within the metavariable context.</param>
+public readonly record struct MVarId(Name Name)
+{
+    /// <inheritdoc/>
+    public override string ToString() => Name.ToString();
+}
+
 /// <summary>
-/// A CIC expression, mirroring Lean 4's kernel <c>Expr</c>.
+/// A CIC expression, mirroring Lean 4's <c>Expr</c>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Expressions are immutable DAGs. Each node caches, at construction, a deterministic hash and the
 /// flags the kernel needs constantly (<see cref="LooseBVarRange"/>, <see cref="HasFVar"/>,
-/// <see cref="HasLevelParam"/>), as Lean does.
+/// <see cref="HasExprMVar"/>, <see cref="HasLevelMVar"/>, <see cref="HasLevelParam"/>), as Lean does.
 /// </para>
 /// <para>
 /// <see cref="Equals(Expr)"/> is exact structural equality, including binder names, binder info and
@@ -96,12 +107,14 @@ public abstract class Expr : IEquatable<Expr>
     /// <summary><c>Type</c>, i.e. <c>Sort 1</c>.</summary>
     public static readonly SortExpr Type = new(Level.One);
 
-    private protected Expr(ExprKind kind, ulong hash, int looseBVarRange, bool hasFVar, bool hasLevelParam)
+    private protected Expr(ExprKind kind, ulong hash, int looseBVarRange, bool hasFVar, bool hasExprMVar, bool hasLevelMVar, bool hasLevelParam)
     {
         Kind = kind;
         Hash64 = hash;
         LooseBVarRange = looseBVarRange;
         HasFVar = hasFVar;
+        HasExprMVar = hasExprMVar;
+        HasLevelMVar = hasLevelMVar;
         HasLevelParam = hasLevelParam;
     }
 
@@ -119,6 +132,12 @@ public abstract class Expr : IEquatable<Expr>
 
     /// <summary>Whether a free variable occurs.</summary>
     public bool HasFVar { get; }
+
+    /// <summary>Whether an expression metavariable occurs.</summary>
+    public bool HasExprMVar { get; }
+
+    /// <summary>Whether a universe metavariable occurs (in a <c>Sort</c> or constant's levels).</summary>
+    public bool HasLevelMVar { get; }
 
     /// <summary>Whether a universe parameter occurs (in a <c>Sort</c> or constant's levels).</summary>
     public bool HasLevelParam { get; }
@@ -179,6 +198,9 @@ public abstract class Expr : IEquatable<Expr>
 
     /// <summary>Projection of field <paramref name="index"/> of structure <paramref name="typeName"/>.</summary>
     public static ProjExpr Proj(Name typeName, int index, Expr structure) => new(typeName, index, structure);
+
+    /// <summary>Metavariable <c>?id</c>.</summary>
+    public static MVarExpr MVar(MVarId id) => new(id);
 
     // ---------------------------------------------------------------- application spines
 
@@ -316,6 +338,7 @@ public abstract class Expr : IEquatable<Expr>
                     {
                         return false;
                     }
+                    // Leaves (BVar, FVar, Sort, Const, NatLit, StrLit, MVar) have no children to share.
                     if (x.Kind is ExprKind.App or ExprKind.Lam or ExprKind.Forall or ExprKind.Let
                         or ExprKind.MData or ExprKind.Proj)
                     {
@@ -450,6 +473,9 @@ public abstract class Expr : IEquatable<Expr>
                 Print(sb, p.Struct, depth + 1);
                 sb.Append('.').Append(p.Index + 1);
                 break;
+            case MVarExpr mv:
+                sb.Append('?').Append(mv.Id);
+                break;
         }
     }
 
@@ -461,6 +487,18 @@ public abstract class Expr : IEquatable<Expr>
             h = Hashing.Mix(h, l.Hash64);
         }
         return h;
+    }
+
+    private protected static bool AnyHasMVar(EquatableArray<Level> levels)
+    {
+        foreach (var l in levels)
+        {
+            if (l.HasMVar)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private protected static bool AnyHasParam(EquatableArray<Level> levels)
@@ -480,7 +518,7 @@ public abstract class Expr : IEquatable<Expr>
 public sealed class BVarExpr : Expr
 {
     internal BVarExpr(int index)
-        : base(ExprKind.BVar, Hashing.Mix(1, (ulong)index), CheckIndex(index) + 1, false, false) => Index = index;
+        : base(ExprKind.BVar, Hashing.Mix(1, (ulong)index), CheckIndex(index) + 1, false, false, false, false) => Index = index;
 
     /// <summary>The de Bruijn index: 0 is the innermost enclosing binder.</summary>
     public int Index { get; }
@@ -500,7 +538,7 @@ public sealed class BVarExpr : Expr
 public sealed class FVarExpr : Expr
 {
     internal FVarExpr(FVarId id)
-        : base(ExprKind.FVar, Hashing.Mix(2, (id.Name ?? throw new ArgumentNullException(nameof(id))).Hash64), 0, true, false) => Id = id;
+        : base(ExprKind.FVar, Hashing.Mix(2, (id.Name ?? throw new ArgumentNullException(nameof(id))).Hash64), 0, true, false, false, false) => Id = id;
 
     /// <summary>The variable's identity.</summary>
     public FVarId Id { get; }
@@ -513,7 +551,7 @@ public sealed class FVarExpr : Expr
 public sealed class SortExpr : Expr
 {
     internal SortExpr(Level level)
-        : base(ExprKind.Sort, Hashing.Mix(3, (level ?? throw new ArgumentNullException(nameof(level))).Hash64), 0, false, level.HasParam) => Level = level;
+        : base(ExprKind.Sort, Hashing.Mix(3, (level ?? throw new ArgumentNullException(nameof(level))).Hash64), 0, false, false, level.HasMVar, level.HasParam) => Level = level;
 
     /// <summary>The universe level.</summary>
     public Level Level { get; }
@@ -526,7 +564,7 @@ public sealed class SortExpr : Expr
 public sealed class ConstExpr : Expr
 {
     internal ConstExpr(Name name, EquatableArray<Level> levels)
-        : base(ExprKind.Const, Hashing.Mix(4, (name ?? throw new ArgumentNullException(nameof(name))).Hash64, LevelsHash(levels)), 0, false, AnyHasParam(levels))
+        : base(ExprKind.Const, Hashing.Mix(4, (name ?? throw new ArgumentNullException(nameof(name))).Hash64, LevelsHash(levels)), 0, false, false, AnyHasMVar(levels), AnyHasParam(levels))
     {
         Name = name;
         Levels = levels;
@@ -554,6 +592,8 @@ public sealed class AppExpr : Expr
             Hashing.Mix(5, (fn ?? throw new ArgumentNullException(nameof(fn))).Hash64, (arg ?? throw new ArgumentNullException(nameof(arg))).Hash64),
             Math.Max(fn.LooseBVarRange, arg.LooseBVarRange),
             fn.HasFVar || arg.HasFVar,
+            fn.HasExprMVar || arg.HasExprMVar,
+            fn.HasLevelMVar || arg.HasLevelMVar,
             fn.HasLevelParam || arg.HasLevelParam)
     {
         Fn = fn;
@@ -584,6 +624,8 @@ public abstract class BindingExpr : Expr
             Hashing.Mix((ulong)kind + 100, (type ?? throw new ArgumentNullException(nameof(type))).Hash64, (body ?? throw new ArgumentNullException(nameof(body))).Hash64),
             Math.Max(type.LooseBVarRange, Math.Max(body.LooseBVarRange - 1, 0)),
             type.HasFVar || body.HasFVar,
+            type.HasExprMVar || body.HasExprMVar,
+            type.HasLevelMVar || body.HasLevelMVar,
             type.HasLevelParam || body.HasLevelParam)
     {
         BinderName = name ?? throw new ArgumentNullException(nameof(name));
@@ -647,6 +689,8 @@ public sealed class LetExpr : Expr
                 (body ?? throw new ArgumentNullException(nameof(body))).Hash64),
             Math.Max(Math.Max(type.LooseBVarRange, value.LooseBVarRange), Math.Max(body.LooseBVarRange - 1, 0)),
             type.HasFVar || value.HasFVar || body.HasFVar,
+            type.HasExprMVar || value.HasExprMVar || body.HasExprMVar,
+            type.HasLevelMVar || value.HasLevelMVar || body.HasLevelMVar,
             type.HasLevelParam || value.HasLevelParam || body.HasLevelParam)
     {
         BinderName = name ?? throw new ArgumentNullException(nameof(name));
@@ -689,7 +733,7 @@ public sealed class LetExpr : Expr
 public sealed class NatLitExpr : Expr
 {
     internal NatLitExpr(BigInteger value)
-        : base(ExprKind.NatLit, Hashing.Mix(9, HashBig(value)), 0, false, false) => Value = value;
+        : base(ExprKind.NatLit, Hashing.Mix(9, HashBig(value)), 0, false, false, false, false) => Value = value;
 
     /// <summary>The value (never negative).</summary>
     public BigInteger Value { get; }
@@ -720,7 +764,7 @@ public sealed class NatLitExpr : Expr
 public sealed class StrLitExpr : Expr
 {
     internal StrLitExpr(string value)
-        : base(ExprKind.StrLit, Hashing.Mix(10, Hashing.String(value ?? throw new ArgumentNullException(nameof(value)))), 0, false, false) => Value = value;
+        : base(ExprKind.StrLit, Hashing.Mix(10, Hashing.String(value ?? throw new ArgumentNullException(nameof(value)))), 0, false, false, false, false) => Value = value;
 
     /// <summary>The value.</summary>
     public string Value { get; }
@@ -738,6 +782,8 @@ public sealed class MDataExpr : Expr
             Hashing.Mix(11, (expr ?? throw new ArgumentNullException(nameof(expr))).Hash64),
             expr.LooseBVarRange,
             expr.HasFVar,
+            expr.HasExprMVar,
+            expr.HasLevelMVar,
             expr.HasLevelParam)
     {
         Data = data ?? throw new ArgumentNullException(nameof(data));
@@ -771,6 +817,8 @@ public sealed class ProjExpr : Expr
             Hashing.Mix(12, (typeName ?? throw new ArgumentNullException(nameof(typeName))).Hash64, (ulong)CheckIndex(index), (structure ?? throw new ArgumentNullException(nameof(structure))).Hash64),
             structure.LooseBVarRange,
             structure.HasFVar,
+            structure.HasExprMVar,
+            structure.HasLevelMVar,
             structure.HasLevelParam)
     {
         TypeName = typeName;
@@ -803,4 +851,20 @@ public sealed class ProjExpr : Expr
         pending.Push((Struct, o.Struct));
         return true;
     }
+}
+
+/// <summary>
+/// A metavariable <c>?id</c>. Its type and local context are not part of the term; they live in the
+/// Meta layer's metavariable context, keyed by <see cref="Id"/>.
+/// </summary>
+public sealed class MVarExpr : Expr
+{
+    internal MVarExpr(MVarId id)
+        : base(ExprKind.MVar, Hashing.Mix(13, (id.Name ?? throw new ArgumentNullException(nameof(id))).Hash64), 0, false, true, false, false) => Id = id;
+
+    /// <summary>The metavariable's identity.</summary>
+    public MVarId Id { get; }
+
+    private protected override bool LocalEquals(Expr other, Stack<(Expr, Expr)> pending, bool strict) =>
+        Id == ((MVarExpr)other).Id;
 }

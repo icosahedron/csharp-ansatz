@@ -1,0 +1,34 @@
+diff --git a/src-java/ansatz/kernel/Reducer.java b/src-java/ansatz/kernel/Reducer.java
+index a0fce8e..2e81250 100644
+--- a/src-java/ansatz/kernel/Reducer.java
++++ b/src-java/ansatz/kernel/Reducer.java
+@@ -25,6 +25,11 @@ public final class Reducer {
+         Boolean.getBoolean("ansatz.kernel.trace.reducer");
+     private static final String TRACE_REDUCER_FILTER =
+         System.getProperty("ansatz.kernel.trace.reducer.filter", "");
++    // Local patch (csharp-ansatz): -Dansatz.kernel.natDecEqShortcut=false turns off the native Nat.decEq
++    // shortcut below. It builds the Lean 4.33 Decidable.isTrue term, which does not match Lean 4.35's Decidable,
++    // so without it Nat.decEq reduces by its definition, as in Lean's kernel.
++    private static final boolean NAT_DEC_EQ_SHORTCUT =
++        !"false".equals(System.getProperty("ansatz.kernel.natDecEqShortcut"));
+     // type_checker::state (type_checker.h:33-44): expr_map<expr> m_whnf_core, m_whnf, m_unfold
+     private final ExprMap<Expr> whnfCoreCache;
+     private final ExprMap<Expr> whnfCache;
+@@ -962,7 +967,7 @@ public final class Reducer {
+         Name opName = (Name) head.o0;
+         // Nat.decEq / instDecidableEqNat — cheap version
+         if (opName == Name.NAT_DEC_EQ || opName == Name.INST_DECIDABLE_EQ_NAT) {
+-            return tryCheapReduceNatDecEq(args);
++            return NAT_DEC_EQ_SHORTCUT ? tryCheapReduceNatDecEq(args) : null;
+         }
+         if (args.length == 1 && opName == Name.NAT_SUCC) {
+             if (args[0].tag == Expr.LIT_NAT)
+@@ -1038,7 +1043,7 @@ public final class Reducer {
+ 
+         // Nat.decEq / instDecidableEqNat — native to avoid O(n) proof recursion
+         if (opName == Name.NAT_DEC_EQ || opName == Name.INST_DECIDABLE_EQ_NAT) {
+-            return tryReduceNatDecEq(args);
++            return NAT_DEC_EQ_SHORTCUT ? tryReduceNatDecEq(args) : null;
+         }
+ 
+         // 1-arg: Nat.succ (matching Lean 4's reduce_nat lines 647-654)

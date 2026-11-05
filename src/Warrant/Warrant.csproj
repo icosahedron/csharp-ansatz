@@ -4,4 +4,8 @@
     <TargetFramework>netstandard2.0</TargetFramework>
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- The WRT0011 check (KTD23); build/, not buildTransitive/, so only direct references are warned. -->
+    <None Include="build\Warrant.targets" Pack="true" PackagePath="build\" />
+  </ItemGroup>
 </Project>

@@ -49,7 +49,18 @@ internal sealed class ModelCheck(KernelEnvironment env, Values values, KernelLim
     /// both values. Must run on a kernel thread.
     /// </summary>
     /// <param name="description">The call, as C# would write it, for the message.</param>
-    public string? Disagreement(string description, VirType type, Expr model, object? result)
+    public string? Disagreement(string description, VirType type, Expr model, object? result) =>
+        Disagreement(description, type, model, result, limits, reportFuel: true);
+
+    /// <summary>
+    /// <see cref="Disagreement(string, VirType, Expr, object?)"/> with the given fuel; running out of it throws
+    /// <see cref="KernelResourceException"/> rather than reporting a disagreement, so that a recursive unit's caller can
+    /// count the input as skipped (docs/m5a/08, "Bounded inputs"). Must run on a kernel thread.
+    /// </summary>
+    public string? DisagreementWithin(string description, VirType type, Expr model, object? result, KernelLimits fuel) =>
+        Disagreement(description, type, model, result, fuel, reportFuel: false);
+
+    private string? Disagreement(string description, VirType type, Expr model, object? result, KernelLimits fuel, bool reportFuel)
     {
         Expr expected;
         try
@@ -63,10 +74,10 @@ internal sealed class ModelCheck(KernelEnvironment env, Values values, KernelLim
         }
         try
         {
-            Kernel.Kernel.Add(Env.Fork(), Theorem(Values.CicType(type), model, expected), limits);
+            Kernel.Kernel.Add(Env.Fork(), Theorem(Values.CicType(type), model, expected), fuel);
             return null;
         }
-        catch (KernelException ex)
+        catch (KernelException ex) when (reportFuel || ex is not KernelResourceException)
         {
             return $"{description}: the CLR returned {Values.Display(type, result)} but the model computes "
                 + $"{Values.ReadBackDisplay(Env, type, model, limits)} (kernel: {FirstLine(ex.Message)})";

@@ -1,7 +1,9 @@
 # How-to guides
 
-> Target syntax; see the [status note](README.md). Each guide names the milestone
-> it needs. *Proposed* means the feature is not in the design yet (§12).
+> Target syntax for M6 and later; see the [status note](README.md). Each guide
+> names the milestone it needs, and the M4 and M5a guides run today; their
+> outputs are copied from `warrant verify`. *Proposed* means the feature is not
+> in the design yet (§12).
 
 These guides assume you have done the [tutorial](tutorial.md). Each one solves a
 single problem and stops there. For the full list of attributes, `Spec`
@@ -39,12 +41,24 @@ methods and tactics, see the [reference](reference.md).
    claims about integer arithmetic and `if`.
 
 ```csharp
-[Theorem]
-static Proof DiscountNeverIncreasesPrice(int price, int discount) =>
-    Prove.That(Spec.Implies(price >= 0 && discount >= 0,
-                            Pricing.Discounted(price, discount) <= price))
-         .By(Tactic.Unfold(nameof(Pricing.Discounted)), Tactic.Simp(), Tactic.Omega());
+public static class Prices
+{
+    [Verified]
+    public static int Discounted(int price, int discount) =>
+        discount >= price ? 0 : price - discount;
+}
+
+static class PriceTheorems
+{
+    [Theorem]
+    static Proof DiscountNeverIncreasesPrice(int price, int discount) =>
+        Prove.That(Spec.Implies(price >= 0 && discount >= 0,
+                                Prices.Discounted(price, discount) <= price))
+             .By(Tactic.Unfold(nameof(Prices.Discounted)), Tactic.Simp(), Tactic.Omega());
+}
 ```
+
+This one is proved (`proved (script)`).
 
 Write the claim as an implication when it only holds for some inputs. A
 theorem with no `Spec.Implies` claims something for *every* `int`, including
@@ -54,35 +68,47 @@ negative ones and `int.MaxValue`.
 
 *M5a.*
 
-A failed proof is a build error with up to three parts:
+A failed proof is a build error (WRT0001) in up to three parts. This is the
+previous guide's theorem with only `price >= 0` as its condition, in a file
+`Pricing.cs` that starts with `using Warrant;` and `namespace Pricing;`:
 
 ```text
-Pricing.cs(40,5): error WRT0001: Theorem 'DiscountNeverIncreasesPrice' could not be proved.
-  omega found a counterexample:
-    price = 0, discount = -1
-  Unsolved goal:
-    price discount : Int32
-    h₁ : 0 ≤ price
-    h₂ : ¬(price ≤ discount)
-    ⊢ price - discount ≤ price
+Pricing.cs(18,75): error WRT0001: Theorem 'PriceTheorems.DiscountNeverIncreasesPrice(int, int)' could not be proved: omega could not prove the goal. Counterexample: price = 0, discount = -1.
+  a possible counterexample may satisfy the constraints
+    0 ≤ b ≤ 2147483647
+    b + 4294967296*c ≥ 1
+    -2147483648 ≤ a ≤ 2147483647
+    a + 4294967296*c ≤ -1
+    0 ≤ a + b + 4294967296*c ≤ 2147483647
+  where
+   a := discount.toInt
+   b := if (price.toInt - discount.toInt) % ↑(2 ^ 32) < (↑(2 ^ 32) + 1) / 2 then (price.toInt - discount.toInt) % ↑(2 ^ 32) else (price.toInt - discount.toInt) % ↑(2 ^ 32) - ↑(2 ^ 32)
+   c := (price.toInt - discount.toInt) / 4294967296
+
+  price discount : Int32
+  ⊢ 0 ≤ price → (if price ≤ discount then 0 else price - discount) ≤ price
 ```
 
-(Here the theorem said only `price >= 0`, and `Discounted` returns
-`discount >= price ? 0 : price - discount`.)
+The location is the tactic that failed, here `Tactic.Omega()`.
 
-- **Counterexample.** If there is one, believe it first. Run the method with
-  those values in a unit test. Usually the claim is missing a condition
-  (here, `discount >= 0`).
-- **Unsolved goal.** Above the line `⊢` are the facts the prover had: the
-  theorem's parameters and the hypotheses it could use (`h₁`, `h₂`, …). Below it
-  is what it still had to show. If a fact you expected is missing from above
-  the line, the proof never learned it: add it to the `Spec.Implies`, to a
-  `Spec.Requires`, or to a contract.
+- **Counterexample.** On the first line, if the engine found one. Believe it
+  first: run the method with those values in a unit test. Usually the claim is
+  missing a condition (here, `discount >= 0`: `Discounted(0, -1)` is 1).
+- **The tactic's explanation.** The indented lines after the first are the
+  failing tactic's own message. For `omega` they are constraints over atoms
+  (`a`, `b`, …) that describe where it could not rule out a failure; an `if`
+  of `%` terms like `b` is how `int` wrap-around looks over `Int`.
+- **Unsolved goal.** The last block. Above the line `⊢` are the facts the
+  prover had: the theorem's parameters and any hypotheses. Below it is what it
+  still had to show; a `Spec.Implies` condition that no `Tactic.Intro` moved
+  above the line appears as `… →`. If a fact you expected is missing, the proof
+  never learned it: add it to the `Spec.Implies` (or, from M6, to a
+  `Spec.Requires` or a contract).
 - **No counterexample, goal looks true.** The tactics weren't strong enough.
   See the next guide.
 
-`warrant explain <unit>` prints the same goal with every intermediate step of
-the tactic script.
+`warrant explain <unit>`, which prints every intermediate step of the tactic
+script, comes with M5b.
 
 ## Get a proof through when the tactics give up
 
@@ -93,15 +119,22 @@ Try these in order:
 1. **Unfold the callees.** `Tactic.Unfold` only unfolds what you name. If the
    goal still mentions a method call, unfold that one too:
    `Tactic.Unfold(nameof(A), nameof(B))`.
-2. **Split on cases.** For a `bool`, enum or closed-set parameter, or a nullable
-   value, `Tactic.Cases(x)` produces one goal per value. Follow it with
-   `Tactic.AllGoals(Tactic.Simp())`.
+2. **Split on cases.** For a `bool`, `[Closed]` enum or closed-set parameter,
+   `Tactic.Cases("x")` produces one goal per value; name the variable with a
+   string. Follow it with `Tactic.AllGoals(Tactic.Simp())`.
 3. **Prove a helper theorem first.** Split a long claim into two `[Theorem]`
    methods and use the first with `Tactic.Apply(nameof(First))` or pass it to
-   simp: `Tactic.Simp(nameof(First))`.
-4. **Use a Lean library lemma.** Anything in Init (and later Mathlib) is
-   available by name: `Tactic.Simp(Lean.Const("Int.add_comm"))`.
-5. **Check the claim is true.** If none of this works, write a few unit tests
+   simp: `Tactic.Simp(nameof(First))`. A theorem cannot name itself.
+4. **Use a Lean library lemma.** A declaration in the semantics bundle is
+   available by name, for example
+   `Tactic.Simp(Lean.Const("Int32.lt_iff_toInt_lt"))`. In M5a that is the
+   semantics library and the part of Init it depends on, not all of Init; the
+   rest comes with M5b's store.
+5. **Raise a budget.** If the theorem fails with WRT0006, it ran out of fuel
+   or time. Give it more with `[Theorem(TacticFuel = …, TimeoutSeconds = …)]`
+   or the project's `WarrantTacticFuel`, `WarrantKernelFuel` and
+   `WarrantTimeoutSeconds`.
+6. **Check the claim is true.** If none of this works, write a few unit tests
    with edge values. Most stuck proofs are of false claims with no small
    counterexample.
 
@@ -182,7 +215,7 @@ casts integers to the enum, mark it `[Closed]`:
 public enum ClaimStatus { Open, Paid, Denied }
 ```
 
-Now `Tactic.Cases(status)` gives exactly three goals (M5a), and Warrant warns
+Now `Tactic.Cases("status")` gives exactly three goals (M5a), and Warrant warns
 (WRT0008) about any integer cast or unboxing conversion to `ClaimStatus`
 anywhere in the project.
 
@@ -275,23 +308,28 @@ zero and checked overflow are all exits that the verifier tracks.
 *M5a.*
 
 C# access rules still apply: a theorem can only call what it can see. Put the
-theorem in the same class. If the class is not `partial`, nest a static class:
+theorem in the same class, or nest a static class for the theorems. The private
+method still needs `[Verified]`:
 
 ```csharp
-internal partial class ReassignmentAlerts
+internal static class ReassignmentAlerts
 {
-    private static bool IsRepeat(Guid? current, Guid? previous, int count) =>
+    [Verified]
+    private static bool IsRepeat(int current, int previous, int count) =>
         count > 0 && current == previous;
 
     static class Theorems
     {
         [Theorem]
-        static Proof FirstIsNeverARepeat(Guid? current, Guid? previous) =>
+        static Proof FirstIsNeverARepeat(int current, int previous) =>
             Prove.That(!IsRepeat(current, previous, 0))
                  .By(Tactic.Unfold(nameof(IsRepeat)), Tactic.Simp());
     }
 }
 ```
+
+This is proved. (The real code this comes from compares `Guid?` values; `Guid`
+and nullable types wait for §12 Q20 and M6.)
 
 `[Theorem]` methods are never emitted into your call graph. You can leave them
 in production code.
@@ -407,7 +445,18 @@ describes the fall-through path, because early exits are where these bugs live.
 *M5a for the task, M5b for the cache.*
 
 `Warrant.Build` fails the build when a required proof fails, so a normal
-`dotnet build` in CI is enough. Two settings matter:
+`dotnet build` in CI is enough. In M5a every build proves every theorem again
+and re-checks it with the kernel: there is no cache to trust. Check the build
+log for the summary line, `Warrant: n verified units, n theorems proved, n not
+proved.`; a project that references `Warrant` without `Warrant.Build`, or turns
+`WarrantEnabled` off, gets warning WRT0011 instead.
+
+To publish the assumptions for reviewers, run
+`warrant verify --csc-args obj/<configuration>/<framework>/warrant.csc.args --report <dir>`
+after the build and keep `report.md` as a build artifact; the build itself does
+not write a report in M5a.
+
+From M5b, a cache serves unchanged proofs, and one setting matters:
 
 ```xml
 <PropertyGroup>
@@ -417,17 +466,20 @@ describes the fall-through path, because early exits are where these bugs live.
 ```
 
 Recheck runs only the kernel, not the tactics, so it costs little compared with
-proving from scratch. Turn it on in CI. Publish `obj/warrant/report.md` as a
-build artifact so reviewers can read the assumptions.
+proving from scratch. Turn it on in CI.
 
 ## Have another kernel check your proofs
 
 *M5a.*
 
 ```sh
-warrant export --unit Approvals.Approve --out approve.ndjson
+warrant verify src/Payouts --out payouts.ndjson
 ```
 
-The file holds the translated method, the theorem and its proof, with every
-declaration they depend on, in lean4export format. Lean's own kernel (or any
-kernel in the Lean kernel arena) can check it without trusting Warrant.
+The file holds the semantics bundle and every declaration Warrant admitted
+(translated methods, their decrease theorems and equation lemmas, and proved
+theorems with their proofs) in lean4export format. Lean's own kernel (or any
+kernel in the Lean kernel arena) can check it without trusting Warrant;
+`tools/lean-replay` runs Lean's kernel on it, as `scripts/cross-check.sh`
+does. A `warrant export --unit` that writes one unit's certificate is not
+built yet.

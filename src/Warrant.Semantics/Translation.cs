@@ -47,20 +47,39 @@ public sealed class TranslationException : Exception
 /// </summary>
 public sealed class TheoremShell
 {
-    internal TheoremShell(Name name, Condition statement)
+    internal TheoremShell(Name name, Condition statement, VirList<TacticNode>? script, VirBudget? budget, Condition? claim = null)
     {
         Name = name;
         Statement = statement;
+        Script = script;
+        Budget = budget;
+        Claim = claim;
     }
 
     /// <summary>The theorem's name.</summary>
     public Name Name { get; }
 
-    /// <summary>The theorem's type: the statement's proposition <c>P</c>.</summary>
+    /// <summary>The theorem's type: the statement's proposition <c>P</c>, closed over the theorem's parameters by <c>∀</c>.</summary>
     public Expr Type => Statement.Prop;
 
-    /// <summary>The statement: the proposition <c>P</c> and its <c>Decidable P</c> instance <c>D</c>, for the <c>decide</c> proof.</summary>
+    /// <summary>
+    /// The statement: the proposition <c>P</c> and its <c>Decidable P</c> instance <c>D</c>, for the <c>decide</c> proof; a
+    /// quantified statement has no instance (M5a KTD17).
+    /// </summary>
     public Condition Statement { get; }
+
+    /// <summary>The proof script from <c>.By(...)</c>, which the engine runs to find a proof; null when the theorem has none.</summary>
+    public VirList<TacticNode>? Script { get; }
+
+    /// <summary>The theorem's budget overrides from <c>[Theorem(...)]</c>; null when it has none.</summary>
+    public VirBudget? Budget { get; }
+
+    /// <summary>
+    /// For a theorem with parameters whose claim is decidable, the claim and its <c>Decidable</c> instance as functions
+    /// of the parameters, <c>fun ps => P</c> and <c>fun ps => D</c>; null otherwise. It is never part of the declaration:
+    /// the engine's counterexample search evaluates <c>decide</c> of it at concrete values (M5a KTD25).
+    /// </summary>
+    public Condition? Claim { get; }
 
     /// <summary>The theorem declaration with this exact name and type, and <paramref name="proof"/> as its value.</summary>
     /// <param name="proof">The proof term; the kernel decides whether it proves <see cref="Type"/>.</param>
@@ -75,7 +94,14 @@ public sealed class TheoremShell
 /// <summary>One translated VIR unit.</summary>
 public sealed class TranslatedUnit
 {
-    internal TranslatedUnit(string key, VirUnitKind kind, Name name, string displayName, IReadOnlyList<KernelDeclaration> declarations, TheoremShell? theorem)
+    internal TranslatedUnit(
+        string key,
+        VirUnitKind kind,
+        Name name,
+        string displayName,
+        IReadOnlyList<KernelDeclaration> declarations,
+        TheoremShell? theorem,
+        RecursiveDefinition? recursion = null)
     {
         Key = key;
         Kind = kind;
@@ -83,6 +109,7 @@ public sealed class TranslatedUnit
         DisplayName = displayName;
         Declarations = [.. declarations];
         Theorem = theorem;
+        Recursion = recursion;
     }
 
     /// <summary>The unit's documentation-comment ID.</summary>
@@ -98,13 +125,20 @@ public sealed class TranslatedUnit
     public string DisplayName { get; }
 
     /// <summary>
-    /// The declarations to admit, in order: one <see cref="DefinitionDecl"/> for a function; for a type, its
+    /// The declarations to admit, in order: one <see cref="DefinitionDecl"/> for a function (for a recursive one, after the
+    /// theorems of <see cref="Recursion"/>); for a type, its
     /// <see cref="InductiveDecl"/> and then <c>$eq</c> or <c>$index</c>, or an open enum's definitions; empty for a theorem.
     /// </summary>
     public ImmutableArray<KernelDeclaration> Declarations { get; }
 
     /// <summary>A theorem's statement; null for other units.</summary>
     public TheoremShell? Theorem { get; }
+
+    /// <summary>
+    /// For a recursive method (M5a KTD14, KTD15), its decrease theorems, to admit before <see cref="Declarations"/>, and its
+    /// equation lemma, to admit after them; null for other units.
+    /// </summary>
+    public RecursiveDefinition? Recursion { get; }
 }
 
 /// <summary>The translation of a set of units (docs/m4/05): declarations in dependency order, and a display-name table.</summary>

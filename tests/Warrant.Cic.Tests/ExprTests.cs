@@ -132,4 +132,55 @@ public class ExprTests
         Assert.Equal("Sort u+1", Expr.Sort(Level.Succ(Level.Param(Name.Parse("u")))).ToString());
         Assert.Equal("Prop", Expr.Prop.ToString());
     }
+
+    [Fact]
+    public void MVarsCompareByIdentity()
+    {
+        var m = Expr.MVar(new MVarId(Name.Parse("_uniq.1")));
+        var n = Expr.MVar(new MVarId(Name.Parse("_uniq.2")));
+        Assert.Equal(m, Expr.MVar(new MVarId(Name.Parse("_uniq.1"))));
+        Assert.True(m.AlphaEquals(Expr.MVar(new MVarId(Name.Parse("_uniq.1")))));
+        Assert.Equal(m.GetHashCode(), Expr.MVar(new MVarId(Name.Parse("_uniq.1"))).GetHashCode());
+        Assert.NotEqual(m, n);
+        Assert.False(m.AlphaEquals(n));
+        Assert.NotEqual(m.GetHashCode(), n.GetHashCode());
+        Assert.NotEqual<Expr>(m, Expr.FVar(new FVarId(Name.Parse("_uniq.1"))));
+        Assert.NotEqual(m.GetHashCode(), Expr.FVar(new FVarId(Name.Parse("_uniq.1"))).GetHashCode());
+        Assert.Equal(ExprKind.MVar, m.Kind);
+        Assert.Equal("(Nat.succ ?_uniq.1)", Expr.App(Expr.Const(Name.Parse("Nat.succ")), m).ToString());
+
+        var u = Level.MVar(new LMVarId(Name.Parse("_uniq.3")));
+        Assert.Equal(u, Level.MVar(new LMVarId(Name.Parse("_uniq.3"))));
+        Assert.NotEqual(u, Level.MVar(new LMVarId(Name.Parse("_uniq.4"))));
+        Assert.NotEqual(u, Level.Param(Name.Parse("_uniq.3")));
+        Assert.NotEqual(u.GetHashCode(), Level.Param(Name.Parse("_uniq.3")).GetHashCode());
+        Assert.Equal("max ?_uniq.3 1", Level.Max(u, Level.One).ToString());
+    }
+
+    [Fact]
+    public void MVarFlagsPropagate()
+    {
+        var m = Expr.MVar(new MVarId(Name.Parse("_uniq.1")));
+        var u = Level.MVar(new LMVarId(Name.Parse("_uniq.2")));
+        Assert.True(m.HasExprMVar);
+        Assert.False(m.HasLevelMVar || m.HasFVar || m.HasLevelParam || m.HasLooseBVars);
+        Assert.True(Expr.App(Nat, m).HasExprMVar);
+        Assert.True(Expr.Lam(X, m, Expr.BVar(0)).HasExprMVar);
+        Assert.True(Expr.Forall(X, Nat, m).HasExprMVar);
+        Assert.True(Expr.Let(X, Nat, m, Expr.BVar(0)).HasExprMVar);
+        Assert.True(Expr.MData(KVMap.Empty, m).HasExprMVar);
+        Assert.True(Expr.Proj(Name.Parse("Prod"), 0, m).HasExprMVar);
+        Assert.False(Expr.App(Nat, Nat).HasExprMVar);
+
+        Assert.True(u.HasMVar);
+        Assert.False(u.HasParam);
+        Assert.True(Level.Succ(Level.Max(Level.Zero, u)).HasMVar);
+        Assert.True(Level.IMax(Level.One, u).HasMVar);
+        Assert.False(Level.Param(Name.Parse("v")).HasMVar);
+        Assert.True(Expr.Sort(Level.Succ(u)).HasLevelMVar);
+        Assert.True(Expr.Const(Name.Parse("List"), u).HasLevelMVar);
+        Assert.True(Expr.Forall(X, Expr.Sort(u), Expr.Prop).HasLevelMVar);
+        Assert.False(Expr.Sort(Level.Succ(u)).HasExprMVar);
+        Assert.False(Expr.Type.HasLevelMVar);
+    }
 }

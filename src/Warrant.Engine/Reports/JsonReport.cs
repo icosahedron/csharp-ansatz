@@ -61,6 +61,15 @@ public static class JsonReport
                     w.WriteEndObject();
                 }
                 w.WriteEndArray();
+                if (!u.Global.IsEmpty)
+                {
+                    w.WriteStartArray("global");
+                    foreach (var g in u.Global)
+                    {
+                        w.WriteStringValue(g);
+                    }
+                    w.WriteEndArray();
+                }
                 w.WriteEndObject();
             }
             w.WriteEndArray();
@@ -94,7 +103,10 @@ public static class JsonReport
                     a.GetProperty("subject").GetString()!,
                     a.GetProperty("from").GetString()!,
                     a.GetProperty("inherited").GetBoolean(),
-                    a.GetProperty("text").GetString()!)).ToImmutableArray()));
+                    a.GetProperty("text").GetString()!)).ToImmutableArray())
+            {
+                Global = u.TryGetProperty("global", out var global) ? [.. global.EnumerateArray().Select(g => g.GetString()!)] : [],
+            });
             return new AssumptionReport(
                 root.GetProperty("kernel").GetString()!,
                 root.GetProperty("bundle").GetString()!,

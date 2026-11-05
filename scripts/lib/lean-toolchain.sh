@@ -3,7 +3,11 @@
 #   source scripts/lib/lean-toolchain.sh
 #   ensure_lean_toolchain WORKDIR     # puts lean/lake on PATH
 #
-# If LEAN_TOOLCHAIN_BIN is set, that directory is used instead of downloading.
+# The toolchain is, in order of preference:
+#   1. LEAN_TOOLCHAIN_BIN, when set (an override);
+#   2. elan's Lean $LEAN_VERSION toolchain, when installed (ELAN_HOME, default ~/.elan), which needs no download
+#      and is the only option on Windows, where the Linux build below cannot run;
+#   3. the Linux release, downloaded once into WORKDIR and unzipped.
 LEAN_VERSION="4.35.0"
 LEAN4EXPORT_COMMIT="5a9a355dc6c5fd82b69058d433e2ae2e8dfbf8fe"   # lean4export commit that bumps its toolchain to Lean v4.35.0
 
@@ -12,6 +16,11 @@ ensure_lean_toolchain() {
   mkdir -p "$workdir"
   if [ -n "${LEAN_TOOLCHAIN_BIN:-}" ]; then
     export PATH="$LEAN_TOOLCHAIN_BIN:$PATH"
+    return
+  fi
+  local elan_bin="${ELAN_HOME:-$HOME/.elan}/toolchains/leanprover--lean4---v$LEAN_VERSION/bin"
+  if [ -x "$elan_bin/lean" ] || [ -x "$elan_bin/lean.exe" ]; then
+    export PATH="$elan_bin:$PATH"
     return
   fi
   if [ ! -x "$workdir/lean-$LEAN_VERSION-linux/bin/lean" ]; then

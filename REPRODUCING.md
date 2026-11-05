@@ -116,6 +116,34 @@ and the design is explained chapter by chapter in [docs/m4/](docs/m4/README.md).
    bundle and every translated declaration and proved theorem, and Lean's
    kernel checks that file in `scripts/cross-check.sh`.
 
+### Milestone 5a: proofs about every input, in the build
+
+The plan is [docs/plans/2026-11-03-0838-feat-m5a-meta-tactics-plan.md](docs/plans/2026-11-03-0838-feat-m5a-meta-tactics-plan.md),
+and the design is explained chapter by chapter in [docs/m5a/](docs/m5a/README.md).
+
+1. **Port Lean's own Meta layer, function by function.** `Warrant.Meta`
+   (metavariable contexts, `whnf`, `isDefEq`, `inferType`, discrimination
+   trees, instance resolution, the tactics, `simp` and `omega`) follows Lean
+   4.35.0's sources, so it builds the proofs Lean would. The kernel rejects
+   any term with a metavariable, so the port stays outside the trusted base.
+2. **Export what the bundle lacks from Lean itself.** `tools/warrant-attrs`
+   exports the simp, instance, reducibility and matcher attributes of the
+   bundle's constants as the committed sidecar
+   `tests/data/warrant-attributes.ndjson.gz`, which names the bundle's hash.
+3. **Use Lean as the oracle.** The discrimination-tree keys Warrant computes
+   are compared with the keys Lean exported for all 346 simp lemmas, and the
+   failure messages of `omega` and the other tactics are compared with Lean's
+   text for the tested goals.
+4. **Write the corpus first.** `tests/corpus/m5a/` holds the exit criterion as
+   accepted, refuted and rejected C#.
+5. **Run the real build.** The build integration tests pack the `Warrant` and
+   `Warrant.Build` packages, consume them from sample projects, and build them
+   with `dotnet build`, Visual Studio 2026's MSBuild and Visual Studio 2022's
+   MSBuild.
+6. **Compare with other kernels.** `scripts/cross-kernel.sh` puts Warrant's
+   verdicts next to Lean's, Ansatz's and the lean-kernel-arena's published
+   ones; the results are in [docs/kernel.md](docs/kernel.md).
+
 ### Notes on the environment
 
 - The cloud container had no .NET; the SDK was installed with Microsoft's
@@ -138,6 +166,8 @@ and the design is explained chapter by chapter in [docs/m4/](docs/m4/README.md).
 | git | cloning | |
 | Python 3 | the independent count check (optional) | standard library only |
 | curl, unzip, ~4 GB of disk | exporting Lean libraries (optional) | the Lean toolchain is about 3 GB unpacked |
+| Visual Studio 2026 and 2022 | the build integration tests on Visual Studio's MSBuild (optional) | found with `vswhere`; a missing one is reported as not run |
+| Java and the Clojure CLI, an Ansatz checkout | the Ansatz column of the cross-kernel harness (optional) | without them that column says SKIPPED |
 
 Installing .NET on Linux without root:
 
@@ -158,13 +188,15 @@ dotnet build
 dotnet test
 ```
 
-Expected result: **590 tests pass and four are skipped**. The skipped ones are
+Expected result: **976 tests pass and 17 are skipped**. The skipped ones are
 opt-in tests that need external files or tools: `AcceptsFullInit` and
 `WritesFixturesForLean` (the kernel's Lean cross-checks), the export-script test
-(needs `LEAN_TOOLCHAIN_BIN`), and the differential-cost measurement (needs
-`WARRANT_DIFFERENTIAL_COST`). By project: 31 Cic, 36 Vir, 208 Extraction,
-65 Semantics, 42 Lean4Export, 85 Kernel, 64 Engine and 7 Cli. No Lean toolchain
-is needed; the whole suite takes about a minute.
+(needs `LEAN_TOOLCHAIN_BIN`), the two differential-cost measurements (need
+`WARRANT_DIFFERENTIAL_COST`), and the 12 build tests that pack the packages and
+run real builds (need `WARRANT_BUILD_INTEGRATION=1`, step 7b). By project:
+33 Cic, 43 Vir, 315 Extraction, 82 Semantics, 117 Meta, 42 Lean4Export,
+104 Kernel, 175 Engine, 29 Cli and 36 Build. No Lean toolchain is needed; the
+whole suite takes about two minutes.
 
 ### 3. Run the kernel on the committed corpus
 
@@ -267,15 +299,27 @@ scripts/export-semantics.sh /tmp/bundle.ndjson.gz   # or anywhere else
 ```
 
 The script uses the same Lean 4.35.0 toolchain and lean4export `5a9a355` as
-step 5 (set `LEAN_TOOLCHAIN_BIN` on Windows), builds the library with
-`lake build`, and exports the 74 roots in `lean/bundle-roots.txt` with their
-dependency closure. It fails if a root does not exist or if anything depends on
-`sorryAx`. The output is deterministic: with an unchanged `lean/`, it is
-byte-identical to the committed file. Check the counts independently with:
+step 5 (on Windows, see `scripts/lib/lean-toolchain.sh` for how the toolchain
+is found), builds the library with `lake build`, and exports the 394 roots in
+`lean/bundle-roots.txt` with their dependency closure. It exports with
+`--export-mdata`, so the `no_index` markers simp needs survive. It fails if a
+root does not exist or if anything depends on `sorryAx`. The output is
+deterministic: with an unchanged `lean/`, it is byte-identical to the
+committed file. Check the counts independently with:
 
 ```sh
-python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 2,483 constants
+python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 2,835 constants
 ```
+
+The attribute sidecar that tactics read is exported from the same library and
+bundle, after the bundle:
+
+```sh
+scripts/export-attributes.sh                    # writes tests/data/warrant-attributes.ndjson.gz
+```
+
+It is deterministic too, and its header records the bundle's SHA-256, which
+`warrant verify` checks.
 
 ### 7. Translate C# with `warrant translate`
 
@@ -291,26 +335,91 @@ The verb compiles every `.cs` file under the directory, translates the
 diagnostics. On `accepted/` it ends with:
 
 ```text
-65 unit(s): 32 translated, 33 proved, 0 false, 0 undecided, 0 failed, 0 skipped; 0 error(s), 0 warning(s)
+79 unit(s): 46 translated, 33 proved, 0 false, 0 unproved, 0 undecided, 0 internal error(s), 0 failed, 0 skipped; 0 error(s), 0 warning(s)
 ```
 
 On `refuted/` it reports both theorems as false, for example:
 
 ```text
-tests/corpus/m4/refuted/Increment.cs(12,18): error WRT0001: Theorem 'NeverWraps' is false.
+tests/corpus/m4/refuted/Increment.cs(12,18): error WRT0001: Theorem 'Increments.NeverWraps()' is false.
   Claim:  Increment(int.MaxValue) > int.MaxValue
   Values: Increment(int.MaxValue) = -2147483648, int.MaxValue = 2147483647
 ```
 
 `--report` writes the assumption report as Markdown, and `--out` writes the
 bundle followed by every admitted declaration as lean4export NDJSON, which
-`tools/lean-replay` accepts (2,576 constants for `accepted/`). Running
+`tools/lean-replay` accepts (2,956 constants for `accepted/`). Running
 `rejected/` as one directory compiles `rejected/CheckedProject.cs` without
 overflow checking, so its members translate there; the corpus tests compile
 that file on its own with overflow checking on, as `expected.json` says. The
 exit codes are 0 when everything
 translated and every theorem was proved, 1 otherwise, and 2 for bad arguments
 or unreadable input.
+
+### 7a. Prove theorems with `warrant verify`
+
+```sh
+warrant verify tests/corpus/m5a/accepted                        # exit 0
+warrant verify tests/corpus/m5a/refuted                         # exit 1, WRT0001
+warrant verify tests/corpus/m5a/rejected                        # exit 1, WRT0002 and WRT0004
+warrant verify tests/corpus/m5a/accepted --report report --out m5a.ndjson
+```
+
+`warrant verify` is M5a's verb: it compiles, extracts, translates and proves,
+running each theorem's `.By(...)` script. On a directory it compiles every
+`.cs` file under it as `translate` does. On `accepted/` it ends with:
+
+```text
+Warrant: 20 verified units, 7 theorems proved, 0 not proved.
+```
+
+On `refuted/` it reports `AlwaysLarger` with the counterexample
+`x = 2147483647` and `Bad`'s decrease obligation, each with `omega`'s
+constraints and the goal ([docs/m5a/README.md](docs/m5a/README.md) shows the
+output). `--report <dir>` writes `report.md` and `report.json`; `--out` writes
+the bundle and every admitted declaration (2,879 constants for `accepted/`).
+
+The build runs the same verb with `--csc-args`, the compiler's own argument
+list, which the `Warrant.Build` task writes to `obj/…/warrant.csc.args`
+([docs/m5a/07](docs/m5a/07-verify-and-build.md)). The options and exit codes
+are in [the reference](docs/proving/reference.md#cli).
+
+### 7b. Build integration tests
+
+The `Warrant.Build.Tests` project packs the `Warrant` and `Warrant.Build`
+packages and builds sample projects that reference them. These tests are
+opt-in, because they run real builds:
+
+```sh
+WARRANT_BUILD_INTEGRATION=1 dotnet test tests/Warrant.Build.Tests
+```
+
+They build the `Increment` sample with `dotnet build`, Visual Studio 2026's
+`MSBuild.exe` (a `net10.0` sample) and Visual Studio 2022's `MSBuild.exe` (a
+`net8.0` sample pinned to SDK 9 by its own `global.json`, because SDK 10 needs
+MSBuild 18), and expect the same WRT0001 diagnostics, with goal and
+counterexample, from each. They find Visual Studio with `vswhere`; a version
+that is not installed is reported as not run, never as passed. Other tests
+cover a green build, a second build, design-time builds, multi-targeting, an
+`#if` that differs between frameworks, a missing `Warrant.Build` (WRT0011),
+a library consumed by an application, and code that needs the SDK's regex
+source generator, which the CLI runs.
+
+How Visual Studio's Error List shows a multi-line WRT0001 is checked by hand,
+in the IDE; that check has not been done yet.
+
+### 7c. Long property runs
+
+The differential tests are FsCheck properties with a pinned seed. For a
+longer search, 10,000 cases per function:
+
+```sh
+WARRANT_PBT_LONG=1 dotnet test --filter Differential
+```
+
+A failure prints `Replay with WARRANT_PBT_SEED=seed,gamma`; set that variable
+to replay it. `WARRANT_PBT_SEED=random` draws a new seed, and
+`WARRANT_PBT_COUNT` sets the count ([tests/Warrant.Engine.Tests/Differential/README.md](tests/Warrant.Engine.Tests/Differential/README.md)).
 
 ### 8. Cross-check against Lean's own kernel
 
@@ -319,8 +428,9 @@ scripts/cross-check.sh
 WARRANT_INIT_EXPORT=$PWD/init.ndjson scripts/cross-check.sh   # include full Init
 ```
 
-The script uses the same Lean 4.35.0 toolchain (downloaded if needed; set
-`LEAN_TOOLCHAIN_BIN` to reuse one) and builds
+The script uses the same Lean 4.35.0 toolchain (downloaded if needed, or set
+`LEAN_TOOLCHAIN_BIN` to reuse one; on Windows, see
+`scripts/lib/lean-toolchain.sh` for how the toolchain is found) and builds
 [`tools/lean-replay`](tools/lean-replay/README.md), a small Lean program that
 checks an NDJSON file with Lean's kernel. For every corpus file it compares Lean's
 verdict with Warrant's. It then has Lean re-check what Warrant admitted
@@ -348,6 +458,29 @@ all verdicts agree
 Lean declines the original `Nat.add_succ` only because its parser reads format
 3.1.0. Warrant's export of it is 3.1.0, and Lean accepts that. With the full
 Init export included, Lean accepts all 59,349 constants Warrant writes.
+
+### 8a. Compare with other kernels
+
+```sh
+scripts/cross-kernel.sh
+```
+
+The harness puts one verdict per kernel on each row: Lean's kernel (through
+`tools/lean-replay`), Warrant's, Ansatz's `arena-check`, and the verdicts the
+lean-kernel-arena publishes for the official kernel, nanoda and lean4lean. It
+downloads the arena's tests and `results.json` at a recorded commit, and skips
+any test whose SHA-256 does not match. It exits 1 only when Warrant
+contradicts an expected outcome or Lean rejects something Warrant wrote.
+
+The Ansatz column needs Java, the Clojure CLI (`clojure` on `PATH`; on Windows,
+deps.clj installed as `clojure.exe` works) and an Ansatz checkout built once
+with `clojure -T:build javac`, in `../ansatz` or wherever `ANSATZ_DIR` points.
+Without them, that column says SKIPPED and the rest still runs. A full run
+takes about an hour, most of it Ansatz; `ARENA_ONLY=1` runs only the arena
+tests, and `KERNEL_TIMEOUT` sets the per-kernel timeout in seconds (900 by
+default). The table is also written to `cross-kernel/verdicts.tsv` in the work
+directory. The recorded results and every disagreement are in
+[docs/kernel.md](docs/kernel.md).
 
 ### 9. Re-derive the port from its sources (optional)
 
@@ -381,15 +514,18 @@ export, and memory use that has not been measured at that scale.
 | `src/Warrant.Cic` | CIC terms: names, levels, expressions, constants, declarations |
 | `src/Warrant.Lean4Export` | lean4export reader (3.0.0, 3.1.0) and writer (3.1.0) |
 | `src/Warrant.Kernel` | the type-checking kernel and the export checker |
-| `src/Warrant` | the user package: `[Verified]`, `[Theorem]`, `[Closed]`, `Prove`, `Spec` |
+| `src/Warrant` | the user package: `[Verified]`, `[Theorem]`, `[Closed]`, `Prove`, `Spec`, `Tactic`, `Lean`, and the WRT0011 check in `build/` |
 | `src/Warrant.Vir` | VIR: the model, its canonical JSON encoding and its hashes |
 | `src/Warrant.Frontend` | the Roslyn compilation that extraction reads |
 | `src/Warrant.Extraction` | C# (Roslyn `IOperation`) to VIR, and the M4 subset checks |
 | `src/Warrant.Semantics` | VIR to CIC: types, definitions and theorem statements |
-| `src/Warrant.Engine` | admission, proofs, read-back, assumption reports and NDJSON output |
-| `src/Warrant.Cli` | the `warrant` tool (`check`, `stats`, `export`, `translate`) |
+| `src/Warrant.Meta` | the untrusted Meta layer: metavariables, reduction and unification, the attribute sidecar, the tactics, `simp` and `omega` |
+| `src/Warrant.Engine` | admission, proofs, proof scripts, counterexamples, read-back, assumption reports and NDJSON output |
+| `src/Warrant.Cli` | the `warrant` tool (`check`, `stats`, `export`, `translate`, `verify`) |
+| `src/Warrant.Build` | the MSBuild task and targets that run `warrant verify` after `CoreCompile` |
 | `lean/` | the semantics library, proved in Lean, and the bundle roots |
 | `tools/lean-replay` | Lean program: check an NDJSON file with Lean's own kernel |
-| `tests/` | unit, corpus and soundness tests; `tests/data` is the kernel corpus and the semantics bundle, `tests/corpus/m4` the C# corpus |
-| `scripts/` | `export-lean-library.sh`, `export-semantics.sh`, `cross-check.sh`, `count-export.py`, shared `lib/lean-toolchain.sh` |
+| `tools/warrant-attrs` | Lean program: export the attribute sidecar |
+| `tests/` | unit, corpus and soundness tests; `tests/data` is the kernel corpus, the semantics bundle and the attribute sidecar, `tests/corpus/m4` and `tests/corpus/m5a` the C# corpora |
+| `scripts/` | `export-lean-library.sh`, `export-semantics.sh`, `export-attributes.sh`, `cross-check.sh`, `cross-kernel.sh`, `count-export.py`, shared `lib/lean-toolchain.sh` and `lib/arena.sh` |
 | `docs/` | design, kernel notes, conversation history |

@@ -12,10 +12,12 @@ internal static class Inductive
     {
         foreach (var t in d.Types)
         {
+            Kernel.CheckNoMVar(t.Name, t.Type);
             Kernel.CheckNoFVar(t.Name, t.Type);
             CheckNoNestedAux(t.Name, t.Type);
             foreach (var c in t.Constructors)
             {
+                Kernel.CheckNoMVar(c.Name, c.Type);
                 Kernel.CheckNoFVar(c.Name, c.Type);
                 CheckNoNestedAux(c.Name, c.Type);
             }
@@ -264,6 +266,7 @@ internal static class Inductive
                 var type = indType.Type;
                 _env.CheckName(indType.Name);
                 _env.CheckName(KernelNames.RecName(indType.Name));
+                Kernel.CheckNoMVar(indType.Name, type);
                 Kernel.CheckNoFVar(indType.Name, type);
                 Tc().Check(type, _lparams);
                 _nindices.Add(0);
@@ -461,6 +464,7 @@ internal static class Inductive
                     }
                     var t = cnstr.Type;
                     _env.CheckName(n);
+                    Kernel.CheckNoMVar(n, t);
                     Kernel.CheckNoFVar(n, t);
                     Tc().Check(t, _lparams);
                     int i = 0;

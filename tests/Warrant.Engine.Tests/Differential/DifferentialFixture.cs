@@ -57,32 +57,38 @@ public sealed class DifferentialFixture : IDisposable
     /// </summary>
     internal FunctionRun Check(ExtractedUnit unit, IReadOnlyList<object?[]> inputs)
     {
+        var check = Checker(unit);
+        var watch = Stopwatch.StartNew();
+        var disagreements = KernelThread.Run(() => inputs.Select(check).OfType<string>().ToList());
+        return new FunctionRun(inputs.Count, disagreements, watch.Elapsed);
+    }
+
+    /// <summary>
+    /// The check of one input of a translated function: null if the model agrees with the CLR, else a message with both
+    /// values. The returned function must run on a kernel thread.
+    /// </summary>
+    internal Func<object?[], string?> Checker(ExtractedUnit unit)
+    {
         Assert.IsType<TranslatedOutcome>(Run.Find(unit.Key));
         var method = Assembly.MethodOf(unit.Unit);
         var types = ModelCheck.ParameterTypes(unit.Unit);
         var returns = unit.Unit.Returns!;
-        var calls = inputs.Select(args =>
+        return args =>
         {
             var description = $"{unit.DisplayName}({string.Join(", ", args.Select((a, i) => Model.Values.Display(types[i], a)))})";
+            object? result;
             try
             {
-                return (args, description, Result: CorpusAssembly.Invoke(method, args), Error: (Exception?)null);
+                result = CorpusAssembly.Invoke(method, args);
             }
 #pragma warning disable CA1031 // Reported as a disagreement: an accepted function must not throw on non-null inputs.
             catch (Exception ex)
 #pragma warning restore CA1031
             {
-                return (args, description, Result: null, Error: ex);
+                return $"{description}: the CLR threw {ex.GetType().Name}: {ex.Message}";
             }
-        }).ToList();
-        var watch = Stopwatch.StartNew();
-        var disagreements = KernelThread.Run(() => calls
-            .Select(c => c.Error is { } error
-                ? $"{c.description}: the CLR threw {error.GetType().Name}: {error.Message}"
-                : Model.Disagreement(c.description, returns, Model.Application(unit.Unit, c.args), c.Result))
-            .OfType<string>()
-            .ToList());
-        return new FunctionRun(calls.Count, disagreements, watch.Elapsed);
+            return Model.Disagreement(description, returns, Model.Application(unit.Unit, args), result);
+        };
     }
 
     public void Dispose() => Assembly.Dispose();

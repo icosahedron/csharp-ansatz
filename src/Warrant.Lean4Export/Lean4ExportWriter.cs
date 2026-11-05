@@ -426,6 +426,8 @@ public sealed class Lean4ExportWriter : IDisposable
                 });
                 break;
             }
+            case LevelKind.MVar:
+                throw new ArgumentException($"Universe metavariable '?{level.MVarId}' cannot be exported: the export format has no metavariables.");
             default:
                 throw new InvalidOperationException($"Unexpected level {level}.");
         }
@@ -480,6 +482,9 @@ public sealed class Lean4ExportWriter : IDisposable
         return false;
     }
 
+    private static ArgumentException MVarNotExportable(MVarExpr m) =>
+        new($"Metavariable '?{m.Id}' cannot be exported: the export format has no metavariables.");
+
     private void PrepareLocal(Expr e)
     {
         switch (e)
@@ -503,6 +508,8 @@ public sealed class Lean4ExportWriter : IDisposable
             case ProjExpr p:
                 EmitName(p.TypeName);
                 break;
+            case MVarExpr m:
+                throw MVarNotExportable(m);
         }
     }
 
@@ -530,6 +537,8 @@ public sealed class Lean4ExportWriter : IDisposable
             case ProjExpr p:
                 _work.Push((p.Struct, false));
                 break;
+            case MVarExpr:
+                break; // a leaf; PrepareLocal has already refused it
         }
     }
 
@@ -677,6 +686,8 @@ public sealed class Lean4ExportWriter : IDisposable
             }
             case FVarExpr f:
                 throw new ArgumentException($"Free variable '{f.Id}' cannot be exported: exported terms must be closed.");
+            case MVarExpr m:
+                throw MVarNotExportable(m);
             default:
                 throw new ArgumentException($"Unsupported expression kind {e.Kind}.");
         }

@@ -60,9 +60,26 @@ internal static class Init
     public static readonly Expr Int32DecLe = C("Int32.decLe");
     public static readonly Expr Int64DecLt = C("Int64.decLt");
     public static readonly Expr Int64DecLe = C("Int64.decLe");
+    public static readonly Expr Gt = C("GT.gt", Level.Zero);
+    public static readonly Expr Ge = C("GE.ge", Level.Zero);
+
+    public static readonly Expr Exists = C("Exists", Level.One);
 
     public static readonly Expr Int32ToInt64 = C("Int32.toInt64");
     public static readonly Expr Int64ToInt32 = C("Int64.toInt32");
+
+    // Well-founded recursion (M5a KTD14): every recursive method's types live in Type, so each level is 1.
+    public static readonly Expr Dite = C("dite", Level.One);
+    public static readonly Expr NatFix = C("WellFounded.Nat.fix", Level.One, Level.One);
+    public static readonly Expr NatFixEq = C("WellFounded.Nat.fix_eq", Level.One, Level.One);
+    public static readonly Expr InvImage = C("InvImage", Level.One, Level.One);
+    public static readonly Expr PSigma = C("PSigma", Level.One, Level.One);
+    public static readonly Expr PSigmaMk = C("PSigma.mk", Level.One, Level.One);
+    public static readonly Name PSigmaName = Name.Parse("PSigma");
+    public static readonly Expr IntToNat = C("Int.toNat");
+    public static readonly Expr Int32ToInt = C("Int32.toInt");
+    public static readonly Expr Int64ToInt = C("Int64.toInt");
+    public static readonly Expr LtNat = C("instLTNat");
 
     public static readonly Expr BoolAnd = C("Bool.and");
     public static readonly Expr BoolOr = C("Bool.or");

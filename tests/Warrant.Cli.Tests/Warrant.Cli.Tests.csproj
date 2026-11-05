@@ -18,5 +18,11 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\corpus\m4\**\*" LinkBase="corpus\m4" CopyToOutputDirectory="PreserveNewest" />
+    <!-- A Csc argument file and the project files it names (plan M5a U12); its sources are data, not this project's code. -->
+    <Compile Remove="cscargs\**" />
+    <None Remove="cscargs\**" />
+    <None Include="cscargs\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Linked, not referenced: Warrant.TestSupport brings the Warrant package's Warrant.dll (KTD4). -->
+    <Compile Include="..\Warrant.TestSupport\SourceGeneratorAssemblies.cs" Link="SourceGeneratorAssemblies.cs" />
   </ItemGroup>
 </Project>

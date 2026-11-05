@@ -43,7 +43,7 @@ public static class MarkdownReport
                 }
             }
             sb.Append("  Assumed (global):\n");
-            foreach (var g in report.Global)
+            foreach (var g in unit.Global.Concat(report.Global))
             {
                 sb.Append("    - ").Append(g).Append('\n');
             }

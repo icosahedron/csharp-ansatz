@@ -14,7 +14,7 @@ internal static class Cli
 {
     private const string Usage = """
         usage:
-          warrant check <export.ndjson[.gz]> [--fuel N] [--admit-rejected] [--quiet]
+          warrant check <export.ndjson[.gz]> [--fuel N] [--admit-rejected] [--quiet] [--slowest N]
           warrant stats <export.ndjson[.gz]>
           warrant export <export.ndjson[.gz]> <output.ndjson> [--fuel N] [--quiet]
           warrant translate <directory> [--out <file.ndjson>] [--report <file.md>] [--check-overflow] [--bundle <path>]
@@ -25,6 +25,8 @@ internal static class Cli
                 --fuel N          step budget per type checker (default 100000000)
                 --admit-rejected  keep going after a rejection by admitting it unchecked
                 --quiet           print only the summary
+                --slowest N       also print the N declarations that took longest to check, with the time and
+                                  the memory allocated since the previous result (reading included)
         stats   prints record counts without checking
         export  checks the file, then writes what the kernel admitted (its own generated
                 constructors, recursors and quotient constants) as lean4export 3.1.0, so another
@@ -99,6 +101,7 @@ internal static class Cli
     {
         long fuel = KernelLimits.Corpus.Fuel;
         bool admitRejected = false, quiet = false;
+        int slowest = 0;
         for (int i = 0; i < options.Length; i++)
         {
             switch (options[i])
@@ -111,6 +114,9 @@ internal static class Cli
                     break;
                 case "--quiet":
                     quiet = true;
+                    break;
+                case "--slowest" when i + 1 < options.Length:
+                    slowest = int.Parse(options[++i], NumberStyles.None, CultureInfo.InvariantCulture);
                     break;
                 default:
                     Console.Error.WriteLine($"unknown option '{options[i]}'{Environment.NewLine}{Usage}");
@@ -125,8 +131,25 @@ internal static class Cli
         var checker = new ExportChecker(env, KernelLimits.Corpus with { Fuel = fuel }, admitRejected);
         int accepted = 0, rejected = 0, declined = 0;
         CheckResult? firstFailure = null;
+        // The cost of each result: its checking time, and the memory the checking thread allocated since the previous
+        // result (results come back on that thread, so reading the declaration is included in the memory).
+        var costs = new PriorityQueue<(string Name, double Seconds, long Bytes), double>();
+        long lastBytes = -1;
         checker.CheckAll(reader.ReadDeclarations(), r =>
         {
+            if (slowest > 0)
+            {
+                long bytes = GC.GetAllocatedBytesForCurrentThread();
+                if (lastBytes >= 0)
+                {
+                    costs.Enqueue((r.Name.ToString(), r.Elapsed.TotalSeconds, bytes - lastBytes), r.Elapsed.TotalSeconds);
+                    if (costs.Count > slowest)
+                    {
+                        costs.Dequeue();
+                    }
+                }
+                lastBytes = bytes;
+            }
             if (r.Accepted)
             {
                 accepted++;
@@ -148,6 +171,19 @@ internal static class Cli
             }
         });
         Console.WriteLine($"accepted {accepted:N0}, rejected {rejected:N0}, declined {declined:N0}; {env.Count:N0} constants in {sw.Elapsed.TotalSeconds:F1}s");
+        if (slowest > 0)
+        {
+            Console.WriteLine($"slowest {costs.Count} (seconds, MB allocated, name):");
+            var top = new List<(string Name, double Seconds, long Bytes)>();
+            while (costs.Count > 0)
+            {
+                top.Add(costs.Dequeue());
+            }
+            foreach (var (name, seconds, bytes) in Enumerable.Reverse(top))
+            {
+                Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"  {seconds,9:F3}  {bytes / (1024.0 * 1024.0),9:F1}  {name}"));
+            }
+        }
         if (output is not null)
         {
             using var writer = new Lean4ExportWriter(File.Create(output), reader.Metadata);

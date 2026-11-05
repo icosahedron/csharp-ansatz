@@ -538,7 +538,7 @@ nested inductives.
   The kernel and corpus tests also use Ansatz's `init-medium` subset of Lean
   4.33.1's Init (5,118 constants in 4,631 declaration records, 3.3 MB gzipped),
   but it is not shipped: it has no `Int32` or `Int64`.
-  Mathlib (707,508 declarations at v4.33.1) is optional and downloaded.
+  Mathlib (712,205 declarations at v4.35.0) is optional and downloaded.
 
 ### 7.3 Store
 
@@ -689,8 +689,9 @@ in the engine can make a true claim fail but never a false one pass.
 
 1. **Kernel corpus.** In order: `Nat.add_succ.ndjson` → arena cases
    (positive, and negative such as `002_badDef`, `141_falseFromUnsafe`) →
-   init-medium (5,118 constants) → full Init (57,919 declarations, 59,349 constants at Lean 4.35.0) → Mathlib (707,508 at v4.33.1; Ansatz
-   checks all of them in about 80 minutes on 4 workers). Every discrepancy
+   init-medium (5,118 constants) → full Init (57,919 declarations, 59,349 constants at Lean 4.35.0) → Mathlib (712,205 declarations, 729,263 constants at v4.35.0,
+   all accepted by Warrant in 26 minutes; Ansatz checks 707,508 at v4.33.1 in
+   about 80 minutes on 4 workers). Every discrepancy
    becomes a regression test.
 2. **Cross-kernel harness.** Export our certificates (§7.4) and check them
    with Lean's kernel, Ansatz and arena kernels. Compare verdicts on a shared
@@ -721,7 +722,7 @@ in the engine can make a true claim fail but never a false one pass.
 | M3 | Exporter, cross-kernel harness, FsCheck property tests | Certificates check in at least one external kernel. Mathlib is a stretch goal. ✅ Lean's kernel re-checks everything Warrant admits, including full Init and C#-built types (see [kernel.md](kernel.md)); the store moved to M5b |
 | M4 | VIR, extraction of the pure subset (`int`/`long`/`bool`, enums, records, `if`/`switch`; theorems are parameterless `[Theorem]` methods returning `Prove.That(bool)`; recursion is rejected until M5a, and `/`, `%` and checked arithmetic are rejected with a diagnostic until M6, and non-null record parameters are recorded as assumptions), semantics library v0 with CLR-agreement tests (§10.6), translation, differential testing | A fixed corpus (`tests/corpus/m4/`) translates, including a `Validate`-shaped method over records and enums (`int` in place of `decimal`), and every rejected construct has a corpus method that is rejected with the diagnostic. Differential tests pass; null-record inputs check that .NET throws and that the non-null assumption is recorded. CLR-agreement tests pass for every modelled operation. Theorems without free parameters are closed by `rfl`/`decide` proof terms the translator emits. The translated corpus, exported with its Init + semantics closure, passes a new translated-output step in `scripts/cross-check.sh`. |
 | M5a | `Warrant.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `unfold`, `simp`, `omega`, `all_goals`, `try`), quantified theorems and `Prove.That(...).By(...)`, well-founded recursion with `Spec.Decreases` (structural recursion is unreachable for M5a's types, §4.2), translator-generated equation lemmas for recursive definitions, a development-time export of simp, instance and reducibility attributes for Init and the semantics library next to the NDJSON bundle (untrusted tactic input; Std is added in M6), `Int32`/`Int64` → `Int` bridging lemmas and an omega-prep simp set (§6.2), in-process `warrant verify` (§3.2), a thin MSBuild task that runs `warrant verify` as a child process (the net10.0 engine cannot load in .NET Framework MSBuild) | First end-to-end result: `Increment(x) > x` fails the build with its goal and the counterexample `x = 2147483647` shown under `dotnet build`, Visual Studio 2026's MSBuild and Visual Studio 2022's MSBuild; `ValidImpliesPositive` (`int`) passes with `Unfold` then `Simp`; a well-founded method whose decrease needs `omega`, and a quantified theorem over a translated `int` method closed by `simp` then `omega`, pass. Differential tests pass for a well-founded unit, both by kernel evaluation and by rewriting with its equation lemma. The certificate of a verified C# theorem passes the translated-output step of `scripts/cross-check.sh`. ✅ as described in [docs/m5a/](m5a/README.md); how Visual Studio's Error List shows a multi-line goal is still to be checked by hand |
-| M5b | Server, content-addressed cache, store v1 (trusted and verified import), CLI verbs, analyzers | The M5a result through the server. A second build is served from the cache without running tactics, `WarrantRecheck=true` re-checks cached certificates with the kernel alone, and the Init + semantics store passes `warrant check-store` in verified mode. `cancel` aborts a running verify, a unit over its fuel or wall-clock budget reports a timeout, and analyzer output is identical across runs. Baseline per-unit verification latency and server memory are recorded for M8. Store v1 waits for the Mathlib run's memory figure. |
+| M5b | Server, content-addressed cache, store v1 (trusted and verified import), CLI verbs, analyzers | The M5a result through the server. A second build is served from the cache without running tactics, `WarrantRecheck=true` re-checks cached certificates with the kernel alone, and the Init + semantics store passes `warrant check-store` in verified mode. `cancel` aborts a running verify, a unit over its fuel or wall-clock budget reports a timeout, and analyzer output is identical across runs. Baseline per-unit verification latency and server memory are recorded for M8. Store v1 is laid out against the Mathlib run's figure: 12.6 GB peak with every constant in memory. |
 | M6 | Contracts: `Spec.Requires`/`Ensures`, contract classes, effect monad (exceptions, null, overflow, `/` and `%`), VC generation with `@[spec]` lemmas in the attribute sidecar, assumption reports, a minimal `decimal` model (96-bit mantissa and scale, comparisons, add/subtract without overflow; `==` is numeric equality, so `1.0m == 1.00m`, also inside records). Readonly fields whose type has a contract become theorem parameters (other field access waits for M7). First step: the Std closure the library imports is kernel-checked and cross-checked | Pure parts of the payment example verified, and `ProcessPayment` verified with the store as a hypothesis. Differential tests with contract-satisfying mocked externals pass, every new model operation (including the minimal `decimal`) passes CLR-agreement tests, generators include zero divisors, `MinValue / -1` and equal `decimal`s with different scales, and `ProcessPayment`'s certificate passes `scripts/cross-check.sh`. |
 | M7 | Regions, loops with invariants, heap model for mutable objects, full `decimal` arithmetic and rounding, strings | The payment example verified without restructuring into records (the target code in §5.3). CLR-agreement tests pass for the `decimal`, string and heap models. |
 | M8 | Live IDE feedback (language server / extension), `grind`, typed Mathlib handles (after the Mathlib run), performance work | Not defined yet (§12 Q15). Define one before starting. |
@@ -729,9 +730,9 @@ in the engine can make a true claim fail but never a false one pass.
 Work deferred from M2/M3 (the Mathlib run with memory measurement, Ansatz and
 arena cross-checks, trace diffing, and the §10.3 property tests not yet
 covered) is tracked on its own tickets. The Ansatz/arena cross-checks and the
-property tests were done in M5a ([kernel.md](kernel.md)). Trace diffing is
-still open. The Mathlib run must finish before M5b's store v1 work and M8's
-typed handles.
+property tests were done in M5a, and the Mathlib run at the start of M5b
+([kernel.md](kernel.md#mathlib)): Warrant and Lean's kernel accept all of it,
+and checking it peaks at 12.6 GB. Trace diffing is still open.
 
 Porting sources: the **Lean 4 sources are authoritative** (`src/kernel/` for
 the kernel, `src/Lean/Meta/` for tactics). **Ansatz is the second reference**

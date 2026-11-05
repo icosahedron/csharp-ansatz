@@ -362,6 +362,26 @@ public sealed class VerifyTests : IDisposable
         Assert.StartsWith("# Assumption report", File.ReadAllText(Path.Combine(reports, "report.md")), StringComparison.Ordinal);
         var json = Warrant.Engine.Reports.JsonReport.Read(File.ReadAllText(Path.Combine(reports, "report.json")));
         Assert.Contains(json.Units, u => u.Key == "M:C.Refl(System.Int32)");
+
+        // check --slowest lists the declarations that took longest, slowest first, with a time and an allocation each.
+        var console = Console.Out;
+        using var captured = new StringWriter { NewLine = "\n" };
+        Console.SetOut(captured);
+        try
+        {
+            Assert.Equal(0, global::Cli.Run(["check", ndjson, "--quiet", "--slowest", "3"]));
+        }
+        finally
+        {
+            Console.SetOut(console);
+        }
+        var lines = captured.ToString().Split('\n');
+        int header = Array.FindIndex(lines, l => l.StartsWith("slowest 3 (seconds, MB allocated, name):", StringComparison.Ordinal));
+        Assert.True(header >= 0, captured.ToString());
+        var rows = lines.Skip(header + 1).Take(3).Select(l => l.Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToList();
+        Assert.All(rows, r => Assert.Equal(3, r.Length));
+        var seconds = rows.Select(r => double.Parse(r[0], CultureInfo.InvariantCulture)).ToList();
+        Assert.Equal(seconds.OrderDescending(), seconds);
     }
 
     [Theory]

@@ -497,13 +497,32 @@ git -C lean4 diff v4.33.1 v4.35.0 -- src/kernel   # what changed since the port
 lists the deliberate differences: fuel, no native reduction, a large-stack
 thread, and macro scopes in generated names not being modelled.
 
-### 10. Mathlib (not yet done)
+### 10. Mathlib
 
-The same export script should work from a Mathlib checkout pinned to the same Lean version (v4.35.0).
-For example, run `lake env <path>/lean4export Mathlib > mathlib.ndjson` inside
-`mathlib4` after `lake exe cache get`. Ansatz reports 707,508 declarations, all
-verified by its kernel. Warrant has not run this yet; expect a multi-gigabyte
-export, and memory use that has not been measured at that scale.
+Step 5 builds lean4export at `<workdir>/lean4export/.lake/build/bin/lean4export`
+(the work directory defaults to `$TMPDIR/warrant-lean`). Step 8 builds
+`tools/lean-replay`. Export Mathlib v4.35.0, the release for the same Lean version:
+
+```sh
+git clone --depth 1 --branch v4.35.0 https://github.com/leanprover-community/mathlib4
+cd mathlib4
+lake exe cache get                                   # prebuilt .olean files
+# about 5 minutes; writes 6.3 GB
+lake env <workdir>/lean4export/.lake/build/bin/lean4export Mathlib > mathlib.ndjson
+```
+
+```sh
+python3 scripts/count-export.py mathlib.ndjson        # 729,263 constants
+warrant check mathlib.ndjson --quiet --slowest 20     # accepted 712,205, rejected 0 (about 26 min)
+warrant export mathlib.ndjson mathlib.warrant.ndjson --quiet
+tools/lean-replay/.lake/build/bin/lean-replay mathlib.ndjson          # accepted: 729263 constants
+tools/lean-replay/.lake/build/bin/lean-replay mathlib.warrant.ndjson  # accepted: 729263 constants
+```
+
+Use the Release build, and allow about 13 GB of memory for the check. The
+times, the peak memory and the slowest declarations from one run are in
+[docs/kernel.md](docs/kernel.md#mathlib). Windows does not report a process's
+peak memory once it exits, so that run sampled it while the check ran.
 
 ---
 

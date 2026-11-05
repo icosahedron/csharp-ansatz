@@ -97,8 +97,34 @@ reproduces it (Lean 4.35.0, lean4export `5a9a355`), and the opt-in test
 `AcceptsFullInit` checks it when `WARRANT_INIT_EXPORT` points to the file.
 (Ansatz's documentation quotes 54,335 declarations for an earlier Init export.)
 
-**Not yet run:** Mathlib (Ansatz reports 707,508 declarations at v4.33.1). The same script can
-export it from a Mathlib checkout.
+### Mathlib
+
+Mathlib v4.35.0 (commit `56a0058`), exported with the same lean4export, is a 6.3 GB
+file: 712,205 declaration records making 729,263 constants (517,916 theorems,
+184,355 definitions, 7,046 inductives, 2,913 opaques). Measured on one machine
+(32 cores, 64 GB), with the Release build:
+
+| Check | Result | Time | Peak memory |
+|---|---|---|---|
+| `warrant check mathlib.ndjson` | accepted 712,205, rejected 0, declined 0 | 1,580 s | 12.6 GB working set, 12.7 GB private |
+| Lean's kernel (`lean-replay`) on the export | accepted 729,263 constants | 1,801 s | |
+| `warrant export` (check, then write what was admitted) | 712,205 declarations written | 2,269 s | |
+| Lean's kernel on Warrant's export | accepted 729,263 constants | 1,725 s | |
+
+For comparison, full Init peaks at 0.73 GB. The 12.6 GB is almost all the
+environment: every constant stays in memory, as the checker needs. Ansatz checks
+its v4.33.1 export (707,508 declarations) in about 80 minutes on 4 workers;
+Warrant checks one declaration at a time.
+
+`warrant check --slowest N` lists the declarations that took longest. On
+Mathlib the slowest twenty take 3.5 to 20.5 s each; the slowest is
+`CategoryTheory.instIsIsoIndCoimageImageComparison` (20.5 s), then
+`AlgebraicGeometry.Proj.awayι_comp_map` (15.6 s),
+`Polynomial.iterate_derivative_derivative_mul_X` (13.3 s) and
+`PresheafOfModules.freeObj._proof_2` (12.4 s). The memory column is what the
+thread allocated while checking (up to 17 GB for one declaration), most of it
+short-lived garbage, so it is not a heap size and is not comparable with Ansatz's
+5–6 GB heap figure for its hardest declarations.
 
 ## Cross-kernel checks (milestone 3)
 

@@ -1,1 +1,1 @@
-{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":5,"timestamp":1793861954,"nonce":"HpuVojS1py4HtRZRhCc61w/qGT8=","added":["feature:leansharp-roadmap","kind:task"],"removed":null}]}
+{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":2,"timestamp":1793861955,"nonce":"vyK6UN+hAkZ6uLjU0RDGZY70muE=","title":"Check how Visual Studio's Error List shows a multi-line WRT0001","was":"Check how Visual Studio's Error List shows a multi-line WRT0001"}]}

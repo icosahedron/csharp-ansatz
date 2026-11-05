@@ -382,7 +382,8 @@ public class ExtractionTests
         var unit = Corpus.Extract("accepted").Find("M:Payouts.PayoutRules.Payout(System.Int32,System.Int32,System.Int32)");
         Assert.NotNull(unit);
         var golden = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "golden", "payout.json"));
-        Assert.Equal(golden, VirWriter.Write(unit.Unit));
+        // The golden file records Roslyn 5.0.0, the compiler it was written with; the Roslyn version is provenance.
+        Assert.Equal(golden, VirWriter.Write(unit.Unit with { Facts = unit.Unit.Facts with { Roslyn = "5.0.0" } }));
     }
 
     [Fact]

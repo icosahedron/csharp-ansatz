@@ -183,7 +183,7 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
     }
 
     [HostFact(BuildHost.Dotnet)]
-    public void ASourceThatNeedsASourceGeneratorFailsWithWrt0012AndNoMsb6006()
+    public void ASourceThatNeedsASourceGeneratorVerifiesWithTheGeneratedSource()
     {
         var host = BuildHost.Find(BuildHost.Dotnet).Host!;
         var dir = packages.Sample(
@@ -194,10 +194,10 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         var (exitCode, log) = host.Build(dir);
         Report(host, dir, log);
 
-        Assert.Equal(1, exitCode);
-        Assert.Contains(
-            "Patterns.cs(9,33,9,35): error WRT0012: The compilation does not compile without generated sources (source generators run only inside the compiler); missing: As.",
-            Samples.Diagnostics(log, dir));
+        // The SDK's regex generator runs in the CLI as in Csc, so As() has its body and the theorem is checked.
+        Assert.True(exitCode == 0, log);
+        Assert.Contains("Warrant: 2 verified units, 1 theorems proved, 0 not proved.", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("WRT0012", log, StringComparison.Ordinal);
         Assert.DoesNotContain("MSB6006", log, StringComparison.Ordinal);
         Assert.DoesNotContain("WRT0010", log, StringComparison.Ordinal);
     }
@@ -354,6 +354,9 @@ internal static class Samples
 
             [Verified]
             public static int Same(int x) => x;
+
+            [Theorem]
+            static Proof SameThree() => Prove.That(Same(3) == 3);
         }
 
         """;

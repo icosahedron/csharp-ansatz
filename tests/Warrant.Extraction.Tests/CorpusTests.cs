@@ -151,7 +151,8 @@ public class CorpusTests
         {
             foreach (var unit in Corpus.Extract(name).Units)
             {
-                text.Append(VirWriter.WriteString(unit.Unit with { Vir = 1 })).Append('\n');
+                // The VIR version and the Roslyn version that produced it are provenance; the translation is the rest.
+                text.Append(VirWriter.WriteString(unit.Unit with { Vir = 1, Facts = unit.Unit.Facts with { Roslyn = "5.0.0" } })).Append('\n');
             }
         }
         var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString())));

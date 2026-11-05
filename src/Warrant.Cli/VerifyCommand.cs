@@ -145,16 +145,27 @@ internal static class VerifyCommand
     private static int FromCscArgs(string argsFile, string projectDir, bool keepConditionalCheck, Settings settings, TextWriter output)
     {
         var root = Path.GetFullPath(projectDir);
-        var compilation = CompilationFactory.FromCscArgs(argsFile, root);
+        var compilation = CompilationFactory.FromCscArgs(argsFile, root, out var generatorProblems);
         var report = new Reporter(output, settings.Msbuild, new TranslateCommand.Sources(root, root));
         report.Line($"verifying {compilation.SyntaxTrees.Length} file(s) from {argsFile}");
-        if (CompilationFactory.Failure(compilation) is { } failure)
+        if (CompilationFactory.Failure(compilation, generatorProblems) is { } failure)
         {
             var at = failure.Errors.FirstOrDefault(e => failure.MissingSymbols.Count > 0 && e.Location.IsInSource
                     && failure.MissingSymbols.Contains(e.Location.SourceTree!.GetText().ToString(e.Location.SourceSpan), StringComparer.Ordinal))
                 ?? failure.Errors[0];
             var details = failure.Errors.Select(e => report.Format(Span(e.Location), "error", e.Id, e.GetMessage(CultureInfo.InvariantCulture))).ToList();
             report.Diagnostic("error", CompilationFailure.Code, Span(at.Location), failure.Message, details);
+            report.Summary(0, 0, 0);
+            return 1;
+        }
+        var intercepted = CompilationFactory.InterceptedCalls(compilation);
+        foreach (var (location, interceptor) in intercepted)
+        {
+            report.Diagnostic("error", "WRT0002", Span(location),
+                $"Unsupported construct 'intercepted call': a source generator replaces this call with '{interceptor.ToDisplayString()}', which Warrant does not model.");
+        }
+        if (intercepted.Count > 0)
+        {
             report.Summary(0, 0, 0);
             return 1;
         }

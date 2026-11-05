@@ -188,14 +188,14 @@ dotnet build
 dotnet test
 ```
 
-Expected result: **970 tests pass and 17 are skipped**. The skipped ones are
+Expected result: **976 tests pass and 17 are skipped**. The skipped ones are
 opt-in tests that need external files or tools: `AcceptsFullInit` and
 `WritesFixturesForLean` (the kernel's Lean cross-checks), the export-script test
 (needs `LEAN_TOOLCHAIN_BIN`), the two differential-cost measurements (need
 `WARRANT_DIFFERENTIAL_COST`), and the 12 build tests that pack the packages and
 run real builds (need `WARRANT_BUILD_INTEGRATION=1`, step 7b). By project:
-33 Cic, 43 Vir, 311 Extraction, 82 Semantics, 117 Meta, 42 Lean4Export,
-104 Kernel, 172 Engine, 27 Cli and 36 Build. No Lean toolchain is needed; the
+33 Cic, 43 Vir, 315 Extraction, 82 Semantics, 117 Meta, 42 Lean4Export,
+104 Kernel, 175 Engine, 29 Cli and 36 Build. No Lean toolchain is needed; the
 whole suite takes about two minutes.
 
 ### 3. Run the kernel on the committed corpus
@@ -402,7 +402,8 @@ counterexample, from each. They find Visual Studio with `vswhere`; a version
 that is not installed is reported as not run, never as passed. Other tests
 cover a green build, a second build, design-time builds, multi-targeting, an
 `#if` that differs between frameworks, a missing `Warrant.Build` (WRT0011),
-a library consumed by an application, and a source generator (WRT0012).
+a library consumed by an application, and code that needs the SDK's regex
+source generator, which the CLI runs.
 
 How Visual Studio's Error List shows a multi-line WRT0001 is checked by hand,
 in the IDE; that check has not been done yet.

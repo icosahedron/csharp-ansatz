@@ -2,6 +2,7 @@ using Basic.Reference.Assemblies;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Warrant.Frontend;
+using Warrant.TestSupport;
 using Warrant.Vir;
 using static Warrant.Extraction.Tests.Inline;
 
@@ -157,5 +158,76 @@ public sealed class CscArgsTests : IDisposable
         Assert.Equal(["GeneratedSettings"], failure.MissingSymbols);
         Assert.Contains(failure.Errors, d => d.Id == "CS0246");
         Assert.Contains("GeneratedSettings", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>The sample's arguments plus <c>/analyzer:</c> for a generator built from <paramref name="generator"/>.</summary>
+    private (CSharpCompilation Compilation, IReadOnlyList<string> Problems) CompileWithGenerator(string generator, string source)
+    {
+        var analyzer = SourceGeneratorAssemblies.Build(Path.Combine(project, "analyzers"), "TestGenerator", generator);
+        Directory.CreateDirectory(Path.Combine(project, "src"));
+        File.WriteAllText(Path.Combine(project, "src", "C.cs"), "using Warrant;\n" + source);
+        var args = Path.Combine(project, "generated.csc.args");
+        File.WriteAllLines(args, File.ReadAllLines(ArgsFile).Append("/analyzer:" + analyzer));
+        var compilation = CompilationFactory.FromCscArgs(args, project, out var problems);
+        return (compilation, problems);
+    }
+
+    [Fact]
+    public void AGeneratorInTheArgumentsRunsAndTheCodeThatNeedsItsOutputCompiles()
+    {
+        var (compilation, problems) = CompileWithGenerator(
+            SourceGeneratorAssemblies.Adding("public sealed class GeneratedSettings { }"),
+            """
+            public static class C
+            {
+                [Verified] public static int F(int x) => x;
+                public static object Settings() => new GeneratedSettings();
+            }
+            """);
+        Assert.Empty(problems);
+        Assert.Null(CompilationFactory.Failure(compilation, problems));
+        Assert.NotNull(compilation.GetTypeByMetadataName("GeneratedSettings"));
+        Assert.Contains(compilation.SyntaxTrees, t => t.FilePath.EndsWith("Added.g.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AGeneratorThatThrowsIsNamedInTheFailure()
+    {
+        var (compilation, problems) = CompileWithGenerator(
+            SourceGeneratorAssemblies.Throwing,
+            "public static class C { public static object Settings() => new GeneratedSettings(); }");
+        var failure = CompilationFactory.Failure(compilation, problems);
+        Assert.NotNull(failure);
+        Assert.Equal(["GeneratedSettings"], failure.MissingSymbols);
+        Assert.Contains("A source generator did not run", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("generator failed on purpose", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnInterceptedCallIsFoundInVerifiedCodeOnly()
+    {
+        var (compilation, problems) = CompileWithGenerator(
+            SourceGeneratorAssemblies.Intercepting,
+            """
+            public static class C
+            {
+                public static int Original() => 0;
+                [Verified] public static int F() => Original();
+                public static int G() => Original();
+            }
+            """);
+        Assert.Empty(problems);
+        Assert.Null(CompilationFactory.Failure(compilation, problems));
+        var intercepted = CompilationFactory.InterceptedCalls(compilation);
+        var (location, interceptor) = Assert.Single(intercepted);
+        Assert.Equal(4, location.GetLineSpan().StartLinePosition.Line); // line 5 of C.cs: F, after the added using
+        Assert.Equal("Replacement", interceptor.Name);
+    }
+
+    [Fact]
+    public void WithoutAnalyzersNoCallIsIntercepted()
+    {
+        var compilation = Compile("public static class C { public static int Original() => 0; [Verified] public static int F() => Original(); }");
+        Assert.Empty(CompilationFactory.InterceptedCalls(compilation));
     }
 }

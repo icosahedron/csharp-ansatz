@@ -173,6 +173,7 @@ diagnostic it must produce (`tests/corpus/m4/expected.json`).
 
 Division and remainder, checked arithmetic, `null`, `string`, `decimal`, loops, exceptions, and calls to anything
 that is not `[Verified]` are rejected with WRT0002; [the reference](reference.md#supported-c) lists the subset and
-the milestone that lifts each limit. The two known gaps in what a build verifies are in
-[docs/m5a/07](../m5a/07-verify-and-build.md): `dotnet build -f` for a framework other than the first does not
-verify, and code a source generator adds is not modelled.
+the milestone that lifts each limit. A type defined in another assembly, such as a closed set from a referenced
+project, cannot appear in verified code yet. Source generators run as in the compiler, and a call that a generated
+interceptor replaces is rejected ([docs/m5a/07](../m5a/07-verify-and-build.md)). The known gap in what a build
+verifies is that `dotnet build -f` for a framework other than the first does not verify.

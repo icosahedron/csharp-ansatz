@@ -188,6 +188,7 @@ diagnostic message uses.
 | `string`, `decimal` | WRT0002 | M6 and M7. |
 | `floating point` | WRT0002 | Never. |
 | `local function` | WRT0002 | |
+| `intercepted call` | WRT0002 | A call that a generated interceptor (`[InterceptsLocation]`) replaces. Reported by `warrant verify --csc-args` and the build (M5a). |
 | `unreachable code` | WRT0002 | |
 | `integer cast to a closed enum`, `unboxing to a closed enum`, `default of a closed enum` | WRT0002 | Each could give a `[Closed]` enum an unnamed value. A cast also gets WRT0008. |
 | `closed enum with duplicate values` | WRT0002 | Two members would be different constructors, while the CLR says they are equal. |
@@ -267,7 +268,7 @@ Numbers are provisional.
 | WRT0009 | error | analyzer | A `[Closed]` class does not have the closed shape. Names the failed step. |
 | WRT0010 | error | build task | Internal error (M5a): the kernel rejected a term Warrant built, the engine could not translate or admit a unit, or the `warrant` CLI failed (the message quotes the end of its error output). Never means the claim is false. Report it as a bug. |
 | WRT0011 | warning | `Warrant` package | Nothing is verified (M5a): the project references `Warrant` but not `Warrant.Build`, or sets `WarrantEnabled` to something other than `true`. Silence it with `NoWarn`. Its location is the package's `build/Warrant.targets`. |
-| WRT0012 | error | build task | The compilation cannot be rebuilt from Csc's arguments (M5a), because it does not compile without generated sources; names the missing symbols. Source generators run only inside the compiler. |
+| WRT0012 | error | build task | The compilation cannot be rebuilt from Csc's arguments (M5a). Warrant runs the project's source generators, so this means the code does not compile, or a generator could not load (for example one built for a compiler newer than Warrant's Roslyn 5.3.0) or threw. Names the missing symbols and the generator problem. |
 
 There is no analyzer until M5b: extraction raises WRT0002 to WRT0005, WRT0008
 and WRT0009 itself, and `warrant translate` and `warrant verify` report them

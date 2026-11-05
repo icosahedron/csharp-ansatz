@@ -44,8 +44,9 @@ Three details follow:
 
 - **Skipped compiles.** When `CoreCompile` is up to date, Csc does not run and the item is empty, so the task reuses the file from the last compile.
 - **Real defines.** With the compiler's `/define:` list, extraction no longer compares every combination of `#if` symbols (M4 docs/m4/03); code is translated under the build's actual configuration. The combination check stays for `warrant verify <directory>` and `translate`, which have no compiler arguments, and for multi-targeted projects (below), where a difference reads, for example, `Sample.Picks.Pick(int) translates differently depending on which of NET8_0 the build defines.` (WRT0002).
-- **Source generators.** Generated sources exist only inside Csc and are not in the arguments. A project whose code does not compile without them fails with WRT0012 naming the missing symbols, rather than a green build with nothing checked: `error WRT0012: The compilation does not compile without generated sources (source generators run only inside the compiler); missing: As.` Setting `EmitCompilerGeneratedFiles` makes Csc write them to disk; picking them up from there is follow-up work.
-  WRT0012 catches only code that fails to compile without them. Generated code that compiles either way but changes what the hand-written code means, such as an overload that binds more closely than the one verified or an interceptor, is not detected: Warrant then verifies the code as written, which is not the code the compiler emitted. Running the generators in the CLI is follow-up work.
+- **Source generators.** Generated sources are not in the arguments, so the CLI runs the generators itself, as Csc does (`SourceGenerators.cs`). It loads every C# generator among the `/analyzer:` arguments into an assembly load context of its own, gives them the `/additionalfile:` arguments and the analyzer configuration, and runs Roslyn's `CSharpGeneratorDriver`. Overloads, partial-member bodies and types that a generator adds are then part of the compilation Warrant translates. Analyzers are not run: they report diagnostics but do not change the program.
+  A generator must be built for the compiler Warrant carries (Roslyn 5.3.0) or an older one. Roslyn refuses one built for a newer compiler, and then the compilation can miss what it would have written. That, a generator that fails to load, and one that throws all end in WRT0012, which names the missing symbols and the generator problem: `error WRT0012: The compilation does not compile; missing: Args, State, Steps. A source generator did not run: Gen.dll: ReferencesNewerCompiler, built for compiler 5.4.0.0`.
+  An interceptor (`[InterceptsLocation]`) replaces a call when Csc emits code, and the semantic model still names the original method. A call in a `[Verified]` or `[Theorem]` member that a generated interceptor replaces is therefore rejected with WRT0002, `Unsupported construct 'intercepted call'`, naming the interceptor.
 
 ## `warrant verify`
 
@@ -160,7 +161,7 @@ Both packages use `build/`, not `buildTransitive/`, so an application that only 
 | WRT0006 | A theorem ran out of kernel fuel, tactic fuel or time; the message says which. |
 | WRT0010 | Internal error: the kernel rejected a term Warrant built, the engine could not translate or admit a unit, Meta failed unexpectedly, or the CLI failed. Report it as a bug. |
 | WRT0011 (warning) | Verification is not enabled for a project that references `Warrant`. |
-| WRT0012 | The compilation could not be reproduced from Csc's arguments, for example because the code needs a source generator's output. Names the missing symbols. |
+| WRT0012 | The compilation could not be reproduced from Csc's arguments, for example because a source generator could not run. Names the missing symbols and the generator problem. |
 
 The engine never reports an unproved claim as false.
 WRT0001 says a theorem "could not be proved"; a counterexample, when one is found, is what shows it is false.

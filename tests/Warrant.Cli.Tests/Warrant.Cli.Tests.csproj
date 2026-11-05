@@ -22,5 +22,7 @@
     <Compile Remove="cscargs\**" />
     <None Remove="cscargs\**" />
     <None Include="cscargs\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Linked, not referenced: Warrant.TestSupport brings the Warrant package's Warrant.dll (KTD4). -->
+    <Compile Include="..\Warrant.TestSupport\SourceGeneratorAssemblies.cs" Link="SourceGeneratorAssemblies.cs" />
   </ItemGroup>
 </Project>

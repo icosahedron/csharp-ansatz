@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Basic.Reference.Assemblies;
 using Warrant.Engine;
 using Warrant.Frontend;
+using Warrant.TestSupport;
 
 namespace Warrant.Cli.Tests;
 
@@ -237,6 +238,45 @@ public sealed class VerifyTests : IDisposable
         var (msbuildCode, records) = VerifyArgs("--format", "msbuild");
         Assert.Equal(1, msbuildCode);
         Assert.Contains($"WRT1\tdiag\terror\tWRT0012\t{SourcePath}\t5\t", records, StringComparison.Ordinal);
+    }
+
+    private (int Code, string Output) VerifyWithGenerator(string generator, params string[] options)
+    {
+        var analyzer = SourceGeneratorAssemblies.Build(Path.Combine(project, "analyzers"), "TestGenerator", generator);
+        var args = Path.Combine(project, "generated.csc.args");
+        File.WriteAllLines(args, File.ReadAllLines(ArgsFile).Append("/analyzer:" + analyzer));
+        return Verify(["--csc-args", args, "--project-dir", project, .. options]);
+    }
+
+    [Fact]
+    public void AProjectWhoseCodeNeedsAGeneratorsOutputVerifies()
+    {
+        Write("""
+            public static class C
+            {
+                [Verified] public static int F(int x) => x;
+                public static object Settings() => new GeneratedSettings();
+                [Theorem] static Proof Identity(int x) => Prove.That(F(x) == x).By(Tactic.Unfold(nameof(F)), Tactic.Simp());
+            }
+            """);
+        var (code, output) = VerifyWithGenerator(SourceGeneratorAssemblies.Adding("public sealed class GeneratedSettings { }"));
+        Assert.True(code == 0, output);
+        Assert.Contains("1 theorems proved, 0 not proved", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnInterceptedCallInVerifiedCodeIsWrt0002()
+    {
+        Write("""
+            public static class C
+            {
+                public static int Original() => 0;
+                [Verified] public static int F() => Original();
+            }
+            """);
+        var (code, output) = VerifyWithGenerator(SourceGeneratorAssemblies.Intercepting);
+        Assert.Equal(1, code);
+        Assert.Matches(@"(?m)C\.cs\(5,\d+\): error WRT0002: Unsupported construct 'intercepted call': .*Replacement\(\)', which Warrant does not model\.$", output);
     }
 
     [Fact]

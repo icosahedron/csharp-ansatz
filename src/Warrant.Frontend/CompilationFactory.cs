@@ -88,15 +88,25 @@ public static class CompilationFactory
     /// Builds the compilation the compiler builds, from <c>@(CscCommandLineArgs)</c> written one argument per line
     /// (KTD21; docs/m5a/07, "Reproducing the compilation"). Roslyn's own parser reads the arguments, so the parse options
     /// (defines, language version, features), compilation options (checked, nullable, unsafe, warnings), sources,
-    /// references and analyzer configuration are exactly the compiler's. Analyzers and source generators are not run.
+    /// references and analyzer configuration are exactly the compiler's. The source generators among the compiler's
+    /// analyzers run as they run in Csc, so the compilation holds the generated sources too; analyzers are not run.
     /// Each tree's path is its path relative to <paramref name="projectDirectory"/>, with forward slashes; sources keep
-    /// the compiler's order.
+    /// the compiler's order, followed by the generated sources.
     /// </summary>
     /// <param name="argsFile">The argument file, e.g. <c>obj/warrant.csc.args</c>.</param>
     /// <param name="projectDirectory">The directory relative paths in the arguments are relative to (<c>$(MSBuildProjectDirectory)</c>).</param>
     /// <returns>The compilation, which may have errors: see <see cref="Failure"/>.</returns>
     /// <exception cref="InvalidDataException">The arguments are not valid compiler arguments.</exception>
-    public static CSharpCompilation FromCscArgs(string argsFile, string projectDirectory)
+    public static CSharpCompilation FromCscArgs(string argsFile, string projectDirectory) =>
+        FromCscArgs(argsFile, projectDirectory, out _);
+
+    /// <summary>As <see cref="FromCscArgs(string, string)"/>, and says why a source generator could not run.</summary>
+    /// <param name="argsFile">The argument file.</param>
+    /// <param name="projectDirectory">The directory relative paths in the arguments are relative to.</param>
+    /// <param name="generatorProblems">Why a generator failed to load or threw; empty when every generator ran.</param>
+    /// <returns>The compilation, which may have errors: see <see cref="Failure"/>.</returns>
+    /// <exception cref="InvalidDataException">The arguments are not valid compiler arguments.</exception>
+    public static CSharpCompilation FromCscArgs(string argsFile, string projectDirectory, out IReadOnlyList<string> generatorProblems)
     {
         var fullProject = Path.GetFullPath(projectDirectory);
         var lines = File.ReadAllLines(argsFile, Encoding.UTF8).Where(l => l.Length > 0).ToArray();
@@ -119,34 +129,57 @@ public static class CompilationFactory
             (MetadataReference)MetadataReference.CreateFromFile(Path.GetFullPath(Path.Combine(fullProject, r.Reference)), r.Properties));
 
         var options = args.CompilationOptions;
+        AnalyzerConfigSet? set = null;
         if (args.AnalyzerConfigPaths.Length > 0)
         {
             var configs = args.AnalyzerConfigPaths
                 .Select(p => Path.GetFullPath(Path.Combine(fullProject, p)))
                 .Select(p => AnalyzerConfig.Parse(SourceText.From(File.ReadAllText(p, Encoding.UTF8)), p))
                 .ToList();
-            var set = AnalyzerConfigSet.Create(configs);
+            set = AnalyzerConfigSet.Create(configs);
             var treeOptions = trees.ToDictionary(
                 t => t.FilePath,
                 t => set.GetOptionsForSourcePath(Path.GetFullPath(Path.Combine(fullProject, t.FilePath))),
                 StringComparer.Ordinal);
             options = options.WithSyntaxTreeOptionsProvider(new AnalyzerConfigTreeOptions(set.GlobalConfigOptions, treeOptions));
         }
-        return CSharpCompilation.Create(args.CompilationName, trees, references, options);
+        var compilation = CSharpCompilation.Create(args.CompilationName, trees, references, options);
+
+        var analyzers = args.AnalyzerReferences.Select(r => Path.GetFullPath(Path.Combine(fullProject, r.FilePath))).ToList();
+        var additionalFiles = args.AdditionalFiles.Select(f => Path.GetFullPath(Path.Combine(fullProject, f.Path))).ToList();
+        (compilation, generatorProblems) = SourceGenerators.Run(compilation, analyzers, additionalFiles, set, args.ParseOptions, fullProject);
+        return compilation;
     }
 
     /// <summary>
-    /// Why a compilation does not compile, or null if it has no errors. Source generators run only inside Csc, so a
-    /// compilation from <see cref="FromCscArgs"/> that needs generated code fails here, naming what it is missing (WRT0012).
+    /// The calls in <c>[Verified]</c> and <c>[Theorem]</c> members that a generated interceptor replaces. Warrant
+    /// translates the method a call names, and the compiler emits the interceptor instead, so these calls are rejected.
+    /// </summary>
+    /// <param name="compilation">The compilation, generated sources included.</param>
+    /// <param name="cancellationToken">Cancels the search.</param>
+    /// <returns>Each intercepted call's location and its interceptor.</returns>
+    public static IReadOnlyList<(Location Location, IMethodSymbol Interceptor)> InterceptedCalls(
+        CSharpCompilation compilation, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(compilation);
+        return SourceGenerators.InterceptedCalls(compilation, cancellationToken);
+    }
+
+    /// <summary>
+    /// Why a compilation does not compile, or null if it has no errors (WRT0012). A compilation from
+    /// <see cref="FromCscArgs(string, string, out IReadOnlyList{string})"/> fails this way when a source generator could not
+    /// run, and the failure names what is missing and why the generator did not run.
     /// </summary>
     /// <param name="compilation">The compilation.</param>
+    /// <param name="generatorProblems">Why a source generator could not run, from <see cref="FromCscArgs(string, string, out IReadOnlyList{string})"/>.</param>
     /// <param name="cancellationToken">Cancels the check.</param>
     /// <returns>The failure, or null.</returns>
-    public static CompilationFailure? Failure(CSharpCompilation compilation, CancellationToken cancellationToken = default)
+    public static CompilationFailure? Failure(
+        CSharpCompilation compilation, IReadOnlyList<string>? generatorProblems = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(compilation);
         var errors = compilation.GetDiagnostics(cancellationToken).Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
-        return errors.Count == 0 ? null : new CompilationFailure(errors);
+        return errors.Count == 0 ? null : new CompilationFailure(errors, generatorProblems ?? []);
     }
 
     private static PortableExecutableReference LoadWarrant()

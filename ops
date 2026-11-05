@@ -1,1 +1,1 @@
-{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":5,"timestamp":1793861942,"nonce":"T8kZpPUuB9XVLIrzyJCNAZzYGv0=","added":["feature:leansharp-roadmap","kind:task"],"removed":null}]}
+{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":2,"timestamp":1793861943,"nonce":"BTUrdzzeaEJ6MIpKAijX8sh2FJg=","title":"Structural recursion over recursive types","was":"Structural recursion over recursive types"}]}

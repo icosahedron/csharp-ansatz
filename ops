@@ -1,1 +1,1 @@
-{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":3,"timestamp":1793861969,"nonce":"lZmTDVPifNB2yp9ZYHL1EhWMovs=","message":"Done in PR #2 (merge 56a697a): the differential tests are shrinking FsCheck properties with replayable seeds, and recursive units are evaluated both by kernel Eq.refl and by equation-lemma rewriting.","files":null}]}
+{"author":{"id":"f4e4dbe251fbd7519eab696986bae317e93a786739d6cebe9c4c1e89dd44e465"},"ops":[{"type":4,"timestamp":1793861971,"nonce":"5zzbst6U5fF1MzzmjffWukclP/0=","status":2}]}

@@ -56,8 +56,8 @@ reports checking 707,508 Mathlib declarations at v4.33.1.
    recursor generation on every inductive type in Mathlib.
 
 The machine was a Windows 11 workstation with 32 cores and 64 GB of memory.
-Warrant checks one declaration at a time, so the core count does not affect
-its time.
+Warrant checks one declaration at a time on one thread; only the garbage
+collector uses the other cores.
 
 ## Results
 
@@ -75,8 +75,8 @@ For comparison:
 | `Init` (Lean 4.35.0) | 57,919 | 46.6 s | 0.73 GB |
 | Mathlib v4.35.0 | 712,205 | 1,580 s | 12.60 GB |
 
-Memory grows roughly in line with the number of constants: about 12 KB per
-constant for `Init` and about 17 KB for Mathlib. Almost all of it is the
+Memory grows roughly in line with the number of constants: about 13 KB per
+constant for `Init` and about 19 KB for Mathlib (the peaks are in GiB). Almost all of it is the
 environment, which keeps every checked constant, with its type and value, in
 memory, because a later declaration may refer to any of them.
 

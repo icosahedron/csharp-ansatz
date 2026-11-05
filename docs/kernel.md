@@ -99,6 +99,8 @@ reproduces it (Lean 4.35.0, lean4export `5a9a355`), and the opt-in test
 
 ### Mathlib
 
+[Checking Mathlib](mathlib.md) describes the run in full.
+
 Mathlib v4.35.0 (commit `56a0058`), exported with the same lean4export, is a 6.3 GB
 file: 712,205 declaration records making 729,263 constants (517,916 theorems,
 184,355 definitions, 7,046 inductives, 2,913 opaques). Measured on one machine

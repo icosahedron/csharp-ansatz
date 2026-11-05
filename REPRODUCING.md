@@ -144,6 +144,19 @@ and the design is explained chapter by chapter in [docs/m5a/](docs/m5a/README.md
    verdicts next to Lean's, Ansatz's and the lean-kernel-arena's published
    ones; the results are in [docs/kernel.md](docs/kernel.md).
 
+### Milestone 5b, first step: Mathlib
+
+Store v1 could not be laid out until the cost of holding Mathlib was known, so
+M5b began by checking it ([docs/mathlib.md](docs/mathlib.md)).
+
+1. **Export it with the same tools as `Init`.** Mathlib v4.35.0 through the
+   same lean4export build: 712,205 declarations, 729,263 constants, 6.3 GB.
+2. **Measure while checking.** `warrant check` accepts all of it in 26 minutes.
+   A sampling script recorded the peak memory, 12.6 GB, and the new
+   `--slowest` option recorded which declarations take longest.
+3. **Have Lean agree twice.** Lean's kernel accepts the export, and it accepts
+   the file `warrant export` writes from it.
+
 ### Notes on the environment
 
 - The cloud container had no .NET; the SDK was installed with Microsoft's
@@ -521,7 +534,7 @@ tools/lean-replay/.lake/build/bin/lean-replay mathlib.warrant.ndjson  # accepted
 
 Use the Release build, and allow about 13 GB of memory for the check. The
 times, the peak memory and the slowest declarations from one run are in
-[docs/kernel.md](docs/kernel.md#mathlib). Windows does not report a process's
+[docs/mathlib.md](docs/mathlib.md). Windows does not report a process's
 peak memory once it exits, so that run sampled it while the check ran.
 
 ---

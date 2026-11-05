@@ -77,6 +77,7 @@ reproduce every result, including exporting and checking Lean's full Init librar
 
 - [Design](docs/design.md): architecture, semantics, trusted base, milestones, open questions
 - [Kernel](docs/kernel.md): how the port maps to Lean's C++, deliberate differences, results
+- [Checking Mathlib](docs/mathlib.md): all of Mathlib v4.35.0 through Warrant's kernel and Lean's, with time and memory
 - [Reproducing](REPRODUCING.md): how the work was done and how to duplicate it
 - [Design history](docs/history/README.md): the conversations that led here, including the full session transcript
 

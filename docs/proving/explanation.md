@@ -48,7 +48,8 @@ translation of contracts into goals, and caching. Warrant keeps all of it
 **outside** what you have to trust. Tactics produce a proof term, which is a
 complete, explicit derivation. A small checker, the **kernel**, then checks
 that term step by step. The kernel is a port of Lean 4's kernel. Its verdicts
-are cross-checked against Lean's own kernel on Lean's entire standard library.
+are cross-checked against Lean's own kernel on Lean's entire standard library
+and on all of Mathlib, 729,263 constants ([Checking Mathlib](../mathlib.md)).
 
 So a bug in a tactic can make a true theorem fail to prove, but it can't make a
 false theorem pass. That is also why a cached proof can be re-checked cheaply

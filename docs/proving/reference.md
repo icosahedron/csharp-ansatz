@@ -268,7 +268,7 @@ Numbers are provisional.
 | WRT0009 | error | analyzer | A `[Closed]` class does not have the closed shape. Names the failed step. |
 | WRT0010 | error | build task | Internal error (M5a): the kernel rejected a term Warrant built, the engine could not translate or admit a unit, or the `warrant` CLI failed (the message quotes the end of its error output). Never means the claim is false. Report it as a bug. |
 | WRT0011 | warning | `Warrant` package | Nothing is verified (M5a): the project references `Warrant` but not `Warrant.Build`, or sets `WarrantEnabled` to something other than `true`. Silence it with `NoWarn`. Its location is the package's `build/Warrant.targets`. |
-| WRT0012 | error | build task | The compilation cannot be rebuilt from Csc's arguments (M5a). Warrant runs the project's source generators, so this means the code does not compile, or a generator could not load (for example one built for a compiler newer than Warrant's Roslyn 5.3.0) or threw; a generator problem fails even when the code compiles without its output. Names the missing symbols and the generator problem. |
+| WRT0012 | error | build task | The compilation cannot be rebuilt from Csc's arguments (M5a). Warrant runs the project's source generators, so this means the code does not compile, or a generator could not load (for example one built for a compiler newer than Warrant's Roslyn 5.9.0) or threw; a generator problem fails even when the code compiles without its output. Names the missing symbols and the generator problem. |
 
 There is no analyzer until M5b: extraction raises WRT0002 to WRT0005, WRT0008
 and WRT0009 itself, and `warrant translate` and `warrant verify` report them

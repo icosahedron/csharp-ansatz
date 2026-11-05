@@ -161,15 +161,79 @@ public sealed class CscArgsTests : IDisposable
     }
 
     /// <summary>The sample's arguments plus <c>/analyzer:</c> for a generator built from <paramref name="generator"/>.</summary>
-    private (CSharpCompilation Compilation, IReadOnlyList<string> Problems) CompileWithGenerator(string generator, string source)
+    private (CSharpCompilation Compilation, IReadOnlyList<string> Problems) CompileWithGenerator(string generator, string source) =>
+        CompileWithArgs(source, "/analyzer:" + SourceGeneratorAssemblies.Build(Path.Combine(project, "analyzers"), "TestGenerator", generator));
+
+    /// <summary>The sample's arguments plus <paramref name="extra"/>, over <c>src/C.cs</c> holding <paramref name="source"/>.</summary>
+    private (CSharpCompilation Compilation, IReadOnlyList<string> Problems) CompileWithArgs(string source, params string[] extra)
     {
-        var analyzer = SourceGeneratorAssemblies.Build(Path.Combine(project, "analyzers"), "TestGenerator", generator);
         Directory.CreateDirectory(Path.Combine(project, "src"));
         File.WriteAllText(Path.Combine(project, "src", "C.cs"), "using Warrant;\n" + source);
         var args = Path.Combine(project, "generated.csc.args");
-        File.WriteAllLines(args, File.ReadAllLines(ArgsFile).Append("/analyzer:" + analyzer));
+        File.WriteAllLines(args, File.ReadAllLines(ArgsFile).Concat(extra));
         var compilation = CompilationFactory.FromCscArgs(args, project, out var problems);
         return (compilation, problems);
+    }
+
+    private const string Compiles = "public static class C { [Verified] public static int F(int x) => x; }";
+
+    [Fact]
+    public void AGeneratorBuiltForANewerCompilerFailsEvenThoughTheCodeCompiles()
+    {
+        // Csc on a newer SDK would run it, and its output (an interceptor, a closer overload) could change what F means.
+        var generator = SourceGeneratorAssemblies.BuildForNewerCompiler(Path.Combine(project, "analyzers"), generator: true);
+        var (compilation, problems) = CompileWithArgs(Compiles, "/analyzer:" + generator);
+        Assert.Contains(problems, p => p.Contains("ReferencesNewerCompiler", StringComparison.Ordinal));
+        var failure = CompilationFactory.Failure(compilation, problems);
+        Assert.NotNull(failure);
+        Assert.Empty(failure.Errors);
+        Assert.StartsWith("A source generator did not run", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("NewerGenerator.dll", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnAnalyzerWithoutAGeneratorThatFailsToLoadDoesNotFailTheCompilation()
+    {
+        var analyzer = SourceGeneratorAssemblies.BuildForNewerCompiler(Path.Combine(project, "analyzers"), generator: false);
+        var (compilation, problems) = CompileWithArgs(Compiles, "/analyzer:" + analyzer);
+        Assert.Empty(problems);
+        Assert.Null(CompilationFactory.Failure(compilation, problems));
+    }
+
+    [Fact]
+    public void AnAnalyzerFileThatIsNotAnAssemblyFailsClosed()
+    {
+        var path = Path.Combine(project, "analyzers", "NotAnAssembly.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "not a PE file");
+        var (compilation, problems) = CompileWithArgs(Compiles, "/analyzer:" + path);
+        Assert.Contains(problems, p => p.Contains("NotAnAssembly.dll", StringComparison.Ordinal));
+        Assert.NotNull(CompilationFactory.Failure(compilation, problems));
+    }
+
+    [Fact]
+    public void AGeneratorThatThrowsFailsEvenThoughTheCodeCompiles()
+    {
+        var (compilation, problems) = CompileWithGenerator(SourceGeneratorAssemblies.Throwing, Compiles);
+        var failure = CompilationFactory.Failure(compilation, problems);
+        Assert.NotNull(failure);
+        Assert.Empty(failure.Errors);
+        Assert.Contains("generator failed on purpose", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GeneratorsSeeTheAdditionalFilesAndTheAnalyzerConfig()
+    {
+        File.WriteAllText(Path.Combine(project, "input.txt"), "from-the-file");
+        File.WriteAllText(Path.Combine(project, "global.editorconfig"), "is_global = true\nbuild_property.WarrantTest = from-the-config\n");
+        var analyzer = SourceGeneratorAssemblies.Build(Path.Combine(project, "analyzers"), "TestGenerator", SourceGeneratorAssemblies.ReadingInputs);
+        var (compilation, problems) = CompileWithArgs(Compiles, "/analyzer:" + analyzer, "/additionalfile:input.txt", "/analyzerconfig:global.editorconfig");
+        Assert.Empty(problems);
+        Assert.Null(CompilationFactory.Failure(compilation, problems));
+        var inputs = compilation.GetTypeByMetadataName("FromInputs");
+        Assert.NotNull(inputs);
+        Assert.Equal("from-the-file", inputs.GetMembers("Text").OfType<IFieldSymbol>().Single().ConstantValue);
+        Assert.Equal("from-the-config", inputs.GetMembers("Option").OfType<IFieldSymbol>().Single().ConstantValue);
     }
 
     [Fact]
@@ -222,6 +286,28 @@ public sealed class CscArgsTests : IDisposable
         var (location, interceptor) = Assert.Single(intercepted);
         Assert.Equal(4, location.GetLineSpan().StartLinePosition.Line); // line 5 of C.cs: F, after the added using
         Assert.Equal("Replacement", interceptor.Name);
+    }
+
+    [Fact]
+    public void AnInterceptedCallIsFoundInATheoremAPropertyALambdaAndALocalFunction()
+    {
+        var (compilation, problems) = CompileWithGenerator(
+            SourceGeneratorAssemblies.Intercepting,
+            """
+            public static class C
+            {
+                public static int Original() => 0;
+                [Theorem] static Proof T() => Prove.That(Original() == 1);
+                [Verified] public static int P => Original();
+                [Verified] public static int Q { get { return Original(); } }
+                [Verified] public static int L() { System.Func<int> f = () => Original(); return f(); }
+                [Verified] public static int Local() { int G() => Original(); return G(); }
+                public static int Unverified => Original();
+            }
+            """);
+        Assert.Empty(problems);
+        var lines = CompilationFactory.InterceptedCalls(compilation).Select(c => c.Location.GetLineSpan().StartLinePosition.Line + 1).Order();
+        Assert.Equal([5, 6, 7, 8, 9], lines); // C.cs lines, after the added using; line 10 is unverified
     }
 
     [Fact]

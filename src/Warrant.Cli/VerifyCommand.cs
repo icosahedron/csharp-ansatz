@@ -150,11 +150,12 @@ internal static class VerifyCommand
         report.Line($"verifying {compilation.SyntaxTrees.Length} file(s) from {argsFile}");
         if (CompilationFactory.Failure(compilation, generatorProblems) is { } failure)
         {
+            // A generator problem with no compile error has no source location of its own.
             var at = failure.Errors.FirstOrDefault(e => failure.MissingSymbols.Count > 0 && e.Location.IsInSource
                     && failure.MissingSymbols.Contains(e.Location.SourceTree!.GetText().ToString(e.Location.SourceSpan), StringComparer.Ordinal))
-                ?? failure.Errors[0];
+                ?? (failure.Errors.Count > 0 ? failure.Errors[0] : null);
             var details = failure.Errors.Select(e => report.Format(Span(e.Location), "error", e.Id, e.GetMessage(CultureInfo.InvariantCulture))).ToList();
-            report.Diagnostic("error", CompilationFailure.Code, Span(at.Location), failure.Message, details);
+            report.Diagnostic("error", CompilationFailure.Code, Span(at?.Location ?? Location.None), failure.Message, details);
             report.Summary(0, 0, 0);
             return 1;
         }

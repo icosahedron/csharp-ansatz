@@ -5,8 +5,9 @@ using Microsoft.CodeAnalysis;
 namespace Warrant.Frontend;
 
 /// <summary>
-/// A compilation that does not compile (WRT0012; KTD21). Warrant runs the project's source generators, so this means the
-/// project does not compile, or a generator could not load or threw; the symbols the compiler could not find are named.
+/// A compilation Warrant cannot trust to be the compiler's (WRT0012; KTD21): it does not compile, or a source generator
+/// could not load or threw, which fails even when the code compiles without the generator's output. The symbols the
+/// compiler could not find are named.
 /// </summary>
 public sealed class CompilationFailure
 {
@@ -35,16 +36,31 @@ public sealed class CompilationFailure
     /// <summary>The names the compiler could not find, as written in the source, sorted ordinally and without repeats.</summary>
     public IReadOnlyList<string> MissingSymbols { get; }
 
-    /// <summary>Every compiler error, in the compiler's order.</summary>
+    /// <summary>Every compiler error, in the compiler's order; empty when only a generator problem failed the compilation.</summary>
     public IReadOnlyList<Diagnostic> Errors { get; }
 
     /// <summary>Why a source generator could not run: it failed to load, or it threw.</summary>
     public IReadOnlyList<string> GeneratorProblems { get; }
 
     /// <summary>A message for people: the missing symbols, or the first error when no name is missing, then any generator problem.</summary>
-    public string Message =>
-        (MissingSymbols.Count > 0
-            ? "The compilation does not compile; missing: " + string.Join(", ", MissingSymbols) + "."
-            : "The compilation does not compile: " + Errors[0].GetMessage(CultureInfo.InvariantCulture))
-        + (GeneratorProblems.Count > 0 ? " A source generator did not run: " + string.Join("; ", GeneratorProblems) : "");
+    public string Message
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (MissingSymbols.Count > 0)
+            {
+                parts.Add("The compilation does not compile; missing: " + string.Join(", ", MissingSymbols) + ".");
+            }
+            else if (Errors.Count > 0)
+            {
+                parts.Add("The compilation does not compile: " + Errors[0].GetMessage(CultureInfo.InvariantCulture));
+            }
+            if (GeneratorProblems.Count > 0)
+            {
+                parts.Add("A source generator did not run, so the compilation may differ from the compiler's: " + string.Join("; ", GeneratorProblems));
+            }
+            return string.Join(" ", parts);
+        }
+    }
 }

@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
 using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 using System.Runtime.Loader;
 using System.Text;
 using Microsoft.CodeAnalysis;
@@ -45,12 +47,19 @@ internal static class SourceGenerators
         foreach (var path in analyzers)
         {
             var reference = new AnalyzerFileReference(path, loader);
-            reference.AnalyzerLoadFailed += (_, e) => problems.Add(
+            var failures = new List<string>();
+            reference.AnalyzerLoadFailed += (_, e) => failures.Add(
                 $"{Path.GetFileName(path)}: {e.ErrorCode}"
                 + (string.IsNullOrEmpty(e.Message) ? "" : ", " + e.Message)
                 + (e.Exception is { } ex ? ", " + ex.GetType().Name + ": " + ex.Message : "")
                 + (e.ReferencedCompilerVersion is { } version ? ", built for compiler " + version : ""));
             generators.AddRange(reference.GetGenerators(LanguageNames.CSharp));
+            // An analyzer that fails to load changes nothing Warrant translates; a generator, or a file that cannot be
+            // read well enough to tell, may have written code the compiler compiled.
+            if (failures.Count > 0 && MayDeclareGenerator(path))
+            {
+                problems.AddRange(failures);
+            }
         }
         if (generators.Count == 0)
         {
@@ -99,16 +108,52 @@ internal static class SourceGenerators
         return found;
     }
 
+    /// <summary>
+    /// Whether an analyzer assembly declares a type marked <c>[Microsoft.CodeAnalysis.Generator]</c>, read from its
+    /// metadata without loading it. A file whose metadata cannot be read counts as declaring one, so it fails closed.
+    /// </summary>
+    internal static bool MayDeclareGenerator(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var pe = new PEReader(stream);
+            if (!pe.HasMetadata)
+            {
+                return true;
+            }
+            var reader = pe.GetMetadataReader();
+            foreach (var handle in reader.CustomAttributes)
+            {
+                var attribute = reader.GetCustomAttribute(handle);
+                if (attribute.Constructor.Kind == HandleKind.MemberReference
+                    && reader.GetMemberReference((MemberReferenceHandle)attribute.Constructor).Parent is { Kind: HandleKind.TypeReference } parent)
+                {
+                    var type = reader.GetTypeReference((TypeReferenceHandle)parent);
+                    if (reader.StringComparer.Equals(type.Name, "GeneratorAttribute")
+                        && reader.StringComparer.Equals(type.Namespace, "Microsoft.CodeAnalysis"))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or BadImageFormatException or InvalidOperationException)
+        {
+            return true;
+        }
+    }
+
     private static bool InVerifiedCode(SemanticModel model, SyntaxNode node, CancellationToken cancellationToken)
     {
+        // The nearest member declaration: a method, a property (whose accessors are not member declarations), a field.
         foreach (var ancestor in node.Ancestors())
         {
             if (ancestor is MemberDeclarationSyntax and not BaseTypeDeclarationSyntax and not BaseNamespaceDeclarationSyntax
                 && model.GetDeclaredSymbol(ancestor, cancellationToken) is { } member)
             {
-                // A property's accessors carry no attribute of their own: the property does.
-                var symbol = member is IMethodSymbol { AssociatedSymbol: { } property } ? property : member;
-                return symbol.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() is "Warrant.VerifiedAttribute" or "Warrant.TheoremAttribute");
+                return member.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() is "Warrant.VerifiedAttribute" or "Warrant.TheoremAttribute");
             }
         }
         return false;

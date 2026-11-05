@@ -265,6 +265,25 @@ public sealed class VerifyTests : IDisposable
     }
 
     [Fact]
+    public void AGeneratorThatThrowsFailsWithWrt0012EvenThoughTheCodeCompiles()
+    {
+        Write("""
+            public static class C
+            {
+                [Verified] public static int F(int x) => x;
+            }
+            """);
+        var (code, output) = VerifyWithGenerator(SourceGeneratorAssemblies.Throwing);
+        Assert.Equal(1, code);
+        Assert.Matches(@"(?m)error WRT0012: A source generator did not run, so the compilation may differ from the compiler's: .*generator failed on purpose", output);
+        Assert.DoesNotContain("translated", output, StringComparison.Ordinal);
+
+        var (msbuildCode, records) = VerifyWithGenerator(SourceGeneratorAssemblies.Throwing, "--format", "msbuild");
+        Assert.Equal(1, msbuildCode);
+        Assert.Contains("WRT1\tdiag\terror\tWRT0012\t\t0\t0\t0\t0\tA source generator did not run", records, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnInterceptedCallInVerifiedCodeIsWrt0002()
     {
         Write("""

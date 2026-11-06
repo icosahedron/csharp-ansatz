@@ -109,13 +109,18 @@ internal static class ServerLauncher
     /// name, and renamed into place, so a server never starts from a half-copied directory; a CLI that loses the rename
     /// race uses the winner's copy.
     /// </summary>
+    /// <remarks>
+    /// The CLI does not start the server itself: it starts <c>warrant server launch</c>, which starts the server and exits
+    /// at once. A build that is cancelled kills the CLI's process tree, found through each process's parent, and the
+    /// operating system keeps naming a detached child's parent; with the launcher gone, the server's parent is a process
+    /// that no longer exists, so the kill cannot reach it (KTD4).
+    /// </remarks>
     /// <param name="settings">The settings.</param>
     /// <param name="directory">The copy's directory, from <see cref="CopyDirectory"/>.</param>
     /// <param name="bundlePath">The semantics bundle the server is to load.</param>
     /// <param name="sidecarPath">The attribute sidecar made for it.</param>
-    /// <returns>The process id of the started server.</returns>
-    /// <exception cref="ServerUnavailableException">The copy could not be made or the process could not be started.</exception>
-    public static int Start(ServerSettings settings, string directory, string bundlePath, string sidecarPath)
+    /// <exception cref="ServerUnavailableException">The copy could not be made or the launcher could not be started.</exception>
+    public static void Start(ServerSettings settings, string directory, string bundlePath, string sidecarPath)
     {
         try
         {
@@ -125,10 +130,7 @@ internal static class ServerLauncher
         {
             throw new ServerUnavailableException($"the server's files could not be copied to '{directory}': {ex.Message}", ex);
         }
-        var host = DotnetHost();
-        var server = Path.Combine(directory, ServerAssembly);
-        var environment = Environment.GetEnvironmentVariables().Cast<DictionaryEntry>()
-            .ToDictionary(e => (string)e.Key, e => (string?)e.Value ?? "", OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var environment = CurrentEnvironment();
         if (settings.EndpointName is { } name)
         {
             environment[ServerEndpoint.EnvironmentVariable] = name;
@@ -137,9 +139,40 @@ internal static class ServerLauncher
         {
             environment[key] = value;
         }
-        return OperatingSystem.IsWindows()
-            ? Windows.Spawn(host, [host, server], environment, directory)
-            : Unix.Spawn(host, [host, server], environment);
+        var host = DotnetHost();
+        var cli = typeof(ServerLauncher).Assembly.Location;
+        Spawn(host, [host, cli, "server", LaunchVerb, directory], environment, directory);
+    }
+
+    /// <summary>The hidden <c>warrant server</c> verb that <see cref="Start"/> runs to start the server.</summary>
+    public const string LaunchVerb = "launch";
+
+    /// <summary>
+    /// <c>warrant server launch &lt;directory&gt;</c>: starts the server in the copy <paramref name="directory"/>, detached,
+    /// with this process's environment, which <see cref="Start"/> set; the caller then exits.
+    /// </summary>
+    /// <param name="directory">The copy's directory.</param>
+    /// <exception cref="ServerUnavailableException">The server could not be started.</exception>
+    public static void Launch(string directory)
+    {
+        var host = DotnetHost();
+        Spawn(host, [host, Path.Combine(directory, ServerAssembly)], CurrentEnvironment(), directory);
+    }
+
+    private static Dictionary<string, string> CurrentEnvironment() =>
+        Environment.GetEnvironmentVariables().Cast<DictionaryEntry>()
+            .ToDictionary(e => (string)e.Key, e => (string?)e.Value ?? "", OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    private static void Spawn(string host, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, string directory)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Windows.Spawn(host, arguments, environment, directory);
+        }
+        else
+        {
+            Unix.Spawn(host, arguments, environment);
+        }
     }
 
     /// <summary>

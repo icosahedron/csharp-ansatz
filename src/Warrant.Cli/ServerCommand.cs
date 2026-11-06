@@ -6,7 +6,7 @@ using Warrant.Engine.Service;
 /// <summary>
 /// <c>warrant server status | cancel &lt;id&gt; | shutdown</c> (M5b KTD26, R17; docs/m5b/07): manages the server a build of
 /// this toolchain would use, found as a build finds it, from the semantics bundle and sidecar beside <c>warrant.dll</c>.
-/// No verb starts a server.
+/// None of these verbs starts a server; the hidden <c>launch</c> verb is the CLI's own way to start one (KTD4).
 /// </summary>
 internal static class ServerCommand
 {
@@ -23,6 +23,20 @@ internal static class ServerCommand
     /// </returns>
     public static int Run(string[] args, TextWriter output, TextWriter error, ServerSettings? settings = null)
     {
+        if (args is [ServerLauncher.LaunchVerb, var directory])
+        {
+            // Not for users: the short-lived process a CLI starts so the server outlives a cancelled build (KTD4).
+            try
+            {
+                ServerLauncher.Launch(directory);
+                return 0;
+            }
+            catch (ServerUnavailableException ex)
+            {
+                error.WriteLine($"warrant server: {ex.Message}");
+                return 1;
+            }
+        }
         if (args is not (["status"] or ["shutdown"] or ["cancel", _]))
         {
             error.WriteLine($"usage: {Usage}");

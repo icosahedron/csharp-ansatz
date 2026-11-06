@@ -249,6 +249,15 @@ internal static class Quotient
 
     private static Expr Arrow(Expr a, Expr b) => Expr.Forall(Name.From("a"), a, ExprOps.LiftLooseBVars(b, 0, 1));
 
+    private static readonly Lazy<IReadOnlyList<QuotInfo>> Expected = new(ExpectedConstants);
+
+    /// <summary>
+    /// Whether a source holds the four quotient constants exactly as the kernel generates them (up to binder names, as
+    /// <see cref="ExportChecker.ConstantsMatch"/> compares an exported quotient constant).
+    /// </summary>
+    public static bool HoldsExpectedConstants(IConstantSource source) =>
+        Expected.Value.All(expected => source.TryGet(expected.Name, out var held) && ExportChecker.ConstantsMatch(held, expected));
+
     /// <summary>The four quotient constants, as Lean's kernel generates them.</summary>
     public static IReadOnlyList<QuotInfo> ExpectedConstants()
     {

@@ -247,7 +247,10 @@ public sealed class ExportChecker
     }
 
     /// <summary>Equality of constants with expressions compared up to binder annotations (Lean's <c>BEq ConstantInfo</c>).</summary>
-    internal static bool ConstantsMatch(ConstantInfo a, ConstantInfo b)
+    /// <param name="a">One constant.</param>
+    /// <param name="b">The other.</param>
+    /// <returns>Whether they are the same constant up to binder names and annotations.</returns>
+    public static bool ConstantsMatch(ConstantInfo a, ConstantInfo b)
     {
         if (a.Kind != b.Kind || a.Name != b.Name || !a.LevelParams.Equals(b.LevelParams) || !a.Type.AlphaEquals(b.Type))
         {

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Store v1: imported Lean libraries on disk, read constant by constant as the kernel asks for them (M5b KTD17, KTD18).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Warrant.Cic\Warrant.Cic.csproj" />
+    <ProjectReference Include="..\Warrant.Kernel\Warrant.Kernel.csproj" />
+    <ProjectReference Include="..\Warrant.Lean4Export\Warrant.Lean4Export.csproj" />
+    <InternalsVisibleTo Include="Warrant.Store.Tests" />
+  </ItemGroup>
+</Project>

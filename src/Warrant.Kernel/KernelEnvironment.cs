@@ -19,11 +19,17 @@ namespace Warrant.Kernel;
 /// into itself only. Since nothing writes to the base after freezing, any number of forks can
 /// read it in parallel.
 /// </para>
+/// <para>
+/// A base environment can have a <see cref="IConstantSource">source</see> (M5b KTD18): constants it reads on demand, after
+/// its own and before reporting a constant unknown. Such an environment cannot enumerate its <see cref="Constants"/>.
+/// </para>
 /// </remarks>
 public sealed class KernelEnvironment
 {
     private readonly KernelEnvironment? _parent;
     private readonly Dictionary<Name, ConstantInfo> _constants = [];
+    private readonly IConstantSource? _source;
+    private readonly bool _sourceQuotInitialized;
     private bool? _quotInitialized;
     private bool _frozen;
 
@@ -32,28 +38,46 @@ public sealed class KernelEnvironment
     {
     }
 
+    /// <summary>
+    /// Creates an environment on a source of trusted constants, which it reads as they are needed. The quotient package
+    /// counts as added only when the source says so and its four quotient constants are exactly the ones the kernel
+    /// generates (<see cref="Quotient.ExpectedConstants"/>): the flag enables quotient reduction, so a source cannot set it
+    /// by claiming it.
+    /// </summary>
+    /// <param name="source">The source.</param>
+    public KernelEnvironment(IConstantSource source)
+    {
+        _source = source ?? throw new ArgumentNullException(nameof(source));
+        _sourceQuotInitialized = source.QuotientsInitialized && Quotient.HoldsExpectedConstants(source);
+    }
+
     private KernelEnvironment(KernelEnvironment parent) => _parent = parent;
 
-    /// <summary>The number of constants (including any in parent environments).</summary>
-    public int Count => _constants.Count + (_parent?.Count ?? 0);
+    /// <summary>The number of constants (including any in parent environments and the source).</summary>
+    public int Count => _constants.Count + (_parent?.Count ?? _source?.Count ?? 0);
 
     /// <summary>Whether this environment has been frozen (see <see cref="Freeze"/>).</summary>
     public bool IsFrozen => _frozen;
 
     /// <summary>Whether the quotient package (<c>Quot</c>, <c>Quot.mk</c>, …) has been added.</summary>
-    public bool IsQuotInitialized => _quotInitialized ?? _parent?.IsQuotInitialized ?? false;
+    public bool IsQuotInitialized => _quotInitialized ?? _parent?.IsQuotInitialized ?? _sourceQuotInitialized;
 
-    /// <summary>Looks up a constant.</summary>
+    /// <summary>Looks up a constant: in this environment, its parents, then the base environment's source.</summary>
     public ConstantInfo? Find(Name name)
     {
-        for (var env = this; env is not null; env = env._parent)
+        var env = this;
+        while (true)
         {
             if (env._constants.TryGetValue(name, out var c))
             {
                 return c;
             }
+            if (env._parent is null)
+            {
+                return env._source is not null && env._source.TryGet(name, out var fromSource) ? fromSource : null;
+            }
+            env = env._parent;
         }
-        return null;
     }
 
     /// <summary>Looks up a constant.</summary>
@@ -68,8 +92,11 @@ public sealed class KernelEnvironment
     public ConstantInfo Get(Name name) => Find(name) ?? throw new KernelException($"unknown constant '{name}'");
 
     /// <summary>All constants (unordered).</summary>
+    /// <exception cref="InvalidOperationException">The base environment reads its constants from a source, which is not enumerated.</exception>
     public IEnumerable<ConstantInfo> Constants =>
-        _parent is null ? _constants.Values : _parent.Constants.Concat(_constants.Values);
+        _parent is null
+            ? _source is null ? _constants.Values : throw new InvalidOperationException("An environment on a constant source cannot enumerate its constants.")
+            : _parent.Constants.Concat(_constants.Values);
 
     /// <summary>Rejects a name that is already declared.</summary>
     /// <exception cref="KernelException">The name is taken.</exception>

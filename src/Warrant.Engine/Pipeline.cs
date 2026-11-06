@@ -194,11 +194,11 @@ public static class Pipeline
         /// <summary>The theorem ran.</summary>
         Ran,
 
-        /// <summary>Its cached proof was admitted, checked by the kernel, because a unit that runs names it (KTD15).</summary>
+        /// <summary>
+        /// Its cached proof was admitted, checked by the kernel, because a unit that runs names it (KTD15) or under recheck
+        /// (KTD16).
+        /// </summary>
         Cache,
-
-        /// <summary>Its cached proof was checked again under recheck (KTD16).</summary>
-        Rechecked,
 
         /// <summary>Its cached proof was rejected under recheck (KTD16).</summary>
         Rejected,
@@ -288,6 +288,21 @@ public static class Pipeline
             };
         }
 
+        /// <summary>
+        /// WRT0006 for a unit that ran out of a budget: "<see cref="Exhausted"/> while <paramref name="activity"/>.", with
+        /// the budget it exhausted.
+        /// </summary>
+        public UndecidedOutcome Undecided(
+            string key, VirUnitKind kind, string display, ImmutableArray<UnitAssumption> assumptions, Exception ex, string activity) =>
+            new(key, kind, display, assumptions, $"{Exhausted(ex)} while {activity}.") { Exhausted = Which(ex) };
+
+        /// <summary>
+        /// Whether running out while the kernel checks a cached proof ends the unit as undecided (KTD15, KTD16): under
+        /// recheck, when the deadline passed, or when the run is cancelled; otherwise the proof is built again.
+        /// </summary>
+        public bool StopsCachedCheck(bool recheck, Exception ex, CancellationToken token) =>
+            recheck || Which(ex) == ExhaustedBudget.Time || token.IsCancellationRequested;
+
         /// <summary>The kernel's exception when the kernel ran out inside Meta's Check (KTD12): its budget, not Meta's.</summary>
         private static Exception Inner(Exception ex) => ex is MetaResourceException { InnerException: KernelResourceException kernel } ? kernel : ex;
     }
@@ -362,7 +377,10 @@ public static class Pipeline
         {
             var translation = Translate();
             Names = NamesOf(translation);
-            _needed = NeededBy(translation);
+            if (Cached.Count > 0)
+            {
+                _needed = NeededBy(translation);
+            }
             var theorems = new List<TranslatedUnit>();
             foreach (var unit in translation.Units)
             {
@@ -378,11 +396,8 @@ public static class Pipeline
                         AdmitFromCertificate(unit, hit);
                         continue;
                     }
-                    Outcomes.Add(unit.Key, hit);
-                    Elapsed.Add(unit.Key, TimeSpan.Zero);
+                    UseCached(unit.Key, hit);
                     OwnCached(unit);
-                    FromCache.Add(unit.Key);
-                    _unadmitted.Add(unit.Key);
                     continue;
                 }
                 var stopwatch = Stopwatch.StartNew();
@@ -444,11 +459,7 @@ public static class Pipeline
             }
             else if (!scope.FellBack && outcome is TranslatedOutcome)
             {
-                FromCache.Add(unit.Key);
-                if (Recheck)
-                {
-                    Rechecked.Add(unit.Key);
-                }
+                MarkReused(unit.Key);
             }
             else
             {
@@ -476,10 +487,7 @@ public static class Pipeline
                     var hit = Cached.GetValueOrDefault(theorem.Key);
                     if (hit is not null && !(hit is ProvedOutcome && Admits(theorem.Key)))
                     {
-                        Outcomes.Add(theorem.Key, hit);
-                        Elapsed.Add(theorem.Key, TimeSpan.Zero);
-                        FromCache.Add(theorem.Key);
-                        _unadmitted.Add(theorem.Key);
+                        UseCached(theorem.Key, hit);
                         continue;
                     }
                     if (((UnitOutcome?)Cancelled(unit) ?? Skip(unit)) is { } early)
@@ -502,11 +510,7 @@ public static class Pipeline
                     switch (source)
                     {
                         case Source.Cache:
-                            FromCache.Add(key);
-                            break;
-                        case Source.Rechecked:
-                            FromCache.Add(key);
-                            Rechecked.Add(key);
+                            MarkReused(key);
                             break;
                         case Source.Rejected:
                             Rejected.Add(key);
@@ -514,6 +518,25 @@ public static class Pipeline
                     }
                 }
                 AdmitProved(ordered);
+            }
+        }
+
+        /// <summary>A cached unit reported as it is, with nothing admitted: no unit that runs depends on it.</summary>
+        private void UseCached(string key, UnitOutcome hit)
+        {
+            Outcomes.Add(key, hit);
+            Elapsed.Add(key, TimeSpan.Zero);
+            FromCache.Add(key);
+            _unadmitted.Add(key);
+        }
+
+        /// <summary>A cached unit admitted from its certificate, checked by the kernel; under recheck, checked again (KTD16).</summary>
+        private void MarkReused(string key)
+        {
+            FromCache.Add(key);
+            if (Recheck)
+            {
+                Rechecked.Add(key);
             }
         }
 
@@ -543,17 +566,14 @@ public static class Pipeline
                 Kernel.Kernel.Add(env, declaration, budget.Kernel);
                 if (ProofTerms.IsAdmittedAs(env, shell))
                 {
-                    return (cached with { Certificate = declaration }, stopwatch.Elapsed, Recheck ? Source.Rechecked : Source.Cache);
+                    return (cached with { Certificate = declaration }, stopwatch.Elapsed, Source.Cache);
                 }
                 reason = $"the kernel admitted {shell.Name} with a type other than its statement";
             }
-            catch (KernelResourceException ex) when (Recheck || budget.Which(ex) == ExhaustedBudget.Time || options.CancellationToken.IsCancellationRequested)
+            catch (KernelResourceException ex) when (budget.StopsCachedCheck(Recheck, ex, options.CancellationToken))
             {
-                var undecided = new UndecidedOutcome(
-                    unit.Unit.Key, unit.Unit.Kind, theorem.DisplayName, Assumptions(unit), $"{budget.Exhausted(ex)} while the kernel checked the cached proof.")
-                {
-                    Exhausted = budget.Which(ex),
-                };
+                var undecided = budget.Undecided(
+                    unit.Unit.Key, unit.Unit.Kind, theorem.DisplayName, Assumptions(unit), ex, "the kernel checked the cached proof");
                 return (SettleCancel(unit, undecided), stopwatch.Elapsed, Source.Ran);
             }
             catch (KernelException ex)
@@ -991,7 +1011,7 @@ public static class Pipeline
                 }
                 catch (KernelResourceException ex)
                 {
-                    return new UndecidedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, $"{definitionBudget.Exhausted(ex)} while the kernel checked the definition.") { Exhausted = definitionBudget.Which(ex) };
+                    return definitionBudget.Undecided(unit.Unit.Key, unit.Unit.Kind, display, assumptions, ex, "the kernel checked the definition");
                 }
                 catch (KernelException ex)
                 {
@@ -1039,7 +1059,7 @@ public static class Pipeline
             }
             catch (KernelResourceException ex)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the definition.") { Exhausted = budget.Which(ex) };
+                return budget.Undecided(key, kind, display, assumptions, ex, "the kernel checked the definition");
             }
             catch (KernelException ex)
             {
@@ -1054,7 +1074,7 @@ public static class Pipeline
                 }
                 catch (KernelResourceException ex)
                 {
-                    return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the equation lemma {recursion.Equation.Name}.") { Exhausted = budget.Which(ex) };
+                    return budget.Undecided(key, kind, display, assumptions, ex, $"the kernel checked the equation lemma {recursion.Equation.Name}");
                 }
                 catch (KernelException ex)
                 {
@@ -1090,12 +1110,9 @@ public static class Pipeline
                     AddDeclaration(unit.Unit.Key, shell.WithProof(proof), admitted, budget);
                     return null;
                 }
-                catch (KernelResourceException ex) when (run.Recheck || budget.Which(ex) == ExhaustedBudget.Time || options.CancellationToken.IsCancellationRequested)
+                catch (KernelResourceException ex) when (budget.StopsCachedCheck(run.Recheck, ex, options.CancellationToken))
                 {
-                    return new UndecidedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the cached proof of {shell.Name}.")
-                    {
-                        Exhausted = budget.Which(ex),
-                    };
+                    return budget.Undecided(unit.Unit.Key, unit.Unit.Kind, display, assumptions, ex, $"the kernel checked the cached proof of {shell.Name}");
                 }
                 catch (KernelException ex)
                 {
@@ -1149,7 +1166,7 @@ public static class Pipeline
             }
             catch (Exception ex) when (ex is MetaResourceException or KernelResourceException)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while proving the decrease of {Describe(unit, decrease)}.") { Exhausted = budget.Which(ex) };
+                return budget.Undecided(key, kind, display, assumptions, ex, $"proving the decrease of {Describe(unit, decrease)}");
             }
             catch (InsufficientExecutionStackException)
             {
@@ -1180,7 +1197,7 @@ public static class Pipeline
             }
             catch (KernelResourceException ex)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked a decrease proof.") { Exhausted = budget.Which(ex) };
+                return budget.Undecided(key, kind, display, assumptions, ex, "the kernel checked a decrease proof");
             }
             catch (KernelException ex)
             {
@@ -1225,8 +1242,7 @@ public static class Pipeline
                 {
                     // KTD12: a cancellation or a passed deadline is shared by every method, so the next one cannot
                     // succeed. Running out of fuel falls through to the next method, which gets its own fuel, as in M5a.
-                    return new UndecidedOutcome(
-                        key, unit.Unit.Kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the {kind.ToString().ToLowerInvariant()} proof.") { Exhausted = budget.Which(ex) };
+                    return budget.Undecided(key, unit.Unit.Kind, display, assumptions, ex, $"the kernel checked the {kind.ToString().ToLowerInvariant()} proof");
                 }
                 catch (KernelException ex)
                 {
@@ -1312,7 +1328,7 @@ public static class Pipeline
             }
             catch (Exception ex) when (ex is MetaResourceException or KernelResourceException)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while running the proof script.") { Exhausted = budget.Which(ex) };
+                return budget.Undecided(key, kind, display, assumptions, ex, "running the proof script");
             }
             catch (InsufficientExecutionStackException)
             {
@@ -1345,7 +1361,7 @@ public static class Pipeline
             }
             catch (KernelResourceException ex)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the proof.") { Exhausted = budget.Which(ex) };
+                return budget.Undecided(key, kind, display, assumptions, ex, "the kernel checked the proof");
             }
             catch (KernelException ex)
             {

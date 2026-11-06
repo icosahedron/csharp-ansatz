@@ -93,6 +93,7 @@ public sealed record CacheKeyInputs(string Closure, string Bundle, string Sideca
             return hash;
         }
 
+        var displays = byKey.ToDictionary(p => p.Key, p => Pipeline.Display(p.Value), StringComparer.Ordinal);
         var result = new Dictionary<string, CacheKeyInputs>(StringComparer.Ordinal);
         foreach (var (key, unit) in byKey)
         {
@@ -103,7 +104,7 @@ public sealed record CacheKeyInputs(string Closure, string Bundle, string Sideca
             ImmutableArray<CacheName> names =
             [
                 .. Pipeline.ClosureOf(unit, byKey).Append(key).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)
-                    .Select(k => new CacheName(k, Pipeline.Display(byKey[k]))),
+                    .Select(k => new CacheName(k, displays[k])),
             ];
             result.Add(key, new CacheKeyInputs(closure.ToString(), bundleSha256, sidecarSha256, names));
         }

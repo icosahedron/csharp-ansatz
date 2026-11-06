@@ -201,13 +201,12 @@ public sealed partial class VerificationService
                 return null;
             }
             var (inputs, key, budgets) = _keys[outcome.Key];
-            // A proof holds under any budgets at least those it needed: the kernel's it ran with, the tactic fuel it used
-            // and the time it took (KTD13).
-            var needed = budgets with { TacticFuel = finish.TacticFuelUsed, Timeout = finish.Elapsed };
             (BudgetMatch Match, VerifyBudgets Budgets)? stored = outcome switch
             {
                 ProvedOutcome or TranslatedOutcome when finish.BudgetExact => (BudgetMatch.Exact, budgets),
-                ProvedOutcome or TranslatedOutcome => (BudgetMatch.AtLeast, needed),
+                // A proof holds under any budgets at least those it needed: the kernel's it ran with, the tactic fuel it
+                // used and the time it took (KTD13).
+                ProvedOutcome or TranslatedOutcome => (BudgetMatch.AtLeast, budgets with { TacticFuel = finish.TacticFuelUsed, Timeout = finish.Elapsed }),
                 FalseOutcome or NotProvedOutcome => (BudgetMatch.Exact, budgets),
                 UndecidedOutcome { Exhausted: ExhaustedBudget.KernelFuel or ExhaustedBudget.TacticFuel } => (BudgetMatch.Exact, budgets),
                 _ => null,

@@ -160,7 +160,6 @@ public sealed partial class VerificationService : IDisposable
                 session?.Delete(unitKey);
             }
         }
-        // A cached unit whose translation now fails reports that, not its entry.
         ImmutableArray<UnitResult> units =
         [
             .. run.Result.Units.Select(o => new UnitResult(

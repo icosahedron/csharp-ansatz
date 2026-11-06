@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using Warrant.Kernel;
 using Warrant.Lean4Export;
+using Warrant.Store;
 
 // Exit codes follow the Lean Kernel Arena convention:
 //   0  every declaration accepted
@@ -21,6 +22,8 @@ internal static class Cli
           warrant verify --csc-args <file> [--project-dir <dir>] [options]
           warrant verify <directory> [options]
           warrant server status | cancel <request id> | shutdown
+          warrant import <file.ndjson[.gz]>... --store <dir> [--verified] [--fuel N]
+          warrant check-store <dir> [--fuel N] [--quiet]
 
         check   re-checks every declaration with the kernel (exit 0 accept, 1 reject, 2 decline)
                 --fuel N          step budget per type checker (default 100000000)
@@ -59,11 +62,18 @@ internal static class Cli
                   --timings                 print each unit's time after the summary
         server  manages the verification server of this toolchain: status prints what it holds and runs, cancel stops a
                 request, shutdown stops it after its running requests (exit 0 when no server runs, except for cancel)
+        import  writes a new version of the store in --store from the files, read in order; a constant may come again in a
+                later file only if it is the same constant. Readers of the previous version are not disturbed.
+                  --verified  check every declaration with the kernel first and store what it admitted (default:
+                              store the declarations as read, trusted)
+                  --fuel N    step budget per type checker in verified mode (default 100000000)
+        check-store re-checks every declaration of the store's current version with the kernel, in stored order
+                    (exit 0 accept, 1 reject, 2 decline)
         """;
 
     public static int Run(string[] args)
     {
-        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate" or "verify" or "server") || (args[0] == "export" && args.Length < 3))
+        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate" or "verify" or "server" or "import" or "check-store") || (args[0] == "export" && args.Length < 3))
         {
             Console.Error.WriteLine(Usage);
             return 2;
@@ -77,10 +87,12 @@ internal static class Cli
                 "translate" => TranslateCommand.Run(args[1..], Console.Out, Console.Error),
                 "verify" => Verify(args[1..]),
                 "server" => ServerCommand.Run(args[1..], Console.Out, Console.Error),
+                "import" => ImportCommand.Run(args[1..], Console.Out, Console.Error),
+                "check-store" => CheckStoreCommand.Run(args[1..], Console.Out, Console.Error),
                 _ => Check(args[1], args.Skip(2).ToArray()),
             };
         }
-        catch (Exception ex) when (ex is Lean4ExportFormatException or IOException or UnauthorizedAccessException or FormatException)
+        catch (Exception ex) when (ex is Lean4ExportFormatException or StoreFormatException or IOException or UnauthorizedAccessException or FormatException)
         {
             Console.Error.WriteLine($"declined: {ex.Message}");
             return 2;
@@ -159,71 +171,13 @@ internal static class Cli
         Console.WriteLine($"checking {path} (format {reader.Metadata.FormatVersion}, Lean {reader.Metadata.LeanVersion})");
         var env = new KernelEnvironment();
         var checker = new ExportChecker(env, KernelLimits.Corpus with { Fuel = fuel }, admitRejected);
-        int accepted = 0, rejected = 0, declined = 0;
-        CheckResult? firstFailure = null;
-        // The cost of each result: its checking time, and the memory the checking thread allocated since the previous
-        // result (results come back on that thread, so reading the declaration is included in the memory).
-        var costs = new PriorityQueue<(string Name, double Seconds, long Bytes), double>();
-        long lastBytes = -1;
-        checker.CheckAll(reader.ReadDeclarations(), r =>
-        {
-            if (slowest > 0)
-            {
-                long bytes = GC.GetAllocatedBytesForCurrentThread();
-                if (lastBytes >= 0)
-                {
-                    costs.Enqueue((r.Name.ToString(), r.Elapsed.TotalSeconds, bytes - lastBytes), r.Elapsed.TotalSeconds);
-                    if (costs.Count > slowest)
-                    {
-                        costs.Dequeue();
-                    }
-                }
-                lastBytes = bytes;
-            }
-            if (r.Accepted)
-            {
-                accepted++;
-                return;
-            }
-            if (r.ResourceLimit)
-            {
-                declined++;
-            }
-            else
-            {
-                rejected++;
-            }
-            firstFailure ??= r;
-            if (!quiet)
-            {
-                var label = r.ResourceLimit ? "DECLINED" : "REJECTED";
-                Console.WriteLine($"{label} {r.Name}: {r.Error}");
-            }
-        });
-        Console.WriteLine($"accepted {accepted:N0}, rejected {rejected:N0}, declined {declined:N0}; {env.Count:N0} constants in {sw.Elapsed.TotalSeconds:F1}s");
-        if (slowest > 0)
-        {
-            Console.WriteLine($"slowest {costs.Count} (seconds, MB allocated, name):");
-            var top = new List<(string Name, double Seconds, long Bytes)>();
-            while (costs.Count > 0)
-            {
-                top.Add(costs.Dequeue());
-            }
-            foreach (var (name, seconds, bytes) in Enumerable.Reverse(top))
-            {
-                Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"  {seconds,9:F3}  {bytes / (1024.0 * 1024.0),9:F1}  {name}"));
-            }
-        }
+        int code = KernelCheck.Run(checker, reader.ReadDeclarations(), Console.Out, quiet, slowest, sw);
         if (output is not null)
         {
             using var writer = new Lean4ExportWriter(File.Create(output), reader.Metadata);
             writer.WriteAll(checker.Admitted);
             Console.WriteLine($"wrote {checker.Admitted.Count:N0} admitted declarations to {output}");
         }
-        if (firstFailure is null)
-        {
-            return 0;
-        }
-        return firstFailure.ResourceLimit ? 2 : 1;
+        return code;
     }
 }

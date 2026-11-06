@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Warrant.Lean4Export\Warrant.Lean4Export.csproj" />
     <ProjectReference Include="..\Warrant.Kernel\Warrant.Kernel.csproj" />
+    <ProjectReference Include="..\Warrant.Store\Warrant.Store.csproj" />
     <!-- Warrant.Frontend embeds the Warrant package rather than copying Warrant.dll beside warrant.dll (KTD4). -->
     <ProjectReference Include="..\Warrant.Frontend\Warrant.Frontend.csproj" />
     <ProjectReference Include="..\Warrant.Extraction\Warrant.Extraction.csproj" />

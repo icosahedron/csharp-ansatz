@@ -19,19 +19,28 @@ The store arrives with its verbs and its kernel seam, tested on Init and measure
 ```text
 <store>/
   current                 one line: the active version directory
+  .lock                   held by the one import writing the store
   v1-3f9a12c4be07/
     manifest.json
-    names.idx             header; sorted (name -> record offset, length, kind)
-    decls.bin             header; one record per declaration
+    names.idx             header; sorted (name key -> record offset, length, kind)
+    decls.bin             header; one length-prefixed record per declaration
 ```
+
+A version's name is `v1-` and twelve hex digits of the SHA-256 of its records' hashes and its manifest, so the same input imported twice makes the same version, byte for byte; importing it into a store that already holds it keeps the version readers may have open.
 
 A store is never rewritten in place (KTD17).
 Each `warrant import` writes a new version directory and then replaces `current`, a one-line file that is read once and never mapped, so replacing it is atomic.
 This is forced by Windows, which refuses to overwrite or rename over a file another process has mapped.
 Readers open the version `current` names and keep it until they are disposed; the next `import` deletes versions nobody holds.
 
-Files are mapped read-only, opened with `FileShare.Read | FileShare.Delete` so an old version can be deleted while it is still mapped (the space is freed when the last reader closes it).
-Every file starts with a magic number, a format version and its length, and a reader checks them before reading any record, because reading a truncated mapped file on Unix raises SIGBUS instead of an exception.
+`names.idx` is mapped read-only; `decls.bin` is read by offset, one record at a time, with positional reads that many threads can make at once.
+Mapping the records as well would save a copy per record, but it would mean decoding through pointers, and the record decoder becomes trusted code when a store becomes a verification base (KTD19); positional reads keep it in safe, bounds-checked code, and a file truncated under a reader becomes an error rather than SIGBUS.
+Both files are opened with `FileShare.Read | FileShare.Delete`, so an old version can be deleted while it is read.
+On Unix, `import` deletes every other version as soon as `current` names the new one, and a reader holding an old one keeps reading it until it closes its files; on Windows a version whose files are open stays until a later `import` deletes it.
+A reader that reads `current` just before an import deletes the version it names opens `current` again.
+
+Every file starts with a magic number (`WRTD`, `WRTI`), a format version and its length, and a reader checks them before reading any record, so a truncated, foreign or newer file is rejected with a message naming it.
+The manifest's `format` is checked the same way.
 
 ### Records
 
@@ -40,12 +49,18 @@ A record is self-contained: it has its own small tables of names, levels and exp
 That keeps the sharing inside a declaration (a proof term's repeated subterms are stored once) without tying records together, so one record can be read without reading any other.
 Identical records are stored once, keyed by their SHA-256.
 
+The encoding is binary (`RecordCodec`): a record kind, then the names (each a string or number component on an earlier name), the levels and the expressions, each table entry referring only to earlier entries, then the declaration's constants with every field `ConstantInfo` has.
+Decoding checks every index, enumeration value, boolean and length, and that the record ends where its last field does, so a damaged record is an error, never a different declaration.
+Free variables and metavariables cannot be stored; no admitted declaration has one.
+
+The index sorts names by a key of their components from the root (a tag byte, then the string's UTF-8 bytes or the number), compared as bytes, so a lookup is a binary search with no name parsing.
+
 The cost is sharing across declarations: a subterm that a thousand Mathlib lemmas mention is stored, and materialized, once per lemma.
 Chapter 8's baselines measure what that costs; it does not touch verification in M5b.
 
 ### The manifest
 
-An illustrative manifest for the Init + semantics store:
+The manifest of the Init + semantics store (hashes shortened):
 
 ```json
 {
@@ -53,14 +68,14 @@ An illustrative manifest for the Init + semantics store:
   "lean": "4.35.0",
   "lean4export": "3.1.0",
   "sources": [
-    { "file": "init.ndjson", "sha256": "…" },
-    { "file": "warrant-semantics.ndjson.gz", "sha256": "51b2…" }
+    { "file": "init.ndjson", "sha256": "f4c6…" },
+    { "file": "warrant-semantics.ndjson.gz", "sha256": "cc74…" }
   ],
   "mode": "verified",
-  "verifiedBy": "9c41…",
+  "verifiedBy": "648c…",
   "quotientsInitialized": true,
-  "declarations": 60212,
-  "constants": 61690
+  "declarations": 57944,
+  "constants": 59374
 }
 ```
 
@@ -93,7 +108,8 @@ Only a store creates one.
 One input is not a lookup: the quotient flag.
 When it is set, the kernel reduces quotient recursors, and `Quotient.Add` skips its checks because it believes the quotient constants are already there (`Kernel.cs`).
 A store that claimed quotients were initialized while holding different `Quot` constants would widen what the kernel accepts.
-So the reader sets the flag only when the store holds the quotient constants exactly as `Quotient.ExpectedConstants` defines them, whatever the manifest says (KTD18).
+So the flag is set only when the source claims it and holds the quotient constants exactly as `Quotient.ExpectedConstants` defines them (up to binder names, as an exported quotient constant is compared), whatever the manifest says (KTD18).
+The kernel makes that check itself, in `KernelEnvironment`'s constructor, rather than taking it from the store's code.
 
 This is a change to a trusted file, so it gets reject-only tests: a declaration whose dependency is missing from the store is still rejected, and an environment without a source behaves exactly as before.
 
@@ -104,19 +120,26 @@ warrant import <file.ndjson[.gz]>... --store <dir> [--verified] [--fuel N]
 warrant check-store <dir> [--fuel N] [--quiet]
 ```
 
-`import` reads its files in order (KTD20).
-A constant may appear again in a later file only if it is identical; that is what lets the Init + semantics store be built from the full Init export followed by the bundle, whose Init closure repeats Init's constants and adds the `Warrant` library's.
+`import` reads its files in order (KTD20) and writes a new version holding exactly those files: a store is a snapshot of the sources its manifest lists, not a library that grows.
+A constant may appear again in a later file only if it is the same constant (up to binder names, as the kernel compares an exported constant with its own) and the store keeps the first; that is what lets the Init + semantics store be built from the full Init export followed by the bundle, whose Init closure repeats Init's constants and adds the `Warrant` library's.
+Metadata counts: the bundle is exported with `--export-mdata`, so Init must be too, and `scripts/export-lean-library.sh` does that by default; an Init exported without it differs from the bundle's copy at `Nat.beq`, whose `@&` borrow annotations are metadata, and the import fails naming it.
+All files of a store must come from one Lean version.
 In verified mode each declaration goes through the kernel first, and the store keeps what the kernel admitted, including the constructors and recursors it generates itself, as `warrant export` does.
 In trusted mode the declarations are stored as read.
 
 `check-store` reads the records back in their stored order into a fresh environment, checks each with the kernel, and prints the same summary as `warrant check`:
 
 ```text
-checking store D:\stores\init-semantics (v1-3f9a12c4be07, Lean 4.35.0)
-accepted 60,212, rejected 0, declined 0; 61,690 constants in 52.3s
+$ warrant import init.ndjson warrant-semantics.ndjson.gz --store init-semantics --verified
+importing 2 file(s) into init-semantics (verified)
+  init.ndjson: 57,919 declarations stored, 0 repeated
+  warrant-semantics.ndjson.gz: 25 declarations stored, 2,574 repeated
+wrote v1-e9a37ed70edb: 57,944 declarations, 59,374 constants in 147.2s
+$ warrant check-store init-semantics --quiet
+checking store /…/init-semantics (v1-e9a37ed70edb, Lean 4.35.0)
+accepted 57,944, rejected 0, declined 0; 59,374 constants in 138.2s
 ```
 
-(Illustrative; the Init figures from the Mathlib run suggest about 50 seconds.)
-
-The Init + semantics store passing `check-store` is M5b's exit criterion for the store.
-The full Init export is 346 MB and not committed, so that test is opt-in through `WARRANT_INIT_EXPORT`, as M3's full-Init test is; CI runs the same test on a store of the bundle alone.
+The Init + semantics store passing `check-store` is M5b's exit criterion for the store, and it does.
+Measured on Linux with a Debug build of the CLI: the import peaked at 0.96 GB and `check-store` at 1.4 GB (a fresh environment holds every constant it checks); the version is 80 MB (`decls.bin` 78.5 MB, `names.idx` 4.4 MB) against the export's 348 MB.
+The full Init export is not committed, so that test is opt-in through `WARRANT_INIT_EXPORT` (`StoreCommandTests.AStoreOfInitAndTheBundlePassesCheckStore`), as M3's full-Init test is; the default run builds and checks a store of the bundle alone.

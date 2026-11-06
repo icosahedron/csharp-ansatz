@@ -279,9 +279,11 @@ scripts/export-lean-library.sh Init init.ndjson
 ```
 
 The script downloads the Lean 4.35.0 toolchain, builds lean4export at commit
-`5a9a355` (the one built for Lean v4.35.0), and runs `lean4export Init`. The
-export takes about 15 seconds and produces a 346 MB file with 57,919
-declaration records.
+`5a9a355` (the one built for Lean v4.35.0), and runs `lean4export --export-mdata Init`. The
+export takes about 15 seconds and produces a 348 MB file with 57,919
+declaration records. Metadata is exported as it is for the semantics bundle, so the
+Init constants the bundle repeats are identical to these and the two files can be
+imported into one store (`EXPORT_MDATA=0` exports without it).
 
 On Windows, run the scripts from Git Bash and point them at a toolchain
 installed with elan instead of the Linux download:

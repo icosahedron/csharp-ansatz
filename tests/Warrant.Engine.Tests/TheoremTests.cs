@@ -291,7 +291,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var extraction = EngineCorpus.Extract("refuted");
         var translation = Translator.Translate(extraction.Units.Select(u => u.Unit), engine.Bundle.Env);
         var shell = translation.Find("M:Corpus.Refuted.Increments.WrongSum")!.Theorem!;
-        var env = Pipeline.Run(EngineCorpus.Inputs(extraction), engine.Bundle).Environment;
+        var env = Pipeline.Run(EngineCorpus.Inputs(extraction), engine.Bundle).Environment.Fork();
         Assert.Null(env.Find(shell.Name));
 
         var left = shell.Type.GetAppArgs()[1];

@@ -189,8 +189,8 @@ public sealed record UndecidedOutcome(
 }
 
 /// <summary>
-/// A unit that translation could not translate, whose declaration the kernel rejected, or a theorem the kernel admitted
-/// with a type other than its statement.
+/// A unit that translation could not translate, whose declaration the kernel rejected, a theorem the kernel admitted
+/// with a type other than its statement, or a theorem whose script names another unit's constant it does not depend on.
 /// </summary>
 /// <param name="Key">The unit's key.</param>
 /// <param name="UnitKind">What the unit is.</param>
@@ -199,7 +199,23 @@ public sealed record UndecidedOutcome(
 /// <param name="Reason">The translation or kernel error.</param>
 public sealed record FailedOutcome(
     string Key, VirUnitKind UnitKind, string DisplayName, ImmutableArray<UnitAssumption> Assumptions, string Reason)
-    : UnitOutcome(Key, UnitKind, DisplayName, Assumptions);
+    : UnitOutcome(Key, UnitKind, DisplayName, Assumptions)
+{
+    /// <summary>
+    /// The code of a proof script the engine rejects as extraction rejects a malformed one (WRT0004): a <c>Lean.Const</c>
+    /// that names another unit's constant without depending on it (M5b KTD33).
+    /// </summary>
+    public const string MalformedScriptCode = "WRT0004";
+
+    /// <summary>
+    /// The diagnostic code when the fault is the user's, such as <see cref="MalformedScriptCode"/>, with
+    /// <see cref="Reason"/> the whole message; null when it is Warrant's (WRT0010).
+    /// </summary>
+    public string? Code { get; init; }
+
+    /// <summary>The VIR node ID (pre-order, docs/m4/04) the diagnostic points at; null for the unit's own location.</summary>
+    public int? Node { get; init; }
+}
 
 /// <summary>A unit not attempted because a unit it depends on failed or was skipped.</summary>
 /// <param name="Key">The unit's key.</param>

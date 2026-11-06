@@ -168,6 +168,31 @@ public sealed class VerifyTests : IDisposable
     }
 
     [Fact]
+    public void ALeanConstNamingAnotherUnitsConstantIsWrt0004AtTheTactic()
+    {
+        // M5b KTD33: Outside does not depend on Twice, so a Lean.Const naming Twice's constant would resolve only in a run
+        // that happens to hold it.
+        Write("""
+            public static class C
+            {
+                [Verified] public static int Twice(int x) => x + x;
+                [Theorem] static Proof Outside(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("Cs.C.«Twice(System.Int32)»")));
+            }
+            """);
+        var (code, output) = VerifyArgs();
+        Assert.Equal(1, code);
+        var column = File.ReadAllLines(SourcePath)[4].IndexOf("Tactic.Exact", StringComparison.Ordinal) + 1;
+        Assert.Contains(
+            $"{SourcePath}(5,{column.ToString(CultureInfo.InvariantCulture)}): error WRT0004: Malformed proof script: "
+            + "Lean.Const(\"Cs.C.«Twice(System.Int32)»\") names a constant of 'Twice', which this theorem does not depend on; "
+            + "name it with nameof(Twice) instead.\n",
+            output,
+            StringComparison.Ordinal);
+        Assert.Matches(@"(?m)^  C\.Outside\(int\) +failed: Malformed proof script: ", output);
+        Assert.EndsWith("Warrant: 2 verified units, 0 theorems proved, 1 not proved.\n", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AllProvedExitsZero()
     {
         Write("""

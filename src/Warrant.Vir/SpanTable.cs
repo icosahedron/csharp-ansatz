@@ -30,6 +30,12 @@ public sealed class SpanTable
     /// <summary>The number of nodes with a span.</summary>
     public int Count => _spans.Count;
 
+    /// <summary>
+    /// The node IDs that have a span, with their spans, in ascending node-ID order: the input a table is rebuilt from
+    /// with <see cref="SpanTable(IEnumerable{KeyValuePair{int, VirSpan}})"/>.
+    /// </summary>
+    public IEnumerable<KeyValuePair<int, VirSpan>> Entries => _spans.OrderBy(pair => pair.Key);
+
     /// <summary>Builds the table for a unit by numbering its nodes in pre-order.</summary>
     /// <param name="unit">The unit.</param>
     /// <param name="spanOf">The span of a node instance, or null if it has none.</param>

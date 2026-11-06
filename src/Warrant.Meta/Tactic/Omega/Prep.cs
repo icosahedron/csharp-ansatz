@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Warrant.Cic;
+using Warrant.Kernel;
 
 namespace Warrant.Meta
 {
@@ -37,17 +38,32 @@ namespace Warrant.Meta
         private static readonly ConditionalWeakTable<Sidecar, SimpTheorems> Cache = new();
 
         /// <summary>
-        /// The set's theorems over <paramref name="meta"/>'s environment, built once per sidecar in a Meta run of its own,
-        /// so building them does not charge any theorem's tactic fuel.
+        /// The set's theorems for <paramref name="meta"/>'s sidecar: built once per base sidecar (<see cref="Sidecar.Base"/>),
+        /// over <paramref name="meta"/>'s environment when nothing built them yet (M5b KTD10).
         /// </summary>
         public static SimpTheorems Theorems(MetaM meta)
         {
             ArgumentNullException.ThrowIfNull(meta);
+            return Theorems(meta.Env, meta.Attributes);
+        }
+
+        /// <summary>
+        /// The set's theorems for <paramref name="sidecar"/>, built over <paramref name="env"/> once per base sidecar, in a
+        /// Meta run of its own, so building them does not charge any theorem's tactic fuel. The engine passes the frozen
+        /// bundle environment, as for <see cref="DefaultSimpSet.Theorems(KernelEnvironment, Sidecar)"/>.
+        /// </summary>
+        /// <param name="env">The environment to build over if the set is not built yet; the bundle's.</param>
+        /// <param name="sidecar">The sidecar, or any fork of it.</param>
+        /// <returns>The set.</returns>
+        public static SimpTheorems Theorems(KernelEnvironment env, Sidecar sidecar)
+        {
+            ArgumentNullException.ThrowIfNull(env);
+            ArgumentNullException.ThrowIfNull(sidecar);
             lock (Cache)
             {
-                return Cache.GetValue(meta.Attributes, sidecar =>
+                return Cache.GetValue(sidecar.Base, b =>
                 {
-                    var builder = new MetaM(meta.Env, new MetaLimits(long.MaxValue)) { Attributes = sidecar };
+                    var builder = new MetaM(env, new MetaLimits(long.MaxValue)) { Attributes = b };
                     var set = new SimpTheorems();
                     foreach (var entry in Entries)
                     {

@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Warrant.Extraction;
 using Warrant.Kernel;
 using Warrant.Meta;
+using Warrant.Vir;
 
 namespace Warrant.Engine.Tests;
 
@@ -12,7 +13,7 @@ namespace Warrant.Engine.Tests;
 /// </summary>
 public sealed class EngineFixture
 {
-    private readonly Dictionary<string, EngineResult> _runs = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (IReadOnlyList<EngineUnit> Inputs, EngineResult Result)> _runs = new(StringComparer.Ordinal);
 
     /// <summary>The checked, frozen bundle, loaded once per test process and shared with the differential fixture.</summary>
     internal static readonly Lazy<SemanticsBundle> SharedBundle = new(() => SemanticsBundle.Load(TestData.Path(SemanticsBundle.FileName)));
@@ -30,18 +31,27 @@ public sealed class EngineFixture
     /// The engine's run over a named corpus compilation, at <see cref="KernelLimits.Corpus"/>: an M4 compilation by its
     /// name, an M5a one as <c>m5a/name</c>.
     /// </summary>
-    public EngineResult Run(string compilation)
+    public EngineResult Run(string compilation) => Get(compilation).Result;
+
+    /// <summary>The units <see cref="Run"/> gave the engine for a named corpus compilation.</summary>
+    public IReadOnlyList<EngineUnit> Inputs(string compilation) => Get(compilation).Inputs;
+
+    /// <summary>A unit's span table in a named corpus compilation, as <see cref="Run"/> extracted it.</summary>
+    public SpanTable? Spans(string compilation, string key) => Get(compilation).Inputs.Single(u => u.Unit.Key == key).Spans;
+
+    private (IReadOnlyList<EngineUnit> Inputs, EngineResult Result) Get(string compilation)
     {
         lock (_runs)
         {
-            if (!_runs.TryGetValue(compilation, out var result))
+            if (!_runs.TryGetValue(compilation, out var run))
             {
                 var set = compilation.StartsWith("m5a/", StringComparison.Ordinal) ? CorpusSet.M5a : CorpusSet.M4;
                 var name = set == CorpusSet.M5a ? compilation["m5a/".Length..] : compilation;
-                result = Pipeline.Run(EngineCorpus.Inputs(EngineCorpus.Extract(set.Compile(name))), Bundle, Options);
-                _runs.Add(compilation, result);
+                var inputs = EngineCorpus.Inputs(EngineCorpus.Extract(set.Compile(name)));
+                run = (inputs, Pipeline.Run(inputs, Bundle, Options));
+                _runs.Add(compilation, run);
             }
-            return result;
+            return run;
         }
     }
 }

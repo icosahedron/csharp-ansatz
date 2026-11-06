@@ -139,12 +139,14 @@ internal static class TranslateCommand
                     }
                     if (f.Sides.Length > 0)
                     {
-                        output.WriteLine($"  Values: {OutcomeText.Values(f.Sides, sources.Text)}");
+                        output.WriteLine($"  Values: {OutcomeText.Values(f.Sides, engineUnits[unit.Key].Spans, sources.Text)}");
                     }
                     break;
                 case NotProvedOutcome n:
                     errors++;
-                    output.WriteLine(sources.Format(n.TacticSpan ?? location, "error", NotProvedOutcome.Code, OutcomeText.NotProvedMessage(theorem, n, sources.Text)));
+                    var spans = engineUnits[unit.Key].Spans;
+                    output.WriteLine(sources.Format(
+                        OutcomeText.SpanOf(spans, n.TacticNode) ?? location, "error", NotProvedOutcome.Code, OutcomeText.NotProvedMessage(theorem, n, spans, sources.Text)));
                     foreach (var line in OutcomeText.NotProvedDetails(n))
                     {
                         output.WriteLine(line.Length == 0 ? "" : $"  {line}");
@@ -152,7 +154,7 @@ internal static class TranslateCommand
                     break;
                 case UndecidedOutcome u:
                     errors++;
-                    output.WriteLine(sources.Format(location, "error", UndecidedOutcome.Code, OutcomeText.UndecidedMessage(theorem, u.Reason)));
+                    output.WriteLine(sources.Format(location, "error", UndecidedOutcome.Code, OutcomeText.UndecidedMessage(u.UnitKind, theorem, u.Reason)));
                     break;
                 case InternalErrorOutcome i:
                     errors++;

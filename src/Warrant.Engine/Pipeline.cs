@@ -1,7 +1,9 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Globalization;
 using Warrant.Cic;
 using Warrant.Engine.Reports;
+using Warrant.Engine.Service;
 using Warrant.Kernel;
 using Warrant.Meta;
 using Warrant.Semantics;
@@ -10,9 +12,9 @@ using Warrant.Vir;
 namespace Warrant.Engine;
 
 /// <summary>
-/// The engine's pipeline (docs/m4/07, "The engine"; docs/m5a/04, "The loop"): translates VIR units, admits their
-/// declarations in dependency order into one fork of the bundle, proves theorems, and classifies every unit's outcome
-/// independently of the others.
+/// The engine's pipeline (docs/m4/07, "The engine"; docs/m5a/04, "The loop"; docs/m5b/03, "Stages and levels"):
+/// translates VIR units, admits the definitions in dependency order into one fork of the bundle, then proves the theorems
+/// level by level, each in its own fork, and classifies every unit's outcome independently of the others.
 /// </summary>
 public static class Pipeline
 {
@@ -33,7 +35,10 @@ public static class Pipeline
     public static EngineResult Run(IEnumerable<EngineUnit> units, SemanticsBundle bundle, KernelLimits? limits = null) =>
         Run(units, bundle, EngineOptions.Default with { Kernel = limits ?? KernelLimits.Corpus });
 
-    /// <summary>Runs the engine over a set of units.</summary>
+    /// <summary>
+    /// Runs the engine over a set of units on one thread: the theorems of a level one after another, in input order. The
+    /// outcomes are those of a run on a <see cref="WorkerPool"/> (M5b R7).
+    /// </summary>
     /// <param name="units">
     /// The units, typically in extraction order. A unit whose dependency is missing, cannot be translated or is rejected by
     /// the kernel fails, and the units depending on it are skipped; the others proceed.
@@ -45,29 +50,69 @@ public static class Pipeline
     public static EngineResult Run(IEnumerable<EngineUnit> units, SemanticsBundle bundle, EngineOptions options)
     {
         ArgumentNullException.ThrowIfNull(units);
-        ArgumentNullException.ThrowIfNull(bundle);
-        ArgumentNullException.ThrowIfNull(options);
         var inputs = units.ToList();
-        var byKey = new Dictionary<string, EngineUnit>(StringComparer.Ordinal);
-        foreach (var input in inputs)
-        {
-            if (!byKey.TryAdd(input.Unit.Key, input))
-            {
-                throw new ArgumentException($"The unit {input.Unit.Key} is given twice.", nameof(units));
-            }
-        }
-        var run = new RunState(bundle, byKey, options);
-        KernelThread.Run(run.Execute);
-        return new EngineResult(
-            bundle,
-            run.Env,
-            [.. inputs.Select(u => run.Outcomes[u.Unit.Key])],
-            [.. run.Admitted]);
+        return Execute(inputs, [], [.. inputs.Select(u => u.Unit.Key)], bundle, options, pool: null).Result;
     }
 
     /// <summary>
-    /// One theorem's budgets (R13): the project's, overridden by the theorem's <c>[Theorem(...)]</c> arguments where they
-    /// are not zero, with one deadline for Meta and the kernel.
+    /// The engine's stages (M5b KTD8): translates every unit, admits the units that are not theorems in dependency order on
+    /// one large-stack thread, freezes the run's fork, then runs the theorems level by level, on <paramref name="pool"/>
+    /// or, when it is null, one after another on that thread.
+    /// </summary>
+    /// <param name="inputs">The units to run.</param>
+    /// <param name="decided">Outcomes decided before the run, such as a unit whose VIR could not be read; their dependents are skipped.</param>
+    /// <param name="order">Every unit's key, of <paramref name="inputs"/> and <paramref name="decided"/>, in the order the result lists them.</param>
+    /// <param name="bundle">The checked, frozen semantics bundle.</param>
+    /// <param name="options">The budgets, the attribute sidecar and the cancellation token.</param>
+    /// <param name="pool">The workers theorems run on; null to run them on the run's own thread.</param>
+    /// <returns>The result, with each unit's time and the number of units whose proof search ran.</returns>
+    /// <exception cref="ArgumentException">Two units have the same key.</exception>
+    internal static PipelineRun Execute(
+        IReadOnlyList<EngineUnit> inputs,
+        IReadOnlyList<UnitOutcome> decided,
+        IReadOnlyList<string> order,
+        SemanticsBundle bundle,
+        EngineOptions options,
+        WorkerPool? pool)
+    {
+        ArgumentNullException.ThrowIfNull(bundle);
+        ArgumentNullException.ThrowIfNull(options);
+        var byKey = new Dictionary<string, EngineUnit>(StringComparer.Ordinal);
+        var decidedKeys = decided.Select(d => d.Key).ToHashSet(StringComparer.Ordinal);
+        foreach (var input in inputs)
+        {
+            if (!byKey.TryAdd(input.Unit.Key, input) || decidedKeys.Contains(input.Unit.Key))
+            {
+                throw new ArgumentException($"The unit {input.Unit.Key} is given twice.", nameof(inputs));
+            }
+        }
+        WarmSimpSets(bundle, options.Attributes);
+
+        var run = new RunState(bundle, byKey, options, decided, pool);
+        KernelThread.Run(run.Execute);
+        return new PipelineRun(
+            new EngineResult(bundle, run.Env, [.. order.Select(k => run.Outcomes[k])], [.. run.Admitted]),
+            run.Elapsed,
+            run.SearchRuns);
+    }
+
+    /// <summary>Builds the shared simp sets over the frozen bundle alone, before any fork exists to leak into them (KTD10).</summary>
+    private static void WarmSimpSets(SemanticsBundle bundle, Sidecar sidecar)
+    {
+        DefaultSimpSet.Theorems(bundle.Env, sidecar);
+        OmegaPrepSet.Theorems(bundle.Env, sidecar);
+    }
+
+    /// <summary>What <see cref="Execute"/> produced.</summary>
+    /// <param name="Result">The outcomes and the final environment.</param>
+    /// <param name="Elapsed">Each unit's time from the moment it started to its outcome; absent for units decided before the run.</param>
+    /// <param name="SearchRuns">The number of units whose proof search ran: theorems, and recursive definitions' decrease proofs.</param>
+    internal sealed record PipelineRun(EngineResult Result, IReadOnlyDictionary<string, TimeSpan> Elapsed, int SearchRuns);
+
+    /// <summary>
+    /// One unit's budgets (M5a R13, M5b KTD11): the project's, overridden by a theorem's <c>[Theorem(...)]</c> arguments
+    /// where they are not zero, with one deadline for Meta and the kernel, which starts when the unit does. A definition,
+    /// with its decrease proofs and equation lemma, has the project's budgets and no overrides.
     /// </summary>
     private sealed class TheoremBudget
     {
@@ -75,8 +120,17 @@ public static class Pipeline
         {
             Timeout = overrides is { TimeoutSeconds: > 0 } ? TimeSpan.FromSeconds(overrides.TimeoutSeconds) : options.Timeout;
             var deadline = DateTimeOffset.UtcNow + Timeout;
-            Kernel = options.Kernel with { Fuel = overrides is { KernelFuel: > 0 } ? overrides.KernelFuel : options.Kernel.Fuel, Deadline = deadline };
-            Meta = new MetaLimits(overrides is { TacticFuel: > 0 } ? overrides.TacticFuel : options.TacticFuel) { Deadline = deadline };
+            Kernel = options.Kernel with
+            {
+                Fuel = overrides is { KernelFuel: > 0 } ? overrides.KernelFuel : options.Kernel.Fuel,
+                Deadline = deadline,
+                CancellationToken = options.CancellationToken,
+            };
+            Meta = new MetaLimits(overrides is { TacticFuel: > 0 } ? overrides.TacticFuel : options.TacticFuel)
+            {
+                Deadline = deadline,
+                CancellationToken = options.CancellationToken,
+            };
         }
 
         public TimeSpan Timeout { get; }
@@ -88,6 +142,11 @@ public static class Pipeline
         /// <summary>Which budget a resource exception exhausted, for WRT0006's message.</summary>
         public string Exhausted(Exception ex)
         {
+            if (ex is MetaResourceException { InnerException: KernelResourceException kernel })
+            {
+                // The kernel ran out inside Meta's Check (KTD12): its budget, not Meta's.
+                ex = kernel;
+            }
             if (ex.Message.Contains("deadline", StringComparison.Ordinal) || DateTimeOffset.UtcNow >= Kernel.Deadline)
             {
                 return string.Create(CultureInfo.InvariantCulture, $"the time limit of {Timeout.TotalSeconds:0.###} s was reached");
@@ -102,37 +161,309 @@ public static class Pipeline
         }
     }
 
-    private sealed class RunState(SemanticsBundle bundle, Dictionary<string, EngineUnit> units, EngineOptions options)
+    /// <summary>
+    /// A run's shared state (KTD8, KTD10): the units, the outcomes and admitted declarations merged so far, and the run's
+    /// fork of the bundle and the sidecar, which the definitions are admitted into and which is frozen before any theorem
+    /// runs. Each theorem works in a <see cref="Scope"/> of its own; its outcome is merged when its level ends.
+    /// </summary>
+    private sealed class RunState(
+        SemanticsBundle bundle, Dictionary<string, EngineUnit> units, EngineOptions options, IReadOnlyList<UnitOutcome> decided, WorkerPool? pool)
     {
-        private readonly KernelLimits limits = options.Kernel;
-        private NotationNames _names = new();
+        private readonly Dictionary<Name, string> _owners = [];
+        private int _searchRuns;
 
-        public KernelEnvironment Env { get; } = bundle.Env.Fork();
+        public SemanticsBundle Bundle => bundle;
+
+        public Dictionary<string, EngineUnit> Units => units;
+
+        public EngineOptions Options => options;
+
+        public NotationNames Names { get; private set; } = new();
+
+        /// <summary>The definitions of the run's type units, by key.</summary>
+        public Dictionary<string, VirDefinition> Definitions { get; } =
+            units.Values.Where(u => u.Unit.Definition is not null).ToDictionary(u => u.Unit.Key, u => u.Unit.Definition!, StringComparer.Ordinal);
+
+        /// <summary>The environment holding every admitted declaration: the run's fork, then each level's fork of it.</summary>
+        public KernelEnvironment Env { get; private set; } = bundle.Env.Fork();
 
         /// <summary>The attribute sidecar with this run's entries for the declarations it generates (KTD8, KTD9).</summary>
         public Sidecar Attributes { get; } = options.Attributes.Fork();
 
-        public Dictionary<string, UnitOutcome> Outcomes { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, UnitOutcome> Outcomes { get; } = decided.ToDictionary(o => o.Key, StringComparer.Ordinal);
 
         public List<KernelDeclaration> Admitted { get; } = [];
+
+        public Dictionary<string, TimeSpan> Elapsed { get; } = new(StringComparer.Ordinal);
+
+        public int SearchRuns => _searchRuns;
+
+        public void CountSearch() => Interlocked.Increment(ref _searchRuns);
 
         public void Execute()
         {
             var translation = Translate();
-            _names = Names(translation);
+            Names = NamesOf(translation);
+            var theorems = new List<TranslatedUnit>();
             foreach (var unit in translation.Units)
             {
-                Outcomes.Add(unit.Key, Skip(units[unit.Key]) ?? Admit(unit));
+                if (unit.Theorem is not null)
+                {
+                    theorems.Add(unit);
+                    continue;
+                }
+                var stopwatch = Stopwatch.StartNew();
+                var outcome = Cancelled(units[unit.Key]) ?? Skip(units[unit.Key]) ?? new Scope(this, Env, Attributes).Admit(unit);
+                Outcomes.Add(unit.Key, SettleCancel(units[unit.Key], outcome));
+                Elapsed.Add(unit.Key, stopwatch.Elapsed);
+            }
+            Env.Freeze();
+            Attributes.Freeze();
+            RecordOwners(translation);
+            RunLevels(theorems);
+        }
+
+        /// <summary>
+        /// The theorems, level by level (KTD8): a theorem's level is one more than the deepest theorem it names with
+        /// <c>nameof</c>. Each runs in its own fork of the level's frozen environment; when the level ends, its proved
+        /// theorems are admitted into a new fork, which is frozen and becomes the next level's base.
+        /// </summary>
+        private void RunLevels(List<TranslatedUnit> theorems)
+        {
+            var index = units.Keys.Select((k, i) => (k, i)).ToDictionary(p => p.k, p => p.i, StringComparer.Ordinal);
+            var levels = LevelsOf(theorems);
+            foreach (var level in theorems.GroupBy(t => levels[t.Key]).OrderBy(g => g.Key))
+            {
+                var ordered = level.OrderBy(t => index[t.Key]).ToList();
+                var levelEnv = Env;
+                var jobs = new List<(TranslatedUnit Unit, Func<(UnitOutcome, TimeSpan)> Work)>();
+                foreach (var theorem in ordered)
+                {
+                    var unit = units[theorem.Key];
+                    if (((UnitOutcome?)Cancelled(unit) ?? Skip(unit)) is { } early)
+                    {
+                        Outcomes.Add(theorem.Key, early);
+                        Elapsed.Add(theorem.Key, TimeSpan.Zero);
+                        continue;
+                    }
+                    jobs.Add((theorem, () => Prove(theorem, levelEnv)));
+                }
+                (UnitOutcome, TimeSpan)[] results = pool is null
+                    ? [.. jobs.Select(j => j.Work())]
+                    : pool.RunAll(jobs.Select(j => j.Work));
+                for (int i = 0; i < jobs.Count; i++)
+                {
+                    Outcomes.Add(jobs[i].Unit.Key, results[i].Item1);
+                    Elapsed.Add(jobs[i].Unit.Key, results[i].Item2);
+                }
+                AdmitProved(ordered);
+            }
+        }
+
+        /// <summary>One theorem in its own fork of the level's environment and the run's sidecar; the deadline starts here.</summary>
+        private (UnitOutcome, TimeSpan) Prove(TranslatedUnit theorem, KernelEnvironment levelEnv)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            var unit = units[theorem.Key];
+            UnitOutcome outcome;
+            try
+            {
+                outcome = Cancelled(unit) ?? new Scope(this, levelEnv.Fork(), Attributes.Fork()).Admit(theorem);
+            }
+            catch (OperationCanceledException)
+            {
+                // KTD32: a cancel during the counterexample search ends the unit as cancelled, not as a failure.
+                outcome = Cancelled(unit) ?? throw new InvalidOperationException("A unit was cancelled although the run was not.");
+            }
+            return (SettleCancel(unit, outcome), stopwatch.Elapsed);
+        }
+
+        /// <summary>
+        /// Admits a level's proved theorems, in input order, into a new fork of the run's environment and freezes it, so
+        /// the next level's theorems can use them. The kernel checks each proof again, as it does every term admitted
+        /// into an environment; one it now rejects is Warrant's bug, and the theorem's users are skipped.
+        /// </summary>
+        private void AdmitProved(List<TranslatedUnit> level)
+        {
+            var proved = level.Where(t => Outcomes[t.Key] is ProvedOutcome).ToList();
+            if (proved.Count == 0)
+            {
+                return;
+            }
+            var next = Env.Fork();
+            foreach (var theorem in proved)
+            {
+                var outcome = (ProvedOutcome)Outcomes[theorem.Key];
+                var limits = new TheoremBudget(options, theorem.Theorem!.Budget).Kernel with { Deadline = null, CancellationToken = default };
+                try
+                {
+                    Kernel.Kernel.Add(next, outcome.Certificate, limits);
+                    Admitted.Add(outcome.Certificate);
+                }
+                catch (KernelException ex)
+                {
+                    Outcomes[theorem.Key] = new InternalErrorOutcome(
+                        outcome.Key, outcome.UnitKind, outcome.DisplayName, outcome.Assumptions, $"the kernel rejected the proof it had accepted when admitting it again: {ex.Message}");
+                }
+            }
+            next.Freeze();
+            Env = next;
+        }
+
+        /// <summary>Each theorem's level: 1, or one more than the deepest translated theorem among its dependencies.</summary>
+        private Dictionary<string, int> LevelsOf(List<TranslatedUnit> theorems)
+        {
+            var keys = theorems.Select(t => t.Key).ToHashSet(StringComparer.Ordinal);
+            var levels = new Dictionary<string, int>(StringComparer.Ordinal);
+            var visiting = new HashSet<string>(StringComparer.Ordinal);
+
+            int Level(string key)
+            {
+                if (levels.TryGetValue(key, out var known))
+                {
+                    return known;
+                }
+                if (!visiting.Add(key))
+                {
+                    throw new InvalidOperationException($"The theorems that {key} names form a cycle.");
+                }
+                var level = 1 + units[key].Unit.Deps.Where(keys.Contains).Select(Level).DefaultIfEmpty(0).Max();
+                visiting.Remove(key);
+                levels.Add(key, level);
+                return level;
+            }
+
+            foreach (var key in keys)
+            {
+                Level(key);
+            }
+            return levels;
+        }
+
+        /// <summary>
+        /// Records every theorem's name as its unit's (KTD33). The declarations definitions and types admitted were recorded
+        /// by <see cref="Own"/> as they were admitted.
+        /// </summary>
+        private void RecordOwners(Translation translation)
+        {
+            foreach (var unit in translation.Units)
+            {
+                if (unit.Theorem is { } shell)
+                {
+                    _owners.TryAdd(shell.Name, unit.Key);
+                }
             }
         }
 
         /// <summary>
-        /// Translates every unit that translates: a unit translation rejects fails, the units depending on it are skipped, and
-        /// translation runs again without them.
+        /// Records a unit as the owner of a declaration it admitted into the run's fork (KTD33), with an inductive type's
+        /// constructors and recursors, whatever the unit's outcome: a unit that fails or runs out after admitting it leaves
+        /// it in the fork. Called only before the fork is frozen, on the run's own thread.
+        /// </summary>
+        public void Own(string key, KernelDeclaration declaration)
+        {
+            foreach (var name in NamesOf(declaration))
+            {
+                _owners.TryAdd(name, key);
+            }
+        }
+
+        private static IEnumerable<Name> NamesOf(KernelDeclaration declaration) => declaration switch
+        {
+            DefinitionDecl d => [d.Value.Name],
+            TheoremDecl t => [t.Value.Name],
+            AxiomDecl a => [a.Value.Name],
+            OpaqueDecl o => [o.Value.Name],
+            InductiveDecl i => i.Types.SelectMany(t => t.Constructors.Select(c => c.Name).Append(t.Name).Append(KernelNames.RecName(t.Name))),
+            _ => [],
+        };
+
+        /// <summary>
+        /// The first <c>Lean.Const</c> in a theorem's script that names a constant another translated unit owns when that
+        /// unit is not among the theorem's dependencies (KTD33), with the tactic that names it; null if there is none.
+        /// </summary>
+        public (TacticNode Node, string Constant, string Owner)? ConstOutsideDependencies(EngineUnit unit, VirList<TacticNode> script)
+        {
+            HashSet<string>? closure = null;
+            foreach (var (node, name) in script.SelectMany(LeanConsts))
+            {
+                // A name that does not parse names no unit's constant; the tactic that reads it reports it for this unit alone.
+                if (TryParseName(name) is not { } parsed
+                    || !_owners.TryGetValue(parsed, out var owner)
+                    || string.Equals(owner, unit.Unit.Key, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                closure ??= Closure(unit);
+                if (!closure.Contains(owner))
+                {
+                    return (node, name, owner);
+                }
+            }
+            return null;
+
+            static IEnumerable<(TacticNode, string)> LeanConsts(TacticNode node) => node.Args.SelectMany(arg => arg switch
+            {
+                LeanRefArg l => [(node, l.Name)],
+                TacticArg { Tactic: var nested } => LeanConsts(nested),
+                _ => [],
+            });
+        }
+
+        /// <summary>A <c>Lean.Const</c> string as a name; null if it is not a well-formed one.</summary>
+        private static Name? TryParseName(string text)
+        {
+            try
+            {
+                return Name.Parse(text);
+            }
+            catch (Exception ex) when (ex is FormatException or OverflowException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>The keys of every unit a unit depends on, transitively.</summary>
+        private HashSet<string> Closure(EngineUnit unit)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var work = new Stack<string>(unit.Unit.Deps);
+            while (work.Count > 0)
+            {
+                var key = work.Pop();
+                if (seen.Add(key) && units.TryGetValue(key, out var dep))
+                {
+                    foreach (var next in dep.Unit.Deps)
+                    {
+                        work.Push(next);
+                    }
+                }
+            }
+            return seen;
+        }
+
+        /// <summary>The cancelled outcome of a unit if the run is cancelled; null if it is not.</summary>
+        public CancelledOutcome? Cancelled(EngineUnit unit) =>
+            options.CancellationToken.IsCancellationRequested
+                ? new CancelledOutcome(unit.Unit.Key, unit.Unit.Kind, Display(unit), Assumptions(unit))
+                : null;
+
+        /// <summary>
+        /// KTD12: once the run is cancelled no unit starts, and a unit it interrupted ran out of a budget it was given,
+        /// which is no verdict: an undecided outcome becomes the cancelled one while the run is cancelled.
+        /// </summary>
+        private UnitOutcome SettleCancel(EngineUnit unit, UnitOutcome outcome) =>
+            outcome is UndecidedOutcome ? Cancelled(unit) ?? outcome : outcome;
+
+        /// <summary>
+        /// Translates every unit that translates: a unit whose dependency was decided before the run without being admitted
+        /// is skipped, a unit translation rejects fails, the units depending on either are skipped, and translation runs
+        /// again without them.
         /// </summary>
         private Translation Translate()
         {
-            var remaining = units.Values.ToList();
+            SkipDependents();
+            var remaining = units.Values.Where(u => !Outcomes.ContainsKey(u.Unit.Key)).ToList();
             while (true)
             {
                 try
@@ -145,20 +476,26 @@ public static class Pipeline
                 catch (TranslationException ex) when (ex.Key is { } key && units.TryGetValue(key, out var failed) && !Outcomes.ContainsKey(key))
                 {
                     Outcomes.Add(key, new FailedOutcome(key, failed.Unit.Kind, Display(failed), Assumptions(failed), ex.Message));
-                    bool changed = true;
-                    while (changed)
-                    {
-                        changed = false;
-                        foreach (var unit in remaining.Where(u => !Outcomes.ContainsKey(u.Unit.Key)))
-                        {
-                            if (Skip(unit) is { } skipped)
-                            {
-                                Outcomes.Add(unit.Unit.Key, skipped);
-                                changed = true;
-                            }
-                        }
-                    }
+                    SkipDependents();
                     remaining = [.. remaining.Where(u => !Outcomes.ContainsKey(u.Unit.Key))];
+                }
+            }
+        }
+
+        /// <summary>Skips every unit, transitively, that depends on a unit with an outcome other than admitted.</summary>
+        private void SkipDependents()
+        {
+            bool changed = true;
+            while (changed)
+            {
+                changed = false;
+                foreach (var unit in units.Values.Where(u => !Outcomes.ContainsKey(u.Unit.Key)))
+                {
+                    if (Skip(unit) is { } skipped)
+                    {
+                        Outcomes.Add(unit.Unit.Key, skipped);
+                        changed = true;
+                    }
                 }
             }
         }
@@ -168,7 +505,7 @@ public static class Pipeline
         /// (<c>Increment</c>), a member of a type under the type's short name (<c>PaymentResult.Valid</c>), a field by its C#
         /// name.
         /// </summary>
-        private NotationNames Names(Translation translation)
+        private NotationNames NamesOf(Translation translation)
         {
             var byName = translation.Units.ToDictionary(u => u.Name, u => u);
             var fields = translation.Units
@@ -202,35 +539,88 @@ public static class Pipeline
             {
                 if (Outcomes.GetValueOrDefault(dep) is { } outcome and not (TranslatedOutcome or ProvedOutcome))
                 {
+                    var name = units.TryGetValue(dep, out var depUnit) ? Display(depUnit) : outcome.DisplayName;
                     return new SkippedOutcome(
-                        unit.Unit.Key, unit.Unit.Kind, Display(unit), Assumptions(unit), dep, $"it depends on {Display(units[dep])}, which was not admitted.");
+                        unit.Unit.Key, unit.Unit.Kind, Display(unit), Assumptions(unit), dep, $"it depends on {name}, which was not admitted.");
                 }
             }
             return null;
         }
 
-        private UnitOutcome Admit(TranslatedUnit translated)
+        /// <summary>A unit's own assumptions; a theorem's also include those of every unit it depends on, transitively.</summary>
+        public ImmutableArray<UnitAssumption> Assumptions(EngineUnit unit)
         {
-            var unit = units[translated.Key];
+            var result = unit.Unit.Assumptions.Select(a => new UnitAssumption(unit.Unit.Key, a)).ToList();
+            if (unit.Unit.Kind != VirUnitKind.Theorem)
+            {
+                return [.. result];
+            }
+            // Passing through the unit itself reaches only its own dependencies again, so its closure without it is the
+            // same set the walk from those dependencies reaches.
+            foreach (var key in Closure(unit).Where(k => !string.Equals(k, unit.Unit.Key, StringComparison.Ordinal)).Order(StringComparer.Ordinal))
+            {
+                if (units.TryGetValue(key, out var dep))
+                {
+                    result.AddRange(dep.Unit.Assumptions.Select(a => new UnitAssumption(key, a)));
+                }
+            }
+            return [.. result];
+        }
+
+        public static string Display(EngineUnit unit) => unit.DisplayName ?? LeanNames.FallbackDisplay(unit.Unit.Key);
+    }
+
+    /// <summary>
+    /// Where one unit is admitted (KTD8): the run's fork for a definition or type, a theorem's own fork of its level's
+    /// environment for a theorem. What the unit admits is recorded here and merged into the run by the caller.
+    /// </summary>
+    private sealed class Scope(RunState run, KernelEnvironment env, Sidecar attributes)
+    {
+        private readonly EngineOptions options = run.Options;
+
+        private KernelEnvironment Env => env;
+
+        private Sidecar Attributes => attributes;
+
+        public UnitOutcome Admit(TranslatedUnit translated)
+        {
+            var unit = run.Units[translated.Key];
             var display = translated.DisplayName;
-            var assumptions = Assumptions(unit);
+            var assumptions = run.Assumptions(unit);
             if (translated.Theorem is { } shell)
             {
+                run.CountSearch();
+                if (shell.Script is { } script && run.ConstOutsideDependencies(unit, script) is { } outside)
+                {
+                    var owner = RunState.Display(run.Units[outside.Owner]);
+                    return new FailedOutcome(
+                        unit.Unit.Key, unit.Unit.Kind, display, assumptions,
+                        $"Malformed proof script: Lean.Const(\"{outside.Constant}\") names a constant of '{OutcomeText.ShortName(owner)}', which this theorem does not depend on; name it with nameof({OutcomeText.ShortName(owner)}) instead.")
+                    {
+                        Code = FailedOutcome.MalformedScriptCode,
+                        Node = VirTree.IdOf(unit.Unit, outside.Node),
+                    };
+                }
                 var budget = new TheoremBudget(options, shell.Budget);
                 return shell.Script is null && shell.Statement.Instance is not null
                     ? Compute(unit, shell, display, assumptions, budget)
                     : RunScript(unit, shell, display, assumptions, budget);
             }
             var admitted = new List<KernelDeclaration>();
+            var definitionBudget = new TheoremBudget(options, null);
             if (translated.Recursion is { } recursion)
             {
-                return AdmitRecursive(unit, translated, recursion, assumptions, admitted);
+                if (recursion.Decreases.Length > 0)
+                {
+                    run.CountSearch();
+                }
+                return AdmitRecursive(unit, translated, recursion, assumptions, admitted, definitionBudget);
             }
             foreach (var declaration in translated.Declarations)
             {
                 try
                 {
-                    AddDeclaration(declaration, admitted);
+                    AddDeclaration(unit.Unit.Key, declaration, admitted, definitionBudget);
                     if (declaration is DefinitionDecl { Value: { Hints.Kind: ReducibilityHintsKind.Abbrev } abbrev })
                     {
                         // KTD9: an open enum and its members are `abbrev`s (docs/m4/05), reducible as Lean's are, so simp
@@ -242,10 +632,14 @@ public static class Pipeline
                         // KTD8: casesOn and ctorIdx, which Lean's elaborator would have made, each built after the last is admitted.
                         foreach (var construction in Constructions.For(Env, inductive))
                         {
-                            AddDeclaration(construction, admitted);
+                            AddDeclaration(unit.Unit.Key, construction, admitted, definitionBudget);
                             Constructions.Register(Attributes, construction.Value);
                         }
                     }
+                }
+                catch (KernelResourceException ex)
+                {
+                    return new UndecidedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, $"{definitionBudget.Exhausted(ex)} while the kernel checked the definition.");
                 }
                 catch (KernelException ex)
                 {
@@ -259,17 +653,23 @@ public static class Pipeline
         /// A recursive method (M5a KTD14, KTD15): each decrease theorem proved by the omega pipeline and admitted, then the
         /// definition, which refers to them, marked irreducible for Meta as Lean marks its well-founded definitions, then
         /// the equation lemma with its bare <c>Nat.fix_eq</c> proof. A decrease theorem that is not proved is WRT0001 at
-        /// its call, with its goal; an equation lemma the kernel rejects fails the unit.
+        /// its call, with its goal; an equation lemma the kernel rejects fails the unit. All of it runs in the unit's one
+        /// budget, and running out of it anywhere is WRT0006 (M5b KTD11).
         /// </summary>
         private UnitOutcome AdmitRecursive(
-            EngineUnit unit, TranslatedUnit translated, RecursiveDefinition recursion, ImmutableArray<UnitAssumption> assumptions, List<KernelDeclaration> admitted)
+            EngineUnit unit,
+            TranslatedUnit translated,
+            RecursiveDefinition recursion,
+            ImmutableArray<UnitAssumption> assumptions,
+            List<KernelDeclaration> admitted,
+            TheoremBudget budget)
         {
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
             var display = translated.DisplayName;
             foreach (var decrease in recursion.Decreases)
             {
-                if (ProveDecrease(unit, decrease, display, assumptions, admitted) is { } failure)
+                if (ProveDecrease(unit, decrease, display, assumptions, admitted, budget) is { } failure)
                 {
                     return failure;
                 }
@@ -278,9 +678,13 @@ public static class Pipeline
             {
                 foreach (var declaration in translated.Declarations)
                 {
-                    AddDeclaration(declaration, admitted);
+                    AddDeclaration(key, declaration, admitted, budget);
                 }
                 Attributes.SetReducibilityStatus(translated.Name, ReducibilityStatus.Irreducible);
+            }
+            catch (KernelResourceException ex)
+            {
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the definition.");
             }
             catch (KernelException ex)
             {
@@ -288,7 +692,11 @@ public static class Pipeline
             }
             try
             {
-                AddDeclaration(recursion.Equation.WithProof(recursion.EquationProof), admitted);
+                AddDeclaration(key, recursion.Equation.WithProof(recursion.EquationProof), admitted, budget);
+            }
+            catch (KernelResourceException ex)
+            {
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the equation lemma {recursion.Equation.Name}.");
             }
             catch (KernelException ex)
             {
@@ -302,13 +710,17 @@ public static class Pipeline
         /// pipeline; the proof the kernel admits. Null when it was admitted, else the unit's outcome.
         /// </summary>
         private UnitOutcome? ProveDecrease(
-            EngineUnit unit, DecreaseObligation decrease, string display, ImmutableArray<UnitAssumption> assumptions, List<KernelDeclaration> admitted)
+            EngineUnit unit,
+            DecreaseObligation decrease,
+            string display,
+            ImmutableArray<UnitAssumption> assumptions,
+            List<KernelDeclaration> admitted,
+            TheoremBudget budget)
         {
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
             var shell = decrease.Theorem;
-            var budget = new TheoremBudget(options, null);
-            var meta = new MetaM(Env, budget.Meta) { Attributes = Attributes, DisplayNames = _names };
+            var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = run.Names };
             var goal = meta.MkFreshExprSyntheticOpaqueMVar(shell.Type);
             MVarId? current = null;
             Expr proof;
@@ -330,10 +742,10 @@ public static class Pipeline
             catch (MetaException ex)
             {
                 var failed = ex is TacticException { Goal: { } g } && meta.MCtx.FindDecl(g) is not null ? g : current ?? goal.Id;
-                var printer = new GoalPrinter(Env, _names);
-                return new NotProvedOutcome(key, kind, display, assumptions, ex.Message, printer.PpGoals(meta.MCtx, [failed]), SpanOf(unit, decrease.Call), [])
+                var printer = new GoalPrinter(Env, run.Names);
+                return new NotProvedOutcome(key, kind, display, assumptions, ex.Message, printer.PpGoals(meta.MCtx, [failed]), VirTree.IdOf(unit.Unit, decrease.Call), [])
                 {
-                    Decrease = new DecreaseFailure(decrease.Index, SpanOf(unit, decrease.Call), SpanOf(unit, decrease.Measure)),
+                    Decrease = new DecreaseFailure(decrease.Index, VirTree.IdOf(unit.Unit, decrease.Call), VirTree.IdOf(unit.Unit, decrease.Measure)),
                 };
             }
 #pragma warning disable CA1031 // KTD19: an unexpected failure in Meta ends this unit as Warrant's bug, not the whole run.
@@ -348,7 +760,7 @@ public static class Pipeline
             }
             try
             {
-                AddDeclaration(shell.WithProof(proof), admitted);
+                AddDeclaration(key, shell.WithProof(proof), admitted, budget);
             }
             catch (KernelResourceException ex)
             {
@@ -361,15 +773,17 @@ public static class Pipeline
             return null;
         }
 
-        private static VirSpan? SpanOf(EngineUnit unit, VirNode node) =>
-            unit.Spans is { } spans && VirTree.IdOf(unit.Unit, node) is { } id && spans.TryGetSpan(id, out var span) ? span : null;
+        private static string Describe(EngineUnit unit, DecreaseObligation decrease) => $"recursive call {decrease.Index} of {RunState.Display(unit)}";
 
-        private static string Describe(EngineUnit unit, DecreaseObligation decrease) => $"recursive call {decrease.Index} of {Display(unit)}";
-
-        private void AddDeclaration(KernelDeclaration declaration, List<KernelDeclaration> admitted)
+        /// <summary>
+        /// Admits one of a definition's or type's declarations into the run's fork and records <paramref name="key"/> as the
+        /// owner of its constants (KTD33): the fork keeps them even if a later step of the unit fails or runs out.
+        /// </summary>
+        private void AddDeclaration(string key, KernelDeclaration declaration, List<KernelDeclaration> admitted, TheoremBudget budget)
         {
-            Kernel.Kernel.Add(Env, declaration, limits);
-            Admitted.Add(declaration);
+            Kernel.Kernel.Add(Env, declaration, budget.Kernel);
+            run.Admitted.Add(declaration);
+            run.Own(key, declaration);
             admitted.Add(declaration);
         }
 
@@ -391,6 +805,13 @@ public static class Pipeline
                 {
                     Kernel.Kernel.Add(Env, declaration, budget.Kernel);
                 }
+                catch (KernelResourceException ex) when (budget.Kernel.CancellationToken.IsCancellationRequested || DateTimeOffset.UtcNow >= budget.Kernel.Deadline)
+                {
+                    // KTD12: a cancellation or a passed deadline is shared by every method, so the next one cannot
+                    // succeed. Running out of fuel falls through to the next method, which gets its own fuel, as in M5a.
+                    return new UndecidedOutcome(
+                        key, unit.Unit.Kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the {kind.ToString().ToLowerInvariant()} proof.");
+                }
                 catch (KernelException)
                 {
                     continue;
@@ -399,7 +820,6 @@ public static class Pipeline
                 {
                     return new FailedOutcome(key, unit.Unit.Kind, display, assumptions, $"the kernel admitted {shell.Name} with a type other than its statement.");
                 }
-                Admitted.Add(declaration);
                 return new ProvedOutcome(key, unit.Unit.Kind, display, assumptions, kind, declaration);
             }
 
@@ -432,18 +852,19 @@ public static class Pipeline
         /// theorem's own parameters introduced under their C# names, then the script; with no goals left, the instantiated
         /// <c>?g</c> goes to the kernel. Each way it can fail is caught as what it is.
         /// </summary>
+        /// <exception cref="OperationCanceledException">The run was cancelled during the counterexample search (KTD32).</exception>
         private UnitOutcome RunScript(EngineUnit unit, TheoremShell shell, string display, ImmutableArray<UnitAssumption> assumptions, TheoremBudget budget)
         {
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
-            var meta = new MetaM(Env, budget.Meta) { Attributes = Attributes, DisplayNames = _names };
-            var printer = new GoalPrinter(Env, _names);
+            var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = run.Names };
+            var printer = new GoalPrinter(Env, run.Names);
             var tactics = new TacticM(meta, []);
-            var runner = new TacticRunner(tactics, unit);
+            var runner = new TacticRunner(tactics);
 
             UnitOutcome NotProved(string message, IEnumerable<MVarId> goals, TacticNode? at) => new NotProvedOutcome(
-                key, kind, display, assumptions, message, printer.PpGoals(meta.MCtx, goals), at is null ? null : runner.SpanOf(at),
-                Counterexample.Search(Env, unit.Unit, shell, Definitions()));
+                key, kind, display, assumptions, message, printer.PpGoals(meta.MCtx, goals), at is null ? null : VirTree.IdOf(unit.Unit, at),
+                Counterexample.Search(Env, unit.Unit, shell, run.Definitions, options.CancellationToken));
 
             Expr proof;
             try
@@ -483,7 +904,7 @@ public static class Pipeline
                 return NotProved(ex.Message, goals, failedAt);
             }
 #pragma warning disable CA1031 // KTD19: an unexpected failure in Meta ends this theorem as Warrant's bug, not the whole run.
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
 #pragma warning restore CA1031
             {
                 return new InternalErrorOutcome(key, kind, display, assumptions, $"Meta failed unexpectedly: {ex.GetType().Name}: {ex.Message}");
@@ -514,13 +935,8 @@ public static class Pipeline
             {
                 return new FailedOutcome(key, kind, display, assumptions, $"the kernel admitted {shell.Name} with a type other than its statement.");
             }
-            Admitted.Add(declaration);
             return new ProvedOutcome(key, kind, display, assumptions, ProofKind.Script, declaration);
         }
-
-        /// <summary>The definitions of the run's type units, by key.</summary>
-        private Dictionary<string, VirDefinition> Definitions() =>
-            units.Values.Where(u => u.Unit.Definition is not null).ToDictionary(u => u.Unit.Key, u => u.Unit.Definition!, StringComparer.Ordinal);
 
         /// <summary>
         /// The two sides of a false claim that is one comparison, in source order, with their values read back. The
@@ -556,49 +972,13 @@ public static class Pipeline
             ReadBackSide Side(VirExpr node, Expr? term)
             {
                 var id = Id(node);
-                VirSpan? span = null;
-                unit.Spans?.TryGetSpan(id, out span);
                 var value = term is null || operands is not { } o
                     ? new UnknownValue("the comparison's operands are not read back")
-                    : ReadBack.Core(Env, term, o.Type, limits);
-                return new ReadBackSide(id, span, value);
+                    : ReadBack.Core(Env, term, o.Type, options.Kernel);
+                return new ReadBackSide(id, value);
             }
 
             return [Side(compare.L, operands?.Left), Side(compare.R, operands?.Right)];
         }
-
-        /// <summary>A unit's own assumptions; a theorem's also include those of every unit it depends on, transitively.</summary>
-        private ImmutableArray<UnitAssumption> Assumptions(EngineUnit unit)
-        {
-            var result = unit.Unit.Assumptions.Select(a => new UnitAssumption(unit.Unit.Key, a)).ToList();
-            if (unit.Unit.Kind != VirUnitKind.Theorem)
-            {
-                return [.. result];
-            }
-            var seen = new SortedSet<string>(StringComparer.Ordinal);
-            var work = new Stack<string>(unit.Unit.Deps);
-            while (work.Count > 0)
-            {
-                var key = work.Pop();
-                if (string.Equals(key, unit.Unit.Key, StringComparison.Ordinal) || !seen.Add(key) || !units.TryGetValue(key, out var dep))
-                {
-                    continue;
-                }
-                foreach (var next in dep.Unit.Deps)
-                {
-                    work.Push(next);
-                }
-            }
-            foreach (var key in seen)
-            {
-                if (units.TryGetValue(key, out var dep))
-                {
-                    result.AddRange(dep.Unit.Assumptions.Select(a => new UnitAssumption(key, a)));
-                }
-            }
-            return [.. result];
-        }
-
-        private static string Display(EngineUnit unit) => unit.DisplayName ?? LeanNames.FallbackDisplay(unit.Unit.Key);
     }
 }

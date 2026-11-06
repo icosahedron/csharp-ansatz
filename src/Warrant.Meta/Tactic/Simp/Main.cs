@@ -18,12 +18,12 @@ public sealed record SimpContext(SimpConfig Config, ImmutableList<SimpTheorems> 
 
     /// <summary>
     /// The <c>@[congr]</c> lemmas of <paramref name="sidecar"/>, by function, highest priority first; grouped once per
-    /// sidecar, whose entries never change after loading.
+    /// base sidecar (<see cref="Sidecar.Base"/>), whose entries every fork shares and which never change after loading.
     /// </summary>
     public static IReadOnlyDictionary<Name, ImmutableArray<CongrEntry>> CongrTheoremsOf(Sidecar sidecar)
     {
         ArgumentNullException.ThrowIfNull(sidecar);
-        return CongrCache.GetValue(sidecar, static s => s.CongrEntries
+        return CongrCache.GetValue(sidecar.Base, static s => s.CongrEntries
             .GroupBy(c => c.Function)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.Priority).ToImmutableArray()));
     }

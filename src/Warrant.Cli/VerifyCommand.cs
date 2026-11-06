@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Warrant.Engine;
 using Warrant.Engine.Reports;
+using Warrant.Engine.Service;
 using Warrant.Extraction;
 using Warrant.Frontend;
 using Warrant.Kernel;
@@ -132,6 +133,9 @@ internal static class VerifyCommand
     private sealed record Settings(
         bool Msbuild, string? OutPath, string? ReportDir, string BundlePath, Sidecar Sidecar, long? KernelFuel, long? TacticFuel, long? TimeoutSeconds)
     {
+        /// <summary>The project's directory, which a request names; the compiled directory in the directory mode.</summary>
+        public string ProjectDirectory { get; init; } = "";
+
         /// <summary>The budgets: the given ones, else the build's defaults (corpus kernel fuel for the directory mode, like translate).</summary>
         public EngineOptions Engine(KernelLimits kernel) => EngineOptions.Default with
         {
@@ -145,6 +149,7 @@ internal static class VerifyCommand
     private static int FromCscArgs(string argsFile, string projectDir, bool keepConditionalCheck, Settings settings, TextWriter output)
     {
         var root = Path.GetFullPath(projectDir);
+        settings = settings with { ProjectDirectory = root };
         var compilation = CompilationFactory.FromCscArgs(argsFile, root, out var generatorProblems);
         var report = new Reporter(output, settings.Msbuild, new TranslateCommand.Sources(root, root));
         report.Line($"verifying {compilation.SyntaxTrees.Length} file(s) from {argsFile}");
@@ -177,6 +182,7 @@ internal static class VerifyCommand
     private static int FromDirectory(string directory, Settings settings, TextWriter output)
     {
         var root = Path.GetFullPath(directory);
+        settings = settings with { ProjectDirectory = root };
         var files = TranslateCommand.SourceFiles(root);
         var report = new Reporter(output, settings.Msbuild, new TranslateCommand.Sources(directory, root));
         report.Line($"verifying {files.Count} file(s) in {directory}");
@@ -196,9 +202,20 @@ internal static class VerifyCommand
 
     private static int Verify(CSharpCompilation compilation, ExtractionResult extraction, Settings settings, EngineOptions options, Reporter report)
     {
-        var bundle = SemanticsBundle.Load(settings.BundlePath);
         var inputs = extraction.Units.Select(u => new EngineUnit(u.Unit, u.DisplayName, u.Spans)).ToList();
-        var result = Pipeline.Run(inputs, bundle, options);
+        // M5b KTD1, KTD6: the same request the server takes, verified by the same service in-process. The spans and the
+        // source text stay here, where the outcomes are rendered.
+        var request = new VerifyRequest(
+            VerificationService.ProtocolVersion,
+            Guid.NewGuid().ToString("N"),
+            settings.ProjectDirectory,
+            CacheDirectory: null,
+            VerifyBudgets.From(options),
+            Recheck: false,
+            Priority: 0,
+            [.. extraction.Units.Select(u => new RequestUnit(u.Key, u.Unit.Kind, u.DisplayName, VirWriter.Write(u.Unit)))]);
+        using var service = new VerificationService(SemanticsBundle.Load(settings.BundlePath), settings.Sidecar);
+        var result = service.Run(request).Result;
 
         int width = result.Units.Select(u => u.DisplayName.Length).DefaultIfEmpty(0).Max();
         foreach (var unit in result.Units)
@@ -226,18 +243,25 @@ internal static class VerifyCommand
                     }
                     if (f.Sides.Length > 0)
                     {
-                        lines.Add($"Values: {OutcomeText.Values(f.Sides, report.Sources.Text)}");
+                        lines.Add($"Values: {OutcomeText.Values(f.Sides, engineUnits[unit.Key].Spans, report.Sources.Text)}");
                     }
                     report.Diagnostic("error", FalseOutcome.Code, location, OutcomeText.FalseMessage(name), lines);
                     break;
                 case NotProvedOutcome n:
-                    report.Diagnostic("error", NotProvedOutcome.Code, n.TacticSpan ?? location, OutcomeText.NotProvedMessage(name, n, report.Sources.Text), OutcomeText.NotProvedDetails(n), n.Goals);
+                    var spans = engineUnits[unit.Key].Spans;
+                    report.Diagnostic(
+                        "error", NotProvedOutcome.Code, OutcomeText.SpanOf(spans, n.TacticNode) ?? location,
+                        OutcomeText.NotProvedMessage(name, n, spans, report.Sources.Text), OutcomeText.NotProvedDetails(n), n.Goals);
                     break;
                 case UndecidedOutcome u:
-                    report.Diagnostic("error", UndecidedOutcome.Code, location, OutcomeText.UndecidedMessage(name, u.Reason));
+                    report.Diagnostic("error", UndecidedOutcome.Code, location, OutcomeText.UndecidedMessage(u.UnitKind, name, u.Reason));
                     break;
                 case InternalErrorOutcome i:
                     report.Diagnostic("error", InternalErrorOutcome.Code, location, OutcomeText.InternalErrorMessage(name, i.Reason));
+                    break;
+                case FailedOutcome { Code: { } code } f:
+                    // M5b KTD33: a script the engine rejects as extraction rejects a malformed one, at the tactic.
+                    report.Diagnostic("error", code, OutcomeText.SpanOf(engineUnits[unit.Key].Spans, f.Node) ?? location, f.Reason);
                     break;
                 case FailedOutcome f:
                     report.Diagnostic("error", InternalErrorOutcome.Code, location, OutcomeText.FailedMessage(name, f.Reason));

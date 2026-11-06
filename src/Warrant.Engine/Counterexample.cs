@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Diagnostics;
 using System.Globalization;
 using Warrant.Cic;
 using Warrant.Kernel;
@@ -15,16 +14,30 @@ namespace Warrant.Engine;
 /// </summary>
 /// <remarks>
 /// The search is untrusted and diagnostic only: a value it finds upgrades the message of WRT0001, never its meaning. It
-/// runs outside the theorem's budgets, with <see cref="FuelPerCombination"/> kernel steps per combination and
-/// <see cref="TimeLimit"/> overall; a combination that runs out is skipped, so the search cannot turn WRT0001 into WRT0006.
+/// runs outside the theorem's budgets, with <see cref="FuelPerCombination"/> kernel steps per combination, at most
+/// <see cref="MaxCombinations"/> combinations and <see cref="TotalFuel"/> steps in all; a combination that runs out is skipped, so the search cannot turn WRT0001
+/// into WRT0006. It reads no clock (M5b KTD32): what it finds depends only on the theorem, never on the machine's load,
+/// so the server, the in-process path and the cache agree. Only a cancellation of the run stops it early.
 /// </remarks>
 internal static class Counterexample
 {
     /// <summary>The kernel fuel for one combination.</summary>
     public const long FuelPerCombination = 1_000_000;
 
-    /// <summary>The time the whole search may take.</summary>
-    public static readonly TimeSpan TimeLimit = TimeSpan.FromSeconds(2);
+    /// <summary>
+    /// The most combinations the search tries (M5b KTD32, replacing M5a KTD25's two seconds): every combination of up to
+    /// three <c>int</c> parameters, 7^3 = 343, and the first 512 of more. Measured in M5b U5, a combination of the M5a
+    /// corpus's claims costs 1 to 5 ms (<c>Clamp</c>'s about 1.3 ms, <c>RankIsSmall</c>'s about 5 ms), and 512 of a
+    /// four-parameter claim over <c>Clamp</c> took 0.8 s, so the worst case stays near two seconds.
+    /// </summary>
+    public const int MaxCombinations = 512;
+
+    /// <summary>
+    /// The kernel fuel the whole search may spend (M5b KTD32): deterministic like <see cref="MaxCombinations"/>, and a
+    /// bound on its time whatever the claim. U5 measured about 1M steps a second, so this keeps the worst case near the two
+    /// seconds of M5a KTD25; without it, 512 combinations that each exhaust their fuel would take minutes.
+    /// </summary>
+    public const long TotalFuel = 2_000_000;
 
     private static readonly Name BoolFalse = Name.Parse("Bool.false");
 
@@ -39,9 +52,11 @@ internal static class Counterexample
     /// <param name="unit">The theorem.</param>
     /// <param name="shell">Its statement.</param>
     /// <param name="definitions">The definitions of the run's type units, by key, for enum members.</param>
+    /// <param name="cancellationToken">The run's token, which every combination's kernel limits carry.</param>
     /// <returns>The values in parameter order, or empty when none was found or the parameters cannot be enumerated.</returns>
+    /// <exception cref="OperationCanceledException">The run was cancelled; the search does not count it as a failed combination.</exception>
     public static ImmutableArray<CounterexampleValue> Search(
-        KernelEnvironment env, VirUnit unit, TheoremShell shell, IReadOnlyDictionary<string, VirDefinition> definitions)
+        KernelEnvironment env, VirUnit unit, TheoremShell shell, IReadOnlyDictionary<string, VirDefinition> definitions, CancellationToken cancellationToken = default)
     {
         var parameters = unit.Params ?? VirList<VirParam>.Empty;
         if (shell.Claim is not { Instance: { } instance } claim || parameters.Count == 0)
@@ -58,26 +73,33 @@ internal static class Counterexample
             candidates.Add(values);
         }
 
-        var stopwatch = Stopwatch.StartNew();
-        var limits = new KernelLimits(FuelPerCombination, KernelLimits.Interactive.MaxNatBytes) { Deadline = DateTimeOffset.UtcNow + TimeLimit };
         var index = new int[candidates.Count];
-        while (stopwatch.Elapsed < TimeLimit)
+        long remaining = TotalFuel;
+        for (int tried = 0; tried < MaxCombinations && remaining > 0; tried++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var args = index.Select((v, i) => candidates[i][v].Term).ToArray();
             var decide = Operators.Decide(new Condition(Expr.App(claim.Prop, args), Expr.App(instance, args)));
+            var limits = new KernelLimits(Math.Min(FuelPerCombination, remaining), KernelLimits.Interactive.MaxNatBytes) { CancellationToken = cancellationToken };
+            var checker = new TypeChecker(env, limits: limits);
             try
             {
-                if (new TypeChecker(env, limits: limits).Whnf(decide) is ConstExpr { Name: var b } && b == BoolFalse)
+                if (checker.Whnf(decide) is ConstExpr { Name: var b } && b == BoolFalse)
                 {
                     return [.. parameters.Select((p, i) => new CounterexampleValue(p.Name, candidates[i][index[i]].Text))];
                 }
             }
-            catch (KernelException)
+            catch (KernelException) when (!cancellationToken.IsCancellationRequested)
             {
+            }
+            catch (KernelException ex)
+            {
+                throw new OperationCanceledException("The run was cancelled during the counterexample search.", ex, cancellationToken);
             }
             catch (InsufficientExecutionStackException)
             {
             }
+            remaining -= checker.FuelUsed;
             int k = index.Length - 1;
             while (k >= 0 && ++index[k] == candidates[k].Length)
             {

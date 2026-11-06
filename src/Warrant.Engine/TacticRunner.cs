@@ -10,7 +10,7 @@ namespace Warrant.Engine;
 /// Lean name in <see cref="Tactics"/>; a later unit adds a tactic by adding its entry. A name with no entry fails the
 /// script with "Tactic `x` is not available yet", which no <c>try</c> hides.
 /// </summary>
-internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
+internal sealed class TacticRunner(TacticM tactics)
 {
     /// <summary>A tactic's implementation: runs <paramref name="node"/> on <paramref name="runner"/>'s goals.</summary>
     private delegate void Handler(TacticRunner runner, TacticNode node);
@@ -232,10 +232,6 @@ internal sealed class TacticRunner(TacticM tactics, EngineUnit unit)
         };
         return tactics.Meta.Env.Find(name) is not null ? name : throw TacticException.Failed(node.Name, tactics.GetMainGoal(), $"unknown constant '{tactics.Meta.PpConst(name)}'");
     }
-
-    /// <summary>The span of a tactic node, when the unit came with spans.</summary>
-    public VirSpan? SpanOf(TacticNode node) =>
-        unit.Spans is { } spans && VirTree.IdOf(unit.Unit, node) is { } id && spans.TryGetSpan(id, out var span) ? span : null;
 }
 
 /// <summary>A script names a tactic this engine does not implement yet (WRT0001, "Tactic `x` is not available yet").</summary>

@@ -28,6 +28,12 @@ public sealed record EngineOptions
     /// <summary>The wall-clock limit per theorem, covering Meta and the kernel.</summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Cancels the run (M5b KTD12): the kernel and Meta poll it, a unit it interrupts ends as <see cref="CancelledOutcome"/>,
+    /// and no unit starts once it is cancelled. Units that finished before keep their outcomes.
+    /// </summary>
+    public CancellationToken CancellationToken { get; init; }
+
     /// <summary>The attribute sidecar (KTD9) the tactics read reducibility, instances and simp lemmas from.</summary>
     public Sidecar Attributes { get; init; } = Sidecar.Empty;
 

@@ -18,13 +18,19 @@ public sealed class EngineResult
     /// <summary>The bundle the run admitted into a fork of.</summary>
     public SemanticsBundle Bundle { get; }
 
-    /// <summary>The run's fork of the bundle, holding every admitted declaration.</summary>
+    /// <summary>
+    /// The run's fork of the bundle, holding every admitted declaration: the fork its last level of theorems was admitted
+    /// into (M5b KTD8), frozen.
+    /// </summary>
     public KernelEnvironment Environment { get; }
 
     /// <summary>One outcome per unit, in the order the units were given.</summary>
     public ImmutableArray<UnitOutcome> Units { get; }
 
-    /// <summary>Every declaration the kernel admitted, translated definitions and proved theorems, in admission order.</summary>
+    /// <summary>
+    /// Every declaration the kernel admitted, in admission order: the translated definitions and types in dependency order,
+    /// then each level's proved theorems in input order (M5b KTD8).
+    /// </summary>
     public ImmutableArray<KernelDeclaration> Admitted { get; }
 
     /// <summary>Finds a unit's outcome by key.</summary>

@@ -100,6 +100,7 @@ public sealed class Sidecar
         _data = data;
         _parent = parent;
         _nextOrder = parent?._nextOrder ?? 0;
+        Base = parent?.Base ?? this;
     }
 
     /// <summary>A frozen sidecar with no entries and no header: every constant is semireducible.</summary>
@@ -110,6 +111,12 @@ public sealed class Sidecar
 
     /// <summary>Whether entries can no longer be added.</summary>
     public bool IsFrozen => _frozen;
+
+    /// <summary>
+    /// The sidecar this one was forked from, through every fork: the one that was loaded, or this one when it is not a
+    /// fork. Forks share its simp, congruence and class entries, so caches built from those key on it (M5b KTD10).
+    /// </summary>
+    public Sidecar Base { get; }
 
     /// <summary>The default simp set's entries, in registration order (a lemma Lean split, or registered twice, has several).</summary>
     public IReadOnlyList<SimpEntry> SimpEntries => _data.Simp;

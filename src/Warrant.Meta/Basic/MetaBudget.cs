@@ -16,21 +16,28 @@ public sealed record MetaLimits(long Fuel)
     /// </summary>
     public DateTimeOffset? Deadline { get; init; }
 
+    /// <summary>
+    /// An optional cancellation token (M5b KTD12), polled where the deadline is; a cancelled token fails the tactic with
+    /// a <see cref="MetaResourceException"/>. <see cref="CancellationToken.None"/> (the default) is never cancelled.
+    /// </summary>
+    public CancellationToken CancellationToken { get; init; }
+
     /// <summary>Defaults for one theorem: 20M steps, the kernel's interactive budget.</summary>
     public static MetaLimits Default { get; } = new(20_000_000);
 }
 
 /// <summary>
-/// The fuel and deadline that one <see cref="MetaM"/> run charges as it works (Lean's
+/// The fuel, deadline and cancellation token that one <see cref="MetaM"/> run charges as it works (Lean's
 /// <c>checkSystem</c>/<c>checkMaxHeartbeats</c>).
 /// </summary>
 public sealed class MetaBudget
 {
-    // Reading the clock costs more than a step, so the deadline is checked on the first step and
-    // then once every ClockCheckInterval steps, as in the kernel.
+    // Reading the clock costs more than a step, so the deadline and the cancellation token are
+    // checked on the first step and then once every ClockCheckInterval steps, as in the kernel.
     private const int ClockCheckInterval = 1024;
 
     private readonly long _deadlineTimestamp;
+    private readonly bool _checksClock;
     private long _fuel;
     private int _ticksUntilClockCheck;
 
@@ -40,6 +47,7 @@ public sealed class MetaBudget
         Limits = limits ?? throw new ArgumentNullException(nameof(limits));
         _fuel = limits.Fuel;
         _deadlineTimestamp = DeadlineTimestamp(limits.Deadline);
+        _checksClock = _deadlineTimestamp != long.MaxValue || limits.CancellationToken.CanBeCanceled;
     }
 
     /// <summary>The limits this budget enforces.</summary>
@@ -49,8 +57,8 @@ public sealed class MetaBudget
     public long FuelUsed => Limits.Fuel - _fuel;
 
     /// <summary>
-    /// Charges one step. Throws <see cref="MetaResourceException"/> when fuel runs out or the
-    /// deadline has passed, and <see cref="InsufficientExecutionStackException"/> before the stack
+    /// Charges one step. Throws <see cref="MetaResourceException"/> when fuel runs out, the
+    /// deadline has passed or the run is cancelled, and <see cref="InsufficientExecutionStackException"/> before the stack
     /// would overflow.
     /// </summary>
     public void Tick()
@@ -59,9 +67,13 @@ public sealed class MetaBudget
         {
             throw new MetaResourceException($"tactic fuel exhausted ({Limits.Fuel:N0} steps)");
         }
-        if (_deadlineTimestamp != long.MaxValue && --_ticksUntilClockCheck < 0)
+        if (_checksClock && --_ticksUntilClockCheck < 0)
         {
             _ticksUntilClockCheck = ClockCheckInterval - 1;
+            if (Limits.CancellationToken.IsCancellationRequested)
+            {
+                throw new MetaResourceException("tactic cancelled");
+            }
             if (Stopwatch.GetTimestamp() >= _deadlineTimestamp)
             {
                 throw new MetaResourceException($"tactic deadline passed ({Limits.Deadline:O})");

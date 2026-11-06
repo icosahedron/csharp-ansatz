@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Warrant.Cic;
+using Warrant.Kernel;
 
 namespace Warrant.Meta;
 
@@ -44,24 +45,42 @@ public static class DefaultSimpSet
     }
 
     /// <summary>
-    /// The set's theorems over <paramref name="meta"/>'s environment and sidecar, built once per sidecar in a Meta run of
-    /// its own, so building them does not charge any theorem's tactic fuel.
+    /// The set's theorems for <paramref name="meta"/>'s sidecar: built once per base sidecar (<see cref="Sidecar.Base"/>),
+    /// so every fork of it shares them (M5b KTD10). When nothing built them yet, they are built over
+    /// <paramref name="meta"/>'s environment; the engine builds them over the bundle first, with
+    /// <see cref="Theorems(KernelEnvironment, Sidecar)"/>.
     /// </summary>
     public static SimpTheorems Theorems(MetaM meta)
     {
         ArgumentNullException.ThrowIfNull(meta);
+        return Theorems(meta.Env, meta.Attributes);
+    }
+
+    /// <summary>
+    /// The set's theorems for <paramref name="sidecar"/>, built over <paramref name="env"/> once per base sidecar, in a Meta
+    /// run of its own, so building them does not charge any theorem's tactic fuel. The lemmas are bundle constants, so
+    /// the engine passes the frozen bundle environment: a set built over one theorem's fork would let that theorem's
+    /// constants into every later theorem's set (M5b KTD10).
+    /// </summary>
+    /// <param name="env">The environment to build over if the set is not built yet; the bundle's.</param>
+    /// <param name="sidecar">The sidecar, or any fork of it.</param>
+    /// <returns>The set.</returns>
+    public static SimpTheorems Theorems(KernelEnvironment env, Sidecar sidecar)
+    {
+        ArgumentNullException.ThrowIfNull(env);
+        ArgumentNullException.ThrowIfNull(sidecar);
         lock (Cache)
         {
-            return Cache.GetValue(meta.Attributes, sidecar =>
+            return Cache.GetValue(sidecar.Base, b =>
             {
-                var builder = new MetaM(meta.Env, new MetaLimits(long.MaxValue)) { Attributes = sidecar };
+                var builder = new MetaM(env, new MetaLimits(long.MaxValue)) { Attributes = b };
                 var set = new SimpTheorems();
                 var firstEntries = new Dictionary<Name, SimpEntry>();
-                foreach (var s in sidecar.SimpEntries)
+                foreach (var s in b.SimpEntries)
                 {
                     firstEntries.TryAdd(s.Name, s);
                 }
-                foreach (var name in LemmaNames(sidecar))
+                foreach (var name in LemmaNames(b))
                 {
                     var entry = firstEntries.GetValueOrDefault(name);
                     set.AddRange(builder.MkSimpTheoremsFromConst(

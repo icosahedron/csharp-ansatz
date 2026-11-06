@@ -22,8 +22,9 @@ public class KernelException : Exception
 }
 
 /// <summary>
-/// The kernel ran out of fuel (its step budget) or hit a size limit. The declaration is rejected
-/// conservatively; it may well be correct, but checking it needs a bigger budget.
+/// The kernel ran out of fuel (its step budget), hit a size limit, passed its deadline or was cancelled.
+/// The declaration is rejected conservatively; it may well be correct, but checking it needs a bigger
+/// budget or a run that is not cancelled.
 /// </summary>
 public sealed class KernelResourceException : KernelException
 {

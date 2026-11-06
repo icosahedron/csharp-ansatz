@@ -214,10 +214,13 @@ public sealed class RecursionTests(EngineFixture engine) : IClassFixture<EngineF
     public void TheDecreaseFailureNamesTheCallAndTheMeasure()
     {
         var outcome = Assert.IsType<NotProvedOutcome>(engine.Run("m5a/refuted").Find("M:Corpus.Refuted.Recursion.Bad(System.Int32)"));
+        var spans = engine.Spans("m5a/refuted", "M:Corpus.Refuted.Recursion.Bad(System.Int32)");
         Assert.Equal(
             "The recursive call 'Bad(n - 1)' could not be shown to decrease 'n': omega could not prove the goal.",
-            Reports.OutcomeText.NotProvedMessage("Bad", outcome, SourceText));
-        Assert.Equal("Bad(n - 1)", SourceText(outcome.TacticSpan!));
+            Reports.OutcomeText.NotProvedMessage("Bad", outcome, spans, SourceText));
+        Assert.Equal("Bad(n - 1)", SourceText(Reports.OutcomeText.SpanOf(spans, outcome.TacticNode)!));
+        Assert.Equal(outcome.TacticNode, outcome.Decrease!.CallNode);
+        Assert.Equal("n", SourceText(Reports.OutcomeText.SpanOf(spans, outcome.Decrease.MeasureNode)!));
         Assert.StartsWith("recursive call 1 was not shown to decrease (WRT0001): ", Reports.OutcomeText.NotProvedDetail(outcome), StringComparison.Ordinal);
     }
 

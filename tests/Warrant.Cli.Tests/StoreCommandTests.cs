@@ -115,7 +115,12 @@ public sealed class StoreCommandTests : IDisposable
         (code, var output, _) = CheckStore(Store);
 
         Assert.Equal(1, code);
-        Assert.Matches($@"\nREJECTED {System.Text.RegularExpressions.Regex.Escape(name.ToString())}: .+\naccepted 2,598, rejected 1, declined 0;", output);
+        // The first rejection is the tampered theorem; declarations that use it are rejected after it, as unknown.
+        var lines = output.Split('\n');
+        Assert.StartsWith($"REJECTED {name}: ", lines[1], StringComparison.Ordinal);
+        Assert.All(lines.Skip(2).Where(l => l.StartsWith("REJECTED ", StringComparison.Ordinal)),
+            l => Assert.Contains($"unknown constant '{name}'", l, StringComparison.Ordinal));
+        Assert.Matches(@"\naccepted [\d,]+, rejected [1-9][\d,]*, declined 0; ", output);
 
         (code, _, error) = Import(tampered, "--store", Path.Combine(_root, "verified"), "--verified");
 

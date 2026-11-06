@@ -39,6 +39,25 @@ internal sealed record ServerSettings
     public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// How often the CLI checks, while a server works on its request, that the server still answers <c>status</c>; a
+    /// server that does not answer within <see cref="HeartbeatTimeout"/> is wedged, and the CLI abandons it and verifies
+    /// in-process. <c>status</c> takes no lock a verification holds, so a busy server answers it at once.
+    /// </summary>
+    public TimeSpan HeartbeatInterval { get; init; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>How long a heartbeat waits for the server's <c>status</c>.</summary>
+    public TimeSpan HeartbeatTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// After a server failed to start, how long builds verify in-process at once instead of waiting
+    /// <see cref="StartTimeout"/> for it again.
+    /// </summary>
+    public TimeSpan StartRetryDelay { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>How long a server copy that no build has used is kept before a later start deletes it.</summary>
+    public TimeSpan CopyRetention { get; init; } = TimeSpan.FromDays(14);
+
+    /// <summary>
     /// The service the in-process path uses instead of loading the bundle again; tests share one across runs. Null for a
     /// service of the run's own.
     /// </summary>
@@ -118,6 +137,7 @@ internal static class ServerLauncher
     /// <exception cref="ServerUnavailableException">The copy could not be made or the launcher could not be started.</exception>
     public static void Start(ServerSettings settings, string directory, ServerEndpoint endpoint, string bundlePath, string sidecarPath)
     {
+        Prune(settings, keep: directory);
         try
         {
             EnsureCopy(settings.SourceDirectory, directory, bundlePath, sidecarPath);
@@ -139,6 +159,152 @@ internal static class ServerLauncher
 
     /// <summary>The hidden <c>warrant server</c> verb that <see cref="Start"/> runs to start the server.</summary>
     public const string LaunchVerb = "launch";
+
+    /// <summary>How long a temporary copy (<c>&lt;copy&gt;.tmp-*</c>) a CLI left, if it died while copying, is kept.</summary>
+    private static readonly TimeSpan TemporaryRetention = TimeSpan.FromHours(1);
+
+    /// <summary>The file that records why the server of a copy failed to start, beside the copy.</summary>
+    /// <param name="directory">The copy's directory.</param>
+    /// <returns>The path.</returns>
+    public static string StartFailurePath(string directory) => directory + ".start-failed";
+
+    /// <summary>
+    /// Fails at once when the server of this copy failed to start less than <see cref="ServerSettings.StartRetryDelay"/>
+    /// ago, so a server that cannot start (a damaged copy, a crash while loading) costs one build the start timeout, not
+    /// every build.
+    /// </summary>
+    /// <param name="settings">The settings.</param>
+    /// <param name="directory">The copy's directory.</param>
+    /// <exception cref="ServerUnavailableException">A recent start failed.</exception>
+    public static void ThrowIfStartFailedRecently(ServerSettings settings, string directory)
+    {
+        var path = StartFailurePath(directory);
+        DateTime failedAt;
+        string reason;
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return;
+            }
+            failedAt = File.GetLastWriteTimeUtc(path);
+            reason = File.ReadAllText(path).Trim();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+        var age = DateTime.UtcNow - failedAt;
+        // A record from the future (a clock that moved back) is not trusted to hold the server off.
+        if (age >= TimeSpan.Zero && age < settings.StartRetryDelay)
+        {
+            throw new ServerUnavailableException(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"the server failed to start {age.TotalSeconds:0} s ago ({reason}); it is tried again {settings.StartRetryDelay.TotalSeconds:0} s after the failure"));
+        }
+    }
+
+    /// <summary>Records that the server of a copy failed to start; best effort.</summary>
+    /// <param name="directory">The copy's directory.</param>
+    /// <param name="reason">Why.</param>
+    public static void RecordStartFailure(string directory, string reason)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(directory)!);
+            File.WriteAllText(StartFailurePath(directory), reason + "\n");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Without the record the next build waits for the start again, as it did before records existed.
+        }
+    }
+
+    /// <summary>
+    /// Marks a copy as used by a build that reached its server, and forgets any failed start: <see cref="Prune"/> keeps a
+    /// copy for <see cref="ServerSettings.CopyRetention"/> after its last use. Best effort.
+    /// </summary>
+    /// <param name="directory">The copy's directory.</param>
+    public static void MarkUsed(string directory)
+    {
+        try
+        {
+            File.Delete(StartFailurePath(directory));
+            if (Directory.Exists(directory))
+            {
+                Directory.SetLastWriteTimeUtc(directory, DateTime.UtcNow);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Deletes, under <see cref="ServerSettings.CopyRoot"/>, the copies no build has used for
+    /// <see cref="ServerSettings.CopyRetention"/> (each Warrant upgrade or rebuild adds one), temporary copies older than an
+    /// hour, and start-failure records older than <see cref="ServerSettings.StartRetryDelay"/>. Nothing else is touched,
+    /// nor <paramref name="keep"/>; an entry that cannot be deleted, such as a copy a server still runs from on Windows,
+    /// stays. A server exits after its idle period, so a copy unused for the retention period has no server.
+    /// </summary>
+    /// <param name="settings">The settings.</param>
+    /// <param name="keep">The copy about to be started.</param>
+    public static void Prune(ServerSettings settings, string keep)
+    {
+        IEnumerable<string> entries;
+        try
+        {
+            entries = Directory.EnumerateFileSystemEntries(settings.CopyRoot).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+        var now = DateTime.UtcNow;
+        foreach (var entry in entries)
+        {
+            var name = Path.GetFileName(entry);
+            if (string.Equals(Path.GetFullPath(entry), Path.GetFullPath(keep), StringComparison.Ordinal))
+            {
+                continue;
+            }
+            TimeSpan retention;
+            if (System.Text.RegularExpressions.Regex.IsMatch(name, "^[0-9a-f]{32}$") && Directory.Exists(entry))
+            {
+                retention = settings.CopyRetention;
+            }
+            else if (System.Text.RegularExpressions.Regex.IsMatch(name, @"^[0-9a-f]{32}\.tmp-[0-9a-f]{8}$") && Directory.Exists(entry))
+            {
+                retention = TemporaryRetention;
+            }
+            else if (System.Text.RegularExpressions.Regex.IsMatch(name, @"^[0-9a-f]{32}\.start-failed$") && File.Exists(entry))
+            {
+                retention = settings.StartRetryDelay;
+            }
+            else
+            {
+                continue;
+            }
+            try
+            {
+                if (now - Directory.GetLastWriteTimeUtc(entry) <= retention)
+                {
+                    continue;
+                }
+                if (Directory.Exists(entry))
+                {
+                    Directory.Delete(entry, recursive: true);
+                }
+                else
+                {
+                    File.Delete(entry);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // In use, or already gone.
+            }
+        }
+    }
 
     /// <summary>
     /// <c>warrant server launch &lt;directory&gt;</c>: starts the server in the copy <paramref name="directory"/>, detached,
@@ -215,7 +381,7 @@ internal static class ServerLauncher
                 File.Copy(source, target);
             }
             File.Copy(bundlePath, Path.Combine(temporary, SemanticsBundle.FileName));
-            File.Copy(sidecarPath, Path.Combine(temporary, VerifyCommand.SidecarFileName));
+            File.Copy(sidecarPath, Path.Combine(temporary, SemanticsBundle.SidecarFileName));
             try
             {
                 Directory.Move(temporary, directory);

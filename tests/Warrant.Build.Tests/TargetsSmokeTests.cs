@@ -111,6 +111,7 @@ public sealed class TargetsSmokeTests : IDisposable
             Build(project, "-p:ContinuousIntegrationBuild=true"),
             Build(project, "-p:ContinuousIntegrationBuild=true", "-p:WarrantUseServer=true", "-p:WarrantRecheck=true"),
             Build(project, "-p:WarrantUseServer=false"),
+            Build(project, "-p:WarrantUseCache=false"),
         };
 
         Assert.All(builds, b => Assert.True(b.ExitCode == 0, b.Log));
@@ -121,6 +122,7 @@ public sealed class TargetsSmokeTests : IDisposable
                 ["--server", "off", "--cache-dir", cache],
                 ["--server", "auto", "--cache-dir", cache, "--recheck"],
                 ["--server", "off", "--cache-dir", cache],
+                ["--server", "auto"],
             ],
             runs);
     }
@@ -133,21 +135,51 @@ public sealed class TargetsSmokeTests : IDisposable
         using var fake = new FakeCli(project);
         fake.Script(["WRT1	summary	info			0	0	0	0	Warrant: 0 verified units, 0 theorems proved, 0 not proved."], exitCode: 0);
         var cache = Path.Combine(project, "obj", "warrant", "cache");
-        var entry = Path.Combine(cache, "ab", "entry");
 
-        Directory.CreateDirectory(Path.GetDirectoryName(entry)!);
-        File.WriteAllText(entry, "cached");
+        WriteCache(cache);
         var (cleanExit, cleanLog) = Build(project, "-t:Clean");
         Assert.True(cleanExit == 0, cleanLog);
         Assert.False(Directory.Exists(cache), cleanLog);
         Assert.True(Directory.Exists(Path.Combine(project, "obj")));
 
-        Directory.CreateDirectory(Path.GetDirectoryName(entry)!);
-        File.WriteAllText(entry, "cached");
+        WriteCache(cache);
         var (rebuildExit, rebuildLog) = Build(project, "-t:Rebuild");
         Assert.True(rebuildExit == 0, rebuildLog);
         Assert.False(Directory.Exists(cache), rebuildLog);
         Assert.Single(fake.Invocations());
+    }
+
+    [FactRequiringEnv(Gate)]
+    public void CleanDeletesOnlyWhatTheCacheWrote()
+    {
+        // A WarrantCacheDir that names the project directory by mistake: no marker, so clean deletes nothing there.
+        var project = Sample("CleanSafe", "<TargetFramework>net10.0</TargetFramework>");
+        using var fake = new FakeCli(project);
+        var keyNamed = Path.Combine(project, new string('a', 64) + ".json");
+        File.WriteAllText(keyNamed, "not a cache entry");
+        var (exit, log) = Build(project, "-t:Clean", "-p:WarrantCacheDir=.");
+        Assert.True(exit == 0, log);
+        Assert.True(File.Exists(keyNamed), log);
+        Assert.True(File.Exists(Path.Combine(project, "CleanSafe.csproj")), log);
+
+        // A marked cache that also holds a file the cache did not write: the entries go, the file and the directory stay.
+        var cache = Path.Combine(project, "obj", "warrant", "cache");
+        WriteCache(cache);
+        var other = Path.Combine(cache, "notes.json");
+        File.WriteAllText(other, "mine");
+        (exit, log) = Build(project, "-t:Clean");
+        Assert.True(exit == 0, log);
+        Assert.Equal([other], Directory.GetFiles(cache));
+    }
+
+    /// <summary>A result cache as the CLI leaves it: the marker, two entries and an unfinished write.</summary>
+    private static void WriteCache(string cache)
+    {
+        Directory.CreateDirectory(cache);
+        File.WriteAllText(Path.Combine(cache, "WARRANT-CACHE"), "marker");
+        File.WriteAllText(Path.Combine(cache, new string('0', 64) + ".json"), "{}");
+        File.WriteAllText(Path.Combine(cache, new string('f', 64) + ".json"), "{}");
+        File.WriteAllText(Path.Combine(cache, new string('f', 64) + ".json." + new string('1', 32) + ".tmp"), "{");
     }
 
     private string Sample(string name, string properties, bool importWarrantBuild = true)

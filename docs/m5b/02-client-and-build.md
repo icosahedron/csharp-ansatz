@@ -73,8 +73,13 @@ docs/m4 already described results this way; the code resolved spans inside the e
 Any failure on the server path makes the CLI verify the remaining units in-process with the same `VerificationService` (KTD5):
 
 - the server cannot be started, or does not answer within 20 seconds of being started (5 seconds when it was already running);
-- `hello` reports another protocol;
-- the connection drops before the response arrives.
+- `hello` reports another protocol, or the server runs another toolchain or loaded another bundle or sidecar;
+- the connection drops before the response arrives;
+- the server stops answering: while it works on the request, the CLI asks for its `status` every 15 seconds, and a server that does not answer within 30 seconds is abandoned (`status` takes no lock a verification holds, so a busy server answers at once).
+
+A server that failed to start leaves a record beside its copy (`<copy>.start-failed`, with the reason), and for 5 minutes after it the CLI verifies in-process at once instead of waiting 20 seconds for a start that will fail again.
+A build that reaches the server deletes the record.
+Each start also deletes the copies no build has used for 14 days (every upgrade or rebuild of Warrant adds one), temporary copies a CLI left over an hour ago, and old records; nothing else under the copy root is touched.
 
 In the last case the CLI re-verifies only the units it has no result for.
 It logs one message saying why, at normal importance; a warning would break builds that treat warnings as errors, and the result is correct either way, as with Roslyn's compiler server.
@@ -90,10 +95,12 @@ Warrant: verification server unavailable (connect timed out after 5 s); verifyin
 | `WarrantUseServer` | `true`; `false` when `ContinuousIntegrationBuild` is `true` | `--server auto` or `--server off` | Use the server, or always verify in-process. |
 | `WarrantRecheck` | `false` | `--recheck` | Re-check every cached proof with the kernel (chapter 4). |
 | `WarrantCacheDir` | `$(BaseIntermediateOutputPath)warrant/cache/` | `--cache-dir` | Where the project's cache lives. |
+| `WarrantUseCache` | `true` | `--cache-dir` left out | `false` verifies without the cache: nothing is read or written. |
 
 The server is off in CI by default because CI agents are thrown away after a job: a server would only add a process that outlives it (KTD5).
 The cache directory sits under `BaseIntermediateOutputPath` (normally `obj/`, and still defined with `UseArtifactsOutput`), so configurations and target frameworks share one cache; that is safe because every input that matters is in the key.
-`dotnet clean` and Rebuild delete it.
+`dotnet clean` and Rebuild delete it, and only it: the cache marks its directory with a `WARRANT-CACHE` file, and the clean deletes only a marked directory's entries (files named by their 64-hex-digit key, their temporary files and the marker), then the directory if that leaves it empty.
+A `WarrantCacheDir` that names a source or home directory by mistake loses nothing to a clean.
 
 The summary line names the cached count and the path taken:
 

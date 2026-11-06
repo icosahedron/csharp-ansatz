@@ -46,12 +46,8 @@ internal sealed class ServerClient : IDisposable
         var directory = ServerLauncher.CopyDirectory(settings, hashes);
         var endpoint = Resolve(settings, directory);
         var client = await TryConnectAsync(endpoint, settings.ConnectTimeout, waitForStart: false, cancellationToken).ConfigureAwait(false);
-        if (client is null)
-        {
-            ServerLauncher.Start(settings, directory, endpoint, bundlePath, sidecarPath);
-            client = await TryConnectAsync(endpoint, settings.StartTimeout, waitForStart: true, cancellationToken).ConfigureAwait(false)
-                ?? throw new ServerUnavailableException($"the server did not start within {settings.StartTimeout.TotalSeconds:0} s");
-        }
+        bool started = client is null;
+        client ??= await StartAsync(settings, directory, endpoint, bundlePath, sidecarPath, cancellationToken).ConfigureAwait(false);
         try
         {
             await client.HelloAsync(settings.StartTimeout, cancellationToken).ConfigureAwait(false);
@@ -65,11 +61,43 @@ internal sealed class ServerClient : IDisposable
             {
                 throw new ServerUnavailableException($"the server loaded another attribute sidecar ({status.SidecarSha256 ?? "unknown"}, not {hashes.Sidecar})");
             }
+            ServerLauncher.MarkUsed(directory);
             return client;
+        }
+        catch (ServerUnavailableException ex)
+        {
+            client.Dispose();
+            if (started)
+            {
+                // A server that started but never said hello, such as one that crashed loading the bundle, failed to start.
+                ServerLauncher.RecordStartFailure(directory, ex.Message);
+            }
+            throw;
         }
         catch
         {
             client.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Starts the server and connects to it, unless a start failed within <see cref="ServerSettings.StartRetryDelay"/>; a
+    /// failure is recorded so that the builds after this one fall back at once instead of waiting for the start again.
+    /// </summary>
+    private static async Task<ServerClient> StartAsync(
+        ServerSettings settings, string directory, ServerEndpoint endpoint, string bundlePath, string sidecarPath, CancellationToken cancellationToken)
+    {
+        ServerLauncher.ThrowIfStartFailedRecently(settings, directory);
+        try
+        {
+            ServerLauncher.Start(settings, directory, endpoint, bundlePath, sidecarPath);
+            return await TryConnectAsync(endpoint, settings.StartTimeout, waitForStart: true, cancellationToken).ConfigureAwait(false)
+                ?? throw new ServerUnavailableException($"the server did not start within {settings.StartTimeout.TotalSeconds:0} s");
+        }
+        catch (ServerUnavailableException ex)
+        {
+            ServerLauncher.RecordStartFailure(directory, ex.Message);
             throw;
         }
     }
@@ -114,18 +142,46 @@ internal sealed class ServerClient : IDisposable
         }
     }
 
-    /// <summary>Verifies a request on the server. Cancelling the token sends <c>$/cancelRequest</c> (KTD12).</summary>
+    /// <summary>
+    /// Verifies a request on the server. Cancelling the token sends <c>$/cancelRequest</c> (KTD12). While the server
+    /// works, the client asks for its <c>status</c> every <paramref name="heartbeatInterval"/>; a server that does not
+    /// answer within <paramref name="heartbeatTimeout"/> is wedged, and the request is abandoned (and cancelled on the
+    /// server, should it recover) so the CLI can verify in-process instead of waiting forever.
+    /// </summary>
     /// <param name="request">The request.</param>
+    /// <param name="heartbeatInterval">How often to check that the server answers.</param>
+    /// <param name="heartbeatTimeout">How long each check waits.</param>
     /// <param name="cancellationToken">Cancels the request on the server.</param>
     /// <returns>The response, with one result per unit in the request's order.</returns>
-    /// <exception cref="ServerUnavailableException">The connection was lost, the server failed the request, or its answer does not match the request.</exception>
+    /// <exception cref="ServerUnavailableException">The connection was lost, the server failed the request or stopped answering, or its answer does not match the request.</exception>
     /// <exception cref="OperationCanceledException">The request was cancelled and the server answered with a cancellation.</exception>
-    public async Task<VerifyResponse> VerifyAsync(VerifyRequest request, CancellationToken cancellationToken)
+    public async Task<VerifyResponse> VerifyAsync(VerifyRequest request, TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken)
     {
         VerifyResponse response;
+        using var abandon = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var call = _rpc.InvokeWithCancellationAsync<VerifyResponse>(ServerProtocol.Verify, [request], abandon.Token);
+        while (!cancellationToken.IsCancellationRequested
+            && await Task.WhenAny(call, Task.Delay(heartbeatInterval, cancellationToken)).ConfigureAwait(false) != call)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            try
+            {
+                await WithTimeout(t => StatusAsync(t), heartbeatTimeout, "status", cancellationToken).ConfigureAwait(false);
+            }
+            catch (ServerUnavailableException ex)
+            {
+                await abandon.CancelAsync().ConfigureAwait(false);
+                // The abandoned call ends cancelled or with the lost connection; nobody waits for it.
+                _ = call.ContinueWith(t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                throw new ServerUnavailableException($"the server stopped answering while it verified: {ex.Message}", ex);
+            }
+        }
         try
         {
-            response = await _rpc.InvokeWithCancellationAsync<VerifyResponse>(ServerProtocol.Verify, [request], cancellationToken).ConfigureAwait(false);
+            response = await call.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

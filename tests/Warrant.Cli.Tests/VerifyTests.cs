@@ -437,7 +437,7 @@ public sealed class VerifyTests : IDisposable
         Assert.Contains("attribute sidecar", output, StringComparison.Ordinal);
 
         // The real sidecar beside a different bundle file: its recorded SHA-256 does not match.
-        File.Copy(Path.Combine(AppContext.BaseDirectory, VerifyCommand.SidecarFileName), Path.Combine(bundles, VerifyCommand.SidecarFileName));
+        File.Copy(Path.Combine(AppContext.BaseDirectory, SemanticsBundle.SidecarFileName), Path.Combine(bundles, SemanticsBundle.SidecarFileName));
         File.AppendAllText(bundle, "x");
         (code, output) = VerifyArgs("--bundle", bundle);
         Assert.Equal(2, code);
@@ -520,7 +520,7 @@ public sealed class VerifyTests : IDisposable
     public void TheSidecarIsCopiedBesideTheCli()
     {
         var cli = Path.GetDirectoryName(typeof(VerifyCommand).Assembly.Location)!;
-        Assert.True(File.Exists(Path.Combine(cli, VerifyCommand.SidecarFileName)));
+        Assert.True(File.Exists(Path.Combine(cli, SemanticsBundle.SidecarFileName)));
     }
 
     private static string Unescape(string field) =>

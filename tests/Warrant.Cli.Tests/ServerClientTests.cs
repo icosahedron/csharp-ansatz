@@ -47,7 +47,7 @@ internal sealed class TestServer : IAsyncDisposable
     /// <summary>The bundle and sidecar beside the CLI, which the tests verify with.</summary>
     public static string BundlePath => Path.Combine(AppContext.BaseDirectory, SemanticsBundle.FileName);
 
-    public static string SidecarPath => Path.Combine(AppContext.BaseDirectory, VerifyCommand.SidecarFileName);
+    public static string SidecarPath => Path.Combine(AppContext.BaseDirectory, SemanticsBundle.SidecarFileName);
 
     public static BundleHashes Hashes { get; } = new(OutcomeText.FileSha256(BundlePath), OutcomeText.FileSha256(SidecarPath));
 
@@ -77,11 +77,13 @@ internal sealed class TestServer : IAsyncDisposable
         }
     }
 
-    /// <summary><c>warrant verify</c> in-process, with this server's settings.</summary>
-    public (int Code, string Output) Verify(string[] args, VerificationService? inProcess = null, CancellationToken cancellationToken = default)
+    /// <summary><c>warrant verify</c> in-process, with this server's settings, changed by <paramref name="configure"/>.</summary>
+    public (int Code, string Output) Verify(
+        string[] args, VerificationService? inProcess = null, Func<ServerSettings, ServerSettings>? configure = null, CancellationToken cancellationToken = default)
     {
         using var output = new StringWriter { NewLine = "\n" };
-        var code = VerifyCommand.Run(args, output, output, Settings with { InProcessService = inProcess }, cancellationToken);
+        var settings = Settings with { InProcessService = inProcess };
+        var code = VerifyCommand.Run(args, output, output, configure is null ? settings : configure(settings), cancellationToken);
         return (code, output.ToString());
     }
 
@@ -265,6 +267,22 @@ public sealed class ServerClientTests
         Assert.DoesNotContain(FallbackPrefix, output, StringComparison.Ordinal);
         Assert.Null(await server.ConnectAsync());
         Assert.False(Directory.Exists(server.CopyRoot));
+    }
+
+    [Fact]
+    public async Task ABusyServerAnswersEveryHeartbeatSoALongRequestIsNeverAbandoned()
+    {
+        await using var server = new TestServer();
+        using var slow = new SourceDirectory(SourceDirectory.Slow());
+        // A few seconds of kernel work, with a heartbeat every 50 ms that must be answered within 2 s.
+        var (code, output) = server.Verify(
+            [slow.Path, "--server", "auto", "--kernel-fuel", "2000000"],
+            configure: s => s with { HeartbeatInterval = TimeSpan.FromMilliseconds(50), HeartbeatTimeout = TimeSpan.FromSeconds(2) });
+
+        Assert.DoesNotContain(FallbackPrefix, output, StringComparison.Ordinal);
+        Assert.Contains("kernel fuel ran out (2,000,000 steps)", output, StringComparison.Ordinal);
+        Assert.EndsWith("Warrant: 34 verified units, 2 theorems proved, 1 not proved. [server]\n", output, StringComparison.Ordinal);
+        Assert.NotEqual(0, code);
     }
 
     [Fact]

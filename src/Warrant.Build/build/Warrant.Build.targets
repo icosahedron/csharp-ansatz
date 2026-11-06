@@ -18,7 +18,11 @@
     <WarrantUseServer Condition="'$(WarrantUseServer)' == '' and '$(ContinuousIntegrationBuild)' == 'true'">false</WarrantUseServer>
     <WarrantUseServer Condition="'$(WarrantUseServer)' == ''">true</WarrantUseServer>
     <WarrantRecheck Condition="'$(WarrantRecheck)' == ''">false</WarrantRecheck>
+    <!-- WarrantUseCache=false verifies without the result cache; an empty WarrantCacheDir means the default directory. -->
+    <WarrantUseCache Condition="'$(WarrantUseCache)' == ''">true</WarrantUseCache>
     <WarrantCacheDir Condition="'$(WarrantCacheDir)' == ''">$(BaseIntermediateOutputPath)warrant/cache/</WarrantCacheDir>
+    <_WarrantCacheDirFull>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(WarrantCacheDir)'))</_WarrantCacheDirFull>
+    <_WarrantVerifyCacheDir Condition="'$(WarrantUseCache)' == 'true'">$(_WarrantCacheDirFull)</_WarrantVerifyCacheDir>
     <!-- The first entry of $(TargetFrameworks), and whether there are two or more: the inner build that verifies. -->
     <_WarrantFirstTargetFramework>$([System.Text.RegularExpressions.Regex]::Replace('$(TargetFrameworks)', '^[\s;]*([^;\s]*)[\s\S]*$', '$1'))</_WarrantFirstTargetFramework>
     <_WarrantMultiTargeted>$([System.Text.RegularExpressions.Regex]::IsMatch('$(TargetFrameworks)', '[^;\s]\s*;[\s;]*[^;\s]'))</_WarrantMultiTargeted>
@@ -48,14 +52,29 @@
                    KeepConditionalCheck="$(_WarrantMultiTargeted)"
                    UseServer="$(WarrantUseServer)"
                    Recheck="$(WarrantRecheck)"
-                   CacheDirectory="$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(WarrantCacheDir)'))" />
+                   CacheDirectory="$(_WarrantVerifyCacheDir)" />
     <ItemGroup>
       <FileWrites Include="$(_WarrantCscArgsFile)" />
     </ItemGroup>
   </Target>
 
-  <!-- dotnet clean and Rebuild delete the project's result cache (M5b R12, KTD27). -->
-  <Target Name="WarrantClean" AfterTargets="Clean" Condition="'$(WarrantCacheDir)' != ''">
-    <RemoveDir Directories="$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(WarrantCacheDir)'))" />
+  <!--
+    dotnet clean and Rebuild delete the project's result cache (M5b R12, KTD27), and nothing else: only a directory the
+    cache marked as its own (ResultCache.MarkerFileName), only the files the cache writes there (entries named by their
+    64-hex-digit key, their temporary files, the marker), and the directory itself only when that leaves it empty. A
+    WarrantCacheDir that names a source or home directory by mistake therefore loses nothing.
+  -->
+  <Target Name="WarrantClean" AfterTargets="Clean" Condition="Exists('$(_WarrantCacheDirFull)WARRANT-CACHE')">
+    <ItemGroup>
+      <_WarrantCacheCandidate Include="$(_WarrantCacheDirFull)*.json;$(_WarrantCacheDirFull)*.tmp" />
+      <_WarrantCacheFile Include="@(_WarrantCacheCandidate)"
+                         Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(_WarrantCacheCandidate.Filename)%(_WarrantCacheCandidate.Extension)', '^[0-9a-f]{64}\.json(\.[0-9a-f]{32}\.tmp)?$'))" />
+      <_WarrantCacheFile Include="$(_WarrantCacheDirFull)WARRANT-CACHE" />
+    </ItemGroup>
+    <Delete Files="@(_WarrantCacheFile)" />
+    <ItemGroup>
+      <_WarrantCacheLeft Include="$(_WarrantCacheDirFull)**" />
+    </ItemGroup>
+    <RemoveDir Directories="$(_WarrantCacheDirFull)" Condition="'@(_WarrantCacheLeft)' == ''" />
   </Target>
 </Project>

@@ -37,6 +37,12 @@ internal static class Program
                     return 2;
             }
         }
+        // A server outlives the build that started it. On Unix the launcher passes on the build's working directory, which
+        // the server would otherwise hold for its whole life (an unmount fails as busy) and resolve relative paths against;
+        // Windows already starts it in its own directory. Paths below are made absolute first.
+        bundlePath = bundlePath is null ? null : Path.GetFullPath(bundlePath);
+        sidecarPath = sidecarPath is null ? null : Path.GetFullPath(sidecarPath);
+        Directory.SetCurrentDirectory(AppContext.BaseDirectory);
         bundlePath ??= Path.Combine(AppContext.BaseDirectory, SemanticsBundle.FileName);
         sidecarPath ??= Path.Combine(Path.GetDirectoryName(Path.GetFullPath(bundlePath))!, SemanticsBundle.SidecarFileName);
 

@@ -44,7 +44,7 @@ internal static class ServerCommand
         }
         settings ??= new ServerSettings();
         var bundlePath = Path.Combine(settings.SourceDirectory, SemanticsBundle.FileName);
-        var sidecarPath = Path.Combine(settings.SourceDirectory, VerifyCommand.SidecarFileName);
+        var sidecarPath = Path.Combine(settings.SourceDirectory, SemanticsBundle.SidecarFileName);
         try
         {
             var hashes = new BundleHashes(OutcomeText.FileSha256(bundlePath), OutcomeText.FileSha256(sidecarPath));

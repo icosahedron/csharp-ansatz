@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.IO.Pipes;
 using System.Net.Sockets;
 using StreamJsonRpc;
@@ -11,7 +12,8 @@ namespace Warrant.Cli.Tests;
 /// <summary>
 /// A server that speaks the protocol but answers as a test tells it to: another toolchain identity in <c>hello</c>,
 /// another bundle or sidecar hash in <c>status</c>, or a <c>verify</c> answer whose units do not match the request. It
-/// listens on an endpoint of its own name, as the real server would, and holds no semantics bundle.
+/// listens on an endpoint of its own name, as the real server would, and holds no semantics bundle. A wedged stub stops
+/// answering anything once it is asked to verify.
 /// </summary>
 internal sealed class StubServer : IAsyncDisposable
 {
@@ -48,6 +50,9 @@ internal sealed class StubServer : IAsyncDisposable
 
         /// <summary>The units a verify answer carries, from the request's.</summary>
         public Func<ImmutableArray<RequestUnit>, IEnumerable<RequestUnit>> Units { get; init; } = units => units;
+
+        /// <summary>Whether <c>verify</c> and every <c>status</c> after it hang until the client goes away.</summary>
+        public bool Wedged { get; init; }
     }
 
     public async ValueTask DisposeAsync()
@@ -128,6 +133,7 @@ internal sealed class StubServer : IAsyncDisposable
     /// <summary>The protocol's methods; a class, not a record, so it has no public members but these.</summary>
     private sealed class Target(Answers answers, List<string> calls)
     {
+        private volatile bool _wedged;
         [JsonRpcMethod(ServerProtocol.Hello)]
         public HelloResponse Hello(int protocol)
         {
@@ -137,18 +143,27 @@ internal sealed class StubServer : IAsyncDisposable
         }
 
         [JsonRpcMethod(ServerProtocol.Status)]
-        public ServerStatus Status()
+        public async Task<ServerStatus> Status(CancellationToken cancellationToken)
         {
             Record(ServerProtocol.Status);
+            if (_wedged)
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
             return new ServerStatus(
                 int.MaxValue, "stub", answers.ToolchainIdentity, TimeSpan.Zero, answers.BundleSha256, answers.SidecarSha256, 0, 0, new VerifyCounters(0, 0, 0, 0), []);
         }
 
         /// <summary>Every unit it is given proved or translated, without looking at any of them.</summary>
         [JsonRpcMethod(ServerProtocol.Verify)]
-        public VerifyResponse Verify(VerifyRequest request)
+        public async Task<VerifyResponse> Verify(VerifyRequest request, CancellationToken cancellationToken)
         {
             Record(ServerProtocol.Verify);
+            if (answers.Wedged)
+            {
+                _wedged = true;
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
             return new VerifyResponse(
                 request.ProtocolVersion,
                 request.RequestId,
@@ -237,21 +252,40 @@ public sealed class ServerMismatchTests
         Assert.Contains(ServerProtocol.Verify, calls);
     }
 
+    [Fact]
+    public async Task AServerThatStopsAnsweringWhileItVerifiesIsAbandonedAfterTheHeartbeatTimeout()
+    {
+        var watch = Stopwatch.StartNew();
+        var output = await VerifyAgainst(
+            new StubServer.Answers { Wedged = true },
+            out var calls,
+            s => s with { HeartbeatInterval = TimeSpan.FromMilliseconds(100), HeartbeatTimeout = TimeSpan.FromSeconds(1) });
+
+        AssertFellBackOnce(output, "the server stopped answering while it verified: the server did not answer status within 1 s");
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), $"the fallback took {watch.Elapsed}");
+        lock (calls)
+        {
+            // hello, status, verify, then the heartbeat that was never answered.
+            Assert.Equal([ServerProtocol.Hello, ServerProtocol.Status, ServerProtocol.Verify, ServerProtocol.Status], calls);
+        }
+    }
+
     /// <summary><c>warrant verify --server auto</c> with the stub on the endpoint; the calls the stub saw.</summary>
-    private static Task<string> VerifyAgainst(StubServer.Answers answers, out List<string> calls)
+    private static Task<string> VerifyAgainst(
+        StubServer.Answers answers, out List<string> calls, Func<ServerSettings, ServerSettings>? configure = null)
     {
         var stub = new StubServer(answers);
         calls = stub.Calls;
-        return Run(stub);
+        return Run(stub, configure);
 
-        static async Task<string> Run(StubServer stub)
+        static async Task<string> Run(StubServer stub, Func<ServerSettings, ServerSettings>? configure)
         {
             // Disposed after the stub, so it finds no server to shut down and starts none.
             await using var server = new TestServer(endpointName: stub.Endpoint.Name);
             await using (stub)
             {
                 using var source = new SourceDirectory(SourceDirectory.Fast);
-                var (code, output) = server.Verify([source.Path, "--server", "auto"]);
+                var (code, output) = server.Verify([source.Path, "--server", "auto"], configure: configure);
                 Assert.True(code == 0, output);
                 // The stub was the only server: the CLI never started one of its own.
                 Assert.False(Directory.Exists(server.CopyRoot), "the CLI copied a server to start");

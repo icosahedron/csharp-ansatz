@@ -102,6 +102,18 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
     }
 
     [Fact]
+    public void TheCacheMarksItsDirectoryAndHoldsOnlyKeyNamedEntriesBesideTheMarker()
+    {
+        // WarrantClean deletes only a directory with the marker, and only these files (Warrant.Build.targets).
+        NewService().Verify(Request(Units(Increments)));
+
+        Assert.True(File.Exists(Path.Combine(Dir, FileResultCache.MarkerFileName)));
+        Assert.All(
+            Directory.GetFiles(Dir).Select(Path.GetFileName).Where(f => f != FileResultCache.MarkerFileName),
+            f => Assert.Matches("^[0-9a-f]{64}\\.json$", f!));
+    }
+
+    [Fact]
     public void EditingACalleesBodyChangesItsCallersKeyAndNoOtherUnits()
     {
         var units = Units(Increments);
@@ -547,7 +559,7 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
 
         Parallel.Invoke(() => first.Verify(Request(units)), () => second.Verify(Request(units)));
 
-        var entries = Directory.GetFiles(Dir);
+        var entries = Directory.GetFiles(Dir).Where(f => Path.GetFileName(f) != FileResultCache.MarkerFileName).ToArray();
         Assert.All(entries, f => Assert.EndsWith(".json", f, StringComparison.Ordinal));
         Assert.Equal(6, entries.Length);
         Assert.All(entries, f => Assert.NotNull(new FileResultCache().Read(Dir, Path.GetFileNameWithoutExtension(f))));
@@ -556,7 +568,7 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
         var entry = new FileResultCache().Read(Dir, KeyOf(units, IncAddsOne))!.Entry;
         var caches = new[] { new FileResultCache(), new FileResultCache() };
         Parallel.For(0, 64, i => caches[i % 2].Write(Dir, entry));
-        Assert.Equal(6, Directory.GetFiles(Dir).Length);
+        Assert.Equal(7, Directory.GetFiles(Dir).Length);
         Assert.Equal(entry.ToFile(), File.ReadAllBytes(FileResultCache.PathOf(Dir, entry.Key)));
     }
 

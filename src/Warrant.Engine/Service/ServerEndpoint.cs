@@ -191,7 +191,7 @@ public sealed record ServerEndpoint(string Name, string Address, string? SocketD
         {
             var buffer = new FileStatusPrefix();
             // A NUL-terminated UTF-8 path, as System.Native takes it.
-            var bytes = Encoding.UTF8.GetBytes(path + " ");
+            var bytes = Encoding.UTF8.GetBytes(path + "\0");
             return LStat(bytes, ref buffer) == 0 ? new Status(buffer.Mode, buffer.Uid) : null;
         }
 

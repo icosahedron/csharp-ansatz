@@ -30,9 +30,6 @@ internal static class VerifyCommand
                    --server auto|off  --timings
         """;
 
-    /// <summary>The attribute sidecar's file name; it ships beside the semantics bundle (KTD9).</summary>
-    public const string SidecarFileName = SemanticsBundle.SidecarFileName;
-
     /// <summary>Runs the verb.</summary>
     /// <param name="args">The arguments after <c>verify</c>.</param>
     /// <param name="output">Where unit lines, diagnostics (or records) and the summary go.</param>
@@ -128,7 +125,7 @@ internal static class VerifyCommand
             error.WriteLine($"declined: semantics bundle '{bundlePath}' not found");
             return 2;
         }
-        var sidecarPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(bundlePath))!, SidecarFileName);
+        var sidecarPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(bundlePath))!, SemanticsBundle.SidecarFileName);
         if (!File.Exists(sidecarPath))
         {
             error.WriteLine($"declined: attribute sidecar '{sidecarPath}' not found; it ships beside the semantics bundle");
@@ -334,15 +331,18 @@ internal static class VerifyCommand
 
         if (settings.OutPath is not null)
         {
+            // Execute runs --out in-process (only that path holds the admitted declarations), so the result is there.
+            var admitted = result ?? throw new InvalidOperationException("--out ran without an in-process result");
             using var stream = File.Create(settings.OutPath);
-            result!.WriteNdjson(stream);
-            report.Line($"wrote the bundle and {result.Admitted.Length} admitted declaration(s) to {settings.OutPath}");
+            admitted.WriteNdjson(stream);
+            report.Line($"wrote the bundle and {admitted.Admitted.Length} admitted declaration(s) to {settings.OutPath}");
         }
         if (settings.ReportDir is not null)
         {
             Directory.CreateDirectory(settings.ReportDir);
             var reportSettings = new ReportSettings(compilation.Options.CheckOverflow, OutcomeText.BundleName(settings.BundlePath));
-            var assumptions = AssumptionReports.Build(result!, inputs, reportSettings, report.Sources.Text);
+            // As for --out: --report runs in-process.
+            var assumptions = AssumptionReports.Build(result ?? throw new InvalidOperationException("--report ran without an in-process result"), inputs, reportSettings, report.Sources.Text);
             File.WriteAllText(Path.Combine(settings.ReportDir, "report.md"), MarkdownReport.Render(assumptions));
             File.WriteAllText(Path.Combine(settings.ReportDir, "report.json"), JsonReport.Render(assumptions));
             report.Line($"wrote report.md and report.json to {settings.ReportDir}");
@@ -392,7 +392,8 @@ internal static class VerifyCommand
                 {
                     using var client = await ServerClient.ConnectOrStartAsync(settings.Server, settings.Hashes, settings.BundlePath, settings.SidecarPath, token)
                         .ConfigureAwait(false);
-                    return await client.VerifyAsync(request, token).ConfigureAwait(false);
+                    return await client.VerifyAsync(request, settings.Server.HeartbeatInterval, settings.Server.HeartbeatTimeout, token)
+                        .ConfigureAwait(false);
                 }).GetAwaiter().GetResult();
                 return (response, null, "server");
             }

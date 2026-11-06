@@ -15,7 +15,7 @@ public enum ReportStatus
     /// <summary>A theorem the kernel admitted with its proof.</summary>
     Verified,
 
-    /// <summary>Anything else: a false, unproved, undecided, failed or skipped unit, or an internal error.</summary>
+    /// <summary>Anything else: a false, unproved, undecided, failed, skipped or cancelled unit, or an internal error.</summary>
     Failed,
 }
 
@@ -136,6 +136,7 @@ public static class AssumptionReports
                 InternalErrorOutcome i => (ReportStatus.Failed, null, OutcomeText.InternalErrorDetail(i.Reason)),
                 FailedOutcome f => (ReportStatus.Failed, null, f.Reason),
                 SkippedOutcome s => (ReportStatus.Failed, null, s.Reason),
+                CancelledOutcome => (ReportStatus.Failed, null, "the run was cancelled before this unit finished."),
                 _ => throw new InvalidOperationException($"Unknown outcome {outcome.GetType().Name}."),
             };
             var assumptions = outcome.Assumptions
@@ -205,8 +206,8 @@ public static class AssumptionReports
     /// <summary>The outcome's name as reports and the CLI print it.</summary>
     /// <param name="outcome">The outcome.</param>
     /// <returns>
-    /// <c>translated</c>, <c>proved</c>, <c>false</c>, <c>unproved</c>, <c>undecided</c>, <c>internal</c>, <c>failed</c> or
-    /// <c>skipped</c>.
+    /// <c>translated</c>, <c>proved</c>, <c>false</c>, <c>unproved</c>, <c>undecided</c>, <c>internal</c>, <c>failed</c>,
+    /// <c>skipped</c> or <c>cancelled</c>.
     /// </returns>
     /// <exception cref="InvalidOperationException">The outcome is of an unknown kind.</exception>
     public static string OutcomeName(UnitOutcome outcome) => outcome switch
@@ -219,6 +220,7 @@ public static class AssumptionReports
         InternalErrorOutcome => "internal",
         FailedOutcome => "failed",
         SkippedOutcome => "skipped",
+        CancelledOutcome => "cancelled",
         _ => throw new InvalidOperationException($"Unknown outcome {outcome?.GetType().Name}."),
     };
 

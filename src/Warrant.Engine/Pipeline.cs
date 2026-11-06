@@ -76,8 +76,17 @@ public static class Pipeline
         {
             Timeout = overrides is { TimeoutSeconds: > 0 } ? TimeSpan.FromSeconds(overrides.TimeoutSeconds) : options.Timeout;
             var deadline = DateTimeOffset.UtcNow + Timeout;
-            Kernel = options.Kernel with { Fuel = overrides is { KernelFuel: > 0 } ? overrides.KernelFuel : options.Kernel.Fuel, Deadline = deadline };
-            Meta = new MetaLimits(overrides is { TacticFuel: > 0 } ? overrides.TacticFuel : options.TacticFuel) { Deadline = deadline };
+            Kernel = options.Kernel with
+            {
+                Fuel = overrides is { KernelFuel: > 0 } ? overrides.KernelFuel : options.Kernel.Fuel,
+                Deadline = deadline,
+                CancellationToken = options.CancellationToken,
+            };
+            Meta = new MetaLimits(overrides is { TacticFuel: > 0 } ? overrides.TacticFuel : options.TacticFuel)
+            {
+                Deadline = deadline,
+                CancellationToken = options.CancellationToken,
+            };
         }
 
         public TimeSpan Timeout { get; }
@@ -89,6 +98,11 @@ public static class Pipeline
         /// <summary>Which budget a resource exception exhausted, for WRT0006's message.</summary>
         public string Exhausted(Exception ex)
         {
+            if (ex is MetaResourceException { InnerException: KernelResourceException kernel })
+            {
+                // The kernel ran out inside Meta's Check (KTD12): its budget, not Meta's.
+                ex = kernel;
+            }
             if (ex.Message.Contains("deadline", StringComparison.Ordinal) || DateTimeOffset.UtcNow >= Kernel.Deadline)
             {
                 return string.Create(CultureInfo.InvariantCulture, $"the time limit of {Timeout.TotalSeconds:0.###} s was reached");
@@ -123,9 +137,18 @@ public static class Pipeline
             _names = Names(translation);
             foreach (var unit in translation.Units)
             {
-                Outcomes.Add(unit.Key, Skip(units[unit.Key]) ?? Admit(unit));
+                // KTD12: once the run is cancelled no unit starts, and a unit it interrupted ran out of a budget it was
+                // given, which is no verdict.
+                var outcome = Cancelled(units[unit.Key]) ?? Skip(units[unit.Key]) ?? Admit(unit);
+                Outcomes.Add(unit.Key, outcome is UndecidedOutcome ? Cancelled(units[unit.Key]) ?? outcome : outcome);
             }
         }
+
+        /// <summary>The cancelled outcome of a unit if the run is cancelled; null if it is not.</summary>
+        private CancelledOutcome? Cancelled(EngineUnit unit) =>
+            options.CancellationToken.IsCancellationRequested
+                ? new CancelledOutcome(unit.Unit.Key, unit.Unit.Kind, Display(unit), Assumptions(unit))
+                : null;
 
         /// <summary>
         /// Translates every unit that translates: a unit translation rejects fails, the units depending on it are skipped, and
@@ -332,7 +355,7 @@ public static class Pipeline
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
             var shell = decrease.Theorem;
-            var meta = new MetaM(Env, budget.Meta) { Attributes = Attributes, DisplayNames = _names };
+            var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = _names };
             var goal = meta.MkFreshExprSyntheticOpaqueMVar(shell.Type);
             MVarId? current = null;
             Expr proof;
@@ -412,6 +435,13 @@ public static class Pipeline
                 {
                     Kernel.Kernel.Add(Env, declaration, budget.Kernel);
                 }
+                catch (KernelResourceException ex) when (budget.Kernel.CancellationToken.IsCancellationRequested || DateTimeOffset.UtcNow >= budget.Kernel.Deadline)
+                {
+                    // KTD12: a cancellation or a passed deadline is shared by every method, so the next one cannot
+                    // succeed. Running out of fuel falls through to the next method, which gets its own fuel, as in M5a.
+                    return new UndecidedOutcome(
+                        key, unit.Unit.Kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the {kind.ToString().ToLowerInvariant()} proof.");
+                }
                 catch (KernelException)
                 {
                     continue;
@@ -457,7 +487,7 @@ public static class Pipeline
         {
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
-            var meta = new MetaM(Env, budget.Meta) { Attributes = Attributes, DisplayNames = _names };
+            var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = _names };
             var printer = new GoalPrinter(Env, _names);
             var tactics = new TacticM(meta, []);
             var runner = new TacticRunner(tactics);

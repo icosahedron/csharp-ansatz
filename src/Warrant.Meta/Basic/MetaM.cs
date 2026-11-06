@@ -73,17 +73,25 @@ public sealed partial class MetaM : IMonadMCtx
 
     /// <summary>Creates a Meta computation over <paramref name="env"/>.</summary>
     /// <param name="env">The environment constants are looked up in.</param>
-    /// <param name="limits">Meta's fuel and deadline (default: <see cref="MetaLimits.Default"/>).</param>
+    /// <param name="limits">Meta's fuel, deadline and cancellation token (default: <see cref="MetaLimits.Default"/>).</param>
     public MetaM(KernelEnvironment env, MetaLimits? limits = null)
     {
         Env = env ?? throw new ArgumentNullException(nameof(env));
         Budget = new MetaBudget(limits ?? MetaLimits.Default);
+        KernelLimits = KernelLimits.Interactive with { Deadline = Budget.Limits.Deadline, CancellationToken = Budget.Limits.CancellationToken };
     }
+
+    /// <summary>
+    /// The limits of the kernel that <see cref="Check"/> hands ground terms to (M5b KTD12); by default the kernel's
+    /// interactive fuel with Meta's deadline and cancellation token. The kernel running out of them fails with a
+    /// <see cref="MetaResourceException"/>.
+    /// </summary>
+    public KernelLimits KernelLimits { get; init; }
 
     /// <summary>The environment.</summary>
     public KernelEnvironment Env { get; }
 
-    /// <summary>The fuel and deadline Meta's traversals charge.</summary>
+    /// <summary>The fuel, deadline and cancellation token Meta's traversals charge.</summary>
     public MetaBudget Budget { get; }
 
     MetaBudget? IMonadMCtx.Budget => Budget;

@@ -21,6 +21,13 @@ public sealed record KernelLimits(long Fuel, long MaxNatBytes)
     /// </summary>
     public DateTimeOffset? Deadline { get; init; }
 
+    /// <summary>
+    /// An optional cancellation token (M5b KTD12), polled where the deadline is. A type checker that sees it cancelled
+    /// throws a <see cref="KernelResourceException"/>, as when fuel runs out, so cancelling can only reject a
+    /// declaration, never admit one. <see cref="CancellationToken.None"/> (the default) is never cancelled.
+    /// </summary>
+    public CancellationToken CancellationToken { get; init; }
+
     /// <summary>Defaults for interactive use: 20M steps, 128 MB numerals (Lean's default size limit).</summary>
     public static KernelLimits Interactive { get; } = new(20_000_000, 128L * 1024 * 1024);
 
@@ -167,8 +174,8 @@ public sealed partial class TypeChecker
 
     // ------------------------------------------------------------------ inference
 
-    // Reading the clock costs more than a step, so a deadline is checked on the first step and then
-    // once every ClockCheckInterval steps.
+    // Reading the clock costs more than a step, so a deadline and the cancellation token are checked
+    // on the first step and then once every ClockCheckInterval steps.
     private const int ClockCheckInterval = 1024;
 
     private void Tick()
@@ -177,9 +184,13 @@ public sealed partial class TypeChecker
         {
             throw new KernelResourceException($"kernel fuel exhausted ({_limits.Fuel:N0} steps)");
         }
-        if (_deadlineTimestamp != long.MaxValue && --_ticksUntilClockCheck < 0)
+        if ((_deadlineTimestamp != long.MaxValue || _limits.CancellationToken.CanBeCanceled) && --_ticksUntilClockCheck < 0)
         {
             _ticksUntilClockCheck = ClockCheckInterval - 1;
+            if (_limits.CancellationToken.IsCancellationRequested)
+            {
+                throw new KernelResourceException("kernel check cancelled");
+            }
             if (Stopwatch.GetTimestamp() >= _deadlineTimestamp)
             {
                 throw new KernelResourceException($"kernel deadline passed ({_limits.Deadline:O})");

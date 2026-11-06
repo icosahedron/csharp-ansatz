@@ -31,7 +31,8 @@ public sealed record UnitAssumption(string UnitKey, VirAssumption Assumption);
 /// <summary>
 /// The outcome of one unit. Each unit ends in exactly one: <see cref="TranslatedOutcome"/>, <see cref="ProvedOutcome"/>,
 /// <see cref="FalseOutcome"/>, <see cref="NotProvedOutcome"/>, <see cref="UndecidedOutcome"/>,
-/// <see cref="InternalErrorOutcome"/>, <see cref="FailedOutcome"/> or <see cref="SkippedOutcome"/>.
+/// <see cref="InternalErrorOutcome"/>, <see cref="FailedOutcome"/>, <see cref="SkippedOutcome"/> or
+/// <see cref="CancelledOutcome"/>.
 /// </summary>
 /// <param name="Key">The unit's documentation-comment ID.</param>
 /// <param name="UnitKind">What the unit is.</param>
@@ -190,6 +191,17 @@ public sealed record FailedOutcome(
 /// <param name="Reason">A message for people.</param>
 public sealed record SkippedOutcome(
     string Key, VirUnitKind UnitKind, string DisplayName, ImmutableArray<UnitAssumption> Assumptions, string Dependency, string Reason)
+    : UnitOutcome(Key, UnitKind, DisplayName, Assumptions);
+
+/// <summary>
+/// A unit whose run was cancelled before it finished or started (M5b KTD12, R6). It is no verdict: it is neither cached
+/// nor reported as a diagnostic.
+/// </summary>
+/// <param name="Key">The unit's key.</param>
+/// <param name="UnitKind">What the unit is.</param>
+/// <param name="DisplayName">The C# display name.</param>
+/// <param name="Assumptions">The unit's assumptions.</param>
+public sealed record CancelledOutcome(string Key, VirUnitKind UnitKind, string DisplayName, ImmutableArray<UnitAssumption> Assumptions)
     : UnitOutcome(Key, UnitKind, DisplayName, Assumptions);
 
 /// <summary>One side of a false comparison.</summary>

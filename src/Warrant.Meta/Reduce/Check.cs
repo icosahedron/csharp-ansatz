@@ -70,7 +70,8 @@ public sealed partial class MetaM
 
     // Kernel-checks the ground `e` in a kernel copy of `lctx` and returns its type, in Meta's free
     // variables, or null if `e` (or `expected`) depends on a declaration that is not ground. With
-    // `expected`, also checks the type is kernel-defeq to it. A kernel rejection becomes a MetaException.
+    // `expected`, also checks the type is kernel-defeq to it, within KernelLimits. A kernel rejection becomes a
+    // MetaException; the kernel running out of a budget, a MetaResourceException.
     private Expr? KernelInfer(LocalContext lctx, Expr e, Expr? expected)
     {
         var ngen = new NameGenerator(KernelCheckPrefix);
@@ -106,13 +107,19 @@ public sealed partial class MetaM
         }
         try
         {
-            var tc = new TypeChecker(Env, DefinitionSafety.Unsafe, localContext: kctx);
+            var tc = new TypeChecker(Env, DefinitionSafety.Unsafe, KernelLimits, kctx);
             var type = tc.Check(ke);
             if (kExpected is not null && !tc.IsDefEq(type, kExpected))
             {
                 throw new MetaException($"kernel type checker: {e} has type {type} but is expected to have type {expected}");
             }
             return ExprOps.Replace(type, (x, _) => x is FVarExpr f && toMeta.TryGetValue(f.Id, out var m) ? m : null);
+        }
+        catch (KernelResourceException ex)
+        {
+            // KTD12: running out of fuel or time, or a cancellation, is no type error; first, try and the unifier must
+            // not take it for a failure they can recover from.
+            throw new MetaResourceException($"kernel type checker ran out of resources at {e}: {ex.Message}", ex);
         }
         catch (KernelException ex)
         {
@@ -159,7 +166,7 @@ public sealed partial class MetaM
         {
             KernelInfer(decl.LCtx, v, expected);
         }
-        catch (MetaException ex)
+        catch (MetaException ex) when (ex is not MetaResourceException)
         {
             throw new MetaException($"ill-typed assignment ?{mvarId} := {v}: {ex.Message}", ex);
         }

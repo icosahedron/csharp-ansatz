@@ -14,15 +14,29 @@ namespace Warrant.Cli.Tests;
 /// </summary>
 internal sealed class TestServer : IAsyncDisposable
 {
-    private readonly string _copyRoot = Path.Combine(Path.GetTempPath(), "warrant-servers-" + Guid.NewGuid().ToString("N")[..12]);
+    private readonly string _copyRoot;
 
-    public TestServer(string? endpointName = null) =>
+    public TestServer(string? endpointName = null)
+        : this(endpointName ?? "wc" + Guid.NewGuid().ToString("N")[..16], Path.Combine(Path.GetTempPath(), "warrant-servers-" + Guid.NewGuid().ToString("N")[..12]))
+    {
+    }
+
+    private TestServer(string? endpointName, string copyRoot)
+    {
+        _copyRoot = copyRoot;
         Settings = new ServerSettings
         {
-            EndpointName = endpointName ?? "wc" + Guid.NewGuid().ToString("N")[..16],
+            EndpointName = endpointName,
             CopyRoot = _copyRoot,
             ServerEnvironment = new Dictionary<string, string> { [ServerIdleVariable] = "600" },
         };
+    }
+
+    /// <summary>
+    /// A server whose endpoint name is computed from its copy's directory, as a build's is, with its copies under
+    /// <paramref name="copyRoot"/>, which the test owns and deletes.
+    /// </summary>
+    public static TestServer WithComputedEndpoint(string copyRoot) => new(endpointName: null, copyRoot);
 
     private const string ServerIdleVariable = "WARRANT_SERVER_IDLE_SECONDS";
 
@@ -308,6 +322,87 @@ public sealed class ServerClientTests
         Assert.DoesNotContain(FallbackPrefix, output, StringComparison.Ordinal);
         Assert.EndsWith("Warrant: 34 verified units, 2 theorems proved, 0 not proved. [server]\n", output, StringComparison.Ordinal);
         Assert.Empty(status.ActiveRequests);
+    }
+
+    [Fact]
+    public async Task WithTheComputedEndpointNameTheCliFindsTheServerItStartedFromALinkedStateDirectory()
+    {
+        // A per-user state directory reached through a link (a symlinked home on Unix, a junction on Windows): the CLI names
+        // the copy by the path it built, and the server must listen on that name, not on one from its resolved path.
+        var real = Path.Combine(Path.GetTempPath(), "warrant-state-" + Guid.NewGuid().ToString("N")[..12]);
+        var linked = real + "-link";
+        Directory.CreateDirectory(real);
+        LinkDirectory(linked, real);
+        try
+        {
+            await using var server = TestServer.WithComputedEndpoint(Path.Combine(linked, "servers"));
+            using var source = new SourceDirectory(SourceDirectory.Fast);
+
+            var (code, output) = server.Verify([source.Path, "--server", "auto"]);
+
+            Assert.True(code == 0, output);
+            Assert.DoesNotContain(FallbackPrefix, output, StringComparison.Ordinal);
+            Assert.EndsWith("Warrant: 2 verified units, 1 theorems proved, 0 not proved. [server]\n", output, StringComparison.Ordinal);
+            var copy = Assert.Single(Directory.GetDirectories(server.CopyRoot));
+            Assert.Equal(ServerEndpoint.For(copy).Address, (await server.StatusAsync()).Endpoint);
+        }
+        finally
+        {
+            // The link itself, not what it points at; then the real directory, which the server's disposal emptied.
+            Directory.Delete(linked);
+            Directory.Delete(real, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AnInterruptBeforeTheServerAnswersReportsEveryUnitCancelledWithoutFallingBack()
+    {
+        await using var server = new TestServer();
+        using var source = new SourceDirectory(SourceDirectory.Fast);
+        using var interrupted = new CancellationTokenSource();
+        await interrupted.CancelAsync();
+
+        var (code, output) = server.Verify([source.Path, "--server", "auto"], cancellationToken: interrupted.Token);
+
+        Assert.Equal(1, code);
+        Assert.DoesNotContain(FallbackPrefix, output, StringComparison.Ordinal);
+        Assert.DoesNotContain("proved (", output, StringComparison.Ordinal);
+        Assert.Matches(@"(?m)^  S\.Larger\(\) +cancelled$", output);
+        Assert.Matches(@"(?m)^  S\.Inc\(int\) +cancelled$", output);
+        Assert.EndsWith("Warrant: 2 verified units, 0 theorems proved, 0 not proved. [server]\n", output, StringComparison.Ordinal);
+        // The CLI may have started a server before it saw the interrupt; it is left to be shut down with the test's.
+        if (Directory.Exists(server.CopyRoot))
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            ServerClient? started;
+            while ((started = await server.ConnectAsync()) is null)
+            {
+                Assert.True(DateTime.UtcNow < deadline, "the started server never answered");
+                await Task.Delay(50);
+            }
+            started.Dispose();
+        }
+    }
+
+    /// <summary>A directory link: a symbolic link, or on Windows without the privilege to make one, a junction.</summary>
+    private static void LinkDirectory(string link, string target)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+        }
+        catch (Exception ex) when (OperatingSystem.IsWindows() && ex is IOException or UnauthorizedAccessException)
+        {
+            var mklink = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, RedirectStandardOutput = true };
+            foreach (var argument in new[] { "/c", "mklink", "/J", link, target })
+            {
+                mklink.ArgumentList.Add(argument);
+            }
+            using var process = Process.Start(mklink)!;
+            process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            Assert.True(process.ExitCode == 0, $"mklink /J failed with {process.ExitCode}");
+        }
     }
 
     [Fact]

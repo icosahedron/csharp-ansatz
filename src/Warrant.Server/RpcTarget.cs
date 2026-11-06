@@ -71,6 +71,7 @@ internal sealed class RpcTarget(ServerHost host, VerificationService service)
         Toolchain.Identity,
         host.Uptime,
         service.Hashes?.Bundle,
+        service.Hashes?.Sidecar,
         GC.GetGCMemoryInfo().HeapSizeBytes,
         Environment.WorkingSet,
         service.Totals,

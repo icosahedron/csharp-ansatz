@@ -33,11 +33,11 @@ internal sealed class ServerClient : IDisposable
     /// only once its bundle is loaded.
     /// </summary>
     /// <param name="settings">The settings.</param>
-    /// <param name="hashes">The SHA-256 of the bundle and sidecar the CLI verifies with; the server must have loaded the same bundle.</param>
+    /// <param name="hashes">The SHA-256 of the bundle and sidecar the CLI verifies with; the server must have loaded the same bundle and sidecar.</param>
     /// <param name="bundlePath">The bundle a started server loads.</param>
     /// <param name="sidecarPath">The sidecar a started server loads.</param>
     /// <param name="cancellationToken">Stops waiting.</param>
-    /// <returns>The client, after a successful <c>hello</c> with the same toolchain and bundle.</returns>
+    /// <returns>The client, after a successful <c>hello</c> with the same toolchain, bundle and sidecar.</returns>
     /// <exception cref="ServerUnavailableException">No usable server could be reached or started.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static async Task<ServerClient> ConnectOrStartAsync(
@@ -48,7 +48,7 @@ internal sealed class ServerClient : IDisposable
         var client = await TryConnectAsync(endpoint, settings.ConnectTimeout, waitForStart: false, cancellationToken).ConfigureAwait(false);
         if (client is null)
         {
-            ServerLauncher.Start(settings, directory, bundlePath, sidecarPath);
+            ServerLauncher.Start(settings, directory, endpoint, bundlePath, sidecarPath);
             client = await TryConnectAsync(endpoint, settings.StartTimeout, waitForStart: true, cancellationToken).ConfigureAwait(false)
                 ?? throw new ServerUnavailableException($"the server did not start within {settings.StartTimeout.TotalSeconds:0} s");
         }
@@ -59,6 +59,11 @@ internal sealed class ServerClient : IDisposable
             if (!string.Equals(status.BundleSha256, hashes.Bundle, StringComparison.Ordinal))
             {
                 throw new ServerUnavailableException($"the server loaded another semantics bundle ({status.BundleSha256 ?? "unknown"}, not {hashes.Bundle})");
+            }
+            // The computed name covers the sidecar through the copy's directory; an overridden name does not.
+            if (!string.Equals(status.SidecarSha256, hashes.Sidecar, StringComparison.Ordinal))
+            {
+                throw new ServerUnavailableException($"the server loaded another attribute sidecar ({status.SidecarSha256 ?? "unknown"}, not {hashes.Sidecar})");
             }
             return client;
         }

@@ -15,7 +15,10 @@ namespace Warrant.Engine.Service;
 /// <param name="SocketDirectory">The socket's directory; null on Windows.</param>
 public sealed record ServerEndpoint(string Name, string Address, string? SocketDirectory)
 {
-    /// <summary>The environment variable that replaces the computed name (tests); the directory checks still apply.</summary>
+    /// <summary>
+    /// The environment variable that replaces the computed name: tests set it, and the CLI sets it for a server it starts, so
+    /// both use the name the CLI computed. The directory checks still apply.
+    /// </summary>
     public const string EnvironmentVariable = "WARRANT_SERVER_ENDPOINT";
 
     /// <summary>The number of characters of the hash a name keeps: short enough for macOS's 104-byte socket paths.</summary>
@@ -31,15 +34,14 @@ public sealed record ServerEndpoint(string Name, string Address, string? SocketD
     /// elevation: <see cref="EnvironmentVariable"/>'s name when it is set, otherwise the hash of KTD3.
     /// </summary>
     /// <param name="serverDirectory">The directory the server runs from.</param>
-    /// <param name="toolchainIdentity">The toolchain identity; <see cref="Toolchain.Identity"/> when null.</param>
     /// <returns>The endpoint.</returns>
     /// <exception cref="ArgumentException"><see cref="EnvironmentVariable"/> holds a name that is not a plain file name.</exception>
-    public static ServerEndpoint For(string serverDirectory, string? toolchainIdentity = null)
+    public static ServerEndpoint For(string serverDirectory)
     {
         ArgumentNullException.ThrowIfNull(serverDirectory);
         var name = Environment.GetEnvironmentVariable(EnvironmentVariable) is { Length: > 0 } overridden
             ? overridden
-            : NameFor(Environment.UserName, Environment.IsPrivilegedProcess, serverDirectory, toolchainIdentity ?? Toolchain.Identity);
+            : NameFor(Environment.UserName, Environment.IsPrivilegedProcess, serverDirectory, Toolchain.Identity);
         return Named(name);
     }
 

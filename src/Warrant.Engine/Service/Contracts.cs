@@ -331,6 +331,7 @@ public sealed record HelloResponse(int ProtocolVersion, string ToolchainIdentity
 /// <param name="ToolchainIdentity">Its toolchain identity.</param>
 /// <param name="Uptime">The time since it started.</param>
 /// <param name="BundleSha256">The SHA-256 of the semantics bundle it loaded; null when unknown.</param>
+/// <param name="SidecarSha256">The SHA-256 of the attribute sidecar it loaded; null when unknown.</param>
 /// <param name="GcHeapBytes">The size of the managed heap after the last garbage collection.</param>
 /// <param name="WorkingSetBytes">The process's working set.</param>
 /// <param name="Counters">The counters of every request it has answered: cache hits, misses and tactic runs.</param>
@@ -341,6 +342,7 @@ public sealed record ServerStatus(
     string ToolchainIdentity,
     TimeSpan Uptime,
     string? BundleSha256,
+    string? SidecarSha256,
     long GcHeapBytes,
     long WorkingSetBytes,
     VerifyCounters Counters,

@@ -16,6 +16,18 @@ public sealed class UnixFactAttribute : FactAttribute
     }
 }
 
+/// <summary>A fact that runs only on Windows, and says so when it is skipped.</summary>
+public sealed class WindowsFactAttribute : FactAttribute
+{
+    public WindowsFactAttribute()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Skip = "Windows only: a named-pipe instance a client left before the server waited on it";
+        }
+    }
+}
+
 /// <summary>
 /// The endpoint (M5b plan U8, KTD3): its name, the per-user socket directory's checks on Unix, and the log (KTD4).
 /// </summary>

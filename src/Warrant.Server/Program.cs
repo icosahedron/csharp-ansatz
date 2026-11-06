@@ -15,8 +15,6 @@ internal static class Program
 {
     private const string Usage = "usage: warrant-server [--bundle <path>] [--sidecar <path>]";
 
-    /// <summary>The attribute sidecar's file name, beside the bundle.</summary>
-
     /// <summary>Runs the server.</summary>
     /// <param name="args">The arguments.</param>
     /// <returns>0 when the server stopped or another holds its endpoint; 1 when it could not start; 2 for bad arguments.</returns>

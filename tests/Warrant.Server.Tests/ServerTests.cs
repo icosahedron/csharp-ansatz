@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Text.Json;
 using StreamJsonRpc;
 using Warrant.Engine.Service;
@@ -238,6 +239,36 @@ public sealed class ServerTests(ServiceFixture fixture)
         Assert.Equal(ServerProtocol.ShuttingDownError, refused.ErrorCode);
         Assert.Equal(OutcomeKind.Undecided, (await running.WaitAsync(Long)).Outcome("M:S.Slow").Kind);
         await server.Run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [WindowsFact]
+    public async Task AClientThatHangsUpBeforeTheServerWaitsForItDoesNotStopTheServer()
+    {
+        var endpoint = HostedServer.UniqueEndpoint();
+        var logPath = Path.Combine(Path.GetTempPath(), $"warrant-server-test-{Guid.NewGuid():N}.log");
+        var host = ServerHost.TryAcquire(endpoint, new ServerLog(logPath), ServerHost.DefaultIdleTimeout)!;
+        try
+        {
+            // The pipe instance exists before the server waits on it; a client that connects and leaves breaks it.
+            using (var pipe = new NamedPipeClientStream(".", endpoint.Address, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
+            {
+                await pipe.ConnectAsync(5000);
+            }
+            var run = host.RunAsync(Service);
+
+            await using var client = await TestClient.ConnectAsync(endpoint);
+            Assert.Equal(Environment.ProcessId, (await client.HelloAsync()).ProcessId);
+            Assert.False(run.IsCompleted, "the server stopped");
+            Assert.Contains("a client hung up before its connection was accepted", await File.ReadAllTextAsync(logPath), StringComparison.Ordinal);
+
+            host.Drain("test ended");
+            await run.WaitAsync(Long);
+        }
+        finally
+        {
+            host.Dispose();
+            File.Delete(logPath);
+        }
     }
 
     private static List<string> Texts(VerifyResponse response) =>

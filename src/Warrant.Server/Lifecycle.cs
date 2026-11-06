@@ -111,6 +111,16 @@ internal sealed class ServerHost : IDisposable
                 {
                     break;
                 }
+                catch (ConnectionDroppedException ex)
+                {
+                    Log.Write($"a client hung up before its connection was accepted: {ex.Message}");
+                    continue;
+                }
+                catch (Exception ex)
+                {
+                    Log.Write($"stopped accepting connections: {ex.Message}");
+                    throw;
+                }
                 connections.Add(ServeAsync(stream, service));
                 connections.RemoveAll(c => c.IsCompleted);
             }

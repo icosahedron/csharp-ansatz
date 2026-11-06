@@ -8,6 +8,11 @@ namespace Warrant.Server;
 /// <param name="message">Why.</param>
 internal sealed class EndpointRefusedException(string message) : Exception(message);
 
+/// <summary>A client left before its connection was accepted; the listener is ready for the next one.</summary>
+/// <param name="message">Why the connection failed.</param>
+/// <param name="inner">The failure.</param>
+internal sealed class ConnectionDroppedException(string message, Exception inner) : IOException(message, inner);
+
 /// <summary>
 /// Holds a <see cref="ServerEndpoint"/> and accepts its connections (M5b KTD3). Holding the endpoint is what makes a
 /// server the only one of its name: the first named-pipe instance on Windows, an exclusive lock file on Unix.
@@ -30,6 +35,7 @@ internal abstract class EndpointListener : IDisposable
     /// <summary>Waits for the next connection.</summary>
     /// <param name="cancellationToken">Stops waiting.</param>
     /// <returns>The connection's stream, which the caller disposes.</returns>
+    /// <exception cref="ConnectionDroppedException">A client left before its connection was accepted; the caller waits again.</exception>
     public abstract Task<Stream> AcceptAsync(CancellationToken cancellationToken);
 
     /// <summary>Releases the endpoint; connections already accepted stay open.</summary>
@@ -61,9 +67,29 @@ internal sealed class PipeListener : EndpointListener
 
     public override async Task<Stream> AcceptAsync(CancellationToken cancellationToken)
     {
-        await _listening.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _listening.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            // A client connected to the instance and hung up before the wait completed, which breaks the instance. A
+            // fresh one replaces it, created before the broken one closes so the name is never free.
+            var broken = _listening;
+            _listening = Create(Endpoint.Address, first: false);
+            await broken.DisposeAsync().ConfigureAwait(false);
+            throw new ConnectionDroppedException(ex.Message, ex);
+        }
         var connected = _listening;
-        _listening = Create(Endpoint.Address, first: false);
+        try
+        {
+            _listening = Create(Endpoint.Address, first: false);
+        }
+        catch
+        {
+            await connected.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
         return connected;
     }
 

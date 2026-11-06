@@ -109,10 +109,14 @@ internal static class ServerLauncher
     /// </remarks>
     /// <param name="settings">The settings.</param>
     /// <param name="directory">The copy's directory, from <see cref="CopyDirectory"/>.</param>
+    /// <param name="endpoint">
+    /// The endpoint the CLI will connect to. The server is given its name rather than computing it from its own directory,
+    /// which the host may have reached through a link the CLI did not resolve.
+    /// </param>
     /// <param name="bundlePath">The semantics bundle the server is to load.</param>
     /// <param name="sidecarPath">The attribute sidecar made for it.</param>
     /// <exception cref="ServerUnavailableException">The copy could not be made or the launcher could not be started.</exception>
-    public static void Start(ServerSettings settings, string directory, string bundlePath, string sidecarPath)
+    public static void Start(ServerSettings settings, string directory, ServerEndpoint endpoint, string bundlePath, string sidecarPath)
     {
         try
         {
@@ -123,10 +127,7 @@ internal static class ServerLauncher
             throw new ServerUnavailableException($"the server's files could not be copied to '{directory}': {ex.Message}", ex);
         }
         var environment = CurrentEnvironment();
-        if (settings.EndpointName is { } name)
-        {
-            environment[ServerEndpoint.EnvironmentVariable] = name;
-        }
+        environment[ServerEndpoint.EnvironmentVariable] = endpoint.Name;
         foreach (var (key, value) in settings.ServerEnvironment)
         {
             environment[key] = value;

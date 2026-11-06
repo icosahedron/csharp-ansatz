@@ -40,17 +40,32 @@ public sealed record UnitAssumption(string UnitKey, VirAssumption Assumption);
 /// <param name="Assumptions">
 /// The unit's own VIR assumptions; a theorem also inherits those of every unit it depends on, transitively (docs/m4/07).
 /// </param>
-public abstract record UnitOutcome(string Key, VirUnitKind UnitKind, string DisplayName, ImmutableArray<UnitAssumption> Assumptions);
+public abstract record UnitOutcome(string Key, VirUnitKind UnitKind, string DisplayName, ImmutableArray<UnitAssumption> Assumptions)
+{
+    /// <summary>
+    /// The declarations the kernel admitted for this unit and kept, in admission order: its certificate (M5b KTD14), which
+    /// <see cref="Certificates"/> writes. Empty for every outcome other than <see cref="TranslatedOutcome"/> and
+    /// <see cref="ProvedOutcome"/>.
+    /// </summary>
+    public virtual ImmutableArray<KernelDeclaration> Declarations => [];
+}
 
 /// <summary>A function or type unit whose declarations the kernel admitted.</summary>
 /// <param name="Key">The unit's key.</param>
 /// <param name="UnitKind">What the unit is.</param>
 /// <param name="DisplayName">The C# display name.</param>
 /// <param name="Assumptions">The unit's assumptions.</param>
-/// <param name="Declarations">The admitted declarations, in admission order.</param>
+/// <param name="Declarations">
+/// The admitted declarations, in admission order: the definition or inductive, the <c>casesOn</c> and <c>ctorIdx</c>
+/// built for an inductive, and for a recursive method its decrease theorems, the definition and the equation lemma.
+/// </param>
 public sealed record TranslatedOutcome(
     string Key, VirUnitKind UnitKind, string DisplayName, ImmutableArray<UnitAssumption> Assumptions, ImmutableArray<KernelDeclaration> Declarations)
-    : UnitOutcome(Key, UnitKind, DisplayName, Assumptions);
+    : UnitOutcome(Key, UnitKind, DisplayName, Assumptions)
+{
+    /// <inheritdoc/>
+    public override ImmutableArray<KernelDeclaration> Declarations { get; } = Declarations;
+}
 
 /// <summary>A theorem the kernel admitted with exactly the name and type translation built (KTD22).</summary>
 /// <param name="Key">The unit's key.</param>
@@ -61,7 +76,11 @@ public sealed record TranslatedOutcome(
 /// <param name="Certificate">The admitted declaration, which NDJSON export writes for Lean to re-check.</param>
 public sealed record ProvedOutcome(
     string Key, VirUnitKind UnitKind, string DisplayName, ImmutableArray<UnitAssumption> Assumptions, ProofKind By, TheoremDecl Certificate)
-    : UnitOutcome(Key, UnitKind, DisplayName, Assumptions);
+    : UnitOutcome(Key, UnitKind, DisplayName, Assumptions)
+{
+    /// <summary>The theorem, the only declaration a proved theorem admits.</summary>
+    public override ImmutableArray<KernelDeclaration> Declarations => [Certificate];
+}
 
 /// <summary>A theorem whose claim the kernel computes to <c>false</c> (WRT0001).</summary>
 /// <param name="Key">The unit's key.</param>

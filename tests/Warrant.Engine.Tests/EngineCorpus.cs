@@ -33,6 +33,9 @@ public sealed class EngineFixture
     /// </summary>
     public EngineResult Run(string compilation) => Get(compilation).Result;
 
+    /// <summary>The units <see cref="Run"/> gave the engine for a named corpus compilation.</summary>
+    public IReadOnlyList<EngineUnit> Inputs(string compilation) => Get(compilation).Inputs;
+
     /// <summary>A unit's span table in a named corpus compilation, as <see cref="Run"/> extracted it.</summary>
     public SpanTable? Spans(string compilation, string key) => Get(compilation).Inputs.Single(u => u.Unit.Key == key).Spans;
 

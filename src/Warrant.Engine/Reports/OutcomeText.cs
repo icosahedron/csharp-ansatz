@@ -53,9 +53,10 @@ public static class OutcomeText
     /// </summary>
     /// <param name="unit">The unit's short name, from <see cref="ShortName"/>.</param>
     /// <param name="outcome">The outcome.</param>
+    /// <param name="spans">The unit's span table from the current extraction (KTD7); null when spans are not available.</param>
     /// <param name="sourceText">The source text of a span; null when it cannot be read.</param>
     /// <returns>The message.</returns>
-    public static string NotProvedMessage(string unit, NotProvedOutcome outcome, Func<VirSpan, string?> sourceText)
+    public static string NotProvedMessage(string unit, NotProvedOutcome outcome, SpanTable? spans, Func<VirSpan, string?> sourceText)
     {
         ArgumentNullException.ThrowIfNull(outcome);
         ArgumentNullException.ThrowIfNull(sourceText);
@@ -63,8 +64,8 @@ public static class OutcomeText
         {
             return NotProvedMessage(unit, outcome);
         }
-        var call = decrease.CallSpan is { } c && sourceText(c) is { } callText ? $"The recursive call '{callText}'" : $"Recursive call {decrease.Index} of '{unit}'";
-        var measure = decrease.MeasureSpan is { } m && sourceText(m) is { } measureText ? $"'{measureText}'" : "its measure";
+        var call = SpanOf(spans, decrease.CallNode) is { } c && sourceText(c) is { } callText ? $"The recursive call '{callText}'" : $"Recursive call {decrease.Index} of '{unit}'";
+        var measure = SpanOf(spans, decrease.MeasureNode) is { } m && sourceText(m) is { } measureText ? $"'{measureText}'" : "its measure";
         return $"{call} could not be shown to decrease {measure}: {FirstLine(outcome.Message).TrimEnd('.', ':')}.";
     }
 
@@ -142,14 +143,25 @@ public static class OutcomeText
     /// <c>left</c> and <c>right</c> when it is not known.
     /// </summary>
     /// <param name="sides">The sides, from <see cref="FalseOutcome.Sides"/>.</param>
+    /// <param name="spans">The unit's span table from the current extraction (KTD7); null when spans are not available.</param>
     /// <param name="sourceText">The source text of a span; null when it cannot be read.</param>
     /// <returns>The values, comma-separated.</returns>
-    public static string Values(ImmutableArray<ReadBackSide> sides, Func<VirSpan, string?> sourceText)
+    public static string Values(ImmutableArray<ReadBackSide> sides, SpanTable? spans, Func<VirSpan, string?> sourceText)
     {
         ArgumentNullException.ThrowIfNull(sourceText);
-        var values = sides.Select((s, i) => $"{(s.Span is { } span ? sourceText(span) : null) ?? (i == 0 ? "left" : "right")} = {s.Value}");
+        var values = sides.Select((s, i) => $"{(SpanOf(spans, s.NodeId) is { } span ? sourceText(span) : null) ?? (i == 0 ? "left" : "right")} = {s.Value}");
         return string.Join(", ", values);
     }
+
+    /// <summary>
+    /// The span an outcome's node ID has in the current extraction (KTD7): outcomes name positions by VIR node ID, so a
+    /// cached outcome renders at the lines the code has now.
+    /// </summary>
+    /// <param name="spans">The unit's span table; null when spans are not available.</param>
+    /// <param name="nodeId">The node ID, e.g. <see cref="NotProvedOutcome.TacticNode"/>; null for none.</param>
+    /// <returns>The span, or null when there is no node or it has no span.</returns>
+    public static VirSpan? SpanOf(SpanTable? spans, int? nodeId) =>
+        spans is not null && nodeId is { } id && spans.TryGetSpan(id, out var span) ? span : null;
 
     /// <summary>A theorem's name without its type or containing type, as messages print it (docs/m4/06).</summary>
     /// <param name="displayName">The theorem's C# display name.</param>

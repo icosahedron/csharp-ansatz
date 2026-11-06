@@ -226,12 +226,15 @@ internal static class VerifyCommand
                     }
                     if (f.Sides.Length > 0)
                     {
-                        lines.Add($"Values: {OutcomeText.Values(f.Sides, report.Sources.Text)}");
+                        lines.Add($"Values: {OutcomeText.Values(f.Sides, engineUnits[unit.Key].Spans, report.Sources.Text)}");
                     }
                     report.Diagnostic("error", FalseOutcome.Code, location, OutcomeText.FalseMessage(name), lines);
                     break;
                 case NotProvedOutcome n:
-                    report.Diagnostic("error", NotProvedOutcome.Code, n.TacticSpan ?? location, OutcomeText.NotProvedMessage(name, n, report.Sources.Text), OutcomeText.NotProvedDetails(n), n.Goals);
+                    var spans = engineUnits[unit.Key].Spans;
+                    report.Diagnostic(
+                        "error", NotProvedOutcome.Code, OutcomeText.SpanOf(spans, n.TacticNode) ?? location,
+                        OutcomeText.NotProvedMessage(name, n, spans, report.Sources.Text), OutcomeText.NotProvedDetails(n), n.Goals);
                     break;
                 case UndecidedOutcome u:
                     report.Diagnostic("error", UndecidedOutcome.Code, location, OutcomeText.UndecidedMessage(name, u.Reason));

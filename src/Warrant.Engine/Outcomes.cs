@@ -93,7 +93,10 @@ public sealed record FalseOutcome(
 /// available yet</c>. Its first line is complete on its own; later lines give details such as the types of a mismatch.
 /// </param>
 /// <param name="Goals">The goals, printed in Lean's layout with C# names and separated by blank lines; empty when none.</param>
-/// <param name="TacticSpan">The span of the <c>Tactic.X(...)</c> call that failed; null when goals remained at the end.</param>
+/// <param name="TacticNode">
+/// The VIR node ID (pre-order, docs/m4/04) of the <c>Tactic.X(...)</c> call that failed; null when goals remained at the
+/// end. Rendering maps it through the current extraction's <see cref="SpanTable"/> (KTD7).
+/// </param>
 /// <param name="Counterexample">Parameter values that falsify the claim, in parameter order; empty when none was found.</param>
 public sealed record NotProvedOutcome(
     string Key,
@@ -102,7 +105,7 @@ public sealed record NotProvedOutcome(
     ImmutableArray<UnitAssumption> Assumptions,
     string Message,
     string Goals,
-    VirSpan? TacticSpan,
+    int? TacticNode,
     ImmutableArray<CounterexampleValue> Counterexample)
     : UnitOutcome(Key, UnitKind, DisplayName, Assumptions)
 {
@@ -111,16 +114,18 @@ public sealed record NotProvedOutcome(
 
     /// <summary>
     /// For a recursive method, the recursive call whose decrease obligation was not proved (M5a KTD15); null for a theorem.
-    /// The goals are that obligation's, and <see cref="TacticSpan"/> is the call's span.
+    /// The goals are that obligation's, and <see cref="TacticNode"/> is the call's node.
     /// </summary>
     public DecreaseFailure? Decrease { get; init; }
 }
 
 /// <summary>A recursive call whose decrease obligation <c>f.$dec_k</c> was not proved (M5a KTD15, docs/m5a/03).</summary>
 /// <param name="Index">The call's number among the method's recursive calls, from 1, in source order.</param>
-/// <param name="CallSpan">The call's span, when the unit came with spans.</param>
-/// <param name="MeasureSpan">The span of <c>Spec.Decreases</c>'s argument, when the unit came with spans.</param>
-public sealed record DecreaseFailure(int Index, VirSpan? CallSpan, VirSpan? MeasureSpan);
+/// <param name="CallNode">The call's VIR node ID (pre-order, docs/m4/04); null if the call is not among the unit's nodes.</param>
+/// <param name="MeasureNode">
+/// The VIR node ID of <c>Spec.Decreases</c>'s argument; null if it is not among the unit's nodes.
+/// </param>
+public sealed record DecreaseFailure(int Index, int? CallNode, int? MeasureNode);
 
 /// <summary>One parameter's value in a counterexample.</summary>
 /// <param name="Parameter">The C# parameter's name.</param>
@@ -188,6 +193,5 @@ public sealed record SkippedOutcome(
 
 /// <summary>One side of a false comparison.</summary>
 /// <param name="NodeId">The side's VIR node ID (pre-order, docs/m4/04).</param>
-/// <param name="Span">The node's source span, when the unit came with spans.</param>
 /// <param name="Value">The value the kernel computes for it.</param>
-public sealed record ReadBackSide(int NodeId, VirSpan? Span, ReadBackValue Value);
+public sealed record ReadBackSide(int NodeId, ReadBackValue Value);

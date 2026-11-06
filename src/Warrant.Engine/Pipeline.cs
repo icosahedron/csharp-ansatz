@@ -331,9 +331,9 @@ public static class Pipeline
             {
                 var failed = ex is TacticException { Goal: { } g } && meta.MCtx.FindDecl(g) is not null ? g : current ?? goal.Id;
                 var printer = new GoalPrinter(Env, _names);
-                return new NotProvedOutcome(key, kind, display, assumptions, ex.Message, printer.PpGoals(meta.MCtx, [failed]), SpanOf(unit, decrease.Call), [])
+                return new NotProvedOutcome(key, kind, display, assumptions, ex.Message, printer.PpGoals(meta.MCtx, [failed]), VirTree.IdOf(unit.Unit, decrease.Call), [])
                 {
-                    Decrease = new DecreaseFailure(decrease.Index, SpanOf(unit, decrease.Call), SpanOf(unit, decrease.Measure)),
+                    Decrease = new DecreaseFailure(decrease.Index, VirTree.IdOf(unit.Unit, decrease.Call), VirTree.IdOf(unit.Unit, decrease.Measure)),
                 };
             }
 #pragma warning disable CA1031 // KTD19: an unexpected failure in Meta ends this unit as Warrant's bug, not the whole run.
@@ -360,9 +360,6 @@ public static class Pipeline
             }
             return null;
         }
-
-        private static VirSpan? SpanOf(EngineUnit unit, VirNode node) =>
-            unit.Spans is { } spans && VirTree.IdOf(unit.Unit, node) is { } id && spans.TryGetSpan(id, out var span) ? span : null;
 
         private static string Describe(EngineUnit unit, DecreaseObligation decrease) => $"recursive call {decrease.Index} of {Display(unit)}";
 
@@ -439,10 +436,10 @@ public static class Pipeline
             var meta = new MetaM(Env, budget.Meta) { Attributes = Attributes, DisplayNames = _names };
             var printer = new GoalPrinter(Env, _names);
             var tactics = new TacticM(meta, []);
-            var runner = new TacticRunner(tactics, unit);
+            var runner = new TacticRunner(tactics);
 
             UnitOutcome NotProved(string message, IEnumerable<MVarId> goals, TacticNode? at) => new NotProvedOutcome(
-                key, kind, display, assumptions, message, printer.PpGoals(meta.MCtx, goals), at is null ? null : runner.SpanOf(at),
+                key, kind, display, assumptions, message, printer.PpGoals(meta.MCtx, goals), at is null ? null : VirTree.IdOf(unit.Unit, at),
                 Counterexample.Search(Env, unit.Unit, shell, Definitions()));
 
             Expr proof;
@@ -556,12 +553,10 @@ public static class Pipeline
             ReadBackSide Side(VirExpr node, Expr? term)
             {
                 var id = Id(node);
-                VirSpan? span = null;
-                unit.Spans?.TryGetSpan(id, out span);
                 var value = term is null || operands is not { } o
                     ? new UnknownValue("the comparison's operands are not read back")
                     : ReadBack.Core(Env, term, o.Type, limits);
-                return new ReadBackSide(id, span, value);
+                return new ReadBackSide(id, value);
             }
 
             return [Side(compare.L, operands?.Left), Side(compare.R, operands?.Right)];

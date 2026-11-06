@@ -69,8 +69,9 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Equal(new Int32Value(-2147483648), outcome.Sides[0].Value);
         Assert.Equal(new Int32Value(2147483647), outcome.Sides[1].Value);
         Assert.Equal("-2147483648", outcome.Sides[0].Value.ToString());
-        Assert.Equal("Increment(int.MaxValue)", SourceText(outcome.Sides[0].Span));
-        Assert.Equal("int.MaxValue", SourceText(outcome.Sides[1].Span));
+        var spans = engine.Spans("refuted", "M:Corpus.Refuted.Increments.NeverWraps");
+        Assert.Equal("Increment(int.MaxValue)", SourceText(Reports.OutcomeText.SpanOf(spans, outcome.Sides[0].NodeId)));
+        Assert.Equal("int.MaxValue", SourceText(Reports.OutcomeText.SpanOf(spans, outcome.Sides[1].NodeId)));
     }
 
     [Fact]
@@ -388,7 +389,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var start = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Start(System.Int32,System.Int32)"));
         Assert.Equal("unsolved goals", start.Message);
         Assert.Equal("a b : Int32\n⊢ a = b → b = a", start.Goals);
-        Assert.Null(start.TacticSpan);
+        Assert.Null(start.TacticNode);
 
         var proved = Assert.IsType<ProvedOutcome>(result.Find("M:S.Symmetric(System.Int32,System.Int32)"));
         var proof = proved.Certificate.Value.Value;
@@ -453,7 +454,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         // omega fails on the false claim, and Try leaves the goal Unfold made.
         Assert.Equal("unsolved goals", outcome.Message);
         Assert.Equal("x : Int32\n⊢ x + 1 > x", outcome.Goals);
-        Assert.Null(outcome.TacticSpan);
+        Assert.Null(outcome.TacticNode);
         Assert.Equal([new CounterexampleValue("x", "2147483647")], outcome.Counterexample.AsEnumerable());
     }
 
@@ -468,9 +469,38 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
             """;
         var outcome = Assert.IsType<NotProvedOutcome>(Script(Source).Find("M:S.T(System.Boolean)"));
         Assert.StartsWith("omega could not prove the goal:\nNo usable constraints found.", outcome.Message, StringComparison.Ordinal);
-        Assert.Equal("Tactic.Omega()", InlineText(Source, outcome.TacticSpan));
+        Assert.Equal("Tactic.Omega()", InlineText(Source, TacticSpan(Source, "M:S.T(System.Boolean)", outcome)));
         Assert.Equal("b : Bool\n⊢ b = b", outcome.Goals);
         Assert.Empty(outcome.Counterexample);
+    }
+
+    [Fact]
+    public void AFailedTacticRendersAtTheLineOfTheCurrentExtraction()
+    {
+        // KTD7: an outcome names the failing tactic by node ID, so the same outcome rendered with the span table of an
+        // extraction where blank lines moved the method down points at the moved line.
+        const string Source = """
+            public static class S
+            {
+                [Theorem] static Proof T(bool b) => Prove.That(b == b).By(Tactic.AllGoals(Tactic.Omega()));
+            }
+            """;
+        const string Moved = """
+            public static class S
+            {
+
+
+
+                [Theorem] static Proof T(bool b) => Prove.That(b == b).By(Tactic.AllGoals(Tactic.Omega()));
+            }
+            """;
+        var outcome = Assert.IsType<NotProvedOutcome>(Script(Source).Find("M:S.T(System.Boolean)"));
+        // Inline sources compile after one using line: the call is on line 4 as extracted, and on line 7 after the move.
+        Assert.Equal(4, TacticSpan(Source, "M:S.T(System.Boolean)", outcome)!.StartLine);
+        var at = TacticSpan(Moved, "M:S.T(System.Boolean)", outcome);
+        Assert.NotNull(at);
+        Assert.Equal(7, at.StartLine);
+        Assert.Equal("Tactic.Omega()", InlineText(Moved, at));
     }
 
     [Fact]
@@ -500,7 +530,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var outcome = Assert.IsType<NotProvedOutcome>(Script(Source).Find("M:S.Mismatch(System.Int32)"));
         Assert.Equal("Tactic `exact` failed: type mismatch\n  Nat.zero\nhas type\n  Nat\nbut is expected to have type\n  a = a", outcome.Message);
         Assert.Equal("a : Int32\n⊢ a = a", outcome.Goals);
-        Assert.Equal("Tactic.Exact(Lean.Const(\"Nat.zero\"))", InlineText(Source, outcome.TacticSpan));
+        Assert.Equal("Tactic.Exact(Lean.Const(\"Nat.zero\"))", InlineText(Source, TacticSpan(Source, "M:S.Mismatch(System.Int32)", outcome)));
         Assert.Equal(
             "Theorem 'Mismatch' could not be proved: Tactic `exact` failed: type mismatch",
             Reports.OutcomeText.NotProvedMessage("Mismatch", outcome));
@@ -617,7 +647,9 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Equal("x : Int32\n⊢ x + 1 > x", outcome.Goals);
         Assert.StartsWith("omega could not prove the goal:\na possible counterexample may satisfy the constraints\n", outcome.Message, StringComparison.Ordinal);
         Assert.Contains("\n b := (x.toInt + ↑1) / 4294967296", outcome.Message, StringComparison.Ordinal);
-        Assert.NotNull(outcome.TacticSpan);
+        // The diagnostic points at the omega call that failed, on line 14 of refuted/Increment.cs.
+        var at = Reports.OutcomeText.SpanOf(engine.Spans("m5a/refuted", "M:Corpus.Refuted.Increments.AlwaysLarger(System.Int32)"), outcome.TacticNode);
+        Assert.Equal(new VirSpan("refuted/Increment.cs", 14, 52, 14, 66), at);
         Assert.Equal([new CounterexampleValue("x", "2147483647")], outcome.Counterexample.AsEnumerable());
         Assert.Equal(
             "Theorem 'AlwaysLarger' could not be proved: omega could not prove the goal. Counterexample: x = 2147483647.",
@@ -884,6 +916,10 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         }
         return names;
     }
+
+    /// <summary>The span of a not-proved outcome's failing tactic in an extraction of an inline source.</summary>
+    private static VirSpan? TacticSpan(string source, string key, NotProvedOutcome outcome) =>
+        Reports.OutcomeText.SpanOf(EngineCorpus.Inline(source).Units.Single(u => u.Key == key).Spans, outcome.TacticNode);
 
     /// <summary>The text of a span in an inline source, which <see cref="EngineCorpus.Inline"/> compiles after one using line.</summary>
     private static string InlineText(string source, VirSpan? span)

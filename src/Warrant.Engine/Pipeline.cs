@@ -78,16 +78,15 @@ public static class Pipeline
         ArgumentNullException.ThrowIfNull(bundle);
         ArgumentNullException.ThrowIfNull(options);
         var byKey = new Dictionary<string, EngineUnit>(StringComparer.Ordinal);
+        var decidedKeys = decided.Select(d => d.Key).ToHashSet(StringComparer.Ordinal);
         foreach (var input in inputs)
         {
-            if (!byKey.TryAdd(input.Unit.Key, input) || decided.Any(d => string.Equals(d.Key, input.Unit.Key, StringComparison.Ordinal)))
+            if (!byKey.TryAdd(input.Unit.Key, input) || decidedKeys.Contains(input.Unit.Key))
             {
                 throw new ArgumentException($"The unit {input.Unit.Key} is given twice.", nameof(inputs));
             }
         }
-        // KTD10: the simp sets are built over the bundle alone, before any fork exists to leak into them.
-        DefaultSimpSet.Theorems(bundle.Env, options.Attributes);
-        OmegaPrepSet.Theorems(bundle.Env, options.Attributes);
+        WarmSimpSets(bundle, options.Attributes);
 
         var run = new RunState(bundle, byKey, options, decided, pool);
         KernelThread.Run(run.Execute);
@@ -95,6 +94,13 @@ public static class Pipeline
             new EngineResult(bundle, run.Env, [.. order.Select(k => run.Outcomes[k])], [.. run.Admitted]),
             run.Elapsed,
             run.SearchRuns);
+    }
+
+    /// <summary>Builds the shared simp sets over the frozen bundle alone, before any fork exists to leak into them (KTD10).</summary>
+    private static void WarmSimpSets(SemanticsBundle bundle, Sidecar sidecar)
+    {
+        DefaultSimpSet.Theorems(bundle.Env, sidecar);
+        OmegaPrepSet.Theorems(bundle.Env, sidecar);
     }
 
     /// <summary>What <see cref="Execute"/> produced.</summary>
@@ -207,10 +213,8 @@ public static class Pipeline
                     continue;
                 }
                 var stopwatch = Stopwatch.StartNew();
-                // KTD12: once the run is cancelled no unit starts, and a unit it interrupted ran out of a budget it was
-                // given, which is no verdict.
                 var outcome = Cancelled(units[unit.Key]) ?? Skip(units[unit.Key]) ?? new Scope(this, Env, Attributes).Admit(unit);
-                Outcomes.Add(unit.Key, outcome is UndecidedOutcome ? Cancelled(units[unit.Key]) ?? outcome : outcome);
+                Outcomes.Add(unit.Key, SettleCancel(units[unit.Key], outcome));
                 Elapsed.Add(unit.Key, stopwatch.Elapsed);
             }
             Env.Freeze();
@@ -271,7 +275,7 @@ public static class Pipeline
                 // KTD32: a cancel during the counterexample search ends the unit as cancelled, not as a failure.
                 outcome = Cancelled(unit) ?? throw new InvalidOperationException("A unit was cancelled although the run was not.");
             }
-            return (outcome is UndecidedOutcome ? Cancelled(unit) ?? outcome : outcome, stopwatch.Elapsed);
+            return (SettleCancel(unit, outcome), stopwatch.Elapsed);
         }
 
         /// <summary>
@@ -424,6 +428,13 @@ public static class Pipeline
                 : null;
 
         /// <summary>
+        /// KTD12: once the run is cancelled no unit starts, and a unit it interrupted ran out of a budget it was given,
+        /// which is no verdict: an undecided outcome becomes the cancelled one while the run is cancelled.
+        /// </summary>
+        private UnitOutcome SettleCancel(EngineUnit unit, UnitOutcome outcome) =>
+            outcome is UndecidedOutcome ? Cancelled(unit) ?? outcome : outcome;
+
+        /// <summary>
         /// Translates every unit that translates: a unit whose dependency was decided before the run without being admitted
         /// is skipped, a unit translation rejects fails, the units depending on either are skipped, and translation runs
         /// again without them.
@@ -523,21 +534,9 @@ public static class Pipeline
             {
                 return [.. result];
             }
-            var seen = new SortedSet<string>(StringComparer.Ordinal);
-            var work = new Stack<string>(unit.Unit.Deps);
-            while (work.Count > 0)
-            {
-                var key = work.Pop();
-                if (string.Equals(key, unit.Unit.Key, StringComparison.Ordinal) || !seen.Add(key) || !units.TryGetValue(key, out var dep))
-                {
-                    continue;
-                }
-                foreach (var next in dep.Unit.Deps)
-                {
-                    work.Push(next);
-                }
-            }
-            foreach (var key in seen)
+            // Passing through the unit itself reaches only its own dependencies again, so its closure without it is the
+            // same set the walk from those dependencies reaches.
+            foreach (var key in Closure(unit).Where(k => !string.Equals(k, unit.Unit.Key, StringComparison.Ordinal)).Order(StringComparer.Ordinal))
             {
                 if (units.TryGetValue(key, out var dep))
                 {

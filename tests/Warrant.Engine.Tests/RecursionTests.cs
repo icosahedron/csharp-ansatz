@@ -73,7 +73,6 @@ public sealed class RecursionTests(EngineFixture engine) : IClassFixture<EngineF
     public void ACallWithNoGuardReportsItsDecreaseGoal()
     {
         var outcome = Assert.IsType<NotProvedOutcome>(engine.Run("m5a/refuted").Find("M:Corpus.Refuted.Recursion.Bad(System.Int32)"));
-        var spans = engine.Spans("m5a/refuted", "M:Corpus.Refuted.Recursion.Bad(System.Int32)");
         Assert.Equal("WRT0001", NotProvedOutcome.Code);
         Assert.Equal("n : Int32\n⊢ (n - 1).toInt.toNat < n.toInt.toNat", outcome.Goals);
         Assert.StartsWith("omega could not prove the goal:", outcome.Message, StringComparison.Ordinal);

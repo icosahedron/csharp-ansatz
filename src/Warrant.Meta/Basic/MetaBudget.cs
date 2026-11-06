@@ -37,6 +37,7 @@ public sealed class MetaBudget
     private const int ClockCheckInterval = 1024;
 
     private readonly long _deadlineTimestamp;
+    private readonly bool _checksClock;
     private long _fuel;
     private int _ticksUntilClockCheck;
 
@@ -46,6 +47,7 @@ public sealed class MetaBudget
         Limits = limits ?? throw new ArgumentNullException(nameof(limits));
         _fuel = limits.Fuel;
         _deadlineTimestamp = DeadlineTimestamp(limits.Deadline);
+        _checksClock = _deadlineTimestamp != long.MaxValue || limits.CancellationToken.CanBeCanceled;
     }
 
     /// <summary>The limits this budget enforces.</summary>
@@ -65,7 +67,7 @@ public sealed class MetaBudget
         {
             throw new MetaResourceException($"tactic fuel exhausted ({Limits.Fuel:N0} steps)");
         }
-        if ((_deadlineTimestamp != long.MaxValue || Limits.CancellationToken.CanBeCanceled) && --_ticksUntilClockCheck < 0)
+        if (_checksClock && --_ticksUntilClockCheck < 0)
         {
             _ticksUntilClockCheck = ClockCheckInterval - 1;
             if (Limits.CancellationToken.IsCancellationRequested)

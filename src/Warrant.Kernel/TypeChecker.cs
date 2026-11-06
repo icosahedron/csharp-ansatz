@@ -66,6 +66,7 @@ public sealed partial class TypeChecker
     private bool _eagerReduce;
     private long _fuel;
     private readonly long _deadlineTimestamp;
+    private readonly bool _checksClock;
     private int _ticksUntilClockCheck;
 
     /// <summary>Creates a type checker over <paramref name="env"/>.</summary>
@@ -86,6 +87,7 @@ public sealed partial class TypeChecker
         _limits = limits ?? KernelLimits.Interactive;
         _fuel = _limits.Fuel;
         _deadlineTimestamp = DeadlineTimestamp(_limits.Deadline);
+        _checksClock = _deadlineTimestamp != long.MaxValue || _limits.CancellationToken.CanBeCanceled;
         LocalContext = localContext is null ? new LocalContext() : new LocalContext(localContext);
     }
 
@@ -184,7 +186,7 @@ public sealed partial class TypeChecker
         {
             throw new KernelResourceException($"kernel fuel exhausted ({_limits.Fuel:N0} steps)");
         }
-        if ((_deadlineTimestamp != long.MaxValue || _limits.CancellationToken.CanBeCanceled) && --_ticksUntilClockCheck < 0)
+        if (_checksClock && --_ticksUntilClockCheck < 0)
         {
             _ticksUntilClockCheck = ClockCheckInterval - 1;
             if (_limits.CancellationToken.IsCancellationRequested)

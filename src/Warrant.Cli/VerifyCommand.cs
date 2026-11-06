@@ -24,7 +24,7 @@ internal static class VerifyCommand
         warrant verify --csc-args <file> [--project-dir <dir>] [options]
                warrant verify <directory> [options]
           options: --format text|msbuild  --out <file.ndjson>  --report <dir>  --keep-conditional-check
-                   --kernel-fuel <n>  --tactic-fuel <n>  --timeout <seconds>  --bundle <path>
+                   --kernel-fuel <n>  --tactic-fuel <n>  --timeout <seconds>  --bundle <path>  --cache-dir <dir>
         """;
 
     /// <summary>The attribute sidecar's file name; it ships beside the semantics bundle (KTD9).</summary>
@@ -37,7 +37,7 @@ internal static class VerifyCommand
     /// <returns>0 when every theorem was proved (warnings allowed); 1 when an error was reported; 2 for bad arguments or unreadable input.</returns>
     public static int Run(string[] args, TextWriter output, TextWriter error)
     {
-        string? directory = null, cscArgs = null, projectDir = null, outPath = null, reportDir = null, bundlePath = null;
+        string? directory = null, cscArgs = null, projectDir = null, outPath = null, reportDir = null, bundlePath = null, cacheDir = null;
         bool msbuild = false, keepConditionalCheck = false;
         long? kernelFuel = null, tacticFuel = null, timeoutSeconds = null;
         for (int i = 0; i < args.Length; i++)
@@ -59,6 +59,9 @@ internal static class VerifyCommand
                     break;
                 case "--report" when hasValue:
                     reportDir = args[++i];
+                    break;
+                case "--cache-dir" when hasValue:
+                    cacheDir = args[++i];
                     break;
                 case "--bundle" when hasValue:
                     bundlePath = args[++i];
@@ -117,8 +120,15 @@ internal static class VerifyCommand
         try
         {
             // The sidecar first: it names the bundle it was made for, so a mismatched pair is declined before the slow load.
-            var sidecar = Sidecar.Load(sidecarPath, OutcomeText.FileSha256(bundlePath));
-            var settings = new Settings(msbuild, outPath, reportDir, bundlePath, sidecar, kernelFuel, tacticFuel, timeoutSeconds);
+            var bundleSha256 = OutcomeText.FileSha256(bundlePath);
+            var sidecar = Sidecar.Load(sidecarPath, bundleSha256);
+            var settings = new Settings(msbuild, outPath, reportDir, bundlePath, sidecar, kernelFuel, tacticFuel, timeoutSeconds)
+            {
+                Hashes = new BundleHashes(bundleSha256, OutcomeText.FileSha256(sidecarPath)),
+                // M5b KTD14: the NDJSON of --out needs every admitted declaration, which a cached unit does not admit
+                // until export reads certificates from the cache (plan U16), so --out verifies without the cache.
+                CacheDirectory = outPath is null && cacheDir is not null ? Path.GetFullPath(cacheDir) : null,
+            };
             return cscArgs is not null
                 ? FromCscArgs(cscArgs, projectDir ?? Environment.CurrentDirectory, keepConditionalCheck, settings, output)
                 : FromDirectory(directory!, settings, output);
@@ -135,6 +145,12 @@ internal static class VerifyCommand
     {
         /// <summary>The project's directory, which a request names; the compiled directory in the directory mode.</summary>
         public string ProjectDirectory { get; init; } = "";
+
+        /// <summary>The SHA-256 of the bundle and sidecar files, which cache keys cover.</summary>
+        public required BundleHashes Hashes { get; init; }
+
+        /// <summary>The result cache directory (M5b KTD14); null for no cache.</summary>
+        public string? CacheDirectory { get; init; }
 
         /// <summary>The budgets: the given ones, else the build's defaults (corpus kernel fuel for the directory mode, like translate).</summary>
         public EngineOptions Engine(KernelLimits kernel) => EngineOptions.Default with
@@ -209,13 +225,14 @@ internal static class VerifyCommand
             VerificationService.ProtocolVersion,
             Guid.NewGuid().ToString("N"),
             settings.ProjectDirectory,
-            CacheDirectory: null,
+            settings.CacheDirectory,
             VerifyBudgets.From(options),
             Recheck: false,
             Priority: 0,
             [.. extraction.Units.Select(u => new RequestUnit(u.Key, u.Unit.Kind, u.DisplayName, VirWriter.Write(u.Unit)))]);
-        using var service = new VerificationService(SemanticsBundle.Load(settings.BundlePath), settings.Sidecar);
-        var result = service.Run(request).Result;
+        using var service = new VerificationService(SemanticsBundle.Load(settings.BundlePath), settings.Sidecar, hashes: settings.Hashes);
+        var run = service.Run(request);
+        var result = run.Result;
 
         int width = result.Units.Select(u => u.DisplayName.Length).DefaultIfEmpty(0).Max();
         foreach (var unit in result.Units)
@@ -287,7 +304,7 @@ internal static class VerifyCommand
 
         var theorems = result.Units.Where(u => u.UnitKind == VirUnitKind.Theorem).ToList();
         int proved = theorems.Count(u => u is ProvedOutcome);
-        report.Summary(result.Units.Length, proved, theorems.Count - proved);
+        report.Summary(result.Units.Length, proved, theorems.Count - proved, run.Response.Counters.Hits);
 
         bool clean = report.Errors == 0 && result.Units.All(u => u is TranslatedOutcome or ProvedOutcome);
         return clean ? 0 : 1;
@@ -347,9 +364,11 @@ internal static class VerifyCommand
             }
         }
 
-        public void Summary(int units, int proved, int notProved)
+        /// <summary>The summary line; it says how many results came from the result cache when any did (M5b R8, KTD27).</summary>
+        public void Summary(int units, int proved, int notProved, int fromCache = 0)
         {
-            var text = string.Create(CultureInfo.InvariantCulture, $"Warrant: {units} verified units, {proved} theorems proved, {notProved} not proved.");
+            var cached = fromCache > 0 ? string.Create(CultureInfo.InvariantCulture, $" ({fromCache} from cache)") : "";
+            var text = string.Create(CultureInfo.InvariantCulture, $"Warrant: {units} verified units, {proved} theorems proved{cached}, {notProved} not proved.");
             if (msbuild)
             {
                 Record("summary", "info", "", null, text);

@@ -65,6 +65,14 @@ public static class Pipeline
     /// <param name="bundle">The checked, frozen semantics bundle.</param>
     /// <param name="options">The budgets, the attribute sidecar and the cancellation token.</param>
     /// <param name="pool">The workers theorems run on; null to run them on the run's own thread.</param>
+    /// <param name="cached">
+    /// Outcomes the result cache already holds, by key (M5b KTD14): those units are translated, so their names still
+    /// collide and own their constants, but nothing of theirs is admitted or run. No unit that runs may depend on one.
+    /// </param>
+    /// <param name="finished">
+    /// Called as soon as each unit that ran has its outcome, on the thread it ran on, before the next unit of that thread
+    /// starts; not called for units that were cached, decided, skipped or cancelled before they started.
+    /// </param>
     /// <returns>The result, with each unit's time and the number of units whose proof search ran.</returns>
     /// <exception cref="ArgumentException">Two units have the same key.</exception>
     internal static PipelineRun Execute(
@@ -73,7 +81,9 @@ public static class Pipeline
         IReadOnlyList<string> order,
         SemanticsBundle bundle,
         EngineOptions options,
-        WorkerPool? pool)
+        WorkerPool? pool,
+        IReadOnlyDictionary<string, UnitOutcome>? cached = null,
+        Action<UnitFinish>? finished = null)
     {
         ArgumentNullException.ThrowIfNull(bundle);
         ArgumentNullException.ThrowIfNull(options);
@@ -88,7 +98,11 @@ public static class Pipeline
         }
         WarmSimpSets(bundle, options.Attributes);
 
-        var run = new RunState(bundle, byKey, options, decided, pool);
+        var run = new RunState(bundle, byKey, options, decided, pool)
+        {
+            Cached = cached ?? new Dictionary<string, UnitOutcome>(StringComparer.Ordinal),
+            Finished = finished,
+        };
         KernelThread.Run(run.Execute);
         return new PipelineRun(
             new EngineResult(bundle, run.Env, [.. order.Select(k => run.Outcomes[k])], [.. run.Admitted]),
@@ -103,11 +117,64 @@ public static class Pipeline
         OmegaPrepSet.Theorems(bundle.Env, sidecar);
     }
 
+    /// <summary>The keys of every unit a unit depends on, transitively, through the given units.</summary>
+    /// <param name="unit">The unit.</param>
+    /// <param name="units">The units, by key; a dependency not among them is in the closure, and its own are not.</param>
+    /// <returns>The keys.</returns>
+    internal static HashSet<string> ClosureOf(EngineUnit unit, IReadOnlyDictionary<string, EngineUnit> units)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var work = new Stack<string>(unit.Unit.Deps);
+        while (work.Count > 0)
+        {
+            var key = work.Pop();
+            if (seen.Add(key) && units.TryGetValue(key, out var dep))
+            {
+                foreach (var next in dep.Unit.Deps)
+                {
+                    work.Push(next);
+                }
+            }
+        }
+        return seen;
+    }
+
+    /// <summary>A unit's display name: the C# one, or the fallback derived from its key.</summary>
+    /// <param name="unit">The unit.</param>
+    /// <returns>The name.</returns>
+    internal static string Display(EngineUnit unit) => RunState.Display(unit);
+
     /// <summary>What <see cref="Execute"/> produced.</summary>
     /// <param name="Result">The outcomes and the final environment.</param>
     /// <param name="Elapsed">Each unit's time from the moment it started to its outcome; absent for units decided before the run.</param>
     /// <param name="SearchRuns">The number of units whose proof search ran: theorems, and recursive definitions' decrease proofs.</param>
     internal sealed record PipelineRun(EngineResult Result, IReadOnlyDictionary<string, TimeSpan> Elapsed, int SearchRuns);
+
+    /// <summary>A unit that ran, as it finished (M5b KTD14): what the result cache needs to store it.</summary>
+    /// <param name="Outcome">The unit's outcome.</param>
+    /// <param name="Environment">The environment its declarations were admitted into, which its certificate is written from.</param>
+    /// <param name="TacticFuelUsed">The most tactic fuel one proof search of the unit used, if it succeeded; 0 when none ran.</param>
+    /// <param name="BudgetExact">
+    /// Whether the outcome depends on the exact budgets even though it is a proof: a fixed proof was tried and ran out
+    /// of a kernel resource before the one that was accepted, so more fuel could have accepted the first.
+    /// </param>
+    /// <param name="Elapsed">The time from the unit's start to its outcome.</param>
+    /// <param name="DeadlinePassed">Whether the unit's wall-clock deadline had passed when it finished.</param>
+    internal sealed record UnitFinish(
+        UnitOutcome Outcome, KernelEnvironment Environment, long TacticFuelUsed, bool BudgetExact, TimeSpan Elapsed, bool DeadlinePassed);
+
+    /// <summary>
+    /// A unit's effective budgets (M5a R13, M5b KTD11): the project's, overridden by a theorem's <c>[Theorem(...)]</c>
+    /// arguments where they are not zero. A definition has the project's budgets.
+    /// </summary>
+    /// <param name="options">The project's budgets.</param>
+    /// <param name="overrides">A theorem's overrides; null for a definition.</param>
+    /// <returns>The budgets the unit runs with.</returns>
+    internal static VerifyBudgets Effective(EngineOptions options, VirBudget? overrides) => new(
+        overrides is { KernelFuel: > 0 } ? overrides.KernelFuel : options.Kernel.Fuel,
+        options.Kernel.MaxNatBytes,
+        overrides is { TacticFuel: > 0 } ? overrides.TacticFuel : options.TacticFuel,
+        overrides is { TimeoutSeconds: > 0 } ? TimeSpan.FromSeconds(overrides.TimeoutSeconds) : options.Timeout);
 
     /// <summary>
     /// One unit's budgets (M5a R13, M5b KTD11): the project's, overridden by a theorem's <c>[Theorem(...)]</c> arguments
@@ -118,15 +185,16 @@ public static class Pipeline
     {
         public TheoremBudget(EngineOptions options, VirBudget? overrides)
         {
-            Timeout = overrides is { TimeoutSeconds: > 0 } ? TimeSpan.FromSeconds(overrides.TimeoutSeconds) : options.Timeout;
+            var effective = Effective(options, overrides);
+            Timeout = effective.Timeout;
             var deadline = DateTimeOffset.UtcNow + Timeout;
             Kernel = options.Kernel with
             {
-                Fuel = overrides is { KernelFuel: > 0 } ? overrides.KernelFuel : options.Kernel.Fuel,
+                Fuel = effective.KernelFuel,
                 Deadline = deadline,
                 CancellationToken = options.CancellationToken,
             };
-            Meta = new MetaLimits(overrides is { TacticFuel: > 0 } ? overrides.TacticFuel : options.TacticFuel)
+            Meta = new MetaLimits(effective.TacticFuel)
             {
                 Deadline = deadline,
                 CancellationToken = options.CancellationToken,
@@ -139,26 +207,35 @@ public static class Pipeline
 
         public MetaLimits Meta { get; }
 
+        public bool DeadlinePassed => DateTimeOffset.UtcNow >= Kernel.Deadline;
+
         /// <summary>Which budget a resource exception exhausted, for WRT0006's message.</summary>
-        public string Exhausted(Exception ex)
+        public string Exhausted(Exception ex) => Which(ex) switch
         {
-            if (ex is MetaResourceException { InnerException: KernelResourceException kernel })
+            ExhaustedBudget.Time => string.Create(CultureInfo.InvariantCulture, $"the time limit of {Timeout.TotalSeconds:0.###} s was reached"),
+            ExhaustedBudget.TacticFuel => string.Create(CultureInfo.InvariantCulture, $"tactic fuel ran out ({Meta.Fuel:N0} steps)"),
+            ExhaustedBudget.KernelFuel => string.Create(CultureInfo.InvariantCulture, $"kernel fuel ran out ({Kernel.Fuel:N0} steps)"),
+            _ => $"the kernel ran out of resources: {Inner(ex).Message}",
+        };
+
+        /// <summary>Which budget a resource exception exhausted; null for another kernel resource, such as a numeral's size.</summary>
+        public ExhaustedBudget? Which(Exception ex)
+        {
+            ex = Inner(ex);
+            if (ex.Message.Contains("deadline", StringComparison.Ordinal) || DeadlinePassed)
             {
-                // The kernel ran out inside Meta's Check (KTD12): its budget, not Meta's.
-                ex = kernel;
-            }
-            if (ex.Message.Contains("deadline", StringComparison.Ordinal) || DateTimeOffset.UtcNow >= Kernel.Deadline)
-            {
-                return string.Create(CultureInfo.InvariantCulture, $"the time limit of {Timeout.TotalSeconds:0.###} s was reached");
+                return ExhaustedBudget.Time;
             }
             return ex switch
             {
-                MetaResourceException => string.Create(CultureInfo.InvariantCulture, $"tactic fuel ran out ({Meta.Fuel:N0} steps)"),
-                KernelResourceException when ex.Message.StartsWith("kernel fuel", StringComparison.Ordinal) =>
-                    string.Create(CultureInfo.InvariantCulture, $"kernel fuel ran out ({Kernel.Fuel:N0} steps)"),
-                _ => $"the kernel ran out of resources: {ex.Message}",
+                MetaResourceException => ExhaustedBudget.TacticFuel,
+                KernelResourceException when ex.Message.StartsWith("kernel fuel", StringComparison.Ordinal) => ExhaustedBudget.KernelFuel,
+                _ => null,
             };
         }
+
+        /// <summary>The kernel's exception when the kernel ran out inside Meta's Check (KTD12): its budget, not Meta's.</summary>
+        private static Exception Inner(Exception ex) => ex is MetaResourceException { InnerException: KernelResourceException kernel } ? kernel : ex;
     }
 
     /// <summary>
@@ -198,6 +275,12 @@ public static class Pipeline
 
         public int SearchRuns => _searchRuns;
 
+        /// <summary>The outcomes the result cache holds, by key: translated, never admitted or run.</summary>
+        public required IReadOnlyDictionary<string, UnitOutcome> Cached { get; init; }
+
+        /// <summary>Told about each unit that ran as soon as it has its outcome.</summary>
+        public required Action<UnitFinish>? Finished { get; init; }
+
         public void CountSearch() => Interlocked.Increment(ref _searchRuns);
 
         public void Execute()
@@ -212,10 +295,20 @@ public static class Pipeline
                     theorems.Add(unit);
                     continue;
                 }
+                if (Cached.TryGetValue(unit.Key, out var hit))
+                {
+                    Outcomes.Add(unit.Key, hit);
+                    Elapsed.Add(unit.Key, TimeSpan.Zero);
+                    OwnCached(unit);
+                    continue;
+                }
                 var stopwatch = Stopwatch.StartNew();
-                var outcome = Cancelled(units[unit.Key]) ?? Skip(units[unit.Key]) ?? new Scope(this, Env, Attributes).Admit(unit);
-                Outcomes.Add(unit.Key, SettleCancel(units[unit.Key], outcome));
+                Scope? scope = null;
+                var outcome = Cancelled(units[unit.Key]) ?? Skip(units[unit.Key]) ?? (scope = new Scope(this, Env, Attributes)).Admit(unit);
+                outcome = SettleCancel(units[unit.Key], outcome);
+                Outcomes.Add(unit.Key, outcome);
                 Elapsed.Add(unit.Key, stopwatch.Elapsed);
+                Finish(scope, outcome, stopwatch.Elapsed);
             }
             Env.Freeze();
             Attributes.Freeze();
@@ -240,7 +333,7 @@ public static class Pipeline
                 foreach (var theorem in ordered)
                 {
                     var unit = units[theorem.Key];
-                    if (((UnitOutcome?)Cancelled(unit) ?? Skip(unit)) is { } early)
+                    if ((Cached.GetValueOrDefault(theorem.Key) ?? (UnitOutcome?)Cancelled(unit) ?? Skip(unit)) is { } early)
                     {
                         Outcomes.Add(theorem.Key, early);
                         Elapsed.Add(theorem.Key, TimeSpan.Zero);
@@ -266,26 +359,60 @@ public static class Pipeline
             var stopwatch = Stopwatch.StartNew();
             var unit = units[theorem.Key];
             UnitOutcome outcome;
+            Scope? scope = null;
             try
             {
-                outcome = Cancelled(unit) ?? new Scope(this, levelEnv.Fork(), Attributes.Fork()).Admit(theorem);
+                outcome = Cancelled(unit) ?? (scope = new Scope(this, levelEnv.Fork(), Attributes.Fork())).Admit(theorem);
             }
             catch (OperationCanceledException)
             {
                 // KTD32: a cancel during the counterexample search ends the unit as cancelled, not as a failure.
                 outcome = Cancelled(unit) ?? throw new InvalidOperationException("A unit was cancelled although the run was not.");
             }
-            return (SettleCancel(unit, outcome), stopwatch.Elapsed);
+            outcome = SettleCancel(unit, outcome);
+            var elapsed = stopwatch.Elapsed;
+            Finish(scope, outcome, elapsed);
+            return (outcome, elapsed);
+        }
+
+        /// <summary>Tells <see cref="Finished"/> about a unit that ran in <paramref name="scope"/>; nothing for one that did not run.</summary>
+        private void Finish(Scope? scope, UnitOutcome outcome, TimeSpan elapsed)
+        {
+            if (scope is not null && Finished is { } finished)
+            {
+                finished(new UnitFinish(outcome, scope.Environment, scope.TacticFuelUsed, scope.BudgetExact, elapsed, scope.DeadlinePassed));
+            }
+        }
+
+        /// <summary>
+        /// Records a cached unit as the owner of the constants it would have admitted (KTD33), so a script naming one
+        /// without depending on it is WRT0004 whether or not the unit came from the cache.
+        /// </summary>
+        private void OwnCached(TranslatedUnit unit)
+        {
+            foreach (var declaration in unit.Declarations)
+            {
+                Own(unit.Key, declaration);
+            }
+            if (unit.Recursion is { } recursion)
+            {
+                foreach (var decrease in recursion.Decreases)
+                {
+                    _owners.TryAdd(decrease.Theorem.Name, unit.Key);
+                }
+                _owners.TryAdd(recursion.Equation.Name, unit.Key);
+            }
         }
 
         /// <summary>
         /// Admits a level's proved theorems, in input order, into a new fork of the run's environment and freezes it, so
         /// the next level's theorems can use them. The kernel checks each proof again, as it does every term admitted
-        /// into an environment; one it now rejects is Warrant's bug, and the theorem's users are skipped.
+        /// into an environment; one it now rejects is Warrant's bug, and the theorem's users are skipped. A cached theorem
+        /// is not admitted: no unit that runs depends on it.
         /// </summary>
         private void AdmitProved(List<TranslatedUnit> level)
         {
-            var proved = level.Where(t => Outcomes[t.Key] is ProvedOutcome).ToList();
+            var proved = level.Where(t => Outcomes[t.Key] is ProvedOutcome && !Cached.ContainsKey(t.Key)).ToList();
             if (proved.Count == 0)
             {
                 return;
@@ -424,23 +551,7 @@ public static class Pipeline
         }
 
         /// <summary>The keys of every unit a unit depends on, transitively.</summary>
-        private HashSet<string> Closure(EngineUnit unit)
-        {
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            var work = new Stack<string>(unit.Unit.Deps);
-            while (work.Count > 0)
-            {
-                var key = work.Pop();
-                if (seen.Add(key) && units.TryGetValue(key, out var dep))
-                {
-                    foreach (var next in dep.Unit.Deps)
-                    {
-                        work.Push(next);
-                    }
-                }
-            }
-            return seen;
-        }
+        private HashSet<string> Closure(EngineUnit unit) => ClosureOf(unit, units);
 
         /// <summary>The cancelled outcome of a unit if the run is cancelled; null if it is not.</summary>
         public CancelledOutcome? Cancelled(EngineUnit unit) =>
@@ -582,6 +693,23 @@ public static class Pipeline
 
         private Sidecar Attributes => attributes;
 
+        private TheoremBudget? _budget;
+
+        /// <summary>The environment the unit admits into.</summary>
+        public KernelEnvironment Environment => env;
+
+        /// <summary>The most tactic fuel one successful proof search of the unit used (M5b KTD13).</summary>
+        public long TacticFuelUsed { get; private set; }
+
+        /// <summary>
+        /// Whether a fixed proof ran out of a kernel resource and the next one was tried, so the outcome depends on the
+        /// exact kernel budget even when it is a proof (M5b KTD13).
+        /// </summary>
+        public bool BudgetExact { get; private set; }
+
+        /// <summary>Whether the unit's deadline has passed; false for a unit that never started its budget.</summary>
+        public bool DeadlinePassed => _budget?.DeadlinePassed ?? false;
+
         public UnitOutcome Admit(TranslatedUnit translated)
         {
             var unit = run.Units[translated.Key];
@@ -601,13 +729,13 @@ public static class Pipeline
                         Node = VirTree.IdOf(unit.Unit, outside.Node),
                     };
                 }
-                var budget = new TheoremBudget(options, shell.Budget);
+                var budget = _budget = new TheoremBudget(options, shell.Budget);
                 return shell.Script is null && shell.Statement.Instance is not null
                     ? Compute(unit, shell, display, assumptions, budget)
                     : RunScript(unit, shell, display, assumptions, budget);
             }
             var admitted = new List<KernelDeclaration>();
-            var definitionBudget = new TheoremBudget(options, null);
+            var definitionBudget = _budget = new TheoremBudget(options, null);
             if (translated.Recursion is { } recursion)
             {
                 if (recursion.Decreases.Length > 0)
@@ -639,7 +767,7 @@ public static class Pipeline
                 }
                 catch (KernelResourceException ex)
                 {
-                    return new UndecidedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, $"{definitionBudget.Exhausted(ex)} while the kernel checked the definition.");
+                    return new UndecidedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, $"{definitionBudget.Exhausted(ex)} while the kernel checked the definition.") { Exhausted = definitionBudget.Which(ex) };
                 }
                 catch (KernelException ex)
                 {
@@ -684,7 +812,7 @@ public static class Pipeline
             }
             catch (KernelResourceException ex)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the definition.");
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the definition.") { Exhausted = budget.Which(ex) };
             }
             catch (KernelException ex)
             {
@@ -696,7 +824,7 @@ public static class Pipeline
             }
             catch (KernelResourceException ex)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the equation lemma {recursion.Equation.Name}.");
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the equation lemma {recursion.Equation.Name}.") { Exhausted = budget.Which(ex) };
             }
             catch (KernelException ex)
             {
@@ -730,10 +858,11 @@ public static class Pipeline
                 current = introduced;
                 meta.OmegaTactic(introduced);
                 proof = meta.InstantiateMVars(goal);
+                TacticFuelUsed = Math.Max(TacticFuelUsed, meta.Budget.FuelUsed);
             }
             catch (Exception ex) when (ex is MetaResourceException or KernelResourceException)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while proving the decrease of {Describe(unit, decrease)}.");
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while proving the decrease of {Describe(unit, decrease)}.") { Exhausted = budget.Which(ex) };
             }
             catch (InsufficientExecutionStackException)
             {
@@ -764,7 +893,7 @@ public static class Pipeline
             }
             catch (KernelResourceException ex)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked a decrease proof.");
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked a decrease proof.") { Exhausted = budget.Which(ex) };
             }
             catch (KernelException ex)
             {
@@ -810,10 +939,13 @@ public static class Pipeline
                     // KTD12: a cancellation or a passed deadline is shared by every method, so the next one cannot
                     // succeed. Running out of fuel falls through to the next method, which gets its own fuel, as in M5a.
                     return new UndecidedOutcome(
-                        key, unit.Unit.Kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the {kind.ToString().ToLowerInvariant()} proof.");
+                        key, unit.Unit.Kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the {kind.ToString().ToLowerInvariant()} proof.") { Exhausted = budget.Which(ex) };
                 }
-                catch (KernelException)
+                catch (KernelException ex)
                 {
+                    // Running out of fuel or a numeral's size falls through to the next proof, which more budget
+                    // might not have needed.
+                    BudgetExact |= ex is KernelResourceException;
                     continue;
                 }
                 if (!ProofTerms.IsAdmittedAs(Env, shell))
@@ -830,7 +962,7 @@ public static class Pipeline
             }
             catch (KernelResourceException ex)
             {
-                return new UndecidedOutcome(key, unit.Unit.Kind, display, assumptions, $"the kernel ran out of resources deciding the claim: {budget.Exhausted(ex)}.");
+                return new UndecidedOutcome(key, unit.Unit.Kind, display, assumptions, $"the kernel ran out of resources deciding the claim: {budget.Exhausted(ex)}.") { Exhausted = budget.Which(ex) };
             }
             catch (KernelException ex)
             {
@@ -885,6 +1017,7 @@ public static class Pipeline
                     return NotProved("unsolved goals", unsolved, null);
                 }
                 proof = meta.InstantiateMVars(goal);
+                TacticFuelUsed = meta.Budget.FuelUsed;
             }
             catch (TacticUnavailableException ex)
             {
@@ -892,7 +1025,7 @@ public static class Pipeline
             }
             catch (Exception ex) when (ex is MetaResourceException or KernelResourceException)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while running the proof script.");
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while running the proof script.") { Exhausted = budget.Which(ex) };
             }
             catch (InsufficientExecutionStackException)
             {
@@ -925,7 +1058,7 @@ public static class Pipeline
             }
             catch (KernelResourceException ex)
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the proof.");
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the proof.") { Exhausted = budget.Which(ex) };
             }
             catch (KernelException ex)
             {

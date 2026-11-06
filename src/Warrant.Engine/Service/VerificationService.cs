@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using Warrant.Engine.Reports;
+using Warrant.Engine.Service.Cache;
 using Warrant.Kernel;
 using Warrant.Meta;
 using Warrant.Semantics;
@@ -17,13 +18,20 @@ namespace Warrant.Engine.Service;
 /// <remarks>
 /// It never sees Roslyn: a request carries each unit's canonical VIR, and the response names positions by VIR node ID,
 /// which the client renders through its own extraction. The service is safe to call from several threads at once.
+/// A request with a cache directory reads and writes the result cache (KTD13, KTD14; docs/m5b/04), and the service runs
+/// at most one computation of a key at a time.
 /// </remarks>
-public sealed class VerificationService : IDisposable
+public sealed partial class VerificationService : IDisposable
 {
     /// <summary>The protocol version of <see cref="VerifyRequest"/> and <see cref="VerifyResponse"/>.</summary>
     public const int ProtocolVersion = 1;
 
     private readonly WorkerPool _pool;
+    private readonly Dictionary<(string Directory, string Key), TaskCompletionSource> _computing = [];
+    private readonly Lock _computingLock = new();
+    private int _hits;
+    private int _misses;
+    private int _tacticRuns;
 
     /// <summary>
     /// Loads the sidecar, which names the bundle it was made for, so a mismatched pair is refused before the slow load, then
@@ -32,10 +40,11 @@ public sealed class VerificationService : IDisposable
     /// <param name="bundlePath">The semantics bundle file.</param>
     /// <param name="sidecarPath">The attribute sidecar file made for that bundle.</param>
     /// <param name="workers">The number of workers; <see cref="WorkerPool.DefaultSize"/> when 0.</param>
+    /// <param name="cache">The result cache; a <see cref="FileResultCache"/> of its own when null.</param>
     /// <exception cref="SidecarFormatException">The sidecar is malformed or was made for another bundle.</exception>
     /// <exception cref="InvalidDataException">The kernel rejects a declaration of the bundle.</exception>
-    public VerificationService(string bundlePath, string sidecarPath, int workers = 0)
-        : this(LoadSidecarFirst(bundlePath, sidecarPath, out var sidecar), sidecar, workers)
+    public VerificationService(string bundlePath, string sidecarPath, int workers = 0, IResultCache? cache = null)
+        : this(LoadSidecarFirst(bundlePath, sidecarPath, out var sidecar, out var hashes), sidecar, workers, hashes, cache)
     {
     }
 
@@ -43,8 +52,13 @@ public sealed class VerificationService : IDisposable
     /// <param name="bundle">The checked, frozen bundle.</param>
     /// <param name="sidecar">The frozen attribute sidecar made for it.</param>
     /// <param name="workers">The number of workers; <see cref="WorkerPool.DefaultSize"/> when 0.</param>
+    /// <param name="hashes">
+    /// The SHA-256 of the files the bundle and the sidecar were loaded from, which every cache key covers (KTD13); null
+    /// when unknown, and then a request with a cache directory is refused.
+    /// </param>
+    /// <param name="cache">The result cache; a <see cref="FileResultCache"/> of its own when null.</param>
     /// <exception cref="ArgumentException">The sidecar is not frozen.</exception>
-    public VerificationService(SemanticsBundle bundle, Sidecar sidecar, int workers = 0)
+    public VerificationService(SemanticsBundle bundle, Sidecar sidecar, int workers = 0, BundleHashes? hashes = null, IResultCache? cache = null)
     {
         ArgumentNullException.ThrowIfNull(bundle);
         ArgumentNullException.ThrowIfNull(sidecar);
@@ -59,7 +73,18 @@ public sealed class VerificationService : IDisposable
         SimpSet = DefaultSimpSet.Theorems(bundle.Env, sidecar);
         OmegaPrep = OmegaPrepSet.Theorems(bundle.Env, sidecar);
         _pool = new WorkerPool(workers == 0 ? WorkerPool.DefaultSize : workers);
+        Hashes = hashes;
+        Cache = cache ?? new FileResultCache();
     }
+
+    /// <summary>The SHA-256 of the bundle's and the sidecar's files; null when the service was not told them.</summary>
+    public BundleHashes? Hashes { get; }
+
+    /// <summary>The result cache requests with a cache directory read and write.</summary>
+    public IResultCache Cache { get; }
+
+    /// <summary>The counters of every request this service has answered, for <c>status</c> (KTD26).</summary>
+    public VerifyCounters Totals => new(Volatile.Read(ref _hits), Volatile.Read(ref _misses), Volatile.Read(ref _tacticRuns));
 
     /// <summary>The checked, frozen semantics bundle.</summary>
     public SemanticsBundle Bundle { get; }
@@ -91,6 +116,7 @@ public sealed class VerificationService : IDisposable
     /// <param name="cancellationToken">Stops the request (KTD12).</param>
     /// <returns>The response and the result.</returns>
     /// <exception cref="ArgumentException">The request's protocol version is not <see cref="ProtocolVersion"/>, or two units have the same key.</exception>
+    /// <exception cref="InvalidOperationException">The request has a cache directory and the service was not given <see cref="Hashes"/>.</exception>
     public ServiceRun Run(VerifyRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -121,24 +147,37 @@ public sealed class VerificationService : IDisposable
             Attributes = Attributes,
             CancellationToken = cancellationToken,
         };
-        var run = Pipeline.Execute(inputs, decided, [.. request.Units.Select(u => u.Key)], Bundle, options, _pool);
+        Pipeline.PipelineRun run;
+        IReadOnlyDictionary<string, UnitOutcome> hits;
+        using (var session = request.CacheDirectory is { } directory ? new CacheSession(this, directory, inputs, options) : null)
+        {
+            hits = session?.Hits ?? new Dictionary<string, UnitOutcome>(StringComparer.Ordinal);
+            run = Pipeline.Execute(inputs, decided, [.. request.Units.Select(u => u.Key)], Bundle, options, _pool, hits, session is null ? null : session.Finished);
+        }
+        // A cached unit whose translation now fails reports that, not its entry.
+        bool FromCache(UnitOutcome o) => hits.TryGetValue(o.Key, out var hit) && ReferenceEquals(hit, o);
         ImmutableArray<UnitResult> units =
         [
-            .. run.Result.Units.Select(o => new UnitResult(OutcomeDto.From(o), FromCache: false, Rechecked: false, run.Elapsed.GetValueOrDefault(o.Key))),
+            .. run.Result.Units.Select(o => new UnitResult(OutcomeDto.From(o), FromCache(o), Rechecked: false, run.Elapsed.GetValueOrDefault(o.Key))),
         ];
-        var response = new VerifyResponse(
-            ProtocolVersion, request.RequestId, units, new VerifyCounters(Hits: 0, Misses: units.Length, TacticRuns: run.SearchRuns), stopwatch.Elapsed);
+        var counters = new VerifyCounters(units.Count(u => u.FromCache), units.Count(u => !u.FromCache), run.SearchRuns);
+        Interlocked.Add(ref _hits, counters.Hits);
+        Interlocked.Add(ref _misses, counters.Misses);
+        Interlocked.Add(ref _tacticRuns, counters.TacticRuns);
+        var response = new VerifyResponse(ProtocolVersion, request.RequestId, units, counters, stopwatch.Elapsed);
         return new ServiceRun(response, run.Result);
     }
 
     /// <summary>Stops the workers once the work they hold is done.</summary>
     public void Dispose() => _pool.Dispose();
 
-    private static SemanticsBundle LoadSidecarFirst(string bundlePath, string sidecarPath, out Sidecar sidecar)
+    private static SemanticsBundle LoadSidecarFirst(string bundlePath, string sidecarPath, out Sidecar sidecar, out BundleHashes hashes)
     {
         ArgumentNullException.ThrowIfNull(bundlePath);
         ArgumentNullException.ThrowIfNull(sidecarPath);
-        sidecar = Sidecar.Load(sidecarPath, OutcomeText.FileSha256(bundlePath));
+        var bundleSha256 = OutcomeText.FileSha256(bundlePath);
+        sidecar = Sidecar.Load(sidecarPath, bundleSha256);
+        hashes = new BundleHashes(bundleSha256, OutcomeText.FileSha256(sidecarPath));
         return SemanticsBundle.Load(bundlePath);
     }
 

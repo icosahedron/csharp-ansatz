@@ -445,6 +445,32 @@ public sealed class VerifyTests : IDisposable
     }
 
     [Fact]
+    public void ASecondVerifyWithACacheDirectoryReportsTheSameDiagnosticsAndHowManyCameFromTheCache()
+    {
+        Write("""
+            public static class Increments
+            {
+                [Verified] public static int Increment(int x) => x + 1;
+                [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
+                [Theorem] static Proof AddsOne(int x) => Prove.That(Increment(x) == x + 1).By(Tactic.Unfold(nameof(Increment)), Tactic.Omega());
+            }
+            """);
+        var cache = Path.Combine(project, "obj", "warrant", "cache");
+        var (_, plain) = VerifyArgs("--format", "msbuild");
+        var (coldCode, cold) = VerifyArgs("--format", "msbuild", "--cache-dir", cache);
+        var (warmCode, warm) = VerifyArgs("--format", "msbuild", "--cache-dir", cache);
+
+        Assert.Equal(1, coldCode);
+        Assert.Equal(1, warmCode);
+        Assert.Equal(plain, cold);
+        Assert.EndsWith("WRT1\tsummary\tinfo\t\t\t0\t0\t0\t0\tWarrant: 3 verified units, 1 theorems proved, 1 not proved.\n", cold, StringComparison.Ordinal);
+        Assert.Equal(
+            cold.Replace("1 theorems proved,", "1 theorems proved (2 from cache),", StringComparison.Ordinal),
+            warm);
+        Assert.Equal(2, Directory.GetFiles(cache, "*.json").Length);
+    }
+
+    [Fact]
     public void TheSidecarIsCopiedBesideTheCli()
     {
         var cli = Path.GetDirectoryName(typeof(VerifyCommand).Assembly.Location)!;

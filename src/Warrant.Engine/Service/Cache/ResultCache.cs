@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Warrant.Engine.Service.Cache;
 
 /// <summary>A cache entry that was read and checked, with the outcome it holds.</summary>
@@ -145,8 +147,10 @@ public sealed class FileResultCache : IResultCache
             var entry = CacheEntry.FromFile(bytes, key, _toolchain);
             result = new CachedResult(entry, entry.Outcome.ToOutcome(entry.Declarations()));
         }
-        catch (FormatException)
+        catch (Exception ex) when (ex is FormatException or OverflowException or ArgumentException or InvalidOperationException
+            or JsonException or KeyNotFoundException)
         {
+            // A body that hashes correctly can still fail to decode, such as a numeral too large for its kind: a bad entry.
             Delete(directory, key);
             return null;
         }

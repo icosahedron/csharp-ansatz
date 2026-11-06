@@ -1,5 +1,7 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Warrant.Engine.Reports;
 using Warrant.Engine.Service;
 using Warrant.Engine.Service.Cache;
@@ -172,6 +174,60 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
         Assert.False(Result(response, IncAddsOne).FromCache);
         Assert.True(Result(response, DecSubtractsOne).FromCache);
         Assert.NotNull(new FileResultCache().Read(Dir, key));
+    }
+
+    [Theory]
+    [InlineData("null assumptions")]
+    [InlineData("null assumption")]
+    [InlineData("null sides")]
+    [InlineData("null side text")]
+    [InlineData("int overflow")]
+    [InlineData("null display name")]
+    [InlineData("null inputs dependencies")]
+    public void AnEntryWithAValidHashButAMalformedBodyIsAMissAndIsDeleted(string damage)
+    {
+        var units = Units(Increments);
+        NewService().Verify(Request(units));
+        var key = KeyOf(units, Wrong);
+        var path = FileResultCache.PathOf(Dir, key);
+        var body = JsonNode.Parse(File.ReadAllBytes(path))!["body"]!.DeepClone();
+        var outcome = body["outcome"]!;
+        Assert.Equal("False", outcome["kind"]!.GetValue<string>());
+        switch (damage)
+        {
+            case "null assumptions":
+                outcome["assumptions"] = null;
+                break;
+            case "null assumption":
+                outcome["assumptions"] = new JsonArray((JsonNode?)null);
+                break;
+            case "null sides":
+                outcome["sides"] = null;
+                break;
+            case "null side text":
+                outcome["sides"]![0]!["text"] = null;
+                break;
+            case "int overflow":
+                outcome["sides"]![0]!["kind"] = "IntValue";
+                outcome["sides"]![0]!["text"] = "99999999999";
+                break;
+            case "null display name":
+                outcome["displayName"] = null;
+                break;
+            default:
+                body["inputs"]!.AsObject().Remove(body["inputs"]!.AsObject().First(p => p.Value is JsonArray).Key);
+                break;
+        }
+        // A deliberate edit: the hash is of the new body, so only decoding the body can tell it is malformed.
+        var bytes = Encoding.UTF8.GetBytes(body.ToJsonString());
+        File.WriteAllText(path, $"{{\"sha256\":\"{Convert.ToHexStringLower(SHA256.HashData(bytes))}\",\"body\":{Encoding.UTF8.GetString(bytes)}}}");
+
+        Assert.Null(new FileResultCache().Read(Dir, key));
+        Assert.False(File.Exists(path));
+
+        var response = NewService().Verify(Request(units));
+        Assert.False(Result(response, Wrong).FromCache);
+        Assert.Equal(OutcomeKind.False, Result(response, Wrong).Outcome.Kind);
     }
 
     [Fact]
@@ -373,6 +429,95 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
         Assert.False(user.FromCache);
         Assert.Equal(OutcomeKind.Proved, user.Outcome.Kind);
         Assert.Equal(Texts(Pipeline.Run(edited, engine.Bundle, engine.Options).Units.Select(OutcomeDto.From)), Texts(response));
+    }
+
+    [Fact]
+    public void ACachedTheoremWhoseLemmaRunsOutOfFuelIsSkippedAsInAColdRunNotReportedFromTheCache()
+    {
+        const string source = """
+            public static class S
+            {
+                [Verified] public static int Inc(int x) => x + 1;
+
+                [Theorem] static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Inc(x) == x + 1)).By(Tactic.Intro("x"), Tactic.Unfold(nameof(Inc)), Tactic.Omega());
+
+                [Theorem(TacticFuel = 100000000)] static Proof User(int a) => Prove.That(Inc(a) == a + 1).By(Tactic.Apply(nameof(Lemma)));
+            }
+            """;
+        const string lemma = "M:S.Lemma";
+        const string user = "M:S.User(System.Int32)";
+        var units = Units(source);
+        var warm = NewService().Verify(Request(units));
+        Assert.Equal(OutcomeKind.Proved, Result(warm, lemma).Outcome.Kind);
+        Assert.Equal(OutcomeKind.Proved, Result(warm, user).Outcome.Kind);
+        var used = new FileResultCache().Read(Dir, KeyOf(units, lemma))!.Entry.Budgets.TacticFuel;
+        Assert.True(used > 1, $"{used} tactic fuel");
+        // The project's tactic fuel below what the lemma needs; the user keeps its own, which its entry holds under.
+        var lower = engine.Options with { TacticFuel = used - 1 };
+
+        var response = NewService().Verify(Request(units, lower));
+
+        var cold = Pipeline.Run(units, engine.Bundle, lower);
+        Assert.IsType<UndecidedOutcome>(cold.Find(lemma));
+        Assert.IsType<SkippedOutcome>(cold.Find(user));
+        Assert.Equal(Texts(cold.Units.Select(OutcomeDto.From)), Texts(response));
+        Assert.False(Result(response, user).FromCache);
+    }
+
+    [Fact]
+    public void ACachedTheoremWhoseLeanConstNowNamesAnotherUnitsConstantIsWrt0004AsInAColdRun()
+    {
+        const string before = """
+            public static class S
+            {
+                [Theorem] static Proof Reflexive(int a) => Prove.That(a == a).By(Tactic.Try(Tactic.Exact(Lean.Const("Cs.S.«Extra(System.Int32)»"))), Tactic.Exact(Lean.Const("rfl")));
+            }
+            """;
+        const string reflexive = "M:S.Reflexive(System.Int32)";
+        var service = NewService();
+        Assert.Equal(OutcomeKind.Proved, Result(service.Verify(Request(Units(before))), reflexive).Outcome.Kind);
+        // A new unit owns the constant the theorem names without depending on it; the theorem's key is unchanged.
+        var after = Units(before.Replace("[Theorem]", "[Verified] public static int Extra(int x) => x;\n\n    [Theorem]", StringComparison.Ordinal));
+        Assert.Equal(KeyOf(Units(before), reflexive), KeyOf(after, reflexive));
+
+        var response = service.Verify(Request(after));
+
+        var outcome = Result(response, reflexive);
+        Assert.Equal("WRT0004", outcome.Outcome.Code);
+        Assert.False(outcome.FromCache);
+        Assert.Equal(Texts(Pipeline.Run(after, engine.Bundle, engine.Options).Units.Select(OutcomeDto.From)), Texts(response));
+    }
+
+    [Fact]
+    public void AProofFoundAfterAnotherRanOutOfKernelFuelHoldsOnlyUnderTheBudgetsItRanWith()
+    {
+        // rfl needs between 15,435 and 22,682 steps of kernel fuel more than decide does for this claim: at 20,000, rfl
+        // runs out and decide is accepted, a proof that more fuel would have found another way.
+        var source = new StringBuilder(ServiceChain(7));
+        source.Append("""
+                [Verified] public static int Twice(int x) => x + x;
+
+                [Theorem] static Proof Doubled() => Prove.That(Twice(A6(0)) == A7(0));
+            }
+            """);
+        const string doubled = "M:S.Doubled";
+        var units = Units(source.ToString());
+        EngineOptions WithFuel(long fuel) => engine.Options with { Kernel = engine.Options.Kernel with { Fuel = fuel } };
+        var at20000 = WithFuel(20_000);
+
+        var cold = Result(NewService().Verify(Request(units, at20000)), doubled);
+        Assert.Equal(ProofKind.Decide, cold.Outcome.By);
+        var entry = new FileResultCache().Read(Dir, KeyOf(units, doubled))!.Entry;
+        Assert.Equal(BudgetMatch.Exact, entry.Match);
+        Assert.Equal(20_000, entry.Budgets.KernelFuel);
+
+        Assert.True(Result(NewService().Verify(Request(units, at20000)), doubled).FromCache);
+        var lower = Result(NewService().Verify(Request(units, WithFuel(19_000))), doubled);
+        Assert.False(lower.FromCache);
+        Assert.Equal(ProofKind.Decide, lower.Outcome.By);
+        var higher = Result(NewService().Verify(Request(units, WithFuel(30_000))), doubled);
+        Assert.False(higher.FromCache);
+        Assert.Equal(ProofKind.Rfl, higher.Outcome.By);
     }
 
     [Fact]

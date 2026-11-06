@@ -356,6 +356,73 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Equal(Text(Result(cold, Wrong).Outcome), Text(wrong.Outcome));
     }
 
+    /// <summary>Units that admit nothing a tiny kernel fuel cannot, but their own proofs: no non-recursive definition.</summary>
+    private const string Standalone = """
+        public static class S
+        {
+            [Verified]
+            public static int Sum(int n)
+            {
+                Spec.Decreases(n);
+                if (n <= 0) return 0;
+                return n + Sum(n - 1);
+            }
+
+            [Theorem] static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => x == x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+
+            [Theorem] static Proof User(int a) => Prove.That(a == a).By(Tactic.Apply(nameof(Lemma)));
+        }
+        """;
+
+    [Fact]
+    public void RecheckThatRunsOutOfKernelFuelIsUndecidedAndKeepsTheEntries()
+    {
+        var units = Units(Standalone);
+        NewService().Verify(Request(units));
+        // The entries say their proofs needed one step of kernel fuel, so they apply to a run with that much.
+        WithKernelFuel(units, Sum, 1);
+        WithKernelFuel(units, Lemma, 1);
+        var tiny = engine.Options with { Kernel = engine.Options.Kernel with { Fuel = 1 } };
+
+        var recheck = NewService().Run(Request(units, tiny) with { Recheck = true });
+
+        foreach (var (key, activity) in new[] { (Sum, "the kernel checked the cached proof of Cs.S.«Sum(System.Int32)».$dec_1"), (Lemma, "the kernel checked the cached proof") })
+        {
+            var undecided = Assert.IsType<UndecidedOutcome>(recheck.Result.Find(key)); // WRT0006, not WRT0010
+            Assert.Equal(ExhaustedBudget.KernelFuel, undecided.Exhausted);
+            Assert.Equal($"kernel fuel ran out (1 steps) while {activity}.", undecided.Reason);
+            Assert.False(Result(recheck.Response, key).Rechecked);
+            Assert.True(File.Exists(FileResultCache.PathOf(Dir, KeyOf(units, key))), key);
+        }
+        Assert.Equal(OutcomeKind.Skipped, Result(recheck.Response, User).Outcome.Kind);
+        Assert.Equal(0, recheck.Response.Counters.TacticRuns);
+    }
+
+    [Fact]
+    public void AMissWhoseCachedLemmaRunsOutOfKernelFuelGivesTheColdOutcome()
+    {
+        var units = Units(Standalone);
+        NewService().Verify(Request(units));
+        WithKernelFuel(units, Lemma, 1);
+        var tiny = engine.Options with { Kernel = engine.Options.Kernel with { Fuel = 1 } };
+        var edited = Units(Standalone.Replace("User(int a) => Prove.That(a == a)", "User(int b) => Prove.That(b == b)", StringComparison.Ordinal));
+
+        var warm = NewService().Verify(Request(edited, tiny));
+
+        Assert.False(Result(warm, User).FromCache);
+        Assert.False(Result(warm, Lemma).FromCache);
+        Assert.Equal(Texts(Pipeline.Run(edited, engine.Bundle, tiny).Units.Select(OutcomeDto.From)), Texts(warm));
+    }
+
+    /// <summary>Rewrites a unit's entry to say its proof needed the given kernel fuel, with a hash of its new body.</summary>
+    private void WithKernelFuel(IReadOnlyList<EngineUnit> units, string unitKey, long fuel)
+    {
+        var cache = new FileResultCache();
+        var entry = cache.Read(Dir, KeyOf(units, unitKey), fromDisk: true)!.Entry;
+        Assert.Equal(BudgetMatch.AtLeast, entry.Match);
+        Assert.True(cache.Write(Dir, entry with { Budgets = entry.Budgets with { KernelFuel = fuel } }));
+    }
+
     private static string EditSumOfZero(string source) => source.Replace(
         "SumOfZero() => Prove.That(Sum(0) == 0)", "SumOfZero() => Prove.That(0 == Sum(0))", StringComparison.Ordinal);
 
@@ -411,8 +478,8 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
         return service;
     }
 
-    private VerifyRequest Request(IEnumerable<EngineUnit> units, string? dir = null) =>
-        ServiceTests.Request(units, engine.Options) with { CacheDirectory = dir ?? Dir };
+    private VerifyRequest Request(IEnumerable<EngineUnit> units, EngineOptions? options = null) =>
+        ServiceTests.Request(units, options ?? engine.Options) with { CacheDirectory = Dir };
 
     private static IReadOnlyList<EngineUnit> Units(string source) => EngineCorpus.Inputs(EngineCorpus.Inline(source));
 

@@ -124,7 +124,7 @@ public sealed record CacheEntry(
                 throw new FormatException("The entry's body does not match its hash.");
             }
             var entry = JsonSerializer.Deserialize(body, CacheJsonContext.Default.CacheEntry);
-            if (entry is not { Inputs: not null, Budgets: not null, Outcome: not null, Certificate: not null })
+            if (entry is null || !HasEveryField(entry))
             {
                 throw new FormatException("The entry is missing a field.");
             }
@@ -147,6 +147,25 @@ public sealed record CacheEntry(
             throw new FormatException($"The entry is malformed: {ex.Message}", ex);
         }
     }
+
+    /// <summary>
+    /// Whether every field the entry is read through is present: JSON null, or an absent array, deserializes to a null
+    /// reference or a default array, which a valid hash does not rule out.
+    /// </summary>
+    private static bool HasEveryField(CacheEntry entry) =>
+        entry is
+        {
+            Toolchain: not null,
+            Key: not null,
+            Inputs: { Closure: not null, Bundle: not null, Sidecar: not null, Names.IsDefault: false } inputs,
+            Budgets: not null,
+            Outcome: { Key: not null, DisplayName: not null, Assumptions.IsDefault: false, Counterexample.IsDefault: false, Sides.IsDefault: false } outcome,
+            Certificate: not null,
+        }
+        && inputs.Names.All(n => n is { Key: not null, DisplayName: not null })
+        && outcome.Assumptions.All(a => a is { UnitKey: not null, Subject: not null })
+        && outcome.Counterexample.All(c => c is { Parameter: not null, Value: not null })
+        && outcome.Sides.All(s => s is { Text: not null });
 }
 
 /// <summary>The System.Text.Json contract of <see cref="CacheEntry"/>, generated at compile time.</summary>

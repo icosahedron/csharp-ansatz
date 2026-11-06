@@ -150,8 +150,9 @@ public sealed record InternalErrorOutcome(
 }
 
 /// <summary>
-/// A theorem that ran out of a budget: kernel fuel, tactic fuel or the time limit (WRT0006, R13); or, without a script,
-/// one neither fixed proof proves and whose <c>decide</c> does not compute to <c>Bool.false</c> within the fuel limit.
+/// A unit that ran out of a budget: kernel fuel, tactic fuel or the time limit (WRT0006, M5a R13, M5b R5), whether it is a
+/// theorem or a definition with its decrease proofs and equation lemma; or a theorem without a script
+/// that neither fixed proof proves and whose <c>decide</c> does not compute to <c>Bool.false</c> within the fuel limit.
 /// Running out of a budget is never success.
 /// </summary>
 /// <param name="Key">The unit's key.</param>

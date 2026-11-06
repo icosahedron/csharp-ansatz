@@ -66,8 +66,9 @@ public static class Pipeline
     }
 
     /// <summary>
-    /// One theorem's budgets (R13): the project's, overridden by the theorem's <c>[Theorem(...)]</c> arguments where they
-    /// are not zero, with one deadline for Meta and the kernel.
+    /// One unit's budgets (M5a R13, M5b KTD11): the project's, overridden by a theorem's <c>[Theorem(...)]</c> arguments
+    /// where they are not zero, with one deadline for Meta and the kernel. A definition, with its decrease proofs and
+    /// equation lemma, has the project's budgets and no overrides.
     /// </summary>
     private sealed class TheoremBudget
     {
@@ -222,15 +223,16 @@ public static class Pipeline
                     : RunScript(unit, shell, display, assumptions, budget);
             }
             var admitted = new List<KernelDeclaration>();
+            var definitionBudget = new TheoremBudget(options, null);
             if (translated.Recursion is { } recursion)
             {
-                return AdmitRecursive(unit, translated, recursion, assumptions, admitted);
+                return AdmitRecursive(unit, translated, recursion, assumptions, admitted, definitionBudget);
             }
             foreach (var declaration in translated.Declarations)
             {
                 try
                 {
-                    AddDeclaration(declaration, admitted);
+                    AddDeclaration(declaration, admitted, definitionBudget);
                     if (declaration is DefinitionDecl { Value: { Hints.Kind: ReducibilityHintsKind.Abbrev } abbrev })
                     {
                         // KTD9: an open enum and its members are `abbrev`s (docs/m4/05), reducible as Lean's are, so simp
@@ -242,10 +244,14 @@ public static class Pipeline
                         // KTD8: casesOn and ctorIdx, which Lean's elaborator would have made, each built after the last is admitted.
                         foreach (var construction in Constructions.For(Env, inductive))
                         {
-                            AddDeclaration(construction, admitted);
+                            AddDeclaration(construction, admitted, definitionBudget);
                             Constructions.Register(Attributes, construction.Value);
                         }
                     }
+                }
+                catch (KernelResourceException ex)
+                {
+                    return new UndecidedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, $"{definitionBudget.Exhausted(ex)} while the kernel checked the definition.");
                 }
                 catch (KernelException ex)
                 {
@@ -259,17 +265,23 @@ public static class Pipeline
         /// A recursive method (M5a KTD14, KTD15): each decrease theorem proved by the omega pipeline and admitted, then the
         /// definition, which refers to them, marked irreducible for Meta as Lean marks its well-founded definitions, then
         /// the equation lemma with its bare <c>Nat.fix_eq</c> proof. A decrease theorem that is not proved is WRT0001 at
-        /// its call, with its goal; an equation lemma the kernel rejects fails the unit.
+        /// its call, with its goal; an equation lemma the kernel rejects fails the unit. All of it runs in the unit's one
+        /// budget, and running out of it anywhere is WRT0006 (M5b KTD11).
         /// </summary>
         private UnitOutcome AdmitRecursive(
-            EngineUnit unit, TranslatedUnit translated, RecursiveDefinition recursion, ImmutableArray<UnitAssumption> assumptions, List<KernelDeclaration> admitted)
+            EngineUnit unit,
+            TranslatedUnit translated,
+            RecursiveDefinition recursion,
+            ImmutableArray<UnitAssumption> assumptions,
+            List<KernelDeclaration> admitted,
+            TheoremBudget budget)
         {
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
             var display = translated.DisplayName;
             foreach (var decrease in recursion.Decreases)
             {
-                if (ProveDecrease(unit, decrease, display, assumptions, admitted) is { } failure)
+                if (ProveDecrease(unit, decrease, display, assumptions, admitted, budget) is { } failure)
                 {
                     return failure;
                 }
@@ -278,9 +290,13 @@ public static class Pipeline
             {
                 foreach (var declaration in translated.Declarations)
                 {
-                    AddDeclaration(declaration, admitted);
+                    AddDeclaration(declaration, admitted, budget);
                 }
                 Attributes.SetReducibilityStatus(translated.Name, ReducibilityStatus.Irreducible);
+            }
+            catch (KernelResourceException ex)
+            {
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the definition.");
             }
             catch (KernelException ex)
             {
@@ -288,7 +304,11 @@ public static class Pipeline
             }
             try
             {
-                AddDeclaration(recursion.Equation.WithProof(recursion.EquationProof), admitted);
+                AddDeclaration(recursion.Equation.WithProof(recursion.EquationProof), admitted, budget);
+            }
+            catch (KernelResourceException ex)
+            {
+                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the equation lemma {recursion.Equation.Name}.");
             }
             catch (KernelException ex)
             {
@@ -302,12 +322,16 @@ public static class Pipeline
         /// pipeline; the proof the kernel admits. Null when it was admitted, else the unit's outcome.
         /// </summary>
         private UnitOutcome? ProveDecrease(
-            EngineUnit unit, DecreaseObligation decrease, string display, ImmutableArray<UnitAssumption> assumptions, List<KernelDeclaration> admitted)
+            EngineUnit unit,
+            DecreaseObligation decrease,
+            string display,
+            ImmutableArray<UnitAssumption> assumptions,
+            List<KernelDeclaration> admitted,
+            TheoremBudget budget)
         {
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
             var shell = decrease.Theorem;
-            var budget = new TheoremBudget(options, null);
             var meta = new MetaM(Env, budget.Meta) { Attributes = Attributes, DisplayNames = _names };
             var goal = meta.MkFreshExprSyntheticOpaqueMVar(shell.Type);
             MVarId? current = null;
@@ -348,7 +372,7 @@ public static class Pipeline
             }
             try
             {
-                AddDeclaration(shell.WithProof(proof), admitted);
+                AddDeclaration(shell.WithProof(proof), admitted, budget);
             }
             catch (KernelResourceException ex)
             {
@@ -363,9 +387,9 @@ public static class Pipeline
 
         private static string Describe(EngineUnit unit, DecreaseObligation decrease) => $"recursive call {decrease.Index} of {Display(unit)}";
 
-        private void AddDeclaration(KernelDeclaration declaration, List<KernelDeclaration> admitted)
+        private void AddDeclaration(KernelDeclaration declaration, List<KernelDeclaration> admitted, TheoremBudget budget)
         {
-            Kernel.Kernel.Add(Env, declaration, limits);
+            Kernel.Kernel.Add(Env, declaration, budget.Kernel);
             Admitted.Add(declaration);
             admitted.Add(declaration);
         }

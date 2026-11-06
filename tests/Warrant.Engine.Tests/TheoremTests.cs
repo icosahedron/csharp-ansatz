@@ -562,12 +562,10 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var result = Script("""
             public static class S
             {
-                [Verified] public static int Inc(int x) => x + 1;
                 [Theorem] static Proof Scripted(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("rfl")));
-                [Theorem] static Proof Computed() => Prove.That(Inc(1) == 2);
+                [Theorem] static Proof Computed() => Prove.That(1 + 1 == 2);
             }
             """, engine.Options with { Timeout = TimeSpan.Zero });
-        Assert.IsType<TranslatedOutcome>(result.Find("M:S.Inc(System.Int32)"));
         foreach (var key in new[] { "M:S.Scripted(System.Int32)", "M:S.Computed" })
         {
             var outcome = Assert.IsType<UndecidedOutcome>(result.Find(key));

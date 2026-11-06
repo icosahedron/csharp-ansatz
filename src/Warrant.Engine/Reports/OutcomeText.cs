@@ -18,11 +18,16 @@ public static class OutcomeText
     /// <returns>The message.</returns>
     public static string FalseMessage(string theorem) => $"Theorem '{theorem}' is false.";
 
-    /// <summary>The diagnostic message for an undecided theorem (WRT0006).</summary>
-    /// <param name="theorem">The theorem's short name, from <see cref="ShortName"/>.</param>
+    /// <summary>
+    /// The diagnostic message for a unit that ran out of a budget (WRT0006, R5): a theorem was not decided; a definition,
+    /// with its decrease proofs and equation lemma, was not verified.
+    /// </summary>
+    /// <param name="kind">What the unit is.</param>
+    /// <param name="name">The unit's short name, from <see cref="ShortName"/>.</param>
     /// <param name="reason">Why it is undecided.</param>
     /// <returns>The message.</returns>
-    public static string UndecidedMessage(string theorem, string reason) => $"Theorem '{theorem}' was not decided: {reason}";
+    public static string UndecidedMessage(VirUnitKind kind, string name, string reason) =>
+        kind == VirUnitKind.Theorem ? $"Theorem '{name}' was not decided: {reason}" : $"Member '{name}' was not verified: {reason}";
 
     /// <summary>The assumption report's detail for an undecided theorem.</summary>
     /// <param name="reason">Why it is undecided.</param>

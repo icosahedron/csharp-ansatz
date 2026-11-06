@@ -154,7 +154,7 @@ internal static class TranslateCommand
                     break;
                 case UndecidedOutcome u:
                     errors++;
-                    output.WriteLine(sources.Format(location, "error", UndecidedOutcome.Code, OutcomeText.UndecidedMessage(theorem, u.Reason)));
+                    output.WriteLine(sources.Format(location, "error", UndecidedOutcome.Code, OutcomeText.UndecidedMessage(u.UnitKind, theorem, u.Reason)));
                     break;
                 case InternalErrorOutcome i:
                     errors++;

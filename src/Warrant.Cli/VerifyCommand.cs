@@ -237,7 +237,7 @@ internal static class VerifyCommand
                         OutcomeText.NotProvedMessage(name, n, spans, report.Sources.Text), OutcomeText.NotProvedDetails(n), n.Goals);
                     break;
                 case UndecidedOutcome u:
-                    report.Diagnostic("error", UndecidedOutcome.Code, location, OutcomeText.UndecidedMessage(name, u.Reason));
+                    report.Diagnostic("error", UndecidedOutcome.Code, location, OutcomeText.UndecidedMessage(u.UnitKind, name, u.Reason));
                     break;
                 case InternalErrorOutcome i:
                     report.Diagnostic("error", InternalErrorOutcome.Code, location, OutcomeText.InternalErrorMessage(name, i.Reason));

@@ -55,6 +55,18 @@ public sealed class WarrantVerify : ToolTask
     /// </summary>
     public bool KeepConditionalCheck { get; set; }
 
+    /// <summary>
+    /// Verifies through the per-user verification server, falling back to in-process verification when it cannot be used
+    /// (<c>$(WarrantUseServer)</c>, <c>--server auto</c>); false always verifies in-process (<c>--server off</c>). M5b KTD27.
+    /// </summary>
+    public bool UseServer { get; set; } = true;
+
+    /// <summary>Has the kernel check every cached proof again (<c>$(WarrantRecheck)</c>, <c>--recheck</c>). M5b KTD27.</summary>
+    public bool Recheck { get; set; }
+
+    /// <summary>The project's result cache (<c>$(WarrantCacheDir)</c>, <c>--cache-dir</c>); no cache when empty. M5b KTD27.</summary>
+    public string? CacheDirectory { get; set; }
+
     /// <inheritdoc />
     protected override string ToolName => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "dotnet.exe" : "dotnet";
 
@@ -119,6 +131,14 @@ public sealed class WarrantVerify : ToolTask
         if (KeepConditionalCheck)
         {
             builder.AppendSwitch("--keep-conditional-check");
+        }
+
+        builder.AppendSwitch(UseServer ? "--server auto" : "--server off");
+        // A trailing separator would escape the closing quote of a quoted path.
+        AppendIfSet(builder, "--cache-dir ", CacheDirectory?.TrimEnd('\\', '/'));
+        if (Recheck)
+        {
+            builder.AppendSwitch("--recheck");
         }
 
         return builder.ToString();

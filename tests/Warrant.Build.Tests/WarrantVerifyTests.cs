@@ -121,8 +121,25 @@ public sealed class WarrantVerifyTests : IDisposable
 
         var args = Assert.Single(fake.Invocations());
         Assert.Equal(
-            ["verify", "--csc-args", Path.Combine(fake.ProjectDirectory, "obj", "warrant.csc.args"), "--project-dir", fake.ProjectDirectory, "--format", "msbuild"],
+            ["verify", "--csc-args", Path.Combine(fake.ProjectDirectory, "obj", "warrant.csc.args"), "--project-dir", fake.ProjectDirectory, "--format", "msbuild", "--server", "auto"],
             args);
+    }
+
+    [Fact]
+    public void ServerOffTheCacheDirectoryAndRecheckArePassedWhenSet()
+    {
+        // M5b KTD27. The directory has a space and a trailing separator, which must not escape the closing quote.
+        fake.Script([Summary], exitCode: 0);
+        var cache = Path.Combine(fake.ProjectDirectory, "obj dir", "warrant", "cache");
+        var task = Task();
+        task.UseServer = false;
+        task.Recheck = true;
+        task.CacheDirectory = cache + Path.DirectorySeparatorChar;
+
+        Assert.True(Run(task));
+
+        var args = Assert.Single(fake.Invocations());
+        Assert.Equal(["--server", "off", "--cache-dir", cache, "--recheck"], args.Skip(7));
     }
 
     [Fact]
@@ -139,7 +156,7 @@ public sealed class WarrantVerifyTests : IDisposable
 
         var args = Assert.Single(fake.Invocations());
         Assert.Equal(
-            ["--kernel-fuel", "20000000", "--tactic-fuel", "5000", "--timeout", "60", "--keep-conditional-check"],
+            ["--kernel-fuel", "20000000", "--tactic-fuel", "5000", "--timeout", "60", "--keep-conditional-check", "--server", "auto"],
             args.Skip(7));
     }
 

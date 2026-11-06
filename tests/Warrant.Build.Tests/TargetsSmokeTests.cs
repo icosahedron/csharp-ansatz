@@ -96,6 +96,60 @@ public sealed class TargetsSmokeTests : IDisposable
         Assert.Empty(fake.Invocations());
     }
 
+    [FactRequiringEnv(Gate)]
+    public void TheServerIsOffInContinuousIntegrationUnlessSetAndTheCacheIsUnderObj()
+    {
+        // M5b KTD27: WarrantUseServer, WarrantRecheck and WarrantCacheDir become --server, --recheck and --cache-dir.
+        var project = Sample("Knobs", "<TargetFramework>net10.0</TargetFramework>");
+        using var fake = new FakeCli(project);
+        fake.Script(["WRT1	summary	info			0	0	0	0	Warrant: 0 verified units, 0 theorems proved, 0 not proved."], exitCode: 0);
+        var cache = Path.Combine(project, "obj", "warrant", "cache");
+
+        var builds = new[]
+        {
+            Build(project),
+            Build(project, "-p:ContinuousIntegrationBuild=true"),
+            Build(project, "-p:ContinuousIntegrationBuild=true", "-p:WarrantUseServer=true", "-p:WarrantRecheck=true"),
+            Build(project, "-p:WarrantUseServer=false"),
+        };
+
+        Assert.All(builds, b => Assert.True(b.ExitCode == 0, b.Log));
+        var runs = fake.Invocations().Select(a => a.SkipWhile(x => x != "--server").ToArray()).ToList();
+        Assert.Equal(
+            [
+                ["--server", "auto", "--cache-dir", cache],
+                ["--server", "off", "--cache-dir", cache],
+                ["--server", "auto", "--cache-dir", cache, "--recheck"],
+                ["--server", "off", "--cache-dir", cache],
+            ],
+            runs);
+    }
+
+    [FactRequiringEnv(Gate)]
+    public void CleanAndRebuildDeleteTheCache()
+    {
+        // M5b R12.
+        var project = Sample("Clean", "<TargetFramework>net10.0</TargetFramework>");
+        using var fake = new FakeCli(project);
+        fake.Script(["WRT1	summary	info			0	0	0	0	Warrant: 0 verified units, 0 theorems proved, 0 not proved."], exitCode: 0);
+        var cache = Path.Combine(project, "obj", "warrant", "cache");
+        var entry = Path.Combine(cache, "ab", "entry");
+
+        Directory.CreateDirectory(Path.GetDirectoryName(entry)!);
+        File.WriteAllText(entry, "cached");
+        var (cleanExit, cleanLog) = Build(project, "-t:Clean");
+        Assert.True(cleanExit == 0, cleanLog);
+        Assert.False(Directory.Exists(cache), cleanLog);
+        Assert.True(Directory.Exists(Path.Combine(project, "obj")));
+
+        Directory.CreateDirectory(Path.GetDirectoryName(entry)!);
+        File.WriteAllText(entry, "cached");
+        var (rebuildExit, rebuildLog) = Build(project, "-t:Rebuild");
+        Assert.True(rebuildExit == 0, rebuildLog);
+        Assert.False(Directory.Exists(cache), rebuildLog);
+        Assert.Single(fake.Invocations());
+    }
+
     private string Sample(string name, string properties, bool importWarrantBuild = true)
     {
         var dir = Path.Combine(root, name);

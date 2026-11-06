@@ -6,7 +6,8 @@ using Xunit.Abstractions;
 /// <summary>
 /// The build matrix (U13, R11, R12): the real packages, consumed by isolated sample projects, under <c>dotnet build</c>
 /// and Visual Studio 2026's and 2022's <c>MSBuild.exe</c>. Opt-in: set WARRANT_BUILD_INTEGRATION=1. A Visual Studio that
-/// <c>vswhere</c> cannot find is skipped with the reason, never passed.
+/// <c>vswhere</c> cannot find is skipped with the reason, never passed. The Increment samples verify through a server of
+/// their own, which is shut down after the build; every other sample verifies in-process (M5b KTD29).
 /// </summary>
 [Collection(BuildIntegrationGroup.Name)]
 public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHelper output)
@@ -22,6 +23,11 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
 
         Assert.Equal(1, exitCode);
         AssertIncrementDiagnostics(diagnostics, log);
+
+        // The server, already shut down, holds nothing in the package folder that the fixture deletes (KTD29).
+        var tools = Path.Combine(packages.Root, "packages", "warrant.build", packages.Version, "tools");
+        Directory.Move(tools, tools + "-moved");
+        Directory.Move(tools + "-moved", tools);
     }
 
     [HostFact(BuildHost.VisualStudio2026)]
@@ -54,24 +60,51 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
     }
 
     [HostFact(BuildHost.Dotnet)]
-    public void TrueTheoremsBuildGreenWithTheSummaryAndASecondBuildVerifiesAgain()
+    public void TrueTheoremsBuildGreenThenComeFromTheCacheAndRecheckWithTheKernel()
     {
         var host = BuildHost.Find(BuildHost.Dotnet).Host!;
         var dir = packages.Sample("Proved", Samples.Project($"<TargetFramework>{Samples.Net10}</TargetFramework>"), Samples.Proved);
 
         var (firstExit, firstLog) = host.Build(dir);
         var (secondExit, secondLog) = host.Build(dir);
-        Report(host, dir, secondLog);
+        var (recheckExit, recheckLog) = host.Build(dir, "-p:WarrantRecheck=true");
+        Report(host, dir, firstLog + secondLog + recheckLog);
 
-        const string Summary = "Warrant: 4 verified units, 3 theorems proved, 0 not proved.";
         Assert.True(firstExit == 0, firstLog);
-        Assert.Contains(Summary, firstLog, StringComparison.Ordinal);
+        Assert.Contains("Warrant: 4 verified units, 3 theorems proved, 0 not proved.", firstLog, StringComparison.Ordinal);
+        Assert.True(Directory.Exists(Path.Combine(dir, "obj", "warrant", "cache")));
         Assert.True(secondExit == 0, secondLog);
-        // The compiler was up to date, so Csc gave no arguments; the last compile's file was verified again (KTD22).
+        // The compiler was up to date, so Csc gave no arguments; the last compile's file was verified again (KTD22), and
+        // every theorem came from the result cache (M5b R8).
         Assert.Contains("Skipping target \"CoreCompile\" because all output files are up-to-date", secondLog, StringComparison.Ordinal);
-        Assert.Contains(Summary, secondLog, StringComparison.Ordinal);
+        Assert.Contains("Warrant: 4 verified units, 3 theorems proved (3 from cache), 0 not proved.", secondLog, StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", Samples.Net10, "warrant.csc.args")));
-        Assert.DoesNotContain("WRT0011", firstLog + secondLog, StringComparison.Ordinal);
+        // WarrantRecheck: the kernel checks every cached proof again, and the build stays green (M5b R11).
+        Assert.True(recheckExit == 0, recheckLog);
+        Assert.Contains("Warrant: 4 verified units, 3 theorems proved (3 from cache, 3 rechecked), 0 not proved.", recheckLog, StringComparison.Ordinal);
+        Assert.DoesNotContain("WRT0011", firstLog + secondLog + recheckLog, StringComparison.Ordinal);
+        Assert.DoesNotContain("verification server", firstLog + secondLog + recheckLog, StringComparison.Ordinal);
+    }
+
+    [HostFact(BuildHost.Dotnet)]
+    public void DotnetCleanRemovesTheCacheAndTheNextBuildHasNoCachedResults()
+    {
+        var host = BuildHost.Find(BuildHost.Dotnet).Host!;
+        var dir = packages.Sample("Cleaned", Samples.Project($"<TargetFramework>{Samples.Net10}</TargetFramework>"), Samples.Proved);
+        var cache = Path.Combine(dir, "obj", "warrant", "cache");
+
+        var (firstExit, firstLog) = host.Build(dir);
+        Assert.True(firstExit == 0, firstLog);
+        Assert.True(Directory.Exists(cache), firstLog);
+
+        var (cleanExit, cleanLog) = host.Build(dir, "-t:Clean");
+        Assert.True(cleanExit == 0, cleanLog);
+        Assert.False(Directory.Exists(cache), cleanLog);
+
+        var (nextExit, nextLog) = host.Build(dir);
+        Report(host, dir, nextLog);
+        Assert.True(nextExit == 0, nextLog);
+        Assert.Contains("Warrant: 4 verified units, 3 theorems proved, 0 not proved.", nextLog, StringComparison.Ordinal);
     }
 
     [HostFact(BuildHost.Dotnet)]
@@ -220,7 +253,9 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         Assert.Contains("\nx : Int32\n⊢ x + 1 > x\n", lines, StringComparison.Ordinal);
         Assert.Contains("\nx : Int32\n⊢ Increment x > x\n", lines, StringComparison.Ordinal);
         Assert.Contains("\nx : Int32\n⊢ Increment x ≤ x\n", lines, StringComparison.Ordinal);
-        Assert.Contains("Warrant: 4 verified units, 0 theorems proved, 3 not proved.", log, StringComparison.Ordinal);
+        // Through the sample's own server (KTD29): no fallback, and the summary names the path taken (M5b KTD27).
+        Assert.Contains("Warrant: 4 verified units, 0 theorems proved, 3 not proved. [server]", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("verification server unavailable", log, StringComparison.Ordinal);
         // One error event per theorem: the loggers print each line of a message with its location, but count it once.
         Assert.Contains("3 Error(s)", log, StringComparison.Ordinal);
         Assert.DoesNotContain("MSB6006", log, StringComparison.Ordinal);
@@ -362,9 +397,10 @@ internal static class Samples
         """;
 
     /// <summary>A project body referencing the packages as a consumer would; <c>$(WarrantVersion)</c> is filled in.</summary>
-    public static string Project(string targetFrameworks, bool warrantBuild = true) => $"""
+    public static string Project(string targetFrameworks, bool warrantBuild = true, bool useServer = false) => $"""
           <PropertyGroup>
             {targetFrameworks}
+            {(useServer ? "<WarrantUseServer>true</WarrantUseServer>" : "")}
           </PropertyGroup>
           <ItemGroup>
             <PackageReference Include="Warrant" Version="$(WarrantVersion)" />

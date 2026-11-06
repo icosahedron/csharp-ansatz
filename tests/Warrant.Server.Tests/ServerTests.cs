@@ -67,6 +67,28 @@ public sealed class ServerTests(ServiceFixture fixture)
     }
 
     [Fact]
+    public async Task CancellingTheVerifyCallSendsCancelRequestWhichStopsItsWorkWithinASecond()
+    {
+        await using var server = HostedServer.Start(Service);
+        await using var watcher = await TestClient.ConnectAsync(server.Endpoint);
+        await using var client = await TestClient.ConnectAsync(server.Endpoint);
+        using var interrupt = new CancellationTokenSource();
+        var running = client.VerifyAsync(Requests.For(Requests.Slow(), "slow-rpc-cancel", Requests.Unbounded), interrupt.Token);
+        await watcher.WaitForStatusAsync(s => s.ActiveRequests.Any(r => r.RequestId == "slow-rpc-cancel"), Long);
+        await Task.Delay(TimeSpan.FromSeconds(1));
+
+        var stopwatch = Stopwatch.StartNew();
+        await interrupt.CancelAsync();
+        var response = await running.WaitAsync(Long);
+        var stoppedAfter = stopwatch.Elapsed;
+
+        Assert.True(stoppedAfter < TimeSpan.FromSeconds(1), $"the verify stopped {stoppedAfter} after $/cancelRequest");
+        Assert.Equal(OutcomeKind.Proved, response.Outcome("M:S.Early").Kind);
+        Assert.Equal(OutcomeKind.Cancelled, response.Outcome("M:S.Slow").Kind);
+        Assert.Empty((await watcher.StatusAsync()).ActiveRequests);
+    }
+
+    [Fact]
     public async Task ClosingTheConnectionMidVerifyCancelsThatRequestsWork()
     {
         await using var server = HostedServer.Start(Service);

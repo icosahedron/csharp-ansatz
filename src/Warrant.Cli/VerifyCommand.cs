@@ -10,13 +10,15 @@ using Warrant.Frontend;
 using Warrant.Kernel;
 using Warrant.Lean4Export;
 using Warrant.Meta;
+using Warrant.Semantics;
 using Warrant.Vir;
 
 /// <summary>
 /// <c>warrant verify</c> (plan M5a U12, KTD20, KTD21, KTD24; docs/m5a/07): builds the compilation from the compiler's own
-/// arguments, or like <c>translate</c> from a directory, then extracts, translates, proves and reports in-process. With
-/// <c>--format msbuild</c> each diagnostic is one <c>WRT1</c> record (the format <c>Warrant.Build</c>'s
-/// <c>OutputParser</c> reads), so a multi-line goal stays one MSBuild event.
+/// arguments, or like <c>translate</c> from a directory, then extracts, proves (through the verification server with
+/// <c>--server auto</c>, else in-process; M5b KTD5) and reports. With <c>--format msbuild</c> each diagnostic is one
+/// <c>WRT1</c> record (the format <c>Warrant.Build</c>'s <c>OutputParser</c> reads), so a multi-line goal stays one MSBuild
+/// event.
 /// </summary>
 internal static class VerifyCommand
 {
@@ -25,6 +27,7 @@ internal static class VerifyCommand
                warrant verify <directory> [options]
           options: --format text|msbuild  --out <file.ndjson>  --report <dir>  --keep-conditional-check
                    --kernel-fuel <n>  --tactic-fuel <n>  --timeout <seconds>  --bundle <path>  --cache-dir <dir>  --recheck
+                   --server auto|off  --timings
         """;
 
     /// <summary>The attribute sidecar's file name; it ships beside the semantics bundle (KTD9).</summary>
@@ -34,11 +37,17 @@ internal static class VerifyCommand
     /// <param name="args">The arguments after <c>verify</c>.</param>
     /// <param name="output">Where unit lines, diagnostics (or records) and the summary go.</param>
     /// <param name="error">Where usage errors and declines go.</param>
+    /// <param name="server">How the server is found and started; a build's defaults when null.</param>
+    /// <param name="cancellationToken">
+    /// Interrupts the run (Ctrl+C): the server is sent <c>$/cancelRequest</c>, or the in-process run stops, and the units
+    /// that had not finished are not reported (M5b R6).
+    /// </param>
     /// <returns>0 when every theorem was proved (warnings allowed); 1 when an error was reported; 2 for bad arguments or unreadable input.</returns>
-    public static int Run(string[] args, TextWriter output, TextWriter error)
+    public static int Run(string[] args, TextWriter output, TextWriter error, ServerSettings? server = null, CancellationToken cancellationToken = default)
     {
         string? directory = null, cscArgs = null, projectDir = null, outPath = null, reportDir = null, bundlePath = null, cacheDir = null;
-        bool msbuild = false, keepConditionalCheck = false, recheck = false;
+        bool msbuild = false, keepConditionalCheck = false, recheck = false, timings = false;
+        bool? useServer = null;
         long? kernelFuel = null, tacticFuel = null, timeoutSeconds = null;
         for (int i = 0; i < args.Length; i++)
         {
@@ -71,6 +80,12 @@ internal static class VerifyCommand
                     break;
                 case "--recheck":
                     recheck = true;
+                    break;
+                case "--server" when hasValue && args[i + 1] is "auto" or "off":
+                    useServer = args[++i] == "auto";
+                    break;
+                case "--timings":
+                    timings = true;
                     break;
                 case "--kernel-fuel" when hasValue && Count(args[i + 1]) is { } n:
                     kernelFuel = n;
@@ -132,6 +147,11 @@ internal static class VerifyCommand
                 // until export reads certificates from the cache (plan U16), so --out verifies without the cache.
                 CacheDirectory = outPath is null && cacheDir is not null ? Path.GetFullPath(cacheDir) : null,
                 Recheck = recheck,
+                SidecarPath = sidecarPath,
+                UseServer = useServer,
+                Timings = timings,
+                Server = server ?? new ServerSettings(),
+                CancellationToken = cancellationToken,
             };
             return cscArgs is not null
                 ? FromCscArgs(cscArgs, projectDir ?? Environment.CurrentDirectory, keepConditionalCheck, settings, output)
@@ -158,6 +178,24 @@ internal static class VerifyCommand
 
         /// <summary>Whether every cached proof is checked by the kernel again (M5b KTD16, <c>WarrantRecheck</c>).</summary>
         public bool Recheck { get; init; }
+
+        /// <summary>The attribute sidecar's file, which a started server copies.</summary>
+        public required string SidecarPath { get; init; }
+
+        /// <summary>
+        /// <c>--server auto</c> (true) or <c>--server off</c> (false); null when the option is absent, which is <c>off</c>
+        /// with the summary unchanged, so direct uses of the CLI keep M5a's output. The build passes the option (KTD27).
+        /// </summary>
+        public bool? UseServer { get; init; }
+
+        /// <summary>Whether each unit's time is printed after the summary (<c>--timings</c>, M5b KTD30).</summary>
+        public bool Timings { get; init; }
+
+        /// <summary>How the server is found and started.</summary>
+        public required ServerSettings Server { get; init; }
+
+        /// <summary>Interrupts the run.</summary>
+        public CancellationToken CancellationToken { get; init; }
 
         /// <summary>The budgets: the given ones, else the build's defaults (corpus kernel fuel for the directory mode, like translate).</summary>
         public EngineOptions Engine(KernelLimits kernel) => EngineOptions.Default with
@@ -237,14 +275,14 @@ internal static class VerifyCommand
             settings.Recheck,
             Priority: 0,
             [.. extraction.Units.Select(u => new RequestUnit(u.Key, u.Unit.Kind, u.DisplayName, VirWriter.Write(u.Unit)))]);
-        using var service = new VerificationService(SemanticsBundle.Load(settings.BundlePath), settings.Sidecar, hashes: settings.Hashes);
-        var run = service.Run(request);
-        var result = run.Result;
+        var (response, result, path) = Execute(request, settings, report);
+        // Both paths render from the response's wire outcomes, so they print the same bytes (M5b R3, KTD28).
+        var outcomes = response.Units.Select(u => u.Outcome).ToList();
 
-        int width = result.Units.Select(u => u.DisplayName.Length).DefaultIfEmpty(0).Max();
-        foreach (var unit in result.Units)
+        int width = outcomes.Select(u => u.DisplayName.Length).DefaultIfEmpty(0).Max();
+        foreach (var unit in outcomes)
         {
-            report.Line($"  {unit.DisplayName.PadRight(width)}  {TranslateCommand.Describe(unit)}");
+            report.Line($"  {unit.DisplayName.PadRight(width)}  {Describe(unit)}");
         }
 
         foreach (var d in extraction.Diagnostics)
@@ -253,7 +291,8 @@ internal static class VerifyCommand
         }
         var units = extraction.Units.ToDictionary(u => u.Key, StringComparer.Ordinal);
         var engineUnits = inputs.ToDictionary(u => u.Unit.Key, StringComparer.Ordinal);
-        foreach (var unit in result.Units)
+        // A proved theorem's outcome needs its certificate, which the wire leaves out; nothing below reports one.
+        foreach (var unit in outcomes.Where(u => u.Kind != OutcomeKind.Proved).Select(u => u.ToOutcome([])))
         {
             var location = units.TryGetValue(unit.Key, out var extracted) ? extracted.Location : null;
             var name = TranslateCommand.MessageName(compilation, unit);
@@ -296,26 +335,93 @@ internal static class VerifyCommand
         if (settings.OutPath is not null)
         {
             using var stream = File.Create(settings.OutPath);
-            result.WriteNdjson(stream);
+            result!.WriteNdjson(stream);
             report.Line($"wrote the bundle and {result.Admitted.Length} admitted declaration(s) to {settings.OutPath}");
         }
         if (settings.ReportDir is not null)
         {
             Directory.CreateDirectory(settings.ReportDir);
             var reportSettings = new ReportSettings(compilation.Options.CheckOverflow, OutcomeText.BundleName(settings.BundlePath));
-            var assumptions = AssumptionReports.Build(result, inputs, reportSettings, report.Sources.Text);
+            var assumptions = AssumptionReports.Build(result!, inputs, reportSettings, report.Sources.Text);
             File.WriteAllText(Path.Combine(settings.ReportDir, "report.md"), MarkdownReport.Render(assumptions));
             File.WriteAllText(Path.Combine(settings.ReportDir, "report.json"), JsonReport.Render(assumptions));
             report.Line($"wrote report.md and report.json to {settings.ReportDir}");
         }
 
-        var theorems = result.Units.Where(u => u.UnitKind == VirUnitKind.Theorem).ToList();
-        int proved = theorems.Count(u => u is ProvedOutcome);
-        report.Summary(result.Units.Length, proved, theorems.Count - proved, run.Response.Counters.Hits, run.Response.Counters.Rechecked);
+        var theorems = outcomes.Where(u => u.UnitKind == VirUnitKind.Theorem).ToList();
+        int proved = theorems.Count(u => u.Kind == OutcomeKind.Proved);
+        // A cancelled theorem is unreported, not unproved (M5b R6).
+        int notProved = theorems.Count(u => u.Kind is not (OutcomeKind.Proved or OutcomeKind.Cancelled));
+        // The path is named only when the server was asked for, so the default output stays M5a's (KTD27).
+        report.Summary(outcomes.Count, proved, notProved, response.Counters.Hits, response.Counters.Rechecked, settings.UseServer == true ? path : null);
+        if (settings.Timings)
+        {
+            report.Line(string.Create(CultureInfo.InvariantCulture, $"timings ({path}): {response.Elapsed.TotalMilliseconds:0.0} ms for the request"));
+            foreach (var unit in response.Units)
+            {
+                var source = unit.FromCache ? (unit.Rechecked ? "rechecked" : "cache") : path;
+                report.Line(string.Create(CultureInfo.InvariantCulture, $"  {unit.Elapsed.TotalMilliseconds,10:0.0} ms  {source,-10}  {unit.Outcome.DisplayName}"));
+            }
+        }
 
-        bool clean = report.Errors == 0 && result.Units.All(u => u is TranslatedOutcome or ProvedOutcome);
+        bool clean = report.Errors == 0 && outcomes.All(u => u.Kind is OutcomeKind.Translated or OutcomeKind.Proved);
         return clean ? 0 : 1;
     }
+
+    /// <summary>A unit's line: its outcome's name, with the proof kind or the reason where there is one.</summary>
+    private static string Describe(OutcomeDto unit) => unit.Kind == OutcomeKind.Proved
+        ? $"proved ({AssumptionReports.ProofName(unit.By ?? ProofKind.Script)})"
+        : TranslateCommand.Describe(unit.ToOutcome([]));
+
+    /// <summary>
+    /// Verifies the request through the server when <c>--server auto</c> asks for it, else in-process (M5b KTD5). Any
+    /// failure on the server path writes one message with the reason and verifies the request in-process with the same
+    /// service; the server answers a request all at once, so a lost connection leaves no unit with a result, and the
+    /// whole request runs again. An interrupted run is not a failure: its units come back cancelled.
+    /// </summary>
+    /// <returns>The response; the engine's result when the run was in-process; and the path taken, <c>server</c> or <c>in-process</c>.</returns>
+    private static (VerifyResponse Response, EngineResult? Result, string Path) Execute(VerifyRequest request, Settings settings, Reporter report)
+    {
+        var token = settings.CancellationToken;
+        // --out and --report need the declarations the run admitted, which only an in-process run holds; the server's
+        // export and report methods arrive with plan unit U16.
+        if (settings.UseServer == true && settings.OutPath is null && settings.ReportDir is null)
+        {
+            try
+            {
+                var response = Task.Run(async () =>
+                {
+                    using var client = await ServerClient.ConnectOrStartAsync(settings.Server, settings.Hashes, settings.BundlePath, settings.SidecarPath, token)
+                        .ConfigureAwait(false);
+                    return await client.VerifyAsync(request, token).ConfigureAwait(false);
+                }).GetAwaiter().GetResult();
+                return (response, null, "server");
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                return (Cancelled(request), null, "server");
+            }
+            catch (ServerUnavailableException ex)
+            {
+                report.Message($"Warrant: verification server unavailable ({ex.Message}); verifying in-process.");
+            }
+        }
+        var service = settings.Server.InProcessService;
+        using var owned = service is null ? new VerificationService(SemanticsBundle.Load(settings.BundlePath), settings.Sidecar, hashes: settings.Hashes) : null;
+        var run = (owned ?? service!).Run(request, token);
+        return (run.Response, run.Result, "in-process");
+    }
+
+    /// <summary>The response of a request interrupted before the server answered: every unit cancelled.</summary>
+    private static VerifyResponse Cancelled(VerifyRequest request) => new(
+        request.ProtocolVersion,
+        request.RequestId,
+        [
+            .. request.Units.Select(u => new UnitResult(
+                new OutcomeDto(OutcomeKind.Cancelled, u.Key, u.Kind, u.DisplayName ?? LeanNames.FallbackDisplay(u.Key), []), FromCache: false, Rechecked: false, TimeSpan.Zero)),
+        ],
+        new VerifyCounters(0, 0, 0, 0),
+        TimeSpan.Zero);
 
     private static long? Count(string text) =>
         long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? n : null;
@@ -371,11 +477,24 @@ internal static class VerifyCommand
             }
         }
 
+        /// <summary>A line that is neither a diagnostic nor the summary, such as the server fallback's (M5b KTD5): an informational record.</summary>
+        public void Message(string text)
+        {
+            if (msbuild)
+            {
+                Record("diag", "info", "", null, text);
+            }
+            else
+            {
+                output.WriteLine(text);
+            }
+        }
+
         /// <summary>
-        /// The summary line; it says how many results came from the result cache when any did, and how many of those the
-        /// kernel checked again when any were (M5b R8, R11, KTD27).
+        /// The summary line; it says how many results came from the result cache when any did, how many of those the
+        /// kernel checked again when any were, and, when given, the path the results came by (M5b R8, R11, KTD27).
         /// </summary>
-        public void Summary(int units, int proved, int notProved, int fromCache = 0, int rechecked = 0)
+        public void Summary(int units, int proved, int notProved, int fromCache = 0, int rechecked = 0, string? path = null)
         {
             var cached = (fromCache, rechecked) switch
             {
@@ -384,6 +503,10 @@ internal static class VerifyCommand
                 _ => "",
             };
             var text = string.Create(CultureInfo.InvariantCulture, $"Warrant: {units} verified units, {proved} theorems proved{cached}, {notProved} not proved.");
+            if (path is not null)
+            {
+                text += $" [{path}]";
+            }
             if (msbuild)
             {
                 Record("summary", "info", "", null, text);

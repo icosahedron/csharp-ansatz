@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Warrant.Kernel;
 using Warrant.Vir;
 
@@ -303,6 +305,18 @@ public static class ServerProtocol
 
     /// <summary>The error of a <c>verify</c> whose request id another running request already has.</summary>
     public const int RequestIdInUseError = -32003;
+
+    /// <summary>
+    /// The wire's JSON options, the same at both ends: camel-case, enums as strings, the service's records through their
+    /// source-generated contracts (<see cref="ServiceJsonContext"/>), and any other type by reflection. The fallback is
+    /// for the transport's own messages: StreamJsonRpc's <c>$/cancelRequest</c> carries a type the context cannot name,
+    /// and without it the notification is dropped, so a client could never cancel the request it is waiting on.
+    /// </summary>
+    /// <returns>New options.</returns>
+    public static JsonSerializerOptions CreateSerializerOptions() => new(ServiceJsonContext.Default.Options)
+    {
+        TypeInfoResolver = JsonTypeInfoResolver.Combine(ServiceJsonContext.Default, new DefaultJsonTypeInfoResolver()),
+    };
 }
 
 /// <summary>The answer to <c>hello</c>.</summary>

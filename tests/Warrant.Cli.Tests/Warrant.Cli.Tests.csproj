@@ -18,6 +18,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\corpus\m4\**\*" LinkBase="corpus\m4" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The M5a exit corpus, which the parity test verifies through the server and in-process (M5b KTD28). -->
+    <None Include="..\corpus\m5a\**\*" LinkBase="corpus\m5a" CopyToOutputDirectory="PreserveNewest" />
     <!-- A Csc argument file and the project files it names (plan M5a U12); its sources are data, not this project's code. -->
     <Compile Remove="cscargs\**" />
     <None Remove="cscargs\**" />

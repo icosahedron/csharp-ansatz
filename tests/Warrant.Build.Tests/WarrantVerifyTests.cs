@@ -59,6 +59,21 @@ public sealed class WarrantVerifyTests : IDisposable
     }
 
     [Fact]
+    public void TheServerFallbackRecordIsANormalImportanceMessageNotAWarning()
+    {
+        // M5b KTD5: a message keeps TreatWarningsAsErrors builds green when the server cannot be used.
+        const string fallback = "Warrant: verification server unavailable (connecting to the server timed out after 5 s); verifying in-process.";
+        fake.Script([$"WRT1\tdiag\tinfo\t\t\t0\t0\t0\t0\t{fallback}", Summary.Replace("not proved.", "not proved. [in-process]", StringComparison.Ordinal)], exitCode: 0);
+
+        Assert.True(Run(Task()));
+
+        Assert.Empty(engine.Warnings);
+        Assert.Empty(engine.Errors);
+        var message = Assert.Single(engine.Messages, m => m.Message == fallback);
+        Assert.Equal(MessageImportance.Normal, message.Importance);
+    }
+
+    [Fact]
     public void ExitTwoIsWrt0010QuotingTheTailOfTheErrorOutput()
     {
         var stderr = Enumerable.Range(1, 25).Select(i => $"stderr line {i}").ToArray();

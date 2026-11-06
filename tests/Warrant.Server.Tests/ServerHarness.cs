@@ -90,7 +90,7 @@ internal sealed class TestClient : IAsyncDisposable
             await socket.ConnectAsync(new UnixDomainSocketEndPoint(endpoint.Address));
             stream = new NetworkStream(socket, ownsSocket: true);
         }
-        var formatter = new SystemTextJsonFormatter { JsonSerializerOptions = new JsonSerializerOptions(ServiceJsonContext.Default.Options) };
+        var formatter = new SystemTextJsonFormatter { JsonSerializerOptions = ServerProtocol.CreateSerializerOptions() };
         var rpc = new JsonRpc(new HeaderDelimitedMessageHandler(stream, stream, formatter));
         rpc.StartListening();
         return new TestClient(rpc);

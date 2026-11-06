@@ -20,6 +20,7 @@ internal static class Cli
           warrant translate <directory> [--out <file.ndjson>] [--report <file.md>] [--check-overflow] [--bundle <path>]
           warrant verify --csc-args <file> [--project-dir <dir>] [options]
           warrant verify <directory> [options]
+          warrant server status | cancel <request id> | shutdown
 
         check   re-checks every declaration with the kernel (exit 0 accept, 1 reject, 2 decline)
                 --fuel N          step budget per type checker (default 100000000)
@@ -50,11 +51,19 @@ internal static class Cli
                   --tactic-fuel N           tactic steps per theorem (default 171970)
                   --timeout SECONDS         wall-clock limit per theorem (default 30)
                   --bundle PATH             the semantics bundle; the attribute sidecar must be beside it
+                  --cache-dir DIR           read and write the result cache there (not with --out)
+                  --recheck                 check every cached proof with the kernel again
+                  --server auto|off         verify through the per-user verification server, starting it when none
+                                            runs and verifying in-process when it cannot be used (auto); or always
+                                            in-process (off, the default); --out and --report always verify in-process
+                  --timings                 print each unit's time after the summary
+        server  manages the verification server of this toolchain: status prints what it holds and runs, cancel stops a
+                request, shutdown stops it after its running requests (exit 0 when no server runs, except for cancel)
         """;
 
     public static int Run(string[] args)
     {
-        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate" or "verify") || (args[0] == "export" && args.Length < 3))
+        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate" or "verify" or "server") || (args[0] == "export" && args.Length < 3))
         {
             Console.Error.WriteLine(Usage);
             return 2;
@@ -67,6 +76,7 @@ internal static class Cli
                 "export" => Check(args[1], args.Skip(3).ToArray(), output: args[2]),
                 "translate" => TranslateCommand.Run(args[1..], Console.Out, Console.Error),
                 "verify" => Verify(args[1..]),
+                "server" => ServerCommand.Run(args[1..], Console.Out, Console.Error),
                 _ => Check(args[1], args.Skip(2).ToArray()),
             };
         }
@@ -77,11 +87,31 @@ internal static class Cli
         }
     }
 
-    /// <summary>The build task reads verify's output as UTF-8 without a BOM, whatever the console's code page (goals hold ⊢).</summary>
+    /// <summary>
+    /// The build task reads verify's output as UTF-8 without a BOM, whatever the console's code page (goals hold ⊢). The
+    /// first Ctrl+C interrupts the run, cancelling it on the server or in-process (M5b R6); a second one ends the process.
+    /// </summary>
     private static int Verify(string[] args)
     {
         Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-        return VerifyCommand.Run(args, Console.Out, Console.Error);
+        using var interrupt = new CancellationTokenSource();
+        void OnCancel(object? sender, ConsoleCancelEventArgs e)
+        {
+            if (!interrupt.IsCancellationRequested)
+            {
+                e.Cancel = true;
+                interrupt.Cancel();
+            }
+        }
+        Console.CancelKeyPress += OnCancel;
+        try
+        {
+            return VerifyCommand.Run(args, Console.Out, Console.Error, cancellationToken: interrupt.Token);
+        }
+        finally
+        {
+            Console.CancelKeyPress -= OnCancel;
+        }
     }
 
     private static int Stats(string path)

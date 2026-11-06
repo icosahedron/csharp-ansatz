@@ -11,8 +11,8 @@ namespace Warrant.Server;
 /// <remarks><c>explain</c>, <c>export</c> and <c>report</c> arrive with plan unit U16 and are not registered yet.</remarks>
 internal sealed class RpcTarget(ServerHost host, VerificationService service)
 {
-    /// <summary>The wire's JSON options: the service's source-generated contracts, camel-case, enums as strings.</summary>
-    public static JsonSerializerOptions SerializerOptions { get; } = new(ServiceJsonContext.Default.Options);
+    /// <summary>The wire's JSON options (<see cref="ServerProtocol.CreateSerializerOptions"/>).</summary>
+    public static JsonSerializerOptions SerializerOptions { get; } = ServerProtocol.CreateSerializerOptions();
 
     /// <summary>
     /// Checks the client's protocol version. A mismatch is an error, and the server drains and exits, so the next client

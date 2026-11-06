@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- The test client is built on StreamJsonRpc directly; the CLI's client is plan unit U9's. -->
+    <PackageReference Include="StreamJsonRpc" Version="2.26.150" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Warrant.TestSupport" />
+    <ProjectReference Include="..\..\src\Warrant.Server\Warrant.Server.csproj" />
+    <ProjectReference Include="..\Warrant.TestSupport\Warrant.TestSupport.csproj" />
+    <!-- Test-only: requests are compiled and extracted here; the server itself never sees Roslyn (KTD1). -->
+    <ProjectReference Include="..\..\src\Warrant\Warrant.csproj" />
+    <ProjectReference Include="..\..\src\Warrant.Frontend\Warrant.Frontend.csproj" />
+    <ProjectReference Include="..\..\src\Warrant.Extraction\Warrant.Extraction.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\data\warrant-semantics.ndjson.gz" LinkBase="data" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\data\warrant-attributes.ndjson.gz" LinkBase="data" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

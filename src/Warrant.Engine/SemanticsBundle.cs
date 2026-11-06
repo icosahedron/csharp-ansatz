@@ -13,6 +13,9 @@ public sealed class SemanticsBundle
     /// <summary>The bundle's file name as the repository commits it (<c>tests/data/warrant-semantics.ndjson.gz</c>).</summary>
     public const string FileName = "warrant-semantics.ndjson.gz";
 
+    /// <summary>The attribute sidecar made for the bundle, which ships beside it.</summary>
+    public const string SidecarFileName = "warrant-attributes.ndjson.gz";
+
     /// <summary>Wraps a bundle that has already been checked and frozen.</summary>
     /// <param name="declarations">The bundle's declarations, in file order; NDJSON export writes them first.</param>
     /// <param name="env">The environment the declarations were checked into; must be frozen.</param>

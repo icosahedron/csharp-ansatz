@@ -43,7 +43,13 @@ internal sealed class BuildHost
     /// Runs a build of the project in <paramref name="directory"/> and returns its exit code and its UTF-8 file log at
     /// normal verbosity. Every host restores, and none keeps nodes or the compiler server alive afterwards.
     /// </summary>
-    public (int ExitCode, string Log) Build(string directory, params string[] extra)
+    public (int ExitCode, string Log) Build(string directory, params string[] extra) => Build(directory, null, extra);
+
+    /// <summary>
+    /// <see cref="Build(string, string[])"/> with <paramref name="environment"/> added to the build's environment, which
+    /// the task passes on to the CLI and the CLI to a server it starts.
+    /// </summary>
+    public (int ExitCode, string Log) Build(string directory, IReadOnlyDictionary<string, string>? environment, params string[] extra)
     {
         var log = Path.Combine(directory, $"build-{Guid.NewGuid():N}.log");
         var start = new ProcessStartInfo(MSBuildExe ?? FakeCli.DotnetHost)
@@ -62,6 +68,11 @@ internal sealed class BuildHost
         }
 
         Isolate(start, visualStudio: MSBuildExe is not null);
+        foreach (var (key, value) in environment ?? new Dictionary<string, string>())
+        {
+            start.Environment[key] = value;
+        }
+
         var (exitCode, output) = Run(start, TimeSpan.FromMinutes(5));
         return (exitCode, File.Exists(log) ? File.ReadAllText(log, Encoding.UTF8) : output);
     }

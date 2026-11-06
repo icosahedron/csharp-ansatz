@@ -11,7 +11,7 @@ namespace Warrant.Cli.Tests;
 /// <c>warrant verify</c> (plan M5a U12, KTD20, KTD21, KTD24; docs/m5a/07), run in-process. <c>cscargs/sample.csc.args</c>
 /// is the Extraction tests' argument file (<c>@(CscCommandLineArgs)</c> of a net10.0 library with <c>/define:DEBUG</c> and
 /// <c>/langversion:14</c>) with <c>/checked-</c>, the SDK's default, so arithmetic wraps as the M5a exit example needs;
-/// its reference pack is written to <c>refs\</c> here.
+/// its reference pack is written to <c>refs/</c> here.
 /// </summary>
 public sealed class VerifyTests : IDisposable
 {
@@ -437,7 +437,7 @@ public sealed class VerifyTests : IDisposable
         Assert.Contains("attribute sidecar", output, StringComparison.Ordinal);
 
         // The real sidecar beside a different bundle file: its recorded SHA-256 does not match.
-        File.Copy(Path.Combine(AppContext.BaseDirectory, VerifyCommand.SidecarFileName), Path.Combine(bundles, VerifyCommand.SidecarFileName));
+        File.Copy(Path.Combine(AppContext.BaseDirectory, SemanticsBundle.SidecarFileName), Path.Combine(bundles, SemanticsBundle.SidecarFileName));
         File.AppendAllText(bundle, "x");
         (code, output) = VerifyArgs("--bundle", bundle);
         Assert.Equal(2, code);
@@ -520,7 +520,7 @@ public sealed class VerifyTests : IDisposable
     public void TheSidecarIsCopiedBesideTheCli()
     {
         var cli = Path.GetDirectoryName(typeof(VerifyCommand).Assembly.Location)!;
-        Assert.True(File.Exists(Path.Combine(cli, VerifyCommand.SidecarFileName)));
+        Assert.True(File.Exists(Path.Combine(cli, SemanticsBundle.SidecarFileName)));
     }
 
     private static string Unescape(string field) =>

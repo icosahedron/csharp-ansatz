@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Warrant.Kernel;
 using Warrant.Vir;
 
@@ -274,8 +276,92 @@ public sealed record ReadBackSideDto(int NodeId, ReadBackKind Kind, string Text)
     });
 }
 
+/// <summary>
+/// The server's JSON-RPC methods and error codes (M5b KTD2, KTD26; docs/m5b/01). Every connection calls
+/// <see cref="Hello"/> first.
+/// </summary>
+public static class ServerProtocol
+{
+    /// <summary><c>hello(protocol)</c>: checks the client's protocol version; answers a <see cref="HelloResponse"/>.</summary>
+    public const string Hello = "hello";
+
+    /// <summary><c>verify(request)</c>: verifies a <see cref="VerifyRequest"/>; answers a <see cref="VerifyResponse"/>.</summary>
+    public const string Verify = "verify";
+
+    /// <summary><c>cancel(id)</c>: cancels the running request with that id, from any connection; answers whether one was running.</summary>
+    public const string Cancel = "cancel";
+
+    /// <summary><c>status()</c>: answers a <see cref="ServerStatus"/>.</summary>
+    public const string Status = "status";
+
+    /// <summary><c>shutdown()</c>: lets the running requests finish, then exits.</summary>
+    public const string Shutdown = "shutdown";
+
+    /// <summary>The error of a <c>hello</c> with another protocol version; the server then drains and exits.</summary>
+    public const int ProtocolMismatchError = -32001;
+
+    /// <summary>The error of a <c>verify</c> that arrives while the server drains.</summary>
+    public const int ShuttingDownError = -32002;
+
+    /// <summary>The error of a <c>verify</c> whose request id another running request already has.</summary>
+    public const int RequestIdInUseError = -32003;
+
+    /// <summary>
+    /// The wire's JSON options, the same at both ends: camel-case, enums as strings, the service's records through their
+    /// source-generated contracts (<see cref="ServiceJsonContext"/>), and any other type by reflection. The fallback is
+    /// for the transport's own messages: StreamJsonRpc's <c>$/cancelRequest</c> carries a type the context cannot name,
+    /// and without it the notification is dropped, so a client could never cancel the request it is waiting on.
+    /// </summary>
+    /// <returns>New options.</returns>
+    public static JsonSerializerOptions CreateSerializerOptions() => new(ServiceJsonContext.Default.Options)
+    {
+        TypeInfoResolver = JsonTypeInfoResolver.Combine(ServiceJsonContext.Default, new DefaultJsonTypeInfoResolver()),
+    };
+}
+
+/// <summary>The answer to <c>hello</c>.</summary>
+/// <param name="ProtocolVersion">The protocol the server speaks.</param>
+/// <param name="ToolchainIdentity">The server's toolchain identity (<see cref="Toolchain.Identity"/>).</param>
+/// <param name="ProcessId">The server's process id.</param>
+public sealed record HelloResponse(int ProtocolVersion, string ToolchainIdentity, int ProcessId);
+
+/// <summary>What the server holds and runs (M5b KTD26), the answer to <c>status</c>.</summary>
+/// <param name="ProcessId">The server's process id.</param>
+/// <param name="Endpoint">The endpoint it listens on: the pipe name on Windows, the socket path elsewhere.</param>
+/// <param name="ToolchainIdentity">Its toolchain identity.</param>
+/// <param name="Uptime">The time since it started.</param>
+/// <param name="BundleSha256">The SHA-256 of the semantics bundle it loaded; null when unknown.</param>
+/// <param name="SidecarSha256">The SHA-256 of the attribute sidecar it loaded; null when unknown.</param>
+/// <param name="GcHeapBytes">The size of the managed heap after the last garbage collection.</param>
+/// <param name="WorkingSetBytes">The process's working set.</param>
+/// <param name="Counters">The counters of every request it has answered: cache hits, misses and tactic runs.</param>
+/// <param name="ActiveRequests">The requests it is running.</param>
+public sealed record ServerStatus(
+    int ProcessId,
+    string Endpoint,
+    string ToolchainIdentity,
+    TimeSpan Uptime,
+    string? BundleSha256,
+    string? SidecarSha256,
+    long GcHeapBytes,
+    long WorkingSetBytes,
+    VerifyCounters Counters,
+    ImmutableArray<ActiveRequest> ActiveRequests);
+
+/// <summary>A request the server is running.</summary>
+/// <param name="RequestId">The id the client chose, by which <c>cancel</c> stops it.</param>
+/// <param name="ProjectDirectory">The project it verifies.</param>
+/// <param name="Units">The number of units it carries.</param>
+/// <param name="Elapsed">The time since it arrived.</param>
+public sealed record ActiveRequest(string RequestId, string ProjectDirectory, int Units, TimeSpan Elapsed);
+
 /// <summary>The System.Text.Json contracts of the service's requests and responses, generated at compile time.</summary>
 [JsonSourceGenerationOptions(UseStringEnumConverter = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(VerifyRequest))]
 [JsonSerializable(typeof(VerifyResponse))]
+[JsonSerializable(typeof(HelloResponse))]
+[JsonSerializable(typeof(ServerStatus))]
+[JsonSerializable(typeof(int))]
+[JsonSerializable(typeof(bool))]
+[JsonSerializable(typeof(string))]
 public sealed partial class ServiceJsonContext : JsonSerializerContext;

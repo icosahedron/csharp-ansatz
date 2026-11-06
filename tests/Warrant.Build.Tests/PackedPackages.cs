@@ -1,7 +1,9 @@
 namespace Warrant.Build.Tests;
 
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 
 /// <summary>The build-integration tests share one packed feed and run one at a time.</summary>
 [CollectionDefinition(Name)]
@@ -34,7 +36,14 @@ public sealed class PackedPackages : IDisposable
 
         Directory.CreateDirectory(Feed);
         // Stop MSBuild's upward search so the repository's and the machine's Directory.Build files never apply.
-        File.WriteAllText(Path.Combine(Root, "Directory.Build.props"), "<Project />");
+        // M5b KTD29: samples verify in-process unless they test the server, which they then shut down.
+        File.WriteAllText(Path.Combine(Root, "Directory.Build.props"), """
+            <Project>
+              <PropertyGroup>
+                <WarrantUseServer>false</WarrantUseServer>
+              </PropertyGroup>
+            </Project>
+            """);
         File.WriteAllText(Path.Combine(Root, "Directory.Build.targets"), "<Project />");
         File.WriteAllText(Path.Combine(Root, "global.json"), Samples.GlobalJson("10.0.100", "latestFeature"));
         File.WriteAllText(Path.Combine(Root, "NuGet.config"), $"""
@@ -62,6 +71,9 @@ public sealed class PackedPackages : IDisposable
 
     /// <summary>The packages' version, <c>0.0.0-it.&lt;ticks&gt;</c>.</summary>
     public string Version { get; }
+
+    /// <summary>The packed CLI, which a build of any sample runs.</summary>
+    public string CliPath => Path.Combine(Root, "packages", "warrant.build", Version, "tools", "net10.0", "any", "warrant.dll");
 
     /// <summary>The Increment sample built once with <c>dotnet build</c>: the diagnostics every other host must match.</summary>
     internal (int ExitCode, string Log, IReadOnlyList<string> Diagnostics) DotnetIncrement => dotnetIncrement.Value;
@@ -92,11 +104,16 @@ public sealed class PackedPackages : IDisposable
         return dir;
     }
 
-    /// <summary>Builds the Increment sample with <paramref name="host"/> in a directory of its own.</summary>
+    /// <summary>
+    /// Builds the Increment sample with <paramref name="host"/> in a directory of its own, through a verification server of
+    /// its own, which is shut down before this returns (M5b KTD29).
+    /// </summary>
     internal (int ExitCode, string Log, IReadOnlyList<string> Diagnostics) BuildIncrement(BuildHost host, string name, string targetFramework, string? sdk = null)
     {
-        var dir = Sample(name, Samples.Project($"<TargetFramework>{targetFramework}</TargetFramework>"), Samples.Increment, sdk);
-        var (exitCode, log) = host.Build(dir);
+        var dir = Sample(name, Samples.Project($"<TargetFramework>{targetFramework}</TargetFramework>", useServer: true), Samples.Increment, sdk);
+        using var server = new SampleServer(CliPath);
+        var (exitCode, log) = host.Build(dir, server.Environment);
+        Assert.True(server.ShutDown() is not null, $"no verification server was running after the build:\n{log}");
         return (exitCode, log, Samples.Diagnostics(log, dir));
     }
 
@@ -154,5 +171,88 @@ public sealed class PackedPackages : IDisposable
         }
 
         throw new InvalidOperationException("the repository root (Warrant.slnx) is not above " + AppContext.BaseDirectory);
+    }
+}
+
+/// <summary>
+/// A verification server of one sample's own (M5b KTD29): its builds name a unique endpoint, so no other test's or the
+/// user's server answers them, and it is shut down at the end, so no server outlives the tests or holds their files. The
+/// short idle timeout is a backstop for a test run that is killed before the shutdown.
+/// </summary>
+internal sealed class SampleServer(string cliPath) : IDisposable
+{
+    private bool shutDown;
+
+    /// <summary>The endpoint's name.</summary>
+    public string Endpoint { get; } = "wrt-it-" + Guid.NewGuid().ToString("N")[..16];
+
+    /// <summary>The variables a build that uses this server runs with.</summary>
+    public IReadOnlyDictionary<string, string> Environment => new Dictionary<string, string>
+    {
+        ["WARRANT_SERVER_ENDPOINT"] = Endpoint,
+        ["WARRANT_SERVER_IDLE_SECONDS"] = "300",
+    };
+
+    /// <summary>
+    /// Runs <c>warrant server shutdown</c> and waits for the server's process to exit; returns its process ID, or null
+    /// when no server was running.
+    /// </summary>
+    public int? ShutDown()
+    {
+        var (exitCode, output, processId) = ShutDownAndWait();
+        Assert.True(exitCode == 0, $"warrant server shutdown failed:\n{output}");
+        return processId;
+    }
+
+    public void Dispose()
+    {
+        if (!shutDown)
+        {
+            ShutDownAndWait();
+        }
+    }
+
+    private (int ExitCode, string Output, int? ProcessId) ShutDownAndWait()
+    {
+        shutDown = true;
+        var start = new ProcessStartInfo(FakeCli.DotnetHost)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var arg in new[] { cliPath, "server", "shutdown" })
+        {
+            start.ArgumentList.Add(arg);
+        }
+
+        foreach (var (key, value) in Environment)
+        {
+            start.Environment[key] = value;
+        }
+
+        var (exitCode, output) = BuildHost.Run(start, TimeSpan.FromMinutes(2));
+        var match = Regex.Match(output, @"\(process (\d+)\)");
+        if (!match.Success)
+        {
+            return (exitCode, output, null);
+        }
+
+        var processId = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (!process.WaitForExit(TimeSpan.FromMinutes(1)))
+            {
+                process.Kill();
+                Assert.Fail($"the verification server (process {processId}) did not exit after shutdown");
+            }
+        }
+        catch (ArgumentException)
+        {
+            // It has already exited.
+        }
+
+        return (exitCode, output, processId);
     }
 }

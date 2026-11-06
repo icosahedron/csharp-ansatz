@@ -11,8 +11,8 @@ namespace Warrant.Extraction.Tests;
 /// <summary>
 /// Compilations from the compiler's own arguments (plan M5a U12, KTD21; docs/m5a/07, "Reproducing the compilation").
 /// <c>cscargs/sample.csc.args</c> is <c>@(CscCommandLineArgs)</c> from a <c>dotnet build</c> of a net10.0 library, with
-/// the reference pack's paths replaced by <c>refs\</c>, <c>obj\Debug\net10.0\</c> by <c>generated\</c>, a reference to
-/// <c>refs\Warrant.dll</c> added, and the SDK's analyzers and global analyzer config removed.
+/// the reference pack's paths replaced by <c>refs/</c>, <c>obj/Debug/net10.0/</c> by <c>generated/</c>, a reference to
+/// <c>refs/Warrant.dll</c> added, paths written with forward slashes so the file works on every OS, and the SDK's analyzers and global analyzer config removed.
 /// </summary>
 public sealed class CscArgsTests : IDisposable
 {

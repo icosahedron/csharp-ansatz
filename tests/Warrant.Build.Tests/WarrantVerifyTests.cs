@@ -59,6 +59,21 @@ public sealed class WarrantVerifyTests : IDisposable
     }
 
     [Fact]
+    public void TheServerFallbackRecordIsANormalImportanceMessageNotAWarning()
+    {
+        // M5b KTD5: a message keeps TreatWarningsAsErrors builds green when the server cannot be used.
+        const string fallback = "Warrant: verification server unavailable (connecting to the server timed out after 5 s); verifying in-process.";
+        fake.Script([$"WRT1\tdiag\tinfo\t\t\t0\t0\t0\t0\t{fallback}", Summary.Replace("not proved.", "not proved. [in-process]", StringComparison.Ordinal)], exitCode: 0);
+
+        Assert.True(Run(Task()));
+
+        Assert.Empty(engine.Warnings);
+        Assert.Empty(engine.Errors);
+        var message = Assert.Single(engine.Messages, m => m.Message == fallback);
+        Assert.Equal(MessageImportance.Normal, message.Importance);
+    }
+
+    [Fact]
     public void ExitTwoIsWrt0010QuotingTheTailOfTheErrorOutput()
     {
         var stderr = Enumerable.Range(1, 25).Select(i => $"stderr line {i}").ToArray();
@@ -106,8 +121,25 @@ public sealed class WarrantVerifyTests : IDisposable
 
         var args = Assert.Single(fake.Invocations());
         Assert.Equal(
-            ["verify", "--csc-args", Path.Combine(fake.ProjectDirectory, "obj", "warrant.csc.args"), "--project-dir", fake.ProjectDirectory, "--format", "msbuild"],
+            ["verify", "--csc-args", Path.Combine(fake.ProjectDirectory, "obj", "warrant.csc.args"), "--project-dir", fake.ProjectDirectory, "--format", "msbuild", "--server", "auto"],
             args);
+    }
+
+    [Fact]
+    public void ServerOffTheCacheDirectoryAndRecheckArePassedWhenSet()
+    {
+        // M5b KTD27. The directory has a space and a trailing separator, which must not escape the closing quote.
+        fake.Script([Summary], exitCode: 0);
+        var cache = Path.Combine(fake.ProjectDirectory, "obj dir", "warrant", "cache");
+        var task = Task();
+        task.UseServer = false;
+        task.Recheck = true;
+        task.CacheDirectory = cache + Path.DirectorySeparatorChar;
+
+        Assert.True(Run(task));
+
+        var args = Assert.Single(fake.Invocations());
+        Assert.Equal(["--server", "off", "--cache-dir", cache, "--recheck"], args.Skip(7));
     }
 
     [Fact]
@@ -124,7 +156,7 @@ public sealed class WarrantVerifyTests : IDisposable
 
         var args = Assert.Single(fake.Invocations());
         Assert.Equal(
-            ["--kernel-fuel", "20000000", "--tactic-fuel", "5000", "--timeout", "60", "--keep-conditional-check"],
+            ["--kernel-fuel", "20000000", "--tactic-fuel", "5000", "--timeout", "60", "--keep-conditional-check", "--server", "auto"],
             args.Skip(7));
     }
 

@@ -1,7 +1,7 @@
 <Project>
   <!--
-    Runs `warrant verify` after CoreCompile (docs/m5a/07, KTD21, KTD22). Every build verifies again: the target has no
-    Inputs or Outputs, because M5a re-checks every proof on every build.
+    Runs `warrant verify` after CoreCompile (docs/m5a/07, KTD21, KTD22). Every build runs the CLI again: the target has no
+    Inputs or Outputs, and the result cache (M5b KTD14) is what spares an unchanged build its proof search.
   -->
   <PropertyGroup>
     <WarrantEnabled Condition="'$(WarrantEnabled)' == ''">true</WarrantEnabled>
@@ -10,6 +10,19 @@
     <!-- Both paths are overridable so tests can point at a locally built task and CLI. -->
     <WarrantTaskAssembly Condition="'$(WarrantTaskAssembly)' == ''">$(MSBuildThisFileDirectory)..\tasks\netstandard2.0\Warrant.Build.dll</WarrantTaskAssembly>
     <WarrantCliPath Condition="'$(WarrantCliPath)' == ''">$(MSBuildThisFileDirectory)..\tools\net10.0\any\warrant.dll</WarrantCliPath>
+    <!--
+      M5b KTD27: the verification server (off by default in CI, whose agents are thrown away after a job), recheck, and
+      the project's result cache. The cache sits under BaseIntermediateOutputPath, which UseArtifactsOutput also defines,
+      so every configuration and target framework shares it; every input that matters is in its keys.
+    -->
+    <WarrantUseServer Condition="'$(WarrantUseServer)' == '' and '$(ContinuousIntegrationBuild)' == 'true'">false</WarrantUseServer>
+    <WarrantUseServer Condition="'$(WarrantUseServer)' == ''">true</WarrantUseServer>
+    <WarrantRecheck Condition="'$(WarrantRecheck)' == ''">false</WarrantRecheck>
+    <!-- WarrantUseCache=false verifies without the result cache; an empty WarrantCacheDir means the default directory. -->
+    <WarrantUseCache Condition="'$(WarrantUseCache)' == ''">true</WarrantUseCache>
+    <WarrantCacheDir Condition="'$(WarrantCacheDir)' == ''">$(BaseIntermediateOutputPath)warrant/cache/</WarrantCacheDir>
+    <_WarrantCacheDirFull>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(WarrantCacheDir)'))</_WarrantCacheDirFull>
+    <_WarrantVerifyCacheDir Condition="'$(WarrantUseCache)' == 'true'">$(_WarrantCacheDirFull)</_WarrantVerifyCacheDir>
     <!-- The first entry of $(TargetFrameworks), and whether there are two or more: the inner build that verifies. -->
     <_WarrantFirstTargetFramework>$([System.Text.RegularExpressions.Regex]::Replace('$(TargetFrameworks)', '^[\s;]*([^;\s]*)[\s\S]*$', '$1'))</_WarrantFirstTargetFramework>
     <_WarrantMultiTargeted>$([System.Text.RegularExpressions.Regex]::IsMatch('$(TargetFrameworks)', '[^;\s]\s*;[\s;]*[^;\s]'))</_WarrantMultiTargeted>
@@ -36,9 +49,32 @@
                    KernelFuel="$(WarrantKernelFuel)"
                    TacticFuel="$(WarrantTacticFuel)"
                    TimeoutSeconds="$(WarrantTimeoutSeconds)"
-                   KeepConditionalCheck="$(_WarrantMultiTargeted)" />
+                   KeepConditionalCheck="$(_WarrantMultiTargeted)"
+                   UseServer="$(WarrantUseServer)"
+                   Recheck="$(WarrantRecheck)"
+                   CacheDirectory="$(_WarrantVerifyCacheDir)" />
     <ItemGroup>
       <FileWrites Include="$(_WarrantCscArgsFile)" />
     </ItemGroup>
+  </Target>
+
+  <!--
+    dotnet clean and Rebuild delete the project's result cache (M5b R12, KTD27), and nothing else: only a directory the
+    cache marked as its own (ResultCache.MarkerFileName), only the files the cache writes there (entries named by their
+    64-hex-digit key, their temporary files, the marker), and the directory itself only when that leaves it empty. A
+    WarrantCacheDir that names a source or home directory by mistake therefore loses nothing.
+  -->
+  <Target Name="WarrantClean" AfterTargets="Clean" Condition="Exists('$(_WarrantCacheDirFull)WARRANT-CACHE')">
+    <ItemGroup>
+      <_WarrantCacheCandidate Include="$(_WarrantCacheDirFull)*.json;$(_WarrantCacheDirFull)*.tmp" />
+      <_WarrantCacheFile Include="@(_WarrantCacheCandidate)"
+                         Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(_WarrantCacheCandidate.Filename)%(_WarrantCacheCandidate.Extension)', '^[0-9a-f]{64}\.json(\.[0-9a-f]{32}\.tmp)?$'))" />
+      <_WarrantCacheFile Include="$(_WarrantCacheDirFull)WARRANT-CACHE" />
+    </ItemGroup>
+    <Delete Files="@(_WarrantCacheFile)" />
+    <ItemGroup>
+      <_WarrantCacheLeft Include="$(_WarrantCacheDirFull)**" />
+    </ItemGroup>
+    <RemoveDir Directories="$(_WarrantCacheDirFull)" Condition="'@(_WarrantCacheLeft)' == ''" />
   </Target>
 </Project>

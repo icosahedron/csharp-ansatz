@@ -12,6 +12,11 @@
     <ProjectReference Include="..\Warrant.Frontend\Warrant.Frontend.csproj" />
     <ProjectReference Include="..\Warrant.Extraction\Warrant.Extraction.csproj" />
     <ProjectReference Include="..\Warrant.Engine\Warrant.Engine.csproj" />
+    <!--
+      The verification server (M5b KTD1, KTD4): its files land beside warrant.dll, from where the CLI copies them to start a
+      server, and it brings StreamJsonRpc, which the CLI's client uses too.
+    -->
+    <ProjectReference Include="..\Warrant.Server\Warrant.Server.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- `warrant translate` and `warrant verify` load the semantics bundle from beside their own assembly by default. -->

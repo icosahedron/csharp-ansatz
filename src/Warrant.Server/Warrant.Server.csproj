@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>warrant-server</AssemblyName>
+    <Description>The per-user verification server (M5b KTD1 to KTD4): hosts Warrant.Engine's VerificationService behind a JSON-RPC endpoint, with the endpoint, the lifecycle and a log; never Roslyn.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Never Roslyn (KTD1, design §3.2): the server receives canonical VIR. -->
+    <ProjectReference Include="..\Warrant.Engine\Warrant.Engine.csproj" />
+    <PackageReference Include="StreamJsonRpc" Version="2.26.150" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The server loads the semantics bundle and the attribute sidecar from beside its own assembly by default, as `warrant verify` does. -->
+    <None Include="..\..\tests\data\warrant-semantics.ndjson.gz" Link="warrant-semantics.ndjson.gz" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\tests\data\warrant-attributes.ndjson.gz" Link="warrant-attributes.ndjson.gz" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Warrant.Server.Tests" />
+  </ItemGroup>
+</Project>

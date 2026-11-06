@@ -26,7 +26,11 @@
     <InternalsVisibleTo Include="Warrant.Build.Tests" />
   </ItemGroup>
 
-  <!-- Publishes the framework-dependent CLI and packs it under tools/net10.0/any/, where the targets launch it. -->
+  <!--
+    Publishes the framework-dependent CLI and the verification server (warrant-server.dll, M5b KTD1) into one folder and
+    packs it under tools/net10.0/any/, where the targets launch the CLI. The two share the engine's assemblies; the
+    server alone brings StreamJsonRpc and its dependencies.
+  -->
   <Target Name="_WarrantPackCli">
     <PropertyGroup>
       <_WarrantCliPublishDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'cli'))</_WarrantCliPublishDir>
@@ -34,6 +38,10 @@
     <!-- A separate evaluation restores the CLI when this project is packed on its own. -->
     <MSBuild Projects="..\Warrant.Cli\Warrant.Cli.csproj" Targets="Restore" Properties="Configuration=$(Configuration);_WarrantCliRestore=true" RemoveProperties="TargetFramework;RuntimeIdentifier" />
     <MSBuild Projects="..\Warrant.Cli\Warrant.Cli.csproj" Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(_WarrantCliPublishDir);UseAppHost=false;SelfContained=false"
+             RemoveProperties="TargetFramework;RuntimeIdentifier" />
+    <MSBuild Projects="..\Warrant.Server\Warrant.Server.csproj" Targets="Restore" Properties="Configuration=$(Configuration);_WarrantCliRestore=true" RemoveProperties="TargetFramework;RuntimeIdentifier" />
+    <MSBuild Projects="..\Warrant.Server\Warrant.Server.csproj" Targets="Publish"
              Properties="Configuration=$(Configuration);PublishDir=$(_WarrantCliPublishDir);UseAppHost=false;SelfContained=false"
              RemoveProperties="TargetFramework;RuntimeIdentifier" />
     <ItemGroup>

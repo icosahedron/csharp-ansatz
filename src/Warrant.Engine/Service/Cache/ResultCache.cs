@@ -100,6 +100,13 @@ public sealed class FileResultCache : IResultCache
         }
     }
 
+    /// <summary>
+    /// The file that marks a directory as a Warrant result cache. The cache writes it with its first entry, and the build's
+    /// <c>WarrantClean</c> target deletes only a directory that has it, and only the files the cache writes there, so a
+    /// mistaken <c>WarrantCacheDir</c> cannot make <c>dotnet clean</c> delete anything else.
+    /// </summary>
+    public const string MarkerFileName = "WARRANT-CACHE";
+
     /// <summary>The file an entry is stored in.</summary>
     /// <param name="directory">The cache directory.</param>
     /// <param name="key">The key.</param>
@@ -167,7 +174,9 @@ public sealed class FileResultCache : IResultCache
         var temporary = $"{path}.{Guid.NewGuid():N}.tmp";
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var cacheDirectory = Path.GetDirectoryName(path)!;
+            Directory.CreateDirectory(cacheDirectory);
+            WriteMarker(cacheDirectory);
             File.WriteAllBytes(temporary, entry.ToFile());
             File.Move(temporary, path, overwrite: true);
             return true;
@@ -187,6 +196,32 @@ public sealed class FileResultCache : IResultCache
         Forget((Path.GetFullPath(directory), key));
         TryDelete(PathOf(directory, key));
     }
+
+    /// <summary>
+    /// Writes <see cref="MarkerFileName"/> into a cache directory that lacks it. Best effort: another writer may be creating
+    /// it at the same moment, and an entry is written whether or not the marker could be.
+    /// </summary>
+    private static void WriteMarker(string directory)
+    {
+        var marker = Path.Combine(directory, MarkerFileName);
+        if (File.Exists(marker))
+        {
+            return;
+        }
+        try
+        {
+            using var stream = new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            stream.Write(MarkerText);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Another writer created it first, or the directory is read-only and the entry's write will say so.
+        }
+    }
+
+    private static readonly byte[] MarkerText = System.Text.Encoding.UTF8.GetBytes(
+        "This directory is a Warrant result cache. `dotnet clean` deletes the entries Warrant wrote here " +
+        "(<64 hex digits>.json and their .tmp files) and this file, and removes the directory if nothing else is in it.\n");
 
     private static void TryDelete(string path)
     {

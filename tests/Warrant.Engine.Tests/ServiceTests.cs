@@ -287,6 +287,54 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
     }
 
     [Fact]
+    public void ALeanConstNamingATypeAdmittedBeforeItsUnitRanOutIsWrt0004()
+    {
+        // With 40 steps of kernel fuel Light's inductive type is admitted and its casesOn is not: the unit is undecided,
+        // but Cs.Light is in the run's environment, and Light owns it.
+        var inputs = EngineCorpus.Inputs(EngineCorpus.Inline("""
+            [Closed]
+            public enum Light { Red, Amber, Green }
+
+            public static class S
+            {
+                [Verified] public static Light Next(Light l) => l switch { Light.Red => Light.Amber, Light.Amber => Light.Green, _ => Light.Red };
+
+                [Theorem] static Proof Outside(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("Cs.Light")));
+            }
+            """));
+        var run = Service.Run(Request(inputs, engine.Options with { Kernel = engine.Options.Kernel with { Fuel = 40 } }));
+
+        Assert.IsType<UndecidedOutcome>(run.Result.Find("T:Light"));
+        Assert.Contains(run.Result.Admitted, d => d is Kernel.InductiveDecl i && i.Types.Any(t => t.Name.ToString() == "Cs.Light"));
+        var outside = run.Response.Units.Single(u => u.Outcome.Key == "M:S.Outside(System.Int32)").Outcome;
+        Assert.Equal("WRT0004", outside.Code);
+        Assert.Equal(
+            "Malformed proof script: Lean.Const(\"Cs.Light\") names a constant of 'Light', which this theorem does not depend on; "
+            + "name it with nameof(Light) instead.",
+            outside.Message);
+    }
+
+    [Fact]
+    public void AMalformedLeanConstNameIsAnInternalErrorForThatTheoremOnly()
+    {
+        var outcomes = Verify("""
+            public static class S
+            {
+                [Verified] public static int Twice(int x) => x + x;
+
+                [Theorem] static Proof Malformed(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("a..b")));
+
+                [Theorem] static Proof Valid(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("rfl")));
+            }
+            """);
+        // The run's KTD33 check skips a name that does not parse; the tactic that reads it fails this theorem alone.
+        Assert.Equal(OutcomeKind.InternalError, outcomes["M:S.Malformed(System.Int32)"].Kind);
+        Assert.StartsWith("Meta failed unexpectedly: FormatException: ", outcomes["M:S.Malformed(System.Int32)"].Message, StringComparison.Ordinal);
+        Assert.Equal(OutcomeKind.Proved, outcomes["M:S.Valid(System.Int32)"].Kind);
+        Assert.Equal(OutcomeKind.Translated, outcomes["M:S.Twice(System.Int32)"].Kind);
+    }
+
+    [Fact]
     public void CancellingDuringTheCounterexampleSearchStopsItWithinOneSecond()
     {
         // The script fails at once (no hypothesis h); then each of the 343 combinations runs A20 in the kernel until its

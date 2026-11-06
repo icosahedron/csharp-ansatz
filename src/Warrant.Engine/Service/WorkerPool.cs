@@ -55,7 +55,7 @@ public sealed class WorkerPool : IDisposable
         for (int i = 0; i < items.Count; i++)
         {
             int index = i;
-            _queue.Add(() =>
+            if (!TryQueue(() =>
             {
                 try
                 {
@@ -71,7 +71,14 @@ public sealed class WorkerPool : IDisposable
                 {
                     done.Signal();
                 }
-            });
+            }))
+            {
+                // The pool was disposed while queueing: the items already queued still run and signal, so wait for them
+                // before the event is disposed, and count the rest as done.
+                done.Signal(items.Count - i);
+                done.Wait();
+                throw new ObjectDisposedException(nameof(WorkerPool));
+            }
         }
         done.Wait();
         foreach (var error in errors)
@@ -96,11 +103,34 @@ public sealed class WorkerPool : IDisposable
         _queue.Dispose();
     }
 
+    /// <summary>Queues one item; false if the pool no longer takes work because it was disposed.</summary>
+    private bool TryQueue(Action item)
+    {
+        try
+        {
+            _queue.Add(item);
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            // Adding was completed, or the queue was disposed (ObjectDisposedException is an InvalidOperationException).
+            return false;
+        }
+    }
+
     private void Work()
     {
         foreach (var item in _queue.GetConsumingEnumerable())
         {
-            item();
+            try
+            {
+                item();
+            }
+#pragma warning disable CA1031 // One item's failure must not end the worker; RunAll's items report their own.
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+            }
         }
     }
 }

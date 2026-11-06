@@ -71,6 +71,28 @@ public sealed class CancellationTests(AttributeSidecarFixture fixture) : IClassF
     }
 
     [Fact]
+    public void ACancellationInsideTheAssignmentCheckIsNotAnIllTypedAssignment()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var (m, _) = NewTactic(KernelLimits.Interactive with { CancellationToken = cts.Token });
+        m.DebugCheckAssignments = true;
+        var goal = m.MkFreshExprMVar(Nat);
+
+        var ex = Assert.Throws<MetaResourceException>(() => m.Assign(goal.Id, Ground));
+        Assert.Contains("cancelled", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("ill-typed assignment", ex.Message, StringComparison.Ordinal);
+        Assert.IsType<KernelResourceException>(ex.InnerException);
+        Assert.False(m.IsAssigned(goal.Id));
+
+        var (live, _) = NewTactic(KernelLimits.Interactive);
+        live.DebugCheckAssignments = true;
+        var liveGoal = live.MkFreshExprMVar(Nat);
+        live.Assign(liveGoal.Id, Ground);
+        Assert.True(live.IsAssigned(liveGoal.Id));
+    }
+
+    [Fact]
     public void MetaTakesItsDeadlineAndTokenToTheKernelByDefault()
     {
         using var cts = new CancellationTokenSource();

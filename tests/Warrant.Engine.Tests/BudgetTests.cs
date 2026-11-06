@@ -58,7 +58,24 @@ public sealed class BudgetTests(EngineFixture engine) : IClassFixture<EngineFixt
     {
         var result = Run(Sum, engine.Options with { Timeout = TimeSpan.Zero });
         var outcome = Assert.IsType<UndecidedOutcome>(result.Find("M:S.Sum(System.Int32)"));
-        Assert.StartsWith("the time limit of 0 s was reached while ", outcome.Reason, StringComparison.Ordinal);
+        Assert.Equal("the time limit of 0 s was reached while proving the decrease of recursive call 1 of S.Sum(int).", outcome.Reason);
+    }
+
+    [Fact]
+    public void ATheoremWhoseProofTheKernelChecksPastItsFuelReportsKernelFuel()
+    {
+        // The script closes the goal (omega's kernel calls fit in 1,000 steps); checking the whole proof term does not.
+        var result = Run("""
+            public static class S
+            {
+                [Verified] public static int Inc(int x) => x + 1;
+                [Theorem(KernelFuel = 1000)] static Proof Starved(int x) => Prove.That(Inc(x) == x + 1).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());
+                [Theorem] static Proof Fed(int x) => Prove.That(Inc(x) == x + 1).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());
+            }
+            """, engine.Options);
+        var outcome = Assert.IsType<UndecidedOutcome>(result.Find("M:S.Starved(System.Int32)"));
+        Assert.Equal("kernel fuel ran out (1,000 steps) while the kernel checked the proof.", outcome.Reason);
+        Assert.IsType<ProvedOutcome>(result.Find("M:S.Fed(System.Int32)"));
     }
 
     private EngineResult Run(string source, EngineOptions options) =>

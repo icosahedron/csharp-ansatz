@@ -341,8 +341,8 @@ public static class Pipeline
         }
 
         /// <summary>
-        /// Which unit each constant the run translated belongs to (KTD33): every declaration a definition or type admitted,
-        /// with an inductive type's constructors and recursors, and every theorem's name.
+        /// Records every theorem's name as its unit's (KTD33). The declarations definitions and types admitted were recorded
+        /// by <see cref="Own"/> as they were admitted.
         /// </summary>
         private void RecordOwners(Translation translation)
         {
@@ -351,15 +351,20 @@ public static class Pipeline
                 if (unit.Theorem is { } shell)
                 {
                     _owners.TryAdd(shell.Name, unit.Key);
-                    continue;
                 }
-                foreach (var declaration in Outcomes[unit.Key].Declarations)
-                {
-                    foreach (var name in NamesOf(declaration))
-                    {
-                        _owners.TryAdd(name, unit.Key);
-                    }
-                }
+            }
+        }
+
+        /// <summary>
+        /// Records a unit as the owner of a declaration it admitted into the run's fork (KTD33), with an inductive type's
+        /// constructors and recursors, whatever the unit's outcome: a unit that fails or runs out after admitting it leaves
+        /// it in the fork. Called only before the fork is frozen, on the run's own thread.
+        /// </summary>
+        public void Own(string key, KernelDeclaration declaration)
+        {
+            foreach (var name in NamesOf(declaration))
+            {
+                _owners.TryAdd(name, key);
             }
         }
 
@@ -382,7 +387,10 @@ public static class Pipeline
             HashSet<string>? closure = null;
             foreach (var (node, name) in script.SelectMany(LeanConsts))
             {
-                if (!_owners.TryGetValue(Name.Parse(name), out var owner) || string.Equals(owner, unit.Unit.Key, StringComparison.Ordinal))
+                // A name that does not parse names no unit's constant; the tactic that reads it reports it for this unit alone.
+                if (TryParseName(name) is not { } parsed
+                    || !_owners.TryGetValue(parsed, out var owner)
+                    || string.Equals(owner, unit.Unit.Key, StringComparison.Ordinal))
                 {
                     continue;
                 }
@@ -400,6 +408,19 @@ public static class Pipeline
                 TacticArg { Tactic: var nested } => LeanConsts(nested),
                 _ => [],
             });
+        }
+
+        /// <summary>A <c>Lean.Const</c> string as a name; null if it is not a well-formed one.</summary>
+        private static Name? TryParseName(string text)
+        {
+            try
+            {
+                return Name.Parse(text);
+            }
+            catch (Exception ex) when (ex is FormatException or OverflowException)
+            {
+                return null;
+            }
         }
 
         /// <summary>The keys of every unit a unit depends on, transitively.</summary>
@@ -599,7 +620,7 @@ public static class Pipeline
             {
                 try
                 {
-                    AddDeclaration(declaration, admitted, definitionBudget);
+                    AddDeclaration(unit.Unit.Key, declaration, admitted, definitionBudget);
                     if (declaration is DefinitionDecl { Value: { Hints.Kind: ReducibilityHintsKind.Abbrev } abbrev })
                     {
                         // KTD9: an open enum and its members are `abbrev`s (docs/m4/05), reducible as Lean's are, so simp
@@ -611,7 +632,7 @@ public static class Pipeline
                         // KTD8: casesOn and ctorIdx, which Lean's elaborator would have made, each built after the last is admitted.
                         foreach (var construction in Constructions.For(Env, inductive))
                         {
-                            AddDeclaration(construction, admitted, definitionBudget);
+                            AddDeclaration(unit.Unit.Key, construction, admitted, definitionBudget);
                             Constructions.Register(Attributes, construction.Value);
                         }
                     }
@@ -657,7 +678,7 @@ public static class Pipeline
             {
                 foreach (var declaration in translated.Declarations)
                 {
-                    AddDeclaration(declaration, admitted, budget);
+                    AddDeclaration(key, declaration, admitted, budget);
                 }
                 Attributes.SetReducibilityStatus(translated.Name, ReducibilityStatus.Irreducible);
             }
@@ -671,7 +692,7 @@ public static class Pipeline
             }
             try
             {
-                AddDeclaration(recursion.Equation.WithProof(recursion.EquationProof), admitted, budget);
+                AddDeclaration(key, recursion.Equation.WithProof(recursion.EquationProof), admitted, budget);
             }
             catch (KernelResourceException ex)
             {
@@ -739,7 +760,7 @@ public static class Pipeline
             }
             try
             {
-                AddDeclaration(shell.WithProof(proof), admitted, budget);
+                AddDeclaration(key, shell.WithProof(proof), admitted, budget);
             }
             catch (KernelResourceException ex)
             {
@@ -754,10 +775,15 @@ public static class Pipeline
 
         private static string Describe(EngineUnit unit, DecreaseObligation decrease) => $"recursive call {decrease.Index} of {RunState.Display(unit)}";
 
-        private void AddDeclaration(KernelDeclaration declaration, List<KernelDeclaration> admitted, TheoremBudget budget)
+        /// <summary>
+        /// Admits one of a definition's or type's declarations into the run's fork and records <paramref name="key"/> as the
+        /// owner of its constants (KTD33): the fork keeps them even if a later step of the unit fails or runs out.
+        /// </summary>
+        private void AddDeclaration(string key, KernelDeclaration declaration, List<KernelDeclaration> admitted, TheoremBudget budget)
         {
             Kernel.Kernel.Add(Env, declaration, budget.Kernel);
             run.Admitted.Add(declaration);
+            run.Own(key, declaration);
             admitted.Add(declaration);
         }
 

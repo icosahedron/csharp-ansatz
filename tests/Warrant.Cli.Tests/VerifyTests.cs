@@ -471,6 +471,52 @@ public sealed class VerifyTests : IDisposable
     }
 
     [Fact]
+    public void AColdRunAndAWarmRunWithOneTheoremEditedGiveTheSameOutputApartFromTheCachedCount()
+    {
+        const string source = """
+            public static class Increments
+            {
+                [Verified] public static int Increment(int x) => x + 1;
+                [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
+                [Theorem] static Proof AddsOne(int x) => Prove.That(Increment(x) == x + 1).By(Tactic.Unfold(nameof(Increment)), Tactic.Omega());
+            }
+            """;
+        var cache = Path.Combine(project, "obj", "warrant", "cache");
+        Write(source);
+        VerifyArgs("--cache-dir", cache);
+        Write(source.Replace("Tactic.Omega()", "Tactic.Simp()", StringComparison.Ordinal));
+
+        var (coldCode, cold) = VerifyArgs();
+        var (warmCode, warm) = VerifyArgs("--cache-dir", cache);
+
+        Assert.Equal(coldCode, warmCode);
+        Assert.EndsWith("Warrant: 3 verified units, 1 theorems proved, 1 not proved.\n", cold, StringComparison.Ordinal);
+        Assert.Equal(cold.Replace("1 theorems proved,", "1 theorems proved (1 from cache),", StringComparison.Ordinal), warm);
+    }
+
+    [Fact]
+    public void RecheckReportsTheSameDiagnosticsAndHowManyCachedProofsTheKernelCheckedAgain()
+    {
+        Write("""
+            public static class Increments
+            {
+                [Verified] public static int Increment(int x) => x + 1;
+                [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
+                [Theorem] static Proof AddsOne(int x) => Prove.That(Increment(x) == x + 1).By(Tactic.Unfold(nameof(Increment)), Tactic.Omega());
+            }
+            """);
+        var cache = Path.Combine(project, "obj", "warrant", "cache");
+        var (_, cold) = VerifyArgs("--format", "msbuild", "--cache-dir", cache);
+
+        var (code, recheck) = VerifyArgs("--format", "msbuild", "--cache-dir", cache, "--recheck");
+
+        Assert.Equal(1, code);
+        Assert.Equal(
+            cold.Replace("1 theorems proved,", "1 theorems proved (2 from cache, 1 rechecked),", StringComparison.Ordinal),
+            recheck);
+    }
+
+    [Fact]
     public void TheSidecarIsCopiedBesideTheCli()
     {
         var cli = Path.GetDirectoryName(typeof(VerifyCommand).Assembly.Location)!;

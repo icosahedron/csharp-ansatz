@@ -73,7 +73,8 @@ public sealed record UnitResult(OutcomeDto Outcome, bool FromCache, bool Recheck
 /// <param name="Hits">Units whose outcome came from the result cache.</param>
 /// <param name="Misses">Units that were verified because the cache had no outcome for them.</param>
 /// <param name="TacticRuns">Units whose proof search ran: theorems, and recursive definitions' decrease proofs.</param>
-public sealed record VerifyCounters(int Hits, int Misses, int TacticRuns);
+/// <param name="Rechecked">Units among <paramref name="Hits"/> whose cached proofs the kernel checked again (<c>WarrantRecheck</c>, M5b R11).</param>
+public sealed record VerifyCounters(int Hits, int Misses, int TacticRuns, int Rechecked);
 
 /// <summary>Which <see cref="UnitOutcome"/> an <see cref="OutcomeDto"/> carries.</summary>
 public enum OutcomeKind

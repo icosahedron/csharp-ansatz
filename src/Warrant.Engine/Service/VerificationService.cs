@@ -32,6 +32,7 @@ public sealed partial class VerificationService : IDisposable
     private int _hits;
     private int _misses;
     private int _tacticRuns;
+    private int _rechecked;
 
     /// <summary>
     /// Loads the sidecar, which names the bundle it was made for, so a mismatched pair is refused before the slow load, then
@@ -84,7 +85,7 @@ public sealed partial class VerificationService : IDisposable
     public IResultCache Cache { get; }
 
     /// <summary>The counters of every request this service has answered, for <c>status</c> (KTD26).</summary>
-    public VerifyCounters Totals => new(Volatile.Read(ref _hits), Volatile.Read(ref _misses), Volatile.Read(ref _tacticRuns));
+    public VerifyCounters Totals => new(Volatile.Read(ref _hits), Volatile.Read(ref _misses), Volatile.Read(ref _tacticRuns), Volatile.Read(ref _rechecked));
 
     /// <summary>The checked, frozen semantics bundle.</summary>
     public SemanticsBundle Bundle { get; }
@@ -148,22 +149,28 @@ public sealed partial class VerificationService : IDisposable
             CancellationToken = cancellationToken,
         };
         Pipeline.PipelineRun run;
-        IReadOnlyDictionary<string, UnitOutcome> hits;
-        using (var session = request.CacheDirectory is { } directory ? new CacheSession(this, directory, inputs, options) : null)
+        using (var session = request.CacheDirectory is { } directory ? new CacheSession(this, directory, inputs, options, request.Recheck) : null)
         {
-            hits = session?.Hits ?? new Dictionary<string, UnitOutcome>(StringComparer.Ordinal);
-            run = Pipeline.Execute(inputs, decided, [.. request.Units.Select(u => u.Key)], Bundle, options, _pool, hits, session is null ? null : session.Finished);
+            var hits = session?.Hits ?? new Dictionary<string, UnitOutcome>(StringComparer.Ordinal);
+            run = Pipeline.Execute(
+                inputs, decided, [.. request.Units.Select(u => u.Key)], Bundle, options, _pool, hits, session is null ? null : session.Finished, request.Recheck);
+            // KTD16: an entry whose certificate the kernel rejected is removed.
+            foreach (var unitKey in run.Rejected)
+            {
+                session?.Delete(unitKey);
+            }
         }
         // A cached unit whose translation now fails reports that, not its entry.
-        bool FromCache(UnitOutcome o) => hits.TryGetValue(o.Key, out var hit) && ReferenceEquals(hit, o);
         ImmutableArray<UnitResult> units =
         [
-            .. run.Result.Units.Select(o => new UnitResult(OutcomeDto.From(o), FromCache(o), Rechecked: false, run.Elapsed.GetValueOrDefault(o.Key))),
+            .. run.Result.Units.Select(o => new UnitResult(
+                OutcomeDto.From(o), run.FromCache.Contains(o.Key), run.Rechecked.Contains(o.Key), run.Elapsed.GetValueOrDefault(o.Key))),
         ];
-        var counters = new VerifyCounters(units.Count(u => u.FromCache), units.Count(u => !u.FromCache), run.SearchRuns);
+        var counters = new VerifyCounters(units.Count(u => u.FromCache), units.Count(u => !u.FromCache), run.SearchRuns, units.Count(u => u.Rechecked));
         Interlocked.Add(ref _hits, counters.Hits);
         Interlocked.Add(ref _misses, counters.Misses);
         Interlocked.Add(ref _tacticRuns, counters.TacticRuns);
+        Interlocked.Add(ref _rechecked, counters.Rechecked);
         var response = new VerifyResponse(ProtocolVersion, request.RequestId, units, counters, stopwatch.Elapsed);
         return new ServiceRun(response, run.Result);
     }

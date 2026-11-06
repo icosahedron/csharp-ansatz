@@ -21,26 +21,28 @@ public sealed partial class VerificationService
     /// it releases every claim still held.
     /// </summary>
     /// <remarks>
-    /// A unit is reported from the cache only when no unit that runs depends on it: closure admission of cached units
-    /// is not built yet (plan U7), so a miss runs its whole closure, and the hits in that closure run again.
+    /// The run admits a hit that a miss depends on from the hit's certificate (KTD15), so a miss never runs its hits again.
+    /// Under recheck every entry is read from disk (KTD16).
     /// </remarks>
     private sealed class CacheSession : IDisposable
     {
         private readonly VerificationService _service;
         private readonly string _directory;
         private readonly CancellationToken _cancellationToken;
+        private readonly bool _recheck;
         private readonly Dictionary<string, EngineUnit> _units = new(StringComparer.Ordinal);
         private readonly Dictionary<string, (CacheKeyInputs Inputs, string Key, VerifyBudgets Budgets)> _keys = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _claimed = new(StringComparer.Ordinal);
         private readonly Lock _lock = new();
 
-        public CacheSession(VerificationService service, string directory, IReadOnlyList<EngineUnit> inputs, EngineOptions options)
+        public CacheSession(VerificationService service, string directory, IReadOnlyList<EngineUnit> inputs, EngineOptions options, bool recheck)
         {
             var hashes = service.Hashes ?? throw new InvalidOperationException(
                 "The request has a cache directory, but the service was not told the SHA-256 of its bundle and sidecar files.");
             _service = service;
             _directory = Path.GetFullPath(directory);
             _cancellationToken = options.CancellationToken;
+            _recheck = recheck;
             foreach (var unit in inputs)
             {
                 _units.TryAdd(unit.Unit.Key, unit);
@@ -68,18 +70,15 @@ public sealed partial class VerificationService
 
         /// <summary>
         /// Stores a finished unit's outcome when it is cacheable and was computed undisturbed: not after the request was
-        /// cancelled and not after the unit's deadline passed (KTD14); then releases its key.
+        /// cancelled and not after the unit's deadline passed (KTD14); then releases its key. A unit that ran although it
+        /// hit, because the kernel rejected a cached proof it was admitted with (KTD15), replaces its entry.
         /// </summary>
         public void Finished(Pipeline.UnitFinish finish)
         {
             var unitKey = finish.Outcome.Key;
-            string? key;
-            lock (_lock)
+            if (!_keys.ContainsKey(unitKey))
             {
-                if (!_claimed.TryGetValue(unitKey, out key))
-                {
-                    return;
-                }
+                return;
             }
             try
             {
@@ -95,6 +94,9 @@ public sealed partial class VerificationService
             }
         }
 
+        /// <summary>Removes a unit's entry, whose certificate the kernel rejected (KTD16).</summary>
+        public void Delete(string unitKey) => _service.Cache.Delete(_directory, _keys[unitKey].Key);
+
         public void Dispose()
         {
             List<string> held;
@@ -109,8 +111,8 @@ public sealed partial class VerificationService
         }
 
         /// <summary>
-        /// Claims and reads every key in key order, so two requests waiting for each other's keys cannot deadlock; then drops
-        /// the hits that a unit that runs depends on.
+        /// Claims and reads every key in key order, so two requests waiting for each other's keys cannot deadlock; under
+        /// recheck every entry is read from disk.
         /// </summary>
         private Dictionary<string, UnitOutcome> Lookup()
         {
@@ -122,7 +124,7 @@ public sealed partial class VerificationService
                     // Cancelled while another request computed the key: the run cancels what is left.
                     break;
                 }
-                if (_service.Cache.Read(_directory, key) is { } cached)
+                if (_service.Cache.Read(_directory, key, fromDisk: _recheck) is { } cached)
                 {
                     if (!string.Equals(cached.Outcome.Key, unitKey, StringComparison.Ordinal))
                     {
@@ -134,15 +136,6 @@ public sealed partial class VerificationService
                         Release(unitKey);
                     }
                 }
-            }
-            var runs = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var unit in _units.Values.Where(u => !found.ContainsKey(u.Unit.Key)))
-            {
-                runs.UnionWith(Pipeline.ClosureOf(unit, _units));
-            }
-            foreach (var unitKey in runs)
-            {
-                found.Remove(unitKey);
             }
             return found;
         }

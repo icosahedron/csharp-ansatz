@@ -66,14 +66,22 @@ public static class Pipeline
     /// <param name="options">The budgets, the attribute sidecar and the cancellation token.</param>
     /// <param name="pool">The workers theorems run on; null to run them on the run's own thread.</param>
     /// <param name="cached">
-    /// Outcomes the result cache already holds, by key (M5b KTD14): those units are translated, so their names still
-    /// collide and own their constants, but nothing of theirs is admitted or run. No unit that runs may depend on one.
+    /// Outcomes the result cache already holds, by key (M5b KTD14, KTD15): those units are translated, so their names
+    /// still collide and own their constants, and their outcomes are reported without running them. One that a unit that
+    /// runs depends on is admitted first without tactics: a recursive definition translated afresh with the decrease
+    /// proofs and equation lemma of its certificate, a proved theorem with its cached proof, each checked by the kernel.
+    /// A cached proof the kernel rejects makes its unit run as if it had no entry.
     /// </param>
     /// <param name="finished">
     /// Called as soon as each unit that ran has its outcome, on the thread it ran on, before the next unit of that thread
     /// starts; not called for units that were cached, decided, skipped or cancelled before they started.
     /// </param>
-    /// <returns>The result, with each unit's time and the number of units whose proof search ran.</returns>
+    /// <param name="recheck">
+    /// Whether every cached proof is checked again (M5b KTD16): each cached recursive definition and proved theorem is
+    /// admitted from its certificate, checked by the kernel against the declarations translated from the current units;
+    /// one the kernel rejects fails as <see cref="CertificateRejected"/> and does not run.
+    /// </param>
+    /// <returns>The result, with each unit's time, the number of units whose proof search ran, and which outcomes came from <paramref name="cached"/>.</returns>
     /// <exception cref="ArgumentException">Two units have the same key.</exception>
     internal static PipelineRun Execute(
         IReadOnlyList<EngineUnit> inputs,
@@ -83,7 +91,8 @@ public static class Pipeline
         EngineOptions options,
         WorkerPool? pool,
         IReadOnlyDictionary<string, UnitOutcome>? cached = null,
-        Action<UnitFinish>? finished = null)
+        Action<UnitFinish>? finished = null,
+        bool recheck = false)
     {
         ArgumentNullException.ThrowIfNull(bundle);
         ArgumentNullException.ThrowIfNull(options);
@@ -102,13 +111,32 @@ public static class Pipeline
         {
             Cached = cached ?? new Dictionary<string, UnitOutcome>(StringComparer.Ordinal),
             Finished = finished,
+            Recheck = recheck,
         };
         KernelThread.Run(run.Execute);
         return new PipelineRun(
             new EngineResult(bundle, run.Env, [.. order.Select(k => run.Outcomes[k])], [.. run.Admitted]),
             run.Elapsed,
-            run.SearchRuns);
+            run.SearchRuns)
+        {
+            FromCache = run.FromCache,
+            Rechecked = run.Rechecked,
+            Rejected = run.Rejected,
+        };
     }
+
+    /// <summary>
+    /// The outcome of a unit whose cached certificate the kernel rejected under recheck (M5b KTD16): WRT0010 naming the
+    /// unit. The unit is not proved again in that run.
+    /// </summary>
+    /// <param name="key">The unit's key.</param>
+    /// <param name="kind">What the unit is.</param>
+    /// <param name="display">The unit's display name.</param>
+    /// <param name="assumptions">The unit's assumptions.</param>
+    /// <param name="reason">The kernel's message.</param>
+    /// <returns>The outcome.</returns>
+    internal static FailedOutcome CertificateRejected(string key, VirUnitKind kind, string display, ImmutableArray<UnitAssumption> assumptions, string reason) =>
+        new(key, kind, display, assumptions, $"cached certificate for '{display}' was rejected by the kernel: {reason}") { Code = InternalErrorOutcome.Code };
 
     /// <summary>Builds the shared simp sets over the frozen bundle alone, before any fork exists to leak into them (KTD10).</summary>
     private static void WarmSimpSets(SemanticsBundle bundle, Sidecar sidecar)
@@ -148,7 +176,33 @@ public static class Pipeline
     /// <param name="Result">The outcomes and the final environment.</param>
     /// <param name="Elapsed">Each unit's time from the moment it started to its outcome; absent for units decided before the run.</param>
     /// <param name="SearchRuns">The number of units whose proof search ran: theorems, and recursive definitions' decrease proofs.</param>
-    internal sealed record PipelineRun(EngineResult Result, IReadOnlyDictionary<string, TimeSpan> Elapsed, int SearchRuns);
+    internal sealed record PipelineRun(EngineResult Result, IReadOnlyDictionary<string, TimeSpan> Elapsed, int SearchRuns)
+    {
+        /// <summary>The units whose outcome is their cached one: reported as cached, or admitted from their certificate.</summary>
+        public IReadOnlySet<string> FromCache { get; init; } = new HashSet<string>();
+
+        /// <summary>The units among <see cref="FromCache"/> whose certificate the kernel checked again under recheck (KTD16).</summary>
+        public IReadOnlySet<string> Rechecked { get; init; } = new HashSet<string>();
+
+        /// <summary>The units whose cached certificate the kernel rejected under recheck, whose entries are to be removed (KTD16).</summary>
+        public IReadOnlySet<string> Rejected { get; init; } = new HashSet<string>();
+    }
+
+    /// <summary>Where a theorem's outcome came from.</summary>
+    private enum Source
+    {
+        /// <summary>The theorem ran.</summary>
+        Ran,
+
+        /// <summary>Its cached proof was admitted, checked by the kernel, because a unit that runs names it (KTD15).</summary>
+        Cache,
+
+        /// <summary>Its cached proof was checked again under recheck (KTD16).</summary>
+        Rechecked,
+
+        /// <summary>Its cached proof was rejected under recheck (KTD16).</summary>
+        Rejected,
+    }
 
     /// <summary>A unit that ran, as it finished (M5b KTD14): what the result cache needs to store it.</summary>
     /// <param name="Outcome">The unit's outcome.</param>
@@ -275,11 +329,32 @@ public static class Pipeline
 
         public int SearchRuns => _searchRuns;
 
-        /// <summary>The outcomes the result cache holds, by key: translated, never admitted or run.</summary>
+        /// <summary>
+        /// The outcomes the result cache holds, by key (KTD15): translated, and admitted from their certificates only when
+        /// a unit that runs depends on them, or under recheck.
+        /// </summary>
         public required IReadOnlyDictionary<string, UnitOutcome> Cached { get; init; }
 
         /// <summary>Told about each unit that ran as soon as it has its outcome.</summary>
         public required Action<UnitFinish>? Finished { get; init; }
+
+        /// <summary>Whether every cached proof is checked again (KTD16).</summary>
+        public required bool Recheck { get; init; }
+
+        /// <summary>The units whose outcome is their cached one.</summary>
+        public HashSet<string> FromCache { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The units whose cached certificate the kernel checked again under recheck.</summary>
+        public HashSet<string> Rechecked { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The units whose cached certificate the kernel rejected under recheck.</summary>
+        public HashSet<string> Rejected { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The cached units reported as they are, with nothing admitted: no unit that runs depends on them.</summary>
+        private readonly HashSet<string> _unadmitted = new(StringComparer.Ordinal);
+
+        /// <summary>The units some unit that runs depends on, transitively (KTD15).</summary>
+        private HashSet<string> _needed = new(StringComparer.Ordinal);
 
         public void CountSearch() => Interlocked.Increment(ref _searchRuns);
 
@@ -287,6 +362,7 @@ public static class Pipeline
         {
             var translation = Translate();
             Names = NamesOf(translation);
+            _needed = NeededBy(translation);
             var theorems = new List<TranslatedUnit>();
             foreach (var unit in translation.Units)
             {
@@ -297,9 +373,16 @@ public static class Pipeline
                 }
                 if (Cached.TryGetValue(unit.Key, out var hit))
                 {
+                    if (hit is TranslatedOutcome && unit.Recursion is not null && Admits(unit.Key))
+                    {
+                        AdmitFromCertificate(unit, hit);
+                        continue;
+                    }
                     Outcomes.Add(unit.Key, hit);
                     Elapsed.Add(unit.Key, TimeSpan.Zero);
                     OwnCached(unit);
+                    FromCache.Add(unit.Key);
+                    _unadmitted.Add(unit.Key);
                     continue;
                 }
                 var stopwatch = Stopwatch.StartNew();
@@ -317,6 +400,63 @@ public static class Pipeline
         }
 
         /// <summary>
+        /// The units some translated unit that has no cached outcome depends on, transitively (KTD15): the cached ones among
+        /// them are admitted from their certificates so that unit can run.
+        /// </summary>
+        private HashSet<string> NeededBy(Translation translation)
+        {
+            var needed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var unit in translation.Units.Where(u => !Cached.ContainsKey(u.Key)))
+            {
+                needed.UnionWith(Closure(units[unit.Key]));
+            }
+            return needed;
+        }
+
+        /// <summary>
+        /// Whether a cached unit with a proof is admitted from its certificate (KTD15, KTD16): under recheck always, else
+        /// when a unit that runs depends on it.
+        /// </summary>
+        private bool Admits(string key) => Recheck || _needed.Contains(key);
+
+        /// <summary>
+        /// A cached recursive definition, translated afresh and admitted with the decrease proofs and equation lemma of its
+        /// certificate, each checked by the kernel (KTD15, KTD16). One the kernel rejects is proved again, or under recheck
+        /// fails the unit; a unit that ran is stored again.
+        /// </summary>
+        private void AdmitFromCertificate(TranslatedUnit unit, UnitOutcome hit)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            var engineUnit = units[unit.Key];
+            Scope? scope = null;
+            var proofs = hit.Declarations.OfType<TheoremDecl>().ToDictionary(d => d.Value.Name, d => d.Value.Proof);
+            var outcome = Cancelled(engineUnit) ?? Skip(engineUnit) ?? (scope = new Scope(this, Env, Attributes) { CachedProofs = proofs }).Admit(unit);
+            outcome = SettleCancel(engineUnit, outcome);
+            Outcomes.Add(unit.Key, outcome);
+            Elapsed.Add(unit.Key, stopwatch.Elapsed);
+            if (scope is null)
+            {
+                return;
+            }
+            if (scope.Rejected)
+            {
+                Rejected.Add(unit.Key);
+            }
+            else if (!scope.FellBack && outcome is TranslatedOutcome)
+            {
+                FromCache.Add(unit.Key);
+                if (Recheck)
+                {
+                    Rechecked.Add(unit.Key);
+                }
+            }
+            else
+            {
+                Finish(scope, outcome, stopwatch.Elapsed);
+            }
+        }
+
+        /// <summary>
         /// The theorems, level by level (KTD8): a theorem's level is one more than the deepest theorem it names with
         /// <c>nameof</c>. Each runs in its own fork of the level's frozen environment; when the level ends, its proved
         /// theorems are admitted into a new fork, which is frozen and becomes the next level's base.
@@ -329,28 +469,100 @@ public static class Pipeline
             {
                 var ordered = level.OrderBy(t => index[t.Key]).ToList();
                 var levelEnv = Env;
-                var jobs = new List<(TranslatedUnit Unit, Func<(UnitOutcome, TimeSpan)> Work)>();
+                var jobs = new List<(TranslatedUnit Unit, Func<(UnitOutcome, TimeSpan, Source)> Work)>();
                 foreach (var theorem in ordered)
                 {
                     var unit = units[theorem.Key];
-                    if ((Cached.GetValueOrDefault(theorem.Key) ?? (UnitOutcome?)Cancelled(unit) ?? Skip(unit)) is { } early)
+                    var hit = Cached.GetValueOrDefault(theorem.Key);
+                    if (hit is not null && !(hit is ProvedOutcome && Admits(theorem.Key)))
+                    {
+                        Outcomes.Add(theorem.Key, hit);
+                        Elapsed.Add(theorem.Key, TimeSpan.Zero);
+                        FromCache.Add(theorem.Key);
+                        _unadmitted.Add(theorem.Key);
+                        continue;
+                    }
+                    if (((UnitOutcome?)Cancelled(unit) ?? Skip(unit)) is { } early)
                     {
                         Outcomes.Add(theorem.Key, early);
                         Elapsed.Add(theorem.Key, TimeSpan.Zero);
                         continue;
                     }
-                    jobs.Add((theorem, () => Prove(theorem, levelEnv)));
+                    jobs.Add((theorem, hit is ProvedOutcome proved ? () => Reuse(theorem, levelEnv, proved) : () => Ran(Prove(theorem, levelEnv))));
                 }
-                (UnitOutcome, TimeSpan)[] results = pool is null
+                (UnitOutcome, TimeSpan, Source)[] results = pool is null
                     ? [.. jobs.Select(j => j.Work())]
                     : pool.RunAll(jobs.Select(j => j.Work));
                 for (int i = 0; i < jobs.Count; i++)
                 {
-                    Outcomes.Add(jobs[i].Unit.Key, results[i].Item1);
-                    Elapsed.Add(jobs[i].Unit.Key, results[i].Item2);
+                    var (outcome, elapsed, source) = results[i];
+                    var key = jobs[i].Unit.Key;
+                    Outcomes.Add(key, outcome);
+                    Elapsed.Add(key, elapsed);
+                    switch (source)
+                    {
+                        case Source.Cache:
+                            FromCache.Add(key);
+                            break;
+                        case Source.Rechecked:
+                            FromCache.Add(key);
+                            Rechecked.Add(key);
+                            break;
+                        case Source.Rejected:
+                            Rejected.Add(key);
+                            break;
+                    }
                 }
                 AdmitProved(ordered);
             }
+        }
+
+        private static (UnitOutcome, TimeSpan, Source) Ran((UnitOutcome Outcome, TimeSpan Elapsed) result) => (result.Outcome, result.Elapsed, Source.Ran);
+
+        /// <summary>
+        /// A cached proved theorem that a unit that runs names, or any under recheck (KTD15, KTD16): its cached proof term,
+        /// as the proof of the theorem translated from the current unit, admitted by the kernel into its own fork of the
+        /// level's environment, and the admitted constant checked to be that theorem. A proof the kernel rejects is
+        /// WRT0010 under recheck, and otherwise the theorem runs as if it had no entry.
+        /// </summary>
+        private (UnitOutcome, TimeSpan, Source) Reuse(TranslatedUnit theorem, KernelEnvironment levelEnv, ProvedOutcome cached)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            var unit = units[theorem.Key];
+            if (Cancelled(unit) is { } cancelled)
+            {
+                return (cancelled, stopwatch.Elapsed, Source.Ran);
+            }
+            var shell = theorem.Theorem!;
+            var budget = new TheoremBudget(options, shell.Budget);
+            var env = levelEnv.Fork();
+            var declaration = shell.WithProof(cached.Certificate.Value.Proof);
+            string reason;
+            try
+            {
+                Kernel.Kernel.Add(env, declaration, budget.Kernel);
+                if (ProofTerms.IsAdmittedAs(env, shell))
+                {
+                    return (cached with { Certificate = declaration }, stopwatch.Elapsed, Recheck ? Source.Rechecked : Source.Cache);
+                }
+                reason = $"the kernel admitted {shell.Name} with a type other than its statement";
+            }
+            catch (KernelResourceException ex) when (Recheck || budget.Which(ex) == ExhaustedBudget.Time || options.CancellationToken.IsCancellationRequested)
+            {
+                var undecided = new UndecidedOutcome(
+                    unit.Unit.Key, unit.Unit.Kind, theorem.DisplayName, Assumptions(unit), $"{budget.Exhausted(ex)} while the kernel checked the cached proof.")
+                {
+                    Exhausted = budget.Which(ex),
+                };
+                return (SettleCancel(unit, undecided), stopwatch.Elapsed, Source.Ran);
+            }
+            catch (KernelException ex)
+            {
+                reason = ex.Message;
+            }
+            return Recheck
+                ? (CertificateRejected(unit.Unit.Key, unit.Unit.Kind, theorem.DisplayName, Assumptions(unit), reason), stopwatch.Elapsed, Source.Rejected)
+                : Ran(Prove(theorem, levelEnv));
         }
 
         /// <summary>One theorem in its own fork of the level's environment and the run's sidecar; the deadline starts here.</summary>
@@ -408,11 +620,11 @@ public static class Pipeline
         /// Admits a level's proved theorems, in input order, into a new fork of the run's environment and freezes it, so
         /// the next level's theorems can use them. The kernel checks each proof again, as it does every term admitted
         /// into an environment; one it now rejects is Warrant's bug, and the theorem's users are skipped. A cached theorem
-        /// is not admitted: no unit that runs depends on it.
+        /// reported as it is, is not admitted: no unit that runs depends on it.
         /// </summary>
         private void AdmitProved(List<TranslatedUnit> level)
         {
-            var proved = level.Where(t => Outcomes[t.Key] is ProvedOutcome && !Cached.ContainsKey(t.Key)).ToList();
+            var proved = level.Where(t => Outcomes[t.Key] is ProvedOutcome && !_unadmitted.Contains(t.Key)).ToList();
             if (proved.Count == 0)
             {
                 return;
@@ -429,6 +641,8 @@ public static class Pipeline
                 }
                 catch (KernelException ex)
                 {
+                    FromCache.Remove(theorem.Key);
+                    Rechecked.Remove(theorem.Key);
                     Outcomes[theorem.Key] = new InternalErrorOutcome(
                         outcome.Key, outcome.UnitKind, outcome.DisplayName, outcome.Assumptions, $"the kernel rejected the proof it had accepted when admitting it again: {ex.Message}");
                 }
@@ -710,6 +924,20 @@ public static class Pipeline
         /// <summary>Whether the unit's deadline has passed; false for a unit that never started its budget.</summary>
         public bool DeadlinePassed => _budget?.DeadlinePassed ?? false;
 
+        /// <summary>
+        /// A cached recursive definition's proofs, by the name of the decrease theorem or equation lemma they prove (KTD15,
+        /// KTD16); null to prove the definition's decrease obligations with tactics.
+        /// </summary>
+        public Dictionary<Name, Expr>? CachedProofs { get; init; }
+
+        /// <summary>Whether a cached proof was missing or rejected, so the unit ran rather than being admitted from its certificate.</summary>
+        public bool FellBack { get; private set; }
+
+        /// <summary>Whether, under recheck, the kernel rejected a cached proof, which failed the unit (KTD16).</summary>
+        public bool Rejected { get; private set; }
+
+        private bool _searched;
+
         public UnitOutcome Admit(TranslatedUnit translated)
         {
             var unit = run.Units[translated.Key];
@@ -738,10 +966,6 @@ public static class Pipeline
             var definitionBudget = _budget = new TheoremBudget(options, null);
             if (translated.Recursion is { } recursion)
             {
-                if (recursion.Decreases.Length > 0)
-                {
-                    run.CountSearch();
-                }
                 return AdmitRecursive(unit, translated, recursion, assumptions, admitted, definitionBudget);
             }
             foreach (var declaration in translated.Declarations)
@@ -797,7 +1021,10 @@ public static class Pipeline
             var display = translated.DisplayName;
             foreach (var decrease in recursion.Decreases)
             {
-                if (ProveDecrease(unit, decrease, display, assumptions, admitted, budget) is { } failure)
+                var failure = CachedProofs is null
+                    ? ProveDecrease(unit, decrease, display, assumptions, admitted, budget)
+                    : AdmitCached(unit, decrease.Theorem, display, assumptions, admitted, budget, () => ProveDecrease(unit, decrease, display, assumptions, admitted, budget));
+                if (failure is not null)
                 {
                     return failure;
                 }
@@ -818,19 +1045,74 @@ public static class Pipeline
             {
                 return new FailedOutcome(key, kind, display, assumptions, ex.Message);
             }
-            try
+            UnitOutcome? Equation()
             {
-                AddDeclaration(key, recursion.Equation.WithProof(recursion.EquationProof), admitted, budget);
+                try
+                {
+                    AddDeclaration(key, recursion.Equation.WithProof(recursion.EquationProof), admitted, budget);
+                    return null;
+                }
+                catch (KernelResourceException ex)
+                {
+                    return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the equation lemma {recursion.Equation.Name}.") { Exhausted = budget.Which(ex) };
+                }
+                catch (KernelException ex)
+                {
+                    return new FailedOutcome(key, kind, display, assumptions, $"the kernel rejected the equation lemma {recursion.Equation.Name}: {ex.Message}");
+                }
             }
-            catch (KernelResourceException ex)
+
+            var equation = CachedProofs is null ? Equation() : AdmitCached(unit, recursion.Equation, display, assumptions, admitted, budget, Equation);
+            return equation ?? new TranslatedOutcome(key, kind, display, assumptions, [.. admitted]);
+        }
+
+        /// <summary>
+        /// One theorem of a cached recursive definition, a decrease theorem or the equation lemma (KTD15, KTD16): the
+        /// translated statement with the proof from the definition's certificate, admitted by the kernel. A proof that is
+        /// missing or that the kernel rejects fails the unit under recheck, and otherwise falls back to
+        /// <paramref name="fallback"/>, which builds it as a run with no entry does. Null when it was admitted, else the
+        /// unit's outcome.
+        /// </summary>
+        private UnitOutcome? AdmitCached(
+            EngineUnit unit,
+            TheoremShell shell,
+            string display,
+            ImmutableArray<UnitAssumption> assumptions,
+            List<KernelDeclaration> admitted,
+            TheoremBudget budget,
+            Func<UnitOutcome?> fallback)
+        {
+            string reason;
+            if (CachedProofs!.TryGetValue(shell.Name, out var proof))
             {
-                return new UndecidedOutcome(key, kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the equation lemma {recursion.Equation.Name}.") { Exhausted = budget.Which(ex) };
+                try
+                {
+                    AddDeclaration(unit.Unit.Key, shell.WithProof(proof), admitted, budget);
+                    return null;
+                }
+                catch (KernelResourceException ex) when (run.Recheck || budget.Which(ex) == ExhaustedBudget.Time || options.CancellationToken.IsCancellationRequested)
+                {
+                    return new UndecidedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, $"{budget.Exhausted(ex)} while the kernel checked the cached proof of {shell.Name}.")
+                    {
+                        Exhausted = budget.Which(ex),
+                    };
+                }
+                catch (KernelException ex)
+                {
+                    reason = ex.Message;
+                }
             }
-            catch (KernelException ex)
+            else
             {
-                return new FailedOutcome(key, kind, display, assumptions, $"the kernel rejected the equation lemma {recursion.Equation.Name}: {ex.Message}");
+                reason = $"it holds no proof of {shell.Name}";
             }
-            return new TranslatedOutcome(key, kind, display, assumptions, [.. admitted]);
+            if (run.Recheck)
+            {
+                Rejected = true;
+                return CertificateRejected(unit.Unit.Key, unit.Unit.Kind, display, assumptions, reason);
+            }
+            FellBack = true;
+            return fallback();
         }
 
         /// <summary>
@@ -848,6 +1130,11 @@ public static class Pipeline
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
             var shell = decrease.Theorem;
+            if (!_searched)
+            {
+                _searched = true;
+                run.CountSearch();
+            }
             var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = run.Names };
             var goal = meta.MkFreshExprSyntheticOpaqueMVar(shell.Type);
             MVarId? current = null;

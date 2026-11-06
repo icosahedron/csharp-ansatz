@@ -24,7 +24,7 @@ internal static class VerifyCommand
         warrant verify --csc-args <file> [--project-dir <dir>] [options]
                warrant verify <directory> [options]
           options: --format text|msbuild  --out <file.ndjson>  --report <dir>  --keep-conditional-check
-                   --kernel-fuel <n>  --tactic-fuel <n>  --timeout <seconds>  --bundle <path>  --cache-dir <dir>
+                   --kernel-fuel <n>  --tactic-fuel <n>  --timeout <seconds>  --bundle <path>  --cache-dir <dir>  --recheck
         """;
 
     /// <summary>The attribute sidecar's file name; it ships beside the semantics bundle (KTD9).</summary>
@@ -38,7 +38,7 @@ internal static class VerifyCommand
     public static int Run(string[] args, TextWriter output, TextWriter error)
     {
         string? directory = null, cscArgs = null, projectDir = null, outPath = null, reportDir = null, bundlePath = null, cacheDir = null;
-        bool msbuild = false, keepConditionalCheck = false;
+        bool msbuild = false, keepConditionalCheck = false, recheck = false;
         long? kernelFuel = null, tacticFuel = null, timeoutSeconds = null;
         for (int i = 0; i < args.Length; i++)
         {
@@ -68,6 +68,9 @@ internal static class VerifyCommand
                     break;
                 case "--keep-conditional-check":
                     keepConditionalCheck = true;
+                    break;
+                case "--recheck":
+                    recheck = true;
                     break;
                 case "--kernel-fuel" when hasValue && Count(args[i + 1]) is { } n:
                     kernelFuel = n;
@@ -128,6 +131,7 @@ internal static class VerifyCommand
                 // M5b KTD14: the NDJSON of --out needs every admitted declaration, which a cached unit does not admit
                 // until export reads certificates from the cache (plan U16), so --out verifies without the cache.
                 CacheDirectory = outPath is null && cacheDir is not null ? Path.GetFullPath(cacheDir) : null,
+                Recheck = recheck,
             };
             return cscArgs is not null
                 ? FromCscArgs(cscArgs, projectDir ?? Environment.CurrentDirectory, keepConditionalCheck, settings, output)
@@ -151,6 +155,9 @@ internal static class VerifyCommand
 
         /// <summary>The result cache directory (M5b KTD14); null for no cache.</summary>
         public string? CacheDirectory { get; init; }
+
+        /// <summary>Whether every cached proof is checked by the kernel again (M5b KTD16, <c>WarrantRecheck</c>).</summary>
+        public bool Recheck { get; init; }
 
         /// <summary>The budgets: the given ones, else the build's defaults (corpus kernel fuel for the directory mode, like translate).</summary>
         public EngineOptions Engine(KernelLimits kernel) => EngineOptions.Default with
@@ -227,7 +234,7 @@ internal static class VerifyCommand
             settings.ProjectDirectory,
             settings.CacheDirectory,
             VerifyBudgets.From(options),
-            Recheck: false,
+            settings.Recheck,
             Priority: 0,
             [.. extraction.Units.Select(u => new RequestUnit(u.Key, u.Unit.Kind, u.DisplayName, VirWriter.Write(u.Unit)))]);
         using var service = new VerificationService(SemanticsBundle.Load(settings.BundlePath), settings.Sidecar, hashes: settings.Hashes);
@@ -304,7 +311,7 @@ internal static class VerifyCommand
 
         var theorems = result.Units.Where(u => u.UnitKind == VirUnitKind.Theorem).ToList();
         int proved = theorems.Count(u => u is ProvedOutcome);
-        report.Summary(result.Units.Length, proved, theorems.Count - proved, run.Response.Counters.Hits);
+        report.Summary(result.Units.Length, proved, theorems.Count - proved, run.Response.Counters.Hits, run.Response.Counters.Rechecked);
 
         bool clean = report.Errors == 0 && result.Units.All(u => u is TranslatedOutcome or ProvedOutcome);
         return clean ? 0 : 1;
@@ -364,10 +371,18 @@ internal static class VerifyCommand
             }
         }
 
-        /// <summary>The summary line; it says how many results came from the result cache when any did (M5b R8, KTD27).</summary>
-        public void Summary(int units, int proved, int notProved, int fromCache = 0)
+        /// <summary>
+        /// The summary line; it says how many results came from the result cache when any did, and how many of those the
+        /// kernel checked again when any were (M5b R8, R11, KTD27).
+        /// </summary>
+        public void Summary(int units, int proved, int notProved, int fromCache = 0, int rechecked = 0)
         {
-            var cached = fromCache > 0 ? string.Create(CultureInfo.InvariantCulture, $" ({fromCache} from cache)") : "";
+            var cached = (fromCache, rechecked) switch
+            {
+                (_, > 0) => string.Create(CultureInfo.InvariantCulture, $" ({fromCache} from cache, {rechecked} rechecked)"),
+                (> 0, _) => string.Create(CultureInfo.InvariantCulture, $" ({fromCache} from cache)"),
+                _ => "",
+            };
             var text = string.Create(CultureInfo.InvariantCulture, $"Warrant: {units} verified units, {proved} theorems proved{cached}, {notProved} not proved.");
             if (msbuild)
             {

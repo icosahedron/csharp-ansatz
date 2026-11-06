@@ -11,6 +11,7 @@
     <Project Path="src/Warrant.Lean4Export/Warrant.Lean4Export.csproj" />
     <Project Path="src/Warrant.Meta/Warrant.Meta.csproj" />
     <Project Path="src/Warrant.Semantics/Warrant.Semantics.csproj" />
+    <Project Path="src/Warrant.Server/Warrant.Server.csproj" />
     <Project Path="src/Warrant.Vir/Warrant.Vir.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -24,6 +25,7 @@
     <Project Path="tests/Warrant.Lean4Export.Tests/Warrant.Lean4Export.Tests.csproj" />
     <Project Path="tests/Warrant.Meta.Tests/Warrant.Meta.Tests.csproj" />
     <Project Path="tests/Warrant.Semantics.Tests/Warrant.Semantics.Tests.csproj" />
+    <Project Path="tests/Warrant.Server.Tests/Warrant.Server.Tests.csproj" />
     <Project Path="tests/Warrant.TestSupport/Warrant.TestSupport.csproj" />
     <Project Path="tests/Warrant.Vir.Tests/Warrant.Vir.Tests.csproj" />
   </Folder>

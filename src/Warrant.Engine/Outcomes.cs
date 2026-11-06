@@ -186,6 +186,26 @@ public sealed record UndecidedOutcome(
 {
     /// <summary>The diagnostic code: the claim was not decided.</summary>
     public const string Code = "WRT0006";
+
+    /// <summary>
+    /// The budget the unit ran out of; null when it is undecided for another reason, such as running out of stack or a
+    /// claim that computes to neither value. The result cache keeps a unit that ran out of fuel and never one that ran
+    /// out of time (M5b KTD14).
+    /// </summary>
+    public ExhaustedBudget? Exhausted { get; init; }
+}
+
+/// <summary>Which budget an <see cref="UndecidedOutcome"/> ran out of (M5b R5).</summary>
+public enum ExhaustedBudget
+{
+    /// <summary>The kernel's fuel.</summary>
+    KernelFuel,
+
+    /// <summary>Meta's and the tactics' fuel.</summary>
+    TacticFuel,
+
+    /// <summary>The wall-clock limit.</summary>
+    Time,
 }
 
 /// <summary>
@@ -208,8 +228,9 @@ public sealed record FailedOutcome(
     public const string MalformedScriptCode = "WRT0004";
 
     /// <summary>
-    /// The diagnostic code when the fault is the user's, such as <see cref="MalformedScriptCode"/>, with
-    /// <see cref="Reason"/> the whole message; null when it is Warrant's (WRT0010).
+    /// The diagnostic code when <see cref="Reason"/> is the whole message: <see cref="MalformedScriptCode"/> when the fault
+    /// is the user's, or WRT0010 for a cached certificate the kernel rejected under recheck (M5b KTD16); null for
+    /// Warrant's own fault (WRT0010), whose message the client words.
     /// </summary>
     public string? Code { get; init; }
 

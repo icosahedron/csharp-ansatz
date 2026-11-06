@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Text.Json.Serialization;
+using Warrant.Kernel;
 using Warrant.Vir;
 
 namespace Warrant.Engine.Service;
@@ -71,7 +73,8 @@ public sealed record UnitResult(OutcomeDto Outcome, bool FromCache, bool Recheck
 /// <param name="Hits">Units whose outcome came from the result cache.</param>
 /// <param name="Misses">Units that were verified because the cache had no outcome for them.</param>
 /// <param name="TacticRuns">Units whose proof search ran: theorems, and recursive definitions' decrease proofs.</param>
-public sealed record VerifyCounters(int Hits, int Misses, int TacticRuns);
+/// <param name="Rechecked">Units among <paramref name="Hits"/> whose cached proofs the kernel checked again (<c>WarrantRecheck</c>, M5b R11).</param>
+public sealed record VerifyCounters(int Hits, int Misses, int TacticRuns, int Rechecked);
 
 /// <summary>Which <see cref="UnitOutcome"/> an <see cref="OutcomeDto"/> carries.</summary>
 public enum OutcomeKind
@@ -172,6 +175,41 @@ public sealed record OutcomeDto(OutcomeKind Kind, string Key, VirUnitKind UnitKi
             _ => throw new ArgumentException($"Unknown outcome {outcome.GetType().Name}.", nameof(outcome)),
         };
     }
+
+    /// <summary>
+    /// The outcome this wire form describes, with the declarations the unit admitted, as a cached outcome is rebuilt
+    /// (M5b KTD14).
+    /// </summary>
+    /// <param name="declarations">
+    /// The unit's admitted declarations (its certificate): a proved theorem's theorem, a translated unit's declarations;
+    /// ignored for every other outcome.
+    /// </param>
+    /// <returns>The outcome.</returns>
+    /// <exception cref="FormatException">A field the outcome needs is missing or malformed, or a proved theorem's certificate does not hold exactly one theorem.</exception>
+    public UnitOutcome ToOutcome(ImmutableArray<KernelDeclaration> declarations)
+    {
+        ImmutableArray<UnitAssumption> assumptions = [.. Assumptions.Select(a => new UnitAssumption(a.UnitKey, new VirAssumption(a.Kind, a.Subject)))];
+        string Text(string? text) => text ?? throw new FormatException($"The {Kind} outcome of {Key} has no message.");
+        return Kind switch
+        {
+            OutcomeKind.Translated => new TranslatedOutcome(Key, UnitKind, DisplayName, assumptions, declarations),
+            OutcomeKind.Proved => new ProvedOutcome(
+                Key, UnitKind, DisplayName, assumptions, By ?? throw new FormatException($"The proved outcome of {Key} has no proof kind."),
+                declarations is [TheoremDecl theorem] ? theorem : throw new FormatException($"The certificate of {Key} does not hold exactly one theorem.")),
+            OutcomeKind.False => new FalseOutcome(Key, UnitKind, DisplayName, assumptions, [.. Sides.Select(s => s.ToSide())]),
+            OutcomeKind.NotProved => new NotProvedOutcome(Key, UnitKind, DisplayName, assumptions, Text(Message), Goals ?? "", Node, Counterexample)
+            {
+                Decrease = Decrease,
+            },
+            OutcomeKind.Undecided => new UndecidedOutcome(Key, UnitKind, DisplayName, assumptions, Text(Message)),
+            OutcomeKind.InternalError => new InternalErrorOutcome(Key, UnitKind, DisplayName, assumptions, Text(Message)),
+            OutcomeKind.Failed => new FailedOutcome(Key, UnitKind, DisplayName, assumptions, Text(Message)) { Code = Code, Node = Node },
+            OutcomeKind.Skipped => new SkippedOutcome(
+                Key, UnitKind, DisplayName, assumptions, Dependency ?? throw new FormatException($"The skipped outcome of {Key} names no dependency."), Text(Message)),
+            OutcomeKind.Cancelled => new CancelledOutcome(Key, UnitKind, DisplayName, assumptions),
+            _ => throw new FormatException($"Unknown outcome kind {Kind}."),
+        };
+    }
 }
 
 /// <summary>One assumption of a unit's outcome (<see cref="UnitAssumption"/>).</summary>
@@ -217,6 +255,23 @@ public sealed record ReadBackSideDto(int NodeId, ReadBackKind Kind, string Text)
             _ => throw new ArgumentException($"Unknown value {side.Value.GetType().Name}.", nameof(side)),
         };
     }
+
+    /// <summary>The side this wire form describes.</summary>
+    /// <returns>The side.</returns>
+    /// <exception cref="FormatException">The text is not a value of the kind.</exception>
+    public ReadBackSide ToSide() => new(NodeId, Kind switch
+    {
+        ReadBackKind.IntValue => new Int32Value(int.Parse(Text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture)),
+        ReadBackKind.LongValue => new Int64Value(long.Parse(Text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture)),
+        ReadBackKind.BoolValue => Text switch
+        {
+            "true" => new BoolValue(true),
+            "false" => new BoolValue(false),
+            _ => throw new FormatException($"'{Text}' is not a bool."),
+        },
+        ReadBackKind.Unknown => (ReadBackValue)new UnknownValue(Text),
+        _ => throw new FormatException($"Unknown value kind {Kind}."),
+    });
 }
 
 /// <summary>The System.Text.Json contracts of the service's requests and responses, generated at compile time.</summary>

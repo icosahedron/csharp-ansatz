@@ -16,7 +16,6 @@ internal static class Program
     private const string Usage = "usage: warrant-server [--bundle <path>] [--sidecar <path>]";
 
     /// <summary>The attribute sidecar's file name, beside the bundle.</summary>
-    private const string SidecarFileName = "warrant-attributes.ndjson.gz";
 
     /// <summary>Runs the server.</summary>
     /// <param name="args">The arguments.</param>
@@ -41,7 +40,7 @@ internal static class Program
             }
         }
         bundlePath ??= Path.Combine(AppContext.BaseDirectory, SemanticsBundle.FileName);
-        sidecarPath ??= Path.Combine(Path.GetDirectoryName(Path.GetFullPath(bundlePath))!, SidecarFileName);
+        sidecarPath ??= Path.Combine(Path.GetDirectoryName(Path.GetFullPath(bundlePath))!, SemanticsBundle.SidecarFileName);
 
         var log = new ServerLog(ServerLog.DefaultPath());
         ServerHost? host;

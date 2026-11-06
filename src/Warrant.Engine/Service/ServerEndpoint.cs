@@ -80,8 +80,28 @@ public sealed record ServerEndpoint(string Name, string Address, string? SocketD
         ArgumentNullException.ThrowIfNull(toolchainIdentity);
         var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(serverDirectory));
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"{user}|{(elevated ? "elevated" : "normal")}|{directory}|{toolchainIdentity}"));
-        return Convert.ToBase64String(hash).Replace('+', '-').Replace('/', '_').TrimEnd('=')[..NameLength];
+        return System.Buffers.Text.Base64Url.EncodeToString(hash)[..NameLength];
     }
+
+    /// <summary>
+    /// The user's Warrant state directory, which holds the server's log and its per-toolchain copies:
+    /// <c>%LOCALAPPDATA%\warrant</c> on Windows, <c>$XDG_STATE_HOME/warrant</c> (by default
+    /// <c>~/.local/state/warrant</c>) elsewhere.
+    /// </summary>
+    /// <returns>The directory.</returns>
+    public static string StateDirectory()
+    {
+        string directory = OperatingSystem.IsWindows()
+            ? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)
+            : Environment.GetEnvironmentVariable("XDG_STATE_HOME") is { Length: > 0 } state
+                ? state
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "state");
+        return Path.Combine(directory, "warrant");
+    }
+
+    /// <summary>The current process's effective user id; Unix only.</summary>
+    /// <returns>The user id.</returns>
+    public static uint EffectiveUserId() => Unix.EffectiveUserId();
 
     /// <summary>The per-user socket directory on Unix: <c>$XDG_RUNTIME_DIR/warrant</c> when that is set, else <c>/tmp/warrant-&lt;uid&gt;</c>.</summary>
     /// <returns>The directory.</returns>

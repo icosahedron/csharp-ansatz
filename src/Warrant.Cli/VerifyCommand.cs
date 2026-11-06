@@ -31,7 +31,7 @@ internal static class VerifyCommand
         """;
 
     /// <summary>The attribute sidecar's file name; it ships beside the semantics bundle (KTD9).</summary>
-    public const string SidecarFileName = "warrant-attributes.ndjson.gz";
+    public const string SidecarFileName = SemanticsBundle.SidecarFileName;
 
     /// <summary>Runs the verb.</summary>
     /// <param name="args">The arguments after <c>verify</c>.</param>
@@ -383,8 +383,7 @@ internal static class VerifyCommand
     private static (VerifyResponse Response, EngineResult? Result, string Path) Execute(VerifyRequest request, Settings settings, Reporter report)
     {
         var token = settings.CancellationToken;
-        // --out and --report need the declarations the run admitted, which only an in-process run holds; the server's
-        // export and report methods arrive with plan unit U16.
+        // --out and --report need the declarations the run admitted, which only an in-process run holds.
         if (settings.UseServer == true && settings.OutPath is null && settings.ReportDir is null)
         {
             try

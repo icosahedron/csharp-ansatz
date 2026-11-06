@@ -67,15 +67,7 @@ internal static class ServerLauncher
     /// <c>$XDG_STATE_HOME/warrant/servers</c> (by default <c>~/.local/state/warrant/servers</c>) elsewhere, beside the
     /// server's log.
     /// </summary>
-    public static string DefaultCopyRoot()
-    {
-        string directory = OperatingSystem.IsWindows()
-            ? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)
-            : Environment.GetEnvironmentVariable("XDG_STATE_HOME") is { Length: > 0 } state
-                ? state
-                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "state");
-        return Path.Combine(directory, "warrant", "servers");
-    }
+    public static string DefaultCopyRoot() => Path.Combine(ServerEndpoint.StateDirectory(), "servers");
 
     /// <summary>
     /// The directory a server for this toolchain runs from: under <see cref="ServerSettings.CopyRoot"/>, named by a hash of
@@ -278,7 +270,7 @@ internal static class ServerLauncher
         private const uint CreateNoWindow = 0x08000000;
         private const int ErrorAccessDenied = 5;
 
-        public static int Spawn(string program, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, string workingDirectory)
+        public static void Spawn(string program, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, string workingDirectory)
         {
             var commandLine = (string.Join(' ', arguments.Select(Quote)) + "\0").ToCharArray();
             // A Unicode environment block: NAME=value entries, each NUL-terminated, sorted by name, then one more NUL.
@@ -297,7 +289,6 @@ internal static class ServerLauncher
                 }
                 CloseHandle(info.Thread);
                 CloseHandle(info.Process);
-                return info.ProcessId;
             }
             finally
             {
@@ -385,7 +376,7 @@ internal static class ServerLauncher
         private static IntPtr Resolve(string library, Assembly assembly, DllImportSearchPath? searchPath) =>
             library == LibC && OperatingSystem.IsLinux() && NativeLibrary.TryLoad("libc.so.6", out var handle) ? handle : IntPtr.Zero;
 
-        public static int Spawn(string program, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment)
+        public static void Spawn(string program, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment)
         {
             short setSid = (short)(OperatingSystem.IsMacOS() ? 0x0400 : 0x80);
             var allocated = new List<IntPtr>();
@@ -404,8 +395,7 @@ internal static class ServerLauncher
                 }
                 var argv = Strings(arguments, allocated);
                 var envp = Strings([.. environment.Select(e => $"{e.Key}={e.Value}")], allocated);
-                Check(posix_spawn(out int pid, CString(program), actions, attributes, argv, envp), "posix_spawn");
-                return pid;
+                Check(posix_spawn(out _, CString(program), actions, attributes, argv, envp), "posix_spawn");
             }
             finally
             {

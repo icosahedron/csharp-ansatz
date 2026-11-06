@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Warrant.Engine.Service;
 
 namespace Warrant.Server;
 
@@ -37,21 +38,7 @@ internal sealed class ServerLog
     /// (by default <c>~/.local/state/warrant/server.log</c>) elsewhere.
     /// </summary>
     /// <returns>The path.</returns>
-    public static string DefaultPath()
-    {
-        string directory;
-        if (OperatingSystem.IsWindows())
-        {
-            directory = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        }
-        else
-        {
-            directory = Environment.GetEnvironmentVariable("XDG_STATE_HOME") is { Length: > 0 } state
-                ? state
-                : System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "state");
-        }
-        return System.IO.Path.Combine(directory, "warrant", "server.log");
-    }
+    public static string DefaultPath() => System.IO.Path.Combine(ServerEndpoint.StateDirectory(), "server.log");
 
     /// <summary>Appends a line with the time and the process id; a log that cannot be written is ignored.</summary>
     /// <param name="message">The line.</param>

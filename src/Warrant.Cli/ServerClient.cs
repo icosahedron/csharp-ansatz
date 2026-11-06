@@ -1,7 +1,6 @@
 using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using StreamJsonRpc;
 using Warrant.Engine.Service;
 
@@ -313,7 +312,7 @@ internal sealed class ServerClient : IDisposable
                 }
             }
             uint peer = PeerUserId(socket);
-            uint user = Unix.EffectiveUserId();
+            uint user = ServerEndpoint.EffectiveUserId();
             if (peer != user)
             {
                 throw new ServerUnavailableException($"the socket '{endpoint.Address}' is served by user {peer}, not {user}");
@@ -366,14 +365,8 @@ internal sealed class ServerClient : IDisposable
     {
         private const string SystemNative = "libSystem.Native";
 
-        public static uint EffectiveUserId() => GetEUid();
-
         [DllImport(SystemNative, EntryPoint = "SystemNative_GetPeerID")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static extern int GetPeerId(IntPtr socket, out uint euid);
-
-        [DllImport(SystemNative, EntryPoint = "SystemNative_GetEUid")]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        private static extern uint GetEUid();
     }
 }

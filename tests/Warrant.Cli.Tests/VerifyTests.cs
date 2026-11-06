@@ -11,7 +11,7 @@ namespace Warrant.Cli.Tests;
 /// <c>warrant verify</c> (plan M5a U12, KTD20, KTD21, KTD24; docs/m5a/07), run in-process. <c>cscargs/sample.csc.args</c>
 /// is the Extraction tests' argument file (<c>@(CscCommandLineArgs)</c> of a net10.0 library with <c>/define:DEBUG</c> and
 /// <c>/langversion:14</c>) with <c>/checked-</c>, the SDK's default, so arithmetic wraps as the M5a exit example needs;
-/// its reference pack is written to <c>refs\</c> here.
+/// its reference pack is written to <c>refs/</c> here.
 /// </summary>
 public sealed class VerifyTests : IDisposable
 {

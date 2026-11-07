@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
@@ -400,6 +401,11 @@ internal static class VerifyCommand
         report.Summary(outcomes.Count, proved, notProved, response.Counters.Hits, response.Counters.Rechecked, settings.UseServer == true ? path : null);
         if (settings.Timings)
         {
+            if (execution.Connection is { } connection)
+            {
+                var how = connection.Started ? "started the server and connected" : "connected to the running server";
+                report.Line(string.Create(CultureInfo.InvariantCulture, $"timings (server): {how} in {connection.Elapsed.TotalMilliseconds:0.0} ms"));
+            }
             report.Line(string.Create(CultureInfo.InvariantCulture, $"timings ({path}): {response.Elapsed.TotalMilliseconds:0.0} ms for the request"));
             foreach (var unit in response.Units)
             {
@@ -438,19 +444,21 @@ internal static class VerifyCommand
             {
                 return Task.Run(async () =>
                 {
+                    var connecting = Stopwatch.StartNew();
                     using var client = await ServerClient.ConnectOrStartAsync(settings.Server, settings.Hashes, settings.BundlePath, settings.SidecarPath, token)
                         .ConfigureAwait(false);
+                    var connection = new ServerConnection(connecting.Elapsed, client.Started);
                     if (explain is not null)
                     {
                         var explained = await client.ExplainAsync(new ExplainRequest(request, explain), interval, timeout, token).ConfigureAwait(false);
-                        return new Execution(explained.Response, "server") { Steps = explained.Steps };
+                        return new Execution(explained.Response, "server") { Steps = explained.Steps, Connection = connection };
                     }
                     if (settings.OutPath is not null)
                     {
                         var exported = await client.ExportAsync(request, interval, timeout, token).ConfigureAwait(false);
-                        return new Execution(exported.Response, "server") { Certificates = exported.Certificates, Admitted = exported.Admitted };
+                        return new Execution(exported.Response, "server") { Certificates = exported.Certificates, Admitted = exported.Admitted, Connection = connection };
                     }
-                    return new Execution(await client.VerifyAsync(request, interval, timeout, token).ConfigureAwait(false), "server");
+                    return new Execution(await client.VerifyAsync(request, interval, timeout, token).ConfigureAwait(false), "server") { Connection = connection };
                 }).GetAwaiter().GetResult();
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -491,7 +499,18 @@ internal static class VerifyCommand
 
         /// <summary>The traced unit's steps (<c>explain</c>).</summary>
         public ImmutableArray<TacticStep> Steps { get; init; } = [];
+
+        /// <summary>How the server was reached; null in-process.</summary>
+        public ServerConnection? Connection { get; init; }
     }
+
+    /// <summary>
+    /// How long reaching the server took (<c>--timings</c>, M5b KTD30): connecting to a running one, or starting one,
+    /// which includes its loading the bundle, and connecting.
+    /// </summary>
+    /// <param name="Elapsed">From the first connection attempt to the server's answers to <c>hello</c> and <c>status</c>.</param>
+    /// <param name="Started">Whether this run started the server.</param>
+    private sealed record ServerConnection(TimeSpan Elapsed, bool Started);
 
     /// <summary>
     /// The unit <c>warrant explain</c> names (KTD24): by documentation-comment ID, by display name, or by the end of a

@@ -182,6 +182,35 @@ internal static class NameIndex
             return false;
         }
 
+        /// <summary>The name of the entry at <paramref name="index"/>, in key order, decoded from its key.</summary>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="index"/> is not below <see cref="Count"/>.</exception>
+        /// <exception cref="StoreFormatException">The entry's key is malformed.</exception>
+        public Name NameAt(int index)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(index);
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, Count);
+            long at = EntriesStart + (long)EntrySize * index;
+            var (keyOffset, keyLength) = (_view.ReadInt64(at), _view.ReadInt32(at + 8));
+            if (keyOffset < 0 || keyLength < 0 || keyOffset > _length - _keysStart - keyLength)
+            {
+                throw new StoreFormatException(_path, $"entry {index}'s key lies outside the file");
+            }
+            var key = new byte[keyLength];
+            _view.ReadArray(_keysStart + keyOffset, key, 0, keyLength);
+            var reader = new ByteReader(key, _path, _keysStart + keyOffset);
+            var name = Name.Anonymous;
+            while (!reader.AtEnd)
+            {
+                name = reader.Byte() switch
+                {
+                    1 => Name.Str(name, reader.String()),
+                    2 => Name.Num(name, reader.VarUInt()),
+                    var tag => throw reader.Malformed($"{tag} is not a name component's tag"),
+                };
+            }
+            return name;
+        }
+
         private (ConstantKind, RecordLocation) EntryAt(int index, long at)
         {
             byte kind = _view.ReadByte(at + 12);

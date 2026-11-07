@@ -40,6 +40,23 @@ public sealed class StoreTests : IDisposable
     }
 
     [Fact]
+    public void TheIndexNamesEveryConstantOnceAndEachNameItGivesIsFound()
+    {
+        var store = _temp.Sub("s");
+        Stores.Write(store, Stores.Bundle);
+        using var reader = StoreReader.Open(store);
+
+        var names = Enumerable.Range(0, reader.ConstantCount).Select(reader.NameAt).ToList();
+
+        var written = Stores.Bundle.SelectMany(d => d.Constants).Select(c => c.Name).ToHashSet();
+        Assert.True(written.SetEquals(names), "the index's names are not the constants written");
+        Assert.Equal(names.Count, names.Distinct().Count());
+        Assert.All(names, n => Assert.True(reader.TryFind(n, out _, out _), $"{n} is not found by name"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => reader.NameAt(reader.ConstantCount));
+        Assert.Throws<ArgumentOutOfRangeException>(() => reader.NameAt(-1));
+    }
+
+    [Fact]
     public void WritingTheSameInputTwiceMakesByteIdenticalVersions()
     {
         var first = Stores.Write(_temp.Sub("a"), Stores.Bundle);

@@ -5,7 +5,15 @@
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <!-- The WRT0011 check (KTD23); build/, not buildTransitive/, so only direct references are warned. -->
+    <!-- The WRT0011 check and the analyzer's removal from builds (KTD23); build/, not buildTransitive/, so only direct references are affected. -->
     <None Include="build\Warrant.targets" Pack="true" PackagePath="build\" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      The IDE analyzer (M5b KTD21): built first, not referenced, and packed where the compiler looks for analyzers. A
+      project reference to this project gets no analyzer; only the package carries it.
+    -->
+    <ProjectReference Include="..\Warrant.Analyzers\Warrant.Analyzers.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <None Include="..\Warrant.Analyzers\bin\$(Configuration)\netstandard2.0\Warrant.Analyzers.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
 </Project>

@@ -25,33 +25,33 @@ RS1035 does not ban clocks, `Guid.NewGuid` or `Stopwatch`; a banned-symbols list
 It asks the compilation for all its errors first (`Compilation.GetDiagnostics()`), and without the build's defines it re-parses the compilation once per combination of up to six `#if` symbols, 64 times in the worst case.
 That is right for a build and far too slow for a keystroke.
 
-Extraction gains a second entry that runs the same per-member checks for one symbol, skipping both.
-The analyzer calls it from a symbol-start action for each member that carries `[Verified]` or `[Theorem]`, and reports WRT0008, which is a property of the whole compilation, from a compilation-end action:
+Extraction gains a second entry, `Diagnoser`, that runs the same checks for one symbol, skipping both.
+For a member it checks the member and everything it reaches: the members it calls or cites in a proof script, transitively, and the types they use.
+That set is closed under calls and dependencies, so mutual recursion and "depends on a rejected unit" come out exactly as a full extraction finds them; `Extractor.Run` has one closure mode, so both entries run the same rule code.
+The scan of the whole compilation that the closed shape and WRT0008 need is made once per compilation, when first needed, and shared.
+A member whose own declaration has a compiler error gets nothing, because the compiler already reports what is wrong with it; its users are still checked.
+
+The analyzer calls `Diagnoser` from a symbol action for each member that carries `[Verified]` or `[Theorem]` and each `[Closed]` type, and reports WRT0008, which is a property of the whole compilation, from a compilation-end action.
+A diagnostic about a record or enum is found through every member that uses it and reported once, so the set reported is the same on every run.
+The shape, as built:
 
 ```csharp
-// Shape only.
+// Abridged from src/Warrant.Analyzers/WarrantAnalyzer.cs.
 public override void Initialize(AnalysisContext context)
 {
     context.EnableConcurrentExecution();
     context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
     context.RegisterCompilationStartAction(start =>
     {
-        var scan = ClosedEnumScan.Create(start.Compilation);
-        start.RegisterSymbolStartAction(symbol =>
-        {
-            if (!Attributes.IsVerifiedOrTheorem(symbol.Symbol)) return;
-            symbol.RegisterSymbolEndAction(end =>
-            {
-                foreach (var d in Diagnose.Member(end.Symbol, start.Compilation, end.CancellationToken))
-                    end.ReportDiagnostic(ToRoslyn(d));   // VirSpan → Location
-            });
-        }, SymbolKind.Method);
-        start.RegisterCompilationEndAction(end => scan.ReportUnnamedValues(end));
+        if (start.Compilation.GetTypeByMetadataName("Warrant.VerifiedAttribute") is null) return;
+        var session = new Session((CSharpCompilation)start.Compilation);   // one Diagnoser, one "reported" set
+        start.RegisterSymbolAction(session.AnalyzeSymbol, SymbolKind.Method, SymbolKind.Property, SymbolKind.NamedType);
+        start.RegisterCompilationEndAction(session.AnalyzeCompilation);    // WRT0008
     });
 }
 ```
 
-A test compares the two entries member by member on the M4 and M5a corpora: same IDs, same spans.
+Two tests compare them on every compilation of the M4 and M5a corpora, against an extraction with the build's defines (what the analyzer sees): `Diagnoser`'s answer for each member equals the full extraction's for that member, and the analyzer's diagnostics equal the full extraction's, ID, span, severity and message alike.
 
 ## Determinism
 
@@ -66,13 +66,20 @@ If this one ran there, a WRT0002 at error severity would fail `CoreCompile`, the
 M5a reports WRT0002 from the CLI and still verifies the rest.
 The CLI would also report the same diagnostic again.
 
-So the `Warrant` package, which ships the analyzer, takes it out of `@(Analyzer)` before `CoreCompile` in every build that is not a design-time build (KTD23).
+So the `Warrant` package, which ships the analyzer under `analyzers/dotnet/cs/`, takes it out of `@(Analyzer)` before `CoreCompile` in every build that is not a design-time build (KTD23).
+The SDK adds a package's analyzers while it resolves references, so the build test that checks a design-time build's list resolves references first, as Visual Studio does.
 That lives in `Warrant`'s own targets rather than `Warrant.Build`'s, because a project may reference `Warrant` alone; it gets WRT0011 and must still build.
 Visual Studio's live analysis uses the design-time build's analyzer list, so the developer sees the diagnostics while editing, and the build reports each one once, from the CLI, as before.
 Warning severity in builds was the alternative; it would still print everything twice.
+
+The analyzer is built against Roslyn 4.8 and tested under 4.8 and 5.9 (`Warrant.Analyzers.Tests.Roslyn48` and `Warrant.Analyzers.Tests`).
 
 ## What the analyzer sees
 
 The analyzer sees the active configuration only.
 A multi-targeted project's build keeps M4's check that a verified member translates the same under every `#if` combination (M5a KTD21); that diagnostic appears only in the build.
 And the analyzer never reports proof results: it cannot ask the server (I/O), and a proof that depends on the last keystroke is M8's language server.
+
+Two things the IDE shows differently from the build:
+WRT0008 comes from a compilation-end action, which Visual Studio runs only with full solution analysis on;
+and a diagnostic about a record or enum in another file is reported at the type, which the IDE shows when that file is analyzed through a member that uses it, while the member itself always shows "depends on a rejected unit".

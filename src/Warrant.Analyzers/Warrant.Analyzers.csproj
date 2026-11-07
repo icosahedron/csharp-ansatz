@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The IDE's view of extraction (M5b KTD21, docs/m5b/06): the Warrant.Extraction and Warrant.Vir sources compiled into
+    this one assembly, so no helper library loads into the compiler host and two Warrant versions in one Visual Studio
+    session cannot bind each other's copy. Built against Roslyn 4.8, the floor the .NET 8 SDK and Visual Studio 2022 load.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Description>Roslyn analyzers that report Warrant's extraction diagnostics while you type. Never reports proof results.</Description>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IsPackable>false</IsPackable>
+    <!-- CA1720: Int32, Int64 and Int name VIR's own types, as in Warrant.Vir. -->
+    <NoWarn>$(NoWarn);CA1720</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
+    <AdditionalFiles Include="..\BannedSymbols.Analyzer.txt" />
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md;AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Warrant.Vir\**\*.cs" Exclude="..\Warrant.Vir\bin\**;..\Warrant.Vir\obj\**;..\Warrant.Vir\VirReader.cs;..\Warrant.Vir\IsExternalInit.cs" LinkBase="Vir" />
+    <Compile Include="..\Warrant.Extraction\**\*.cs" Exclude="..\Warrant.Extraction\bin\**;..\Warrant.Extraction\obj\**" LinkBase="Extraction" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Warrant.Analyzers.Tests" />
+  </ItemGroup>
+</Project>

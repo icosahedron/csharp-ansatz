@@ -125,6 +125,47 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
     }
 
     [HostFact(BuildHost.Dotnet)]
+    public void TheAnalyzerRunsOnlyInDesignTimeBuildsSoABuildReportsWrt0002OnceAndStillVerifiesTheRest()
+    {
+        var host = BuildHost.Find(BuildHost.Dotnet).Host!;
+        var dir = packages.Sample(
+            "Analyzed", Samples.Project($"<TargetFramework>{Samples.Net10}</TargetFramework>") + Samples.RecordAnalyzers, Samples.Mixed);
+
+        var (exitCode, log) = host.Build(dir);
+        Report(host, dir, log);
+
+        // The CLI reports the division once, in its own format, and still proves the theorem (M5b R19, KTD23).
+        Assert.Equal(1, exitCode);
+        Assert.Equal(["Mixed.cs(9,49,9,54): error WRT0002: M4 does not support division."], Samples.Diagnostics(log, dir));
+        Assert.Contains("1 theorems proved, 0 not proved.", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("Warrant.Analyzers", File.ReadAllText(Path.Combine(dir, "obj", "analyzers-build.txt")), StringComparison.Ordinal);
+
+        // What Visual Studio's project system runs, references resolved first, as they are where the SDK adds a package's
+        // analyzers: the analyzer is in the list it hands the IDE's compiler.
+        var (designExit, designLog) = host.Build(
+            dir, "-t:ResolveReferences;CoreCompile", "-p:DesignTimeBuild=true", "-p:SkipCompilerExecution=true", "-p:ProvideCommandLineArgs=true");
+        Assert.True(designExit == 0, designLog);
+        Assert.Contains("Warrant.Analyzers", File.ReadAllLines(Path.Combine(dir, "obj", "analyzers-design.txt")));
+    }
+
+    [HostFact(BuildHost.Dotnet)]
+    public void AProjectReferencingOnlyWarrantBuildsGreenDespiteAnUnsupportedConstruct()
+    {
+        var host = BuildHost.Find(BuildHost.Dotnet).Host!;
+        var dir = packages.Sample(
+            "AnalyzedNoTask",
+            Samples.Project($"<TargetFramework>{Samples.Net10}</TargetFramework>", warrantBuild: false) + Samples.RecordAnalyzers,
+            Samples.Mixed);
+
+        var (exitCode, log) = host.Build(dir);
+        Report(host, dir, log);
+
+        Assert.True(exitCode == 0, log);
+        Assert.Matches(@"warning WRT0011: ", Assert.Single(Samples.Diagnostics(log, dir)));
+        Assert.DoesNotContain("Warrant.Analyzers", File.ReadAllText(Path.Combine(dir, "obj", "analyzers-build.txt")), StringComparison.Ordinal);
+    }
+
+    [HostFact(BuildHost.Dotnet)]
     public void AMultiTargetedSampleVerifiesOnceAndReportsEachDiagnosticOnce()
     {
         var host = BuildHost.Find(BuildHost.Dotnet).Host!;
@@ -341,6 +382,42 @@ internal static class Samples
 
             """,
     };
+
+    /// <summary>A provable theorem beside a member outside the subset.</summary>
+    public static readonly IReadOnlyDictionary<string, string> Mixed = new Dictionary<string, string>
+    {
+        ["Mixed.cs"] = """
+            using Warrant;
+
+            namespace Sample;
+
+            public static class Mixed
+            {
+                [Verified]
+                public static int Same(int x) => x;
+                [Verified] public static int Half(int x) => x / 2;
+
+                [Theorem]
+                static Proof SameIsIdentity(int x) =>
+                    Prove.That(Same(x) == x).By(Tactic.Unfold(nameof(Same)), Tactic.Exact(Lean.Const("rfl")));
+            }
+
+            """,
+    };
+
+    /// <summary>
+    /// Writes the analyzers CoreCompile was given to <c>obj/analyzers-build.txt</c>, or <c>obj/analyzers-design.txt</c> in a
+    /// design-time build, after the Warrant package's targets have run.
+    /// </summary>
+    public const string RecordAnalyzers = """
+          <Target Name="RecordAnalyzers" AfterTargets="CoreCompile">
+            <PropertyGroup>
+              <_RecordedBuild>build</_RecordedBuild>
+              <_RecordedBuild Condition="'$(DesignTimeBuild)' == 'true'">design</_RecordedBuild>
+            </PropertyGroup>
+            <WriteLinesToFile File="$(BaseIntermediateOutputPath)analyzers-$(_RecordedBuild).txt" Lines="@(Analyzer->'%(Filename)')" Overwrite="true" />
+          </Target>
+        """;
 
     public const string NoScriptOnly = """
         using Warrant;

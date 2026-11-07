@@ -22,8 +22,8 @@
 
 | Package | Target | Add to | Contents |
 |---|---|---|---|
-| `Warrant` | netstandard2.0 | the project being verified | Attributes, `Spec`, `Prove`, `Tactic`, `Lean`, `Verify`. No run-time behaviour. |
-| `Warrant.Build` | netstandard2.0 | the project being verified | The MSBuild task (M5a), which runs the `warrant` CLI it carries under `tools/net10.0/any/`; analyzers come in M5b. Development dependency. |
+| `Warrant` | netstandard2.0 | the project being verified | Attributes, `Spec`, `Prove`, `Tactic`, `Lean`, `Verify`. No run-time behaviour. From M5b it also carries the IDE analyzer (`analyzers/dotnet/cs/Warrant.Analyzers.dll`), which runs only in design-time builds. |
+| `Warrant.Build` | netstandard2.0 | the project being verified | The MSBuild task (M5a), which runs the `warrant` CLI it carries under `tools/net10.0/any/`. Development dependency. |
 | `warrant` | net10.0 | a dotnet tool | The CLI and verification engine. |
 
 Neither package is on nuget.org yet; the build integration tests pack them
@@ -270,11 +270,20 @@ Numbers are provisional.
 | WRT0011 | warning | `Warrant` package | Nothing is verified (M5a): the project references `Warrant` but not `Warrant.Build`, or sets `WarrantEnabled` to something other than `true`. Silence it with `NoWarn`. Its location is the package's `build/Warrant.targets`. |
 | WRT0012 | error | build task | The compilation cannot be rebuilt from Csc's arguments (M5a). Warrant runs the project's source generators, so this means the code does not compile, or a generator could not load (for example one built for a compiler newer than Warrant's Roslyn 5.9.0) or threw; a generator problem fails even when the code compiles without its output. Names the missing symbols and the generator problem. |
 
-There is no analyzer until M5b: extraction raises WRT0002 to WRT0005, WRT0008
-and WRT0009 itself, and `warrant translate` and `warrant verify` report them
-with the engine's WRT0001, WRT0006 and WRT0010. The build task reports what
-`warrant verify` reports, plus WRT0010 when the CLI fails; WRT0011 comes from
-the `Warrant` package's own targets.
+Extraction raises WRT0002 to WRT0005, WRT0008 and WRT0009, and `warrant
+translate` and `warrant verify` report them with the engine's WRT0001, WRT0006
+and WRT0010. The build task reports what `warrant verify` reports, plus WRT0010
+when the CLI fails; WRT0011 comes from the `Warrant` package's own targets.
+
+From M5b the `Warrant` package's analyzer reports extraction's diagnostics in
+the IDE as you type, at the same places and with the same messages, because it
+runs extraction's own rules. It sees the active configuration only, so the
+`preprocessor conditional` check stays the build's, and it never reports proof
+results (WRT0001, WRT0006). It runs only in design-time builds: in a build, the
+CLI reports each diagnostic once and verifies everything else. WRT0008 is a
+property of the whole compilation, so Visual Studio shows it only with full
+solution analysis on. A diagnostic about a record or enum that a member uses is
+reported at the type, and the member gets "depends on a rejected unit".
 
 ## MSBuild properties
 

@@ -8,6 +8,18 @@
     <_WarrantFirstTargetFramework>$([System.Text.RegularExpressions.Regex]::Replace('$(TargetFrameworks)', '^[\s;]*([^;\s]*)[\s\S]*$', '$1'))</_WarrantFirstTargetFramework>
   </PropertyGroup>
 
+  <!--
+    The package's analyzer (M5b KTD23) runs in the IDE only: every build that is not a design-time build drops it before
+    CoreCompile, whether or not Warrant.Build is referenced or WarrantEnabled is true. In a build, the warrant CLI reports
+    extraction's diagnostics once each and still verifies everything else; the analyzer would report them again, and its
+    errors would fail CoreCompile before any theorem was verified. The IDE takes its analyzers from design-time builds.
+  -->
+  <Target Name="_WarrantRemoveAnalyzerFromBuild" BeforeTargets="CoreCompile" Condition="'$(DesignTimeBuild)' != 'true'">
+    <ItemGroup>
+      <Analyzer Remove="@(Analyzer)" Condition="'%(Analyzer.Filename)' == 'Warrant.Analyzers'" />
+    </ItemGroup>
+  </Target>
+
   <Target Name="_WarrantCheckVerificationEnabled"
           BeforeTargets="CoreCompile"
           Condition="'$(DesignTimeBuild)' != 'true' and ('$(TargetFrameworks)' == '' or '$(TargetFramework)' == '$(_WarrantFirstTargetFramework)')">

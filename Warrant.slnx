@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Warrant/Warrant.csproj" />
+    <Project Path="src/Warrant.Analyzers/Warrant.Analyzers.csproj" />
     <Project Path="src/Warrant.Build/Warrant.Build.csproj" />
     <Project Path="src/Warrant.Cic/Warrant.Cic.csproj" />
     <Project Path="src/Warrant.Cli/Warrant.Cli.csproj" />
@@ -16,6 +17,8 @@
     <Project Path="src/Warrant.Vir/Warrant.Vir.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Warrant.Analyzers.Tests/Warrant.Analyzers.Tests.csproj" />
+    <Project Path="tests/Warrant.Analyzers.Tests.Roslyn48/Warrant.Analyzers.Tests.Roslyn48.csproj" />
     <Project Path="tests/Warrant.Build.FakeCli/Warrant.Build.FakeCli.csproj" />
     <Project Path="tests/Warrant.Build.Tests/Warrant.Build.Tests.csproj" />
     <Project Path="tests/Warrant.Cic.Tests/Warrant.Cic.Tests.csproj" />

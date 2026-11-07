@@ -234,6 +234,9 @@ public static class Extractor
         return text.EndsWith(".0", StringComparison.Ordinal) ? text.Substring(0, text.Length - 2) : text;
     }
 
+    /// <summary>Sorts diagnostics as <see cref="ExtractionResult.Diagnostics"/> is: by file, line, column, ID, member and construct.</summary>
+    internal static List<ExtractionDiagnostic> Sorted(List<ExtractionDiagnostic> diagnostics) => Sort(diagnostics);
+
     private static List<ExtractionDiagnostic> Sort(List<ExtractionDiagnostic> diagnostics)
     {
         diagnostics.Sort((a, b) =>
@@ -307,39 +310,37 @@ public static class Extractor
         public TypeBuild? Type { get; set; }
     }
 
-    private sealed class Run
+    /// <summary>One extraction: the whole compilation (<see cref="Execute"/>), or one member's closure (<see cref="ExecuteFor"/>).</summary>
+    internal sealed class Run
     {
         private readonly CSharpCompilation _compilation;
         private readonly CancellationToken _cancellationToken;
         private readonly ExtractionContext _context;
         private readonly Dictionary<string, Candidate> _candidates = new(StringComparer.Ordinal);
         private readonly List<ExtractionDiagnostic> _diagnostics = [];
+        private readonly Lazy<CompilationScan> _scan;
 
-        public Run(CSharpCompilation compilation, CancellationToken cancellationToken)
+        /// <param name="compilation">The compilation.</param>
+        /// <param name="cancellationToken">Cancels the run.</param>
+        /// <param name="scan">The compilation's scan, shared by runs on the same compilation; null to make one when needed.</param>
+        public Run(CSharpCompilation compilation, CancellationToken cancellationToken, Lazy<CompilationScan>? scan = null)
         {
             _compilation = compilation;
             _cancellationToken = cancellationToken;
-            var facts = new VirFacts(
-                compilation.Options.CheckOverflow ? VirOverflow.Checked : VirOverflow.Wrap,
-                LanguageText(compilation.LanguageVersion),
-                Version,
-                RoslynVersion);
-            _context = new ExtractionContext(compilation, facts);
+            _context = new ExtractionContext(compilation, Facts(compilation));
+            _scan = scan ?? new Lazy<CompilationScan>(() => CompilationScan.Run(_context, _cancellationToken), LazyThreadSafetyMode.None);
         }
+
+        public static VirFacts Facts(CSharpCompilation compilation) => new(
+            compilation.Options.CheckOverflow ? VirOverflow.Checked : VirOverflow.Wrap,
+            LanguageText(compilation.LanguageVersion),
+            Version,
+            RoslynVersion);
 
         public ExtractionResult Execute()
         {
-            var scan = CompilationScan.Run(_context, _cancellationToken);
-            var types = SourceTypes(_compilation.Assembly.GlobalNamespace)
-                .OrderBy(Symbols.Key, StringComparer.Ordinal)
-                .ToList();
-
-            var members = types
-                .SelectMany(t => t.GetMembers())
-                .Where(m => m is IMethodSymbol { MethodKind: not MethodKind.PropertyGet and not MethodKind.PropertySet } or IPropertySymbol)
-                .Where(m => Symbols.IsVerified(m) || Symbols.IsTheorem(m))
-                .OrderBy(Symbols.Key, StringComparer.Ordinal);
-            foreach (var member in members)
+            var types = SortedSourceTypes(_compilation);
+            foreach (var member in AttributedMembers(types))
             {
                 _cancellationToken.ThrowIfCancellationRequested();
                 var candidate = BuildMember(member);
@@ -347,13 +348,10 @@ public static class Extractor
             }
 
             // Type units for every type a unit uses, then the shape checks for every [Closed] type, used or not.
-            while (_context.TryNextType(out var type))
-            {
-                AddType(type, scan);
-            }
+            AddUsedTypes();
             foreach (var type in types.Where(t => Symbols.IsClosed(t) && !_context.IsUsed(Symbols.Key(t))))
             {
-                var build = TypeChecks.Build(_context, scan, type);
+                var build = TypeChecks.Build(_context, _scan, type);
                 if (build.Rejection is { } r)
                 {
                     Report(Symbols.Key(type), r);
@@ -361,14 +359,7 @@ public static class Extractor
             }
 
             // WRT0008 anywhere in the compilation (KTD18).
-            foreach (var (operation, construct, member) in scan.UnnamedClosedValues)
-            {
-                Warn(member, construct, operation.Syntax.GetLocation());
-            }
-            foreach (var type in types.Where(t => Symbols.Shape(t) == TypeShape.ClosedEnum && !TypeChecks.HasZero(t)))
-            {
-                Warn(type, "closed enum without a member valued 0", Symbols.FirstLocation(type));
-            }
+            _diagnostics.AddRange(UnnamedClosedValues(_scan.Value, types));
 
             RejectCycles();
             RejectDependents();
@@ -382,6 +373,90 @@ public static class Extractor
             var order = Graph.TopologicalOrder(accepted.Keys, k => accepted[k].Deps);
             var units = order.Select(k => Finish(accepted[k])).ToList();
             return new ExtractionResult(units, Sort(_diagnostics), hasCompileErrors: false);
+        }
+
+        /// <summary>
+        /// The diagnostics of one member or type and of everything it reaches (M5b KTD22): the member, the members it calls
+        /// or cites, transitively, and the types they use, checked with the same rules as <see cref="Execute"/>. That set is
+        /// closed under calls and dependencies, so cycles and rejected dependencies come out as they do for the whole
+        /// compilation. No units are built and no WRT0008 is reported.
+        /// </summary>
+        /// <param name="root">A <c>[Verified]</c> member, a <c>[Theorem]</c>, or a record, enum or closed type.</param>
+        /// <param name="attributed">The compilation's <c>[Verified]</c> members and <c>[Theorem]</c>s by key.</param>
+        /// <returns>The diagnostics, keyed by the members and types they are about.</returns>
+        public List<ExtractionDiagnostic> ExecuteFor(ISymbol root, IReadOnlyDictionary<string, ISymbol> attributed)
+        {
+            if (root is INamedTypeSymbol type)
+            {
+                _context.UseType(type);
+            }
+            else
+            {
+                var pending = new Queue<ISymbol>();
+                pending.Enqueue(root);
+                while (pending.Count > 0)
+                {
+                    _cancellationToken.ThrowIfCancellationRequested();
+                    var member = pending.Dequeue();
+                    var key = Symbols.Key(member);
+                    if (_candidates.ContainsKey(key))
+                    {
+                        continue;
+                    }
+                    var candidate = BuildMember(member);
+                    _candidates.Add(key, candidate);
+                    foreach (var reached in candidate.Deps.Concat(candidate.Calls))
+                    {
+                        if (!_candidates.ContainsKey(reached) && attributed.TryGetValue(reached, out var next))
+                        {
+                            pending.Enqueue(next);
+                        }
+                    }
+                }
+            }
+            AddUsedTypes();
+            RejectCycles();
+            RejectDependents();
+            foreach (var c in _candidates.Values.Where(c => c.Rejection is not null).OrderBy(c => c.Key, StringComparer.Ordinal))
+            {
+                Report(c.Key, c.Rejection!);
+            }
+            return Sort(_diagnostics);
+        }
+
+        private void AddUsedTypes()
+        {
+            while (_context.TryNextType(out var type))
+            {
+                AddType(type);
+            }
+        }
+
+        /// <summary>The compilation's source types, by key.</summary>
+        public static List<INamedTypeSymbol> SortedSourceTypes(CSharpCompilation compilation) =>
+            SourceTypes(compilation.Assembly.GlobalNamespace)
+                .OrderBy(Symbols.Key, StringComparer.Ordinal)
+                .ToList();
+
+        /// <summary>The <c>[Verified]</c> members and <c>[Theorem]</c>s of the types, by key.</summary>
+        public static IEnumerable<ISymbol> AttributedMembers(IEnumerable<INamedTypeSymbol> types) =>
+            types
+                .SelectMany(t => t.GetMembers())
+                .Where(m => m is IMethodSymbol { MethodKind: not MethodKind.PropertyGet and not MethodKind.PropertySet } or IPropertySymbol)
+                .Where(m => Symbols.IsVerified(m) || Symbols.IsTheorem(m))
+                .OrderBy(Symbols.Key, StringComparer.Ordinal);
+
+        /// <summary>WRT0008: the operations the scan found, then every closed enum without a member valued 0.</summary>
+        public static IEnumerable<ExtractionDiagnostic> UnnamedClosedValues(CompilationScan scan, IEnumerable<INamedTypeSymbol> types)
+        {
+            foreach (var (operation, construct, member) in scan.UnnamedClosedValues)
+            {
+                yield return Warning(member, construct, operation.Syntax.GetLocation());
+            }
+            foreach (var type in types.Where(t => Symbols.Shape(t) == TypeShape.ClosedEnum && !TypeChecks.HasZero(t)))
+            {
+                yield return Warning(type, "closed enum without a member valued 0", Symbols.FirstLocation(type));
+            }
         }
 
         private static IEnumerable<INamedTypeSymbol> SourceTypes(INamespaceSymbol ns)
@@ -422,18 +497,18 @@ public static class Extractor
             _diagnostics.Add(new ExtractionDiagnostic(
                 r.Id, ExtractionSeverity.Error, r.Construct, key, r.At is null ? null : Symbols.Span(r.At), r.Message));
 
-        private void Warn(ISymbol member, string construct, Location? at) =>
-            _diagnostics.Add(new ExtractionDiagnostic(
+        private static ExtractionDiagnostic Warning(ISymbol member, string construct, Location? at) =>
+            new(
                 DiagnosticIds.UnnamedClosedValue,
                 ExtractionSeverity.Warning,
                 construct,
                 Symbols.Key(member),
                 at is null ? null : Symbols.Span(at),
-                $"{Symbols.Display(member)}: {construct} can give a [Closed] enum a value the model says cannot exist."));
+                $"{Symbols.Display(member)}: {construct} can give a [Closed] enum a value the model says cannot exist.");
 
-        private void AddType(INamedTypeSymbol type, CompilationScan scan)
+        private void AddType(INamedTypeSymbol type)
         {
-            var build = TypeChecks.Build(_context, scan, type);
+            var build = TypeChecks.Build(_context, _scan, type);
             var candidate = new Candidate(Symbols.Key(type), type, VirUnitKind.Type)
             {
                 Type = build,

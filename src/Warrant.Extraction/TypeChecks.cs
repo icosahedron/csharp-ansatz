@@ -31,7 +31,7 @@ internal sealed class TypeBuild
 /// </summary>
 internal static class TypeChecks
 {
-    public static TypeBuild Build(ExtractionContext context, CompilationScan scan, INamedTypeSymbol type)
+    public static TypeBuild Build(ExtractionContext context, Lazy<CompilationScan> scan, INamedTypeSymbol type)
     {
         var walker = new Walker(context, inTheorem: false);
         var build = new TypeBuild(type, walker.Deps);
@@ -181,7 +181,7 @@ internal static class TypeChecks
         EnumMembers(closedEnum).Any(f => Symbols.ToInt64(f.ConstantValue!) == 0);
 
     /// <summary>The closed shape (design D13), checked in docs/m4/03's five steps; a failure is WRT0009 naming the step.</summary>
-    private static ClosedDefinition ClosedClass(ExtractionContext context, CompilationScan scan, INamedTypeSymbol type, TypeBuild build)
+    private static ClosedDefinition ClosedClass(ExtractionContext context, Lazy<CompilationScan> scan, INamedTypeSymbol type, TypeBuild build)
     {
         // 1. Sealed.
         if (!type.IsSealed)
@@ -232,7 +232,7 @@ internal static class TypeChecks
         }
 
         // 4. The constructors are called nowhere else.
-        foreach (var creation in scan.Creations)
+        foreach (var creation in scan.Value.Creations)
         {
             if (SymbolEqualityComparer.Default.Equals(creation.Constructor?.ContainingType, type)
                 && !allowed.Contains((creation.Syntax.SyntaxTree, creation.Syntax.SpanStart, creation.Syntax.Span.Length)))

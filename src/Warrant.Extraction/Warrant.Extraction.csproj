@@ -11,4 +11,15 @@
   <ItemGroup>
     <ProjectReference Include="..\Warrant.Vir\Warrant.Vir.csproj" />
   </ItemGroup>
+  <!--
+    The analyzer compiles these sources into the compiler (M5b KTD21): Roslyn's rules for analyzer code (RS1035: no file,
+    console or process I/O) and a ban on clocks, randomness, GUIDs and Environment, so nothing nondeterministic creeps in.
+  -->
+  <PropertyGroup>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
+    <AdditionalFiles Include="..\BannedSymbols.Analyzer.txt" />
+  </ItemGroup>
 </Project>

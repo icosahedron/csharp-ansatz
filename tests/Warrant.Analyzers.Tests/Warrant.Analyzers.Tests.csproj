@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The analyzer under the compiler Warrant uses (Roslyn 5.9), with the corpus parity test (M5b U15). -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <DefineConstants>$(DefineConstants);ROSLYN59</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <ProjectReference Include="..\..\src\Warrant\Warrant.csproj" />
+    <!-- The analyzer compiles Extraction's and Vir's sources into itself, so its types are reached through an alias. -->
+    <ProjectReference Include="..\..\src\Warrant.Analyzers\Warrant.Analyzers.csproj" Aliases="analyzers" />
+    <ProjectReference Include="..\Warrant.TestSupport\Warrant.TestSupport.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\corpus\m4\**\*" LinkBase="corpus\m4" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\corpus\m5a\**\*" LinkBase="corpus\m5a" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

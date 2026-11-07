@@ -152,17 +152,17 @@ public sealed class StoreCommandTests : IDisposable
     [Fact]
     public void SampleStoreLooksUpTheRequestedNumberOfConstantsAndReportsTheMemoryAfterwards()
     {
+        const int Count = 50, QuotientCheckRecords = 4;
         Assert.Equal(0, Import(Bundle, "--store", Store).Code);
 
-        var (code, output, error) = Run(SampleStoreCommand.Run, [Store, "--count", "50", "--seed", "7"]);
+        var (code, output, error) = Run(SampleStoreCommand.Run, [Store, "--count", $"{Count}", "--seed", "7"]);
 
         Assert.True(code == 0, error);
         var lines = output.Split('\n');
         Assert.Matches(@"^opened store .+ \(v1-[0-9a-f]{12}, 2,835 constants\) in \d+\.\d ms$", lines[0]);
-        var looked = Regex.Match(lines[1], @"^looked up 50 random constants \(seed 7\) in \d+\.\d ms, decoding (\d+) records$");
+        var looked = Regex.Match(lines[1], $@"^looked up {Count} random constants \(seed 7\) in \d+\.\d ms, decoding (\d+) records$");
         Assert.True(looked.Success, lines[1]);
-        // Fifty constants live in at most fifty records, and the quotient check reads the records of its four constants.
-        Assert.InRange(int.Parse(looked.Groups[1].Value, CultureInfo.InvariantCulture), 1, 54);
+        Assert.InRange(int.Parse(looked.Groups[1].Value, CultureInfo.InvariantCulture), 1, Count + QuotientCheckRecords);
         Assert.Matches(@"^GC heap \d+\.\d MB, working set \d+\.\d MB$", lines[2]);
         Assert.Equal("", lines[3]);
     }

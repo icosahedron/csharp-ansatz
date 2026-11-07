@@ -44,7 +44,6 @@ export WARRANT_SERVER_ENDPOINT="warrant-measure-$$-$RANDOM"
 warrant() { dotnet "$WARRANT_CLI" "$@"; }
 now_ms() { date +%s%3N; }
 
-# Stops this run's server and waits until nothing answers on its endpoint.
 stop_server() {
   warrant server shutdown >/dev/null 2>&1 || true
   for _ in $(seq 1 300); do
@@ -63,7 +62,6 @@ cp -r "$repo/tests/corpus/m5a" "$work/m5a"
 mkdir -p "$work/empty"
 
 rows=()
-# run_mode MODE SAMPLE VERIFY-ARGS...: one row of the latency table.
 run_mode() {
   local mode="$1" sample="$2"
   shift 2
@@ -89,7 +87,6 @@ run_mode() {
     }')")
 }
 
-# memory LABEL: one row of the server memory table, from `warrant server status`.
 memory_rows=()
 memory() {
   memory_rows+=("$(warrant server status | awk -v label="$1" '

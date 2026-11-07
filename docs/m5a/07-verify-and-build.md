@@ -32,7 +32,7 @@ M5a moves both into the CLI (KTD21), for two reasons found while planning:
 
 The task is then thin: a netstandard2.0 `ToolTask` that references only `Microsoft.Build.Utilities.Core` (KTD22).
 Running the engine in a separate process also gives the time limit a clean place to act, and an out-of-memory or stack overflow in a tactic cannot take the build node down.
-M5b replaces the child process with the server.
+M5b keeps the child process: it still compiles and extracts, then sends the units' VIR to the verification server, or verifies them in-process when the server cannot be used, and renders the results ([M5b chapter 2](../m5b/02-client-and-build.md)). The server never loads Roslyn.
 
 ## Reproducing the compilation
 
@@ -119,6 +119,7 @@ This is `src/Warrant.Build/build/Warrant.Build.targets`, shortened; `Warrant.Bui
 
 The target has no `Inputs` and `Outputs`, so every build verifies again (KTD22).
 Skipping an unchanged project would be a cache keyed on timestamps, and the CI trust decision for M5a is that every build re-checks every proof (Key Decisions).
+M5b keeps the target without them and adds a content-addressed result cache inside the CLI's run, so an unchanged build still runs the CLI but no tactics ([M5b chapter 4](../m5b/04-cache-and-recheck.md)).
 In a multi-targeted project the target runs in the inner build of the first target framework only, so diagnostics are not repeated, and it asks the CLI to keep M4's `#if` combination check, so a verified method whose meaning differs under `#if NET8_0` is rejected instead of being proved for one framework and shipped unproved for the other.
 A build of one framework that is not the first, such as `dotnet build -f net10.0` for `net8.0;net10.0`, therefore verifies nothing and gives no warning: the inner build cannot tell whether the first framework's build is part of the same invocation. Verify with the first framework, or a build of all of them.
 Design-time builds, which Visual Studio runs constantly in the background, skip it.

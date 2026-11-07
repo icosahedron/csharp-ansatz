@@ -27,33 +27,39 @@ That is why outcomes must not carry spans (below).
 A verify request is a record in `Warrant.Engine.Service`, serialized with a source-generated System.Text.Json context (KTD6).
 
 ```csharp
-// Shape only.
-record VerifyRequest(
-    int Protocol,
+// Abridged from src/Warrant.Engine/Service/Contracts.cs (XML documentation removed).
+public sealed record VerifyRequest(
+    int ProtocolVersion,
     string RequestId,          // chosen by the client, used by cancel(id)
     string ProjectDirectory,   // names the project for report(project)
-    string CacheDirectory,     // $(WarrantCacheDir)
-    Budgets Budgets,           // kernel fuel, tactic fuel, seconds
+    string? CacheDirectory,    // $(WarrantCacheDir); null for no cache
+    VerifyBudgets Budgets,     // kernel fuel, numeral size limit, tactic fuel, time limit
     bool Recheck,
-    int Priority,              // build; unused until an IDE client exists
-    ImmutableArray<WireUnit> Units);
+    int Priority,              // unused until an IDE client exists
+    ImmutableArray<RequestUnit> Units)
+{
+    public VerifyReport? Report { get; init; }   // claims and settings for report(project), chapter 7
+}
 
-record WireUnit(byte[] Vir, string DisplayName);   // Vir is VirWriter's canonical encoding
+public sealed record RequestUnit(string Key, VirUnitKind Kind, string? DisplayName, ReadOnlyMemory<byte> Vir);   // VirWriter's encoding
 
-record VerifyResponse(
-    ImmutableArray<UnitResult> Units,               // in request order
-    Counters Counters);                              // hits, misses, tactic runs
+public sealed record VerifyResponse(
+    int ProtocolVersion, string RequestId,
+    ImmutableArray<UnitResult> Units,   // in request order
+    VerifyCounters Counters,            // hits, misses, tactic runs, rechecked
+    TimeSpan Elapsed);
 
-record UnitResult(string Key, OutcomeDto Outcome, bool FromCache, bool Rechecked, TimeSpan Elapsed);
+public sealed record UnitResult(OutcomeDto Outcome, bool FromCache, bool Rechecked, TimeSpan Elapsed);
 ```
 
 The VIR bytes are the canonical encoding the closure hash is computed over, so the server needs no Roslyn to read them and computes the same hashes the cache uses (chapter 4).
 
 ## Node IDs, not spans
 
-Today an outcome that points into the source, such as the tactic that failed or a recursive call whose measure does not decrease, stores a `VirSpan`: file, line and column (`Outcomes.cs`).
+In M5a an outcome that points into the source, such as the tactic that failed or a recursive call whose measure does not decrease, stored a `VirSpan`: file, line and column (`Outcomes.cs`).
 A cached outcome must not, because the cache key leaves positions out on purpose: adding a blank line above a method changes no closure hash.
 So outcomes carry the node's ID, its index in the unit's pre-order walk, and the client maps it through the current extraction's `SpanTable` (KTD7).
+`OutcomeDto`, the outcome on the wire and in a cache entry, has a `Node` for the failing tactic or a failed unit's diagnostic, a decrease failure that names its call by node, and a node ID for each side of a false comparison.
 
 ```mermaid
 sequenceDiagram
@@ -65,12 +71,12 @@ sequenceDiagram
   C-->>C: error WRT0001 at Increments.cs(15,12)
 ```
 
-docs/m4 already described results this way; the code resolved spans inside the engine.
-`SpanTable` gains an enumeration so the renderer and tests can walk it.
+docs/m4 already described results this way; until M5b only a false comparison's sides worked so, and the engine resolved the other spans itself.
+`SpanTable` gained an enumeration, `Entries`, so the renderer and tests can walk it.
 
 ## When there is no server
 
-Any failure on the server path makes the CLI verify the remaining units in-process with the same `VerificationService` (KTD5):
+Any failure on the server path makes the CLI verify the request in-process with the same `VerificationService` (KTD5):
 
 - the server cannot be started, or does not answer within 20 seconds of being started (5 seconds when it was already running);
 - `hello` reports another protocol, or the server runs another toolchain or loaded another bundle or sidecar;
@@ -81,12 +87,14 @@ A server that failed to start leaves a record beside its copy (`<copy>.start-fai
 A build that reaches the server deletes the record.
 Each start also deletes the copies no build has used for 14 days (every upgrade or rebuild of Warrant adds one), temporary copies a CLI left over an hour ago, and old records; nothing else under the copy root is touched.
 
-In the last case the CLI re-verifies only the units it has no result for.
-It logs one message saying why, at normal importance; a warning would break builds that treat warnings as errors, and the result is correct either way, as with Roslyn's compiler server.
+The server answers a request all at once, so a dropped or abandoned request leaves the CLI no unit's result, and it verifies the whole request again; units the server finished before it stopped answering have their cache entries written, so they come back as hits.
+The CLI logs one message saying why, at normal importance; a warning would break builds that treat warnings as errors, and the result is correct either way, as with Roslyn's compiler server.
 
 ```text
-Warrant: verification server unavailable (connect timed out after 5 s); verifying in-process.
+Warrant: verification server unavailable (connecting to the server timed out after 5 s); verifying in-process.
 ```
+
+A Ctrl+C is not a failure: the first one cancels the request on the server (or in-process), and the units that had not finished come back cancelled and unreported; a second one ends the process.
 
 ## The build's new knobs
 
@@ -102,10 +110,16 @@ The cache directory sits under `BaseIntermediateOutputPath` (normally `obj/`, an
 `dotnet clean` and Rebuild delete it, and only it: the cache marks its directory with a `WARRANT-CACHE` file, and the clean deletes only a marked directory's entries (files named by their 64-hex-digit key, their temporary files and the marker), then the directory if that leaves it empty.
 A `WarrantCacheDir` that names a source or home directory by mistake loses nothing to a clean.
 
-The summary line names the cached count and the path taken:
+The summary line names the cached count, the rechecked count when there is one, and, when the build asked for the server, the path taken: `[server]`, or `[in-process]` after a fallback.
+With `WarrantUseServer=false` the line is M5a's, with the cached count added.
+The M5a accepted sample, verified three times through the server, the third with `--recheck` (*ran*):
 
 ```text
-Warrant: 20 verified units, 7 theorems proved (5 from cache), 0 not proved. [server]
+Warrant: 20 verified units, 7 theorems proved, 0 not proved. [server]
+Warrant: 20 verified units, 7 theorems proved (10 from cache), 0 not proved. [server]
+Warrant: 20 verified units, 7 theorems proved (10 from cache, 10 rechecked), 0 not proved. [server]
 ```
+
+The cached count is units, not theorems: the seven theorems and the three recursive methods, whose decrease proofs are cached too (chapter 4).
 
 Everything else about the task is M5a's: the WRT1 records, the exit codes and the error for a CLI crash.

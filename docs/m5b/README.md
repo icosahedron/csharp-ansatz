@@ -1,6 +1,6 @@
 # M5b: a server, a cache and a store
 
-> Status: **planned.** These chapters were written with the plan, before the implementation; the documentation unit (U18) brings them up to date with the code.
+> Status: **built.** These chapters were written with the plan and brought up to date with the code when M5b was finished (U18); the exit criterion holds as design §11 records.
 > The plan that schedules this work is [docs/plans/2026-11-05-1640-feat-m5b-server-cache-store-plan.md](../plans/2026-11-05-1640-feat-m5b-server-cache-store-plan.md).
 > Its Key Technical Decisions (`KTD1`, `KTD2`, …) own the decisions; these chapters explain them and cite them by ID.
 > Code in these chapters shows the shape of the design and is not compiled. Output in `text` blocks is illustrative unless marked *ran*.
@@ -31,15 +31,19 @@ M5a's three theorems carry through, now built twice.
 `Increment` and `AlwaysLarger` are in `Increments.cs`; `Validate` and `ValidImpliesPositive` in `Payments.cs`; `Sum`, a recursive method whose decrease proof needs `omega`, in `Sums.cs` (see [the M5a README](../m5a/README.md#the-running-examples)).
 
 The first `dotnet build` starts the server and proves everything it can; `AlwaysLarger` fails with its counterexample, as in M5a.
-The second build, with nothing changed, prints the same diagnostics, and its summary says where they came from (illustrative):
+The second build, with nothing changed, prints the same diagnostics, and its summary says where they came from.
+On the M5a corpus's refuted sample, verified twice through the server as the build does (*ran*, `warrant verify tests/corpus/m5a/refuted --server auto --cache-dir …`, abridged):
 
 ```text
-Increments.cs(14,52): error WRT0001: Theorem 'Increments.AlwaysLarger(int)' could not be proved: omega could not prove the goal. Counterexample: x = 2147483647.
+m5a/refuted/Increment.cs(14,52): error WRT0001: Theorem 'Increments.AlwaysLarger(int)' could not be proved: omega could not prove the goal. Counterexample: x = 2147483647.
   …
-Warrant: 5 verified units, 2 theorems proved (2 from cache), 1 not proved. [server]
+m5a/refuted/Recursion.cs(12,16): error WRT0001: The recursive call 'Bad(n - 1)' could not be shown to decrease 'n': omega could not prove the goal.
+  …
+Warrant: 3 verified units, 0 theorems proved (2 from cache), 1 not proved. [server]
 ```
 
-The not-proved result came from the cache too: its inputs and budgets are unchanged, so running `omega` again would fail the same way.
+The two not-proved results came from the cache: their inputs and budgets are unchanged, so running `omega` again would fail the same way.
+The cached count counts units, theorems and recursive methods alike; on the accepted sample a second build reports `7 theorems proved (10 from cache)`, the three recursive methods' decrease proofs included.
 Editing `Validate` invalidates `ValidImpliesPositive` and nothing else; editing `Sum`'s body invalidates `Sum` and any theorem about it.
 
 ```mermaid
@@ -61,6 +65,7 @@ flowchart TB
 - Live proof feedback in the IDE, a language server, `grind` and typed Mathlib handles (M8).
 - Using the store as the verification environment: the bundle stays the environment until M6 needs more of Lean's library (chapter 5).
 - A cache shared across projects, signed cache entries, and eviction beyond `dotnet clean` (chapter 4).
+- Hardening the server against the same user's processes at another elevation level (GitHub issue #43, chapter 1).
 
 ## Glossary
 

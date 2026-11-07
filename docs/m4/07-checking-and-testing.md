@@ -160,7 +160,7 @@ The kernel is named by the major and minor version of the `Warrant.Kernel` assem
 A unit's status is `TRANSLATED`, `VERIFIED` or `FAILED`; a failed theorem also gives the reason, such as `the claim is false (WRT0001)`.
 Reports use C# display names, not Lean names (chapter 5).
 A theorem's report inherits the assumptions of every unit it calls, because the claim is only as good as the models it reasons about.
-The engine's results refer to VIR node IDs and get their spans from the current extraction, so a report rebuilt from results cached by M5b's server will never point at a stale line (chapter 4).
+The engine's results refer to VIR node IDs and get their spans from the current extraction, so a report rebuilt from cached results never points at a stale line (chapter 4); M5b extended this from false claims to every position an outcome carries (M5b KTD7).
 
 ## The cross-check step
 

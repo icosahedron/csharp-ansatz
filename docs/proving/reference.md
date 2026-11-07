@@ -23,7 +23,7 @@
 | Package | Target | Add to | Contents |
 |---|---|---|---|
 | `Warrant` | netstandard2.0 | the project being verified | Attributes, `Spec`, `Prove`, `Tactic`, `Lean`, `Verify`. No run-time behaviour. From M5b it also carries the IDE analyzer (`analyzers/dotnet/cs/Warrant.Analyzers.dll`), which runs only in design-time builds. |
-| `Warrant.Build` | netstandard2.0 | the project being verified | The MSBuild task (M5a), which runs the `warrant` CLI it carries under `tools/net10.0/any/`. Development dependency. |
+| `Warrant.Build` | netstandard2.0 | the project being verified | The MSBuild task (M5a), which runs the `warrant` CLI it carries under `tools/net10.0/any/`, and, from M5b, the verification server `warrant-server.dll` beside it. Development dependency. |
 | `warrant` | net10.0 | a dotnet tool | The CLI and verification engine. |
 
 Neither package is on nuget.org yet; the build integration tests pack them
@@ -116,7 +116,7 @@ The default pipeline for contracts (M6) is VC generation, then `Simp`, then `Ome
 
 | Member | Since | Meaning |
 |---|---|---|
-| `Lean.Const("Int32.lt_iff_toInt_lt")` | M5a | A declaration in the semantics bundle: the semantics library and the part of Init that `lean/bundle-roots.txt` reaches. Other Init lemmas, such as `Nat.add_comm`, are not in it and fail with "unknown constant". The whole store (Init, then Std and Mathlib) comes with M5b's store. Takes a string literal; it cannot name a variable or a member to unfold. |
+| `Lean.Const("Int32.lt_iff_toInt_lt")` | M5a | A declaration in the semantics bundle: the semantics library and the part of Init that `lean/bundle-roots.txt` reaches. Other Init lemmas, such as `Nat.add_comm`, are not in it and fail with "unknown constant". M5b's store holds Init and Mathlib for the CLI's `import` and `check-store`, but proofs still see only the bundle; the store becomes the verification environment when M6 brings in Std. Takes a string literal; it cannot name a variable or a member to unfold. |
 
 Typed handles such as `Mathlib.Nat.AddComm` come in M8.
 
@@ -293,12 +293,17 @@ reported at the type, and the member gets "depends on a rejected unit".
 | `WarrantKernelFuel` | M5a | 20,000,000 | Kernel steps per theorem. |
 | `WarrantTacticFuel` | M5a | 171,970 | Tactic steps per theorem. |
 | `WarrantTimeoutSeconds` | M5a | 30 | Wall-clock seconds per theorem, for tactics and kernel together. |
-| `WarrantRecheck` | M5b | `false` | Re-check cached proof certificates with the kernel alone. Recommended in CI. M5a has no cache: every build re-checks every proof. |
+| `WarrantUseServer` | M5b | `true`; `false` when `ContinuousIntegrationBuild` is `true` | Verify through the per-user verification server, starting it when none runs (`--server auto`). A server that cannot be started, reached or trusted makes the build verify in-process and log why, as a message, not a warning. `false` always verifies in-process (`--server off`). |
+| `WarrantRecheck` | M5b | `false` | Have the kernel re-check every cached proof against the theorem as it is built from the current code, without running tactics (`--recheck`). A cached proof the kernel rejects is WRT0010 and its entry is deleted. Without it a cache hit is trusted. Recommended in CI. |
+| `WarrantCacheDir` | M5b | `$(BaseIntermediateOutputPath)warrant/cache/` | The project's result cache (`--cache-dir`). `dotnet clean` and Rebuild delete the entries in it, and nothing else. |
+| `WarrantUseCache` | M5b | `true` | `false` verifies without the result cache: nothing is read or written. |
 | `CheckForOverflowUnderflow` | M4 | `false` | The standard C# setting. Warrant models arithmetic the same way. |
 
-A theorem's own `[Theorem(...)]` arguments override the three budgets. Design-time
-builds never verify, and a multi-targeted project verifies once, in the build
-of the first entry of `TargetFrameworks`. A build of a single framework that is not
+A theorem's own `[Theorem(...)]` arguments override the three budgets, and from M5b
+they apply to every unit: a definition, its equation lemma or a decrease proof
+that runs out is WRT0006 too. Design-time builds never verify, and a
+multi-targeted project verifies once, in the build of the first entry of
+`TargetFrameworks`. A build of a single framework that is not
 the first (`dotnet build -f`) does not verify, and does not warn.
 
 ## CLI
@@ -308,11 +313,12 @@ the first (`dotnet build -f`) does not verify, and does not warn.
 | `warrant check <file.ndjson[.gz]> [--fuel <n>] [--admit-rejected] [--quiet] [--slowest <n>]` | M2 | Check a lean4export file with Warrant's kernel. `--quiet` prints only the summary; `--slowest <n>` also lists the n declarations that took longest, with the time and the memory allocated for each (M5b, used for [the Mathlib run](../mathlib.md)). |
 | `warrant export <in> <out>` | M3 | Check a lean4export file, then write what the kernel admitted, for another kernel to re-check. |
 | `warrant translate <directory> [--out <file.ndjson>] [--report <file.md>] [--check-overflow] [--bundle <path>]` | M4 | Compile every `.cs` file under the directory, translate its `[Verified]` members and theorems, and print one line per unit plus diagnostics. `--out` writes the semantics bundle and every admitted declaration as lean4export NDJSON; `--report` writes the assumption report as Markdown. Exit 0 when everything translated and every theorem was proved, 1 otherwise, 2 for bad arguments or unreadable input. |
-| `warrant verify --csc-args <file> [--project-dir <dir>] [options]`, `warrant verify <directory> [options]` | M5a | Verify in-process, without the server: from the argument file the build writes (as the build task does), or from every `.cs` file under a directory, as `translate` compiles it. Prints one line per unit, the diagnostics and `Warrant: n verified units, n theorems proved, n not proved.` Options: `--format text\|msbuild` (`msbuild` writes one tab-separated `WRT1` record per diagnostic, for the build task); `--out <file.ndjson>` (the bundle and every admitted declaration, as `translate --out`); `--report <dir>` (`report.md` and `report.json`); `--kernel-fuel <n>`, `--tactic-fuel <n>`, `--timeout <seconds>`; `--bundle <path>` (the attribute sidecar must sit next to the bundle and name its hash); `--keep-conditional-check` (keep M4's `#if` combination check with `--csc-args`). The directory mode uses the corpus kernel fuel, 100M. Exit 0 when every theorem was proved (warnings allowed), 1 when an error was reported, 2 for bad arguments or unreadable input, including a missing bundle or a missing or mismatched sidecar. A `<project>` form that evaluates the project file is follow-up work. |
+| `warrant verify --csc-args <file> [--project-dir <dir>] [options]`, `warrant verify <directory> [options]` | M5a | Verify from the argument file the build writes (as the build task does), or from every `.cs` file under a directory, as `translate` compiles it. Prints one line per unit, the diagnostics and `Warrant: n verified units, n theorems proved, n not proved.`; from M5b the summary adds `(k from cache)` and `(k from cache, k rechecked)`, counting theorems and recursive methods, and, with `--server auto`, `[server]` or `[in-process]`. M5b options: `--server auto\|off` (through the verification server, falling back to in-process when it cannot be used, or in-process; in-process when not given); `--cache-dir <dir>` (read and write the result cache there; not with `--out`); `--recheck` (the kernel re-checks every cached proof); `--timings` (after the summary, how long reaching the server took, the request's time and each unit's time and source: `server`, `in-process`, `cache` or `rechecked`). The first Ctrl+C cancels the run, on the server too; a second ends the process. M5a options: `--format text\|msbuild` (`msbuild` writes one tab-separated `WRT1` record per diagnostic, for the build task); `--out <file.ndjson>` (the bundle and every admitted declaration, as `translate --out`); `--report <dir>` (`report.md` and `report.json`); `--kernel-fuel <n>`, `--tactic-fuel <n>`, `--timeout <seconds>`; `--bundle <path>` (the attribute sidecar must sit next to the bundle and name its hash); `--keep-conditional-check` (keep M4's `#if` combination check with `--csc-args`). The directory mode uses the corpus kernel fuel, 100M. Exit 0 when every theorem was proved (warnings allowed), 1 when an error was reported, 2 for bad arguments or unreadable input, including a missing bundle or a missing or mismatched sidecar. A `<project>` form that evaluates the project file is follow-up work. |
 | `warrant explain <unit> [--project-dir <dir>] [--csc-args <file>] [--sources <dir>] [--server auto\|off]` | M5b | Verify one unit and the units it needs, and print each tactic of its proof script as its source reads, where it is, and the goals before and after it, or why it failed; then the unit's outcome as `verify` reports it. `<unit>` is the name a diagnostic gives (`Increments.AlwaysLarger(int)`), any dotted end of the display name, with or without its parameters, or the documentation-comment ID; an unknown or ambiguous name lists the units. It compiles from the project's most recent `obj/**/warrant.csc.args` unless `--csc-args` or a `--sources` directory is given, takes `--bundle`, `--kernel-fuel`, `--tactic-fuel` and `--timeout` as `verify` does, and never uses the result cache. Exit 0 when the unit verified, 1 when it did not, 2 for bad arguments or an unknown unit. |
-| `warrant server status \| cancel <id> \| shutdown \| report <project dir>` | M5b | Manage the verification server of this toolchain. `report` prints the JSON assumption report of the project's last verify through the server, the `report.json` that `--report` writes. |
+| `warrant server status \| cancel <id> \| shutdown \| report <project dir>` | M5b | Manage the verification server a build of this toolchain uses; none of them starts one. `status` prints the process id, endpoint, toolchain identity, uptime, bundle hash, GC heap, working set, cache counters (hits, misses, tactic runs, rechecked) and the running requests with their ids. `cancel <id>` stops a running request. `shutdown` stops the server once its running requests finish. `report` prints the JSON assumption report of the project's last verify through the server, the `report.json` that `--report` writes. With no server running each says so; exit 0 for `status` and `shutdown` then, 1 for `cancel` and `report`, and 1 when `cancel` finds no such request. |
 | `warrant import <file.ndjson[.gz]>... --store <dir> [--verified] [--fuel <n>]` | M5b | Write a new version of a store from the files, in order ([store v1](../m5b/05-store.md)). |
 | `warrant check-store <dir> [--fuel <n>] [--quiet]` | M5b | Re-check every declaration of the store with the kernel, with `warrant check`'s summary and exit codes. |
+| `warrant sample-store <dir> [--count <n>] [--seed <n>]` | M5b | Open the store's current version, look up n distinct constants chosen at random by name (1,000 and seed 1 by default), and print the time taken, the GC heap and the working set: a measurement of the store, used by `scripts/measure-m5b.sh`. |
 
 From M5b, `verify --out` and `--report` work through the server too: `--out` writes the certificates the server's
 `export` returns, byte for byte what an in-process run writes, and `--report` renders the same reports on either path.
@@ -321,7 +327,9 @@ From M5b, `verify --out` and `--report` work through the server too: `--out` wri
 
 `warrant translate --report <file.md>` (M4) writes the Markdown form, and
 `warrant verify --report <dir>` (M5a) writes `report.md` and `report.json`.
-The build does not write a report in M5a. Each unit's line names its status
+The build does not write a report. From M5b, a verify through the server keeps
+the project's last JSON report there, and `warrant server report <project dir>`
+prints it. Each unit's line names its status
 (`TRANSLATED`, `VERIFIED` or `FAILED`), how a theorem was proved or why it
 failed, the kernel version and the semantics bundle's hash, followed by its
 assumptions. From M5a, a recursive method, and every unit that depends on one,

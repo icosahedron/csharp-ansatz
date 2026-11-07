@@ -39,35 +39,48 @@ string Key(Unit u) => Sha256Hex(
 ```
 
 Budgets are not in the key, because most outcomes do not depend on them: a proof found with 10,000 tactic steps is still a proof with 20,000.
-The reverse is not true, so a proved entry records the fuel and time its proof used and hits only when the current budgets are at least that; a project that lowers its budgets sees the failure a cold CI build would.
+The reverse is not true, so a proved entry records what its proof needed (the kernel fuel and numeral size limit it ran with, the tactic fuel it used and the time it took) and hits only when every current budget is at least that; a project that lowers its budgets sees the failure a cold CI build would.
 An outcome that depends on the exact budgets ("not proved", "ran out of kernel fuel", and "false", whose read-back values use the kernel's limits) stores the budgets it ran with, and the entry hits only when the current budgets are the same (KTD13).
 
 ## What is stored
 
-One JSON file per entry, named by its key, under `$(BaseIntermediateOutputPath)warrant/cache/` (KTD14):
+One JSON file per entry, named by its key, under `$(BaseIntermediateOutputPath)warrant/cache/` (KTD14).
+The file is `{"sha256": …, "body": …}`, where the hash is the SHA-256 of the body's text exactly as it stands in the file.
+The entry for the M5a accepted sample's `Sum` (*ran*; hashes shortened, the outcome's empty fields and most of the certificate left out):
 
 ```json
 {
-  "format": 1,
-  "toolchain": "9c41…",
-  "inputs": { "closure": "e07d…", "bundle": "51b2…", "sidecar": "a8f0…" },
-  "budgets": null,
-  "outcome": { "kind": "proved", "by": "script" },
-  "report": { "assumptions": [ … ] },
-  "certificate": "{\"meta\":…}\n{\"in\":1,…}\n…",
-  "sha256": "…"
+  "sha256": "8344f464…",
+  "body": {
+    "format": 1,
+    "toolchain": "8a1f35d2…",
+    "key": "4eea5469…",
+    "inputs": {
+      "closure": "cd0f01f5…",
+      "bundle": "cc74b3a2…",
+      "sidecar": "7d4ebef2…",
+      "names": [ { "key": "M:Corpus.Recursion.Sum(System.Int32)", "displayName": "Corpus.Recursion.Sum(int)" } ]
+    },
+    "match": "AtLeast",
+    "budgets": { "kernelFuel": 100000000, "kernelMaxNatBytes": 134217728, "tacticFuel": 16896, "timeout": "00:00:00.0630442" },
+    "outcome": { "kind": "Translated", "key": "M:Corpus.Recursion.Sum(System.Int32)", "unitKind": "Function", "displayName": "Corpus.Recursion.Sum(int)", "assumptions": [], … },
+    "certificate": "{\"meta\":{\"exporter\":{\"name\":\"Warrant\",\"version\":\"1.0.0\"},…"
+  }
 }
 ```
 
-The certificate is the lean4export NDJSON of exactly the declarations the unit admitted: its definition or theorem, and for a recursive method its decrease theorems and equation lemma.
+`match` says how `budgets` decide a hit: `AtLeast` for a proof (here the decrease proof's 16,896 tactic steps and 63 ms), `Exact` for an outcome that depends on the budgets.
+The outcome is the wire form of chapter 2, so its positions are node IDs and it carries the unit's assumptions, which is what the assumption report needs.
+
+The certificate is the lean4export NDJSON of exactly the declarations the unit admitted: its definition or theorem, and for a recursive method its definition, decrease theorems and equation lemma (about 109 KB for `Sum`).
 Recursive methods get entries like theorems do: their decrease proofs run `omega`, so a second build that must run no tactics needs them, and a decrease proof that failed is a cached not-proved outcome.
-It refers to bundle and callee constants by name without including them, so it is small.
-`verify --out` assembles the full file Lean re-checks from the bundle and these pieces (chapter 7).
+It refers to bundle and callee constants by name without including them, so it holds only the unit's own declarations.
+`verify --out` does not read it: it verifies without the cache and writes everything the run admitted (chapter 7).
 
 An entry is written as soon as its unit finishes, but only if the request was not cancelled and the unit's deadline had not passed when it finished, so a result produced while being interrupted is never stored.
 Files are written to a temporary name and renamed into place.
 Entries are immutable and named by content, so two builds writing the same key at once both write the same bytes, and a crash leaves at most a stray temporary file.
-A reader checks the body's hash, the format and the toolchain identity; a file that fails any check is deleted and counts as a miss.
+A reader checks the body's hash, the format, the toolchain identity and the key; a file that fails any check is deleted and counts as a miss.
 
 | Outcome | Cached? | Why |
 |---|---|---|

@@ -27,9 +27,9 @@ MSBuildWorkspace is not used: it would add an MSBuild dependency to the tests fo
 
 The factory and extraction are separate assemblies because they have different Roslyn constraints:
 
-- `Warrant.Extraction` is netstandard2.0, and the M5b analyzer will load it into the compiler.
+- `Warrant.Extraction` is netstandard2.0, and the M5b analyzer loads it into the compiler.
   A compiler refuses an analyzer built against a newer Roslyn than its own (warning CS8032), so extraction is compiled against **Roslyn 4.8.0**, the version in Visual Studio 2022 17.8 and the .NET 8 SDK.
-  That floor is provisional; M5b confirms it when it packages the analyzer.
+  M5b kept that floor when it packaged the analyzer, which is tested under Roslyn 4.8 and 5.9 ([docs/m5b/06](../m5b/06-analyzers.md)).
 - `Warrant.Frontend` runs only in Warrant's own net10.0 processes (tests, the CLI, later the M5a child process), so it can reference **Roslyn 5.0.0**, which knows C# 14.
   It also carries the reference assemblies, tens of megabytes that have no place in an analyzer.
 
@@ -156,7 +156,7 @@ Each unit collects the assumptions its translation relies on, for the assumption
 ## Diagnostics
 
 Diagnostic numbers are provisional, as in the [reference](../proving/reference.md).
-M4 has no analyzer (M5b), so extraction raises the analyzer's checks itself; the analyzer will call the same code.
+M4 has no analyzer, so extraction raises the analyzer's checks itself; M5b's analyzer calls the same code.
 
 | Code | Severity | Raised when |
 |---|---|---|
@@ -171,5 +171,5 @@ WRT0001 (not proved) and WRT0006 (out of fuel) come from checking, not extractio
 
 ## Determinism
 
-The same compilation must always give byte-identical VIR, because VIR is hashed (chapter 4) and the hash will key M5b's cache.
+The same compilation must always give byte-identical VIR, because VIR is hashed (chapter 4) and the hash keys M5b's result cache.
 Extraction therefore identifies symbols by documentation-comment ID, sorts with ordinal string comparison, never iterates a hash-ordered collection to produce output, never uses `string.GetHashCode` (randomised per process), and formats numbers with the invariant culture.

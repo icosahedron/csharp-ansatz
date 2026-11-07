@@ -142,4 +142,6 @@ accepted 57,944, rejected 0, declined 0; 59,374 constants in 138.2s
 
 The Init + semantics store passing `check-store` is M5b's exit criterion for the store, and it does.
 Measured on Linux with a Debug build of the CLI: the import peaked at 0.96 GB and `check-store` at 1.4 GB (a fresh environment holds every constant it checks); the version is 80 MB (`decls.bin` 78.5 MB, `names.idx` 4.4 MB) against the export's 348 MB.
-The full Init export is not committed, so that test is opt-in through `WARRANT_INIT_EXPORT` (`StoreCommandTests.AStoreOfInitAndTheBundlePassesCheckStore`), as M3's full-Init test is; the default run builds and checks a store of the bundle alone.
+On Windows, in the test run on a 32-core workstation, `check-store` on the Init + semantics store took about 2 minutes 50 seconds.
+The full Init export is not committed, so that test is opt-in through `WARRANT_INIT_EXPORT` (`StoreCommandTests.AStoreOfInitAndTheBundlePassesCheckStore`, and `M5bExitTests.TheInitAndSemanticsStorePassesCheckStore`), as M3's full-Init test is; the default run builds and checks a store of the bundle alone.
+The export must be made with metadata, as `scripts/export-lean-library.sh` now does by default; an Init export made before that fails the import with "'Nat.beq' differs from the constant of that name an earlier file declared".

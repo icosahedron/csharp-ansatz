@@ -145,6 +145,15 @@ minutes on one thread, so it is a one-off or CI job, not something to run on
 every build. Trusted mode, which reads the store without re-checking it, is the
 everyday path.
 
+The M5b plan chose lazy loading, and store v1 does it
+([docs/m5b/05](m5b/05-store.md)). On the same export and a Windows workstation
+(2026-11-07), a trusted `warrant import` writes a 1.45 GB store in 139 s;
+opening it takes 69 ms, and after 1,000 random lookups the process holds a
+21 MB managed heap and an 88 MB working set
+([docs/m5b/08](m5b/08-testing-and-baselines.md#baselines-for-m8)). The server
+still verifies against the semantics bundle alone; the store becomes the
+verification environment in M6.
+
 ## What it does not show
 
 - **Peak memory for Lean's kernel and for `warrant export`** was not measured.

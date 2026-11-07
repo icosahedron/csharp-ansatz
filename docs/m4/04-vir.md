@@ -4,7 +4,7 @@
 
 VIR is the verification IR between extraction and translation (design §4.1).
 It is shaped like C#, with every implicit thing made explicit: types are resolved, conversions are nodes, overflow behaviour is a field, and calls say what they call.
-From M5b on it is the wire format between the build task and the server, and its hash keys the server's cache (design §8.2), so M4 fixes its shape, its encoding and its hashes now.
+From M5b on it is the wire format between the `warrant` CLI, which extracts it, and the server, and its hash keys the result cache (design §8.2), so M4 fixes its shape, its encoding and its hashes now.
 
 It lives in `src/Warrant.Vir`, with no Roslyn dependency: the server only ever sees VIR (design §3.2).
 
@@ -111,7 +111,7 @@ The writer is hand-written rather than built on `System.Text.Json`, because that
 A test writes the same units from both target frameworks and compares the bytes.
 The reader, which only the engine and later the server need, is built for net10.0 only and uses the in-box `System.Text.Json`; reading is not where the bytes are decided.
 
-A binary encoding (design §4.1) waits until the server needs one.
+M5b's CLI sends these bytes to the server as they are; a binary encoding (design §4.1) was not needed.
 
 ## Hashes
 
@@ -128,7 +128,9 @@ The graph is acyclic, because M4 rejects recursion and cyclic record types (chap
 Source spans are in neither hash.
 They live in a side table keyed by node ID, where node IDs are assigned in pre-order.
 Without that split, adding a comment line above a method would move every span below it and change every hash.
-The engine's results refer to node IDs (the two sides of a false claim, for example) and get their spans from the side table of the current extraction, so a result cached by M5b's server will never point at stale lines.
+The engine's results refer to node IDs and get their spans from the side table of the current extraction, so a cached result never points at stale lines.
+In M4 and M5a this held only for the two sides of a false claim: a failed tactic and a recursive call that did not decrease carried a span resolved inside the engine.
+M5b made every position in an outcome a node ID, which the client maps through its own extraction's span table (M5b KTD7, [docs/m5b/02](../m5b/02-client-and-build.md#node-ids-not-spans)).
 Extraction's own diagnostics carry source locations directly, because they are produced from the current compilation and never cached.
 
 ## The running example in VIR

@@ -29,6 +29,7 @@ public sealed partial class VerificationService : IDisposable
     private readonly WorkerPool _pool;
     private readonly Dictionary<(string Directory, string Key), TaskCompletionSource> _computing = [];
     private readonly Lock _computingLock = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _reports = new(StringComparer.Ordinal);
     private int _hits;
     private int _misses;
     private int _tacticRuns;
@@ -118,7 +119,68 @@ public sealed partial class VerificationService : IDisposable
     /// <returns>The response and the result.</returns>
     /// <exception cref="ArgumentException">The request's protocol version is not <see cref="ProtocolVersion"/>, or two units have the same key.</exception>
     /// <exception cref="InvalidOperationException">The request has a cache directory and the service was not given <see cref="Hashes"/>.</exception>
-    public ServiceRun Run(VerifyRequest request, CancellationToken cancellationToken = default)
+    public ServiceRun Run(VerifyRequest request, CancellationToken cancellationToken = default) => RunTraced(request, null, cancellationToken);
+
+    /// <summary>
+    /// Verifies one unit and the units it needs with a trace of its proof script (M5b KTD24, <c>warrant explain</c>),
+    /// never reading or writing the cache: an explanation comes from running the tactics.
+    /// </summary>
+    /// <param name="request">The request and the unit to trace.</param>
+    /// <param name="cancellationToken">Stops the request (KTD12).</param>
+    /// <returns>The response and the traced unit's steps.</returns>
+    /// <exception cref="ArgumentException">The request is malformed, or names a unit it does not hold.</exception>
+    public ExplainResponse Explain(ExplainRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!request.Request.Units.Any(u => string.Equals(u.Key, request.UnitKey, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException($"The request has no unit {request.UnitKey}.", nameof(request));
+        }
+        var steps = ImmutableArray<TacticStep>.Empty;
+        void Trace(string key, ImmutableArray<TacticStep> recorded)
+        {
+            if (string.Equals(key, request.UnitKey, StringComparison.Ordinal))
+            {
+                steps = recorded;
+            }
+        }
+        var run = RunTraced(request.Request with { CacheDirectory = null }, Trace, cancellationToken);
+        return new ExplainResponse(run.Response, steps);
+    }
+
+    /// <summary>
+    /// Verifies a request without the cache and returns, with the response, the certificate file of what it admitted (M5b
+    /// KTD25): the semantics bundle and every admitted declaration as lean4export NDJSON, gzip-compressed, which is the
+    /// file <c>warrant verify --out</c> writes. A cached unit admits nothing, so the cache is not used.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">Stops the request (KTD12).</param>
+    /// <returns>The response and the certificates.</returns>
+    public ExportResponse Export(VerifyRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var run = RunTraced(request with { CacheDirectory = null }, null, cancellationToken);
+        using var buffer = new MemoryStream();
+        using (var gzip = new System.IO.Compression.GZipStream(buffer, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+        {
+            run.Result.WriteNdjson(gzip);
+        }
+        return new ExportResponse(run.Response, buffer.ToArray(), run.Result.Admitted.Length);
+    }
+
+    /// <summary>
+    /// The JSON assumption report of the last request for a project directory that asked for one (M5b KTD25), as
+    /// <c>warrant verify --report</c> writes it to <c>report.json</c>; null when there was none.
+    /// </summary>
+    /// <param name="projectDirectory">The directory, as the request named it.</param>
+    /// <returns>The report, or null.</returns>
+    public string? Report(string projectDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(projectDirectory);
+        return _reports.TryGetValue(projectDirectory, out var report) ? report : null;
+    }
+
+    private ServiceRun RunTraced(VerifyRequest request, Action<string, ImmutableArray<TacticStep>>? trace, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (request.ProtocolVersion != ProtocolVersion)
@@ -147,6 +209,7 @@ public sealed partial class VerificationService : IDisposable
             Timeout = budgets.Timeout,
             Attributes = Attributes,
             CancellationToken = cancellationToken,
+            TacticTrace = trace,
         };
         Pipeline.PipelineRun run;
         using (var session = request.CacheDirectory is { } directory ? new CacheSession(this, directory, inputs, options, request.Recheck) : null)
@@ -171,6 +234,13 @@ public sealed partial class VerificationService : IDisposable
         Interlocked.Add(ref _tacticRuns, counters.TacticRuns);
         Interlocked.Add(ref _rechecked, counters.Rechecked);
         var response = new VerifyResponse(ProtocolVersion, request.RequestId, units, counters, stopwatch.Elapsed);
+        if (request.Report is { } report)
+        {
+            var byKey = inputs.ToDictionary(u => u.Unit.Key, StringComparer.Ordinal);
+            var built = AssumptionReports.Build(
+                [.. units.Select(u => u.Outcome)], byKey, new ReportSettings(report.CheckOverflow, report.Bundle), key => report.Claims.GetValueOrDefault(key));
+            _reports[request.ProjectDirectory] = JsonReport.Render(built);
+        }
         return new ServiceRun(response, run.Result);
     }
 

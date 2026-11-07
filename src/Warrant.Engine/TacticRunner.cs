@@ -10,7 +10,9 @@ namespace Warrant.Engine;
 /// Lean name in <see cref="Tactics"/>; a later unit adds a tactic by adding its entry. A name with no entry fails the
 /// script with "Tactic `x` is not available yet", which no <c>try</c> hides.
 /// </summary>
-internal sealed class TacticRunner(TacticM tactics)
+/// <param name="tactics">The tactic state.</param>
+/// <param name="recorder">Records each step for <c>warrant explain</c> (M5b KTD24); null when no one asked.</param>
+internal sealed class TacticRunner(TacticM tactics, TacticRecorder? recorder = null)
 {
     /// <summary>A tactic's implementation: runs <paramref name="node"/> on <paramref name="runner"/>'s goals.</summary>
     private delegate void Handler(TacticRunner runner, TacticNode node);
@@ -45,10 +47,16 @@ internal sealed class TacticRunner(TacticM tactics)
     public void Run(TacticNode node)
     {
         tactics.Step();
+        int? slot = recorder?.Started(node, tactics.GetUnsolvedGoals());
         if (!Tactics.TryGetValue(node.Name, out var handler))
         {
             FailedAt ??= node;
-            throw new TacticUnavailableException($"Tactic `{node.Name}` is not available yet");
+            var unavailable = new TacticUnavailableException($"Tactic `{node.Name}` is not available yet");
+            if (slot is { } s)
+            {
+                recorder!.Failed(s, unavailable.Message);
+            }
+            throw unavailable;
         }
         try
         {
@@ -57,9 +65,17 @@ internal sealed class TacticRunner(TacticM tactics)
         catch (Exception ex) when (ex is MetaException or TacticUnavailableException)
         {
             FailedAt ??= node;
+            if (slot is { } s)
+            {
+                recorder!.Failed(s, ex.Message);
+            }
             throw;
         }
         tactics.PruneSolvedGoals();
+        if (slot is { } done)
+        {
+            recorder!.Succeeded(done, tactics.GetUnsolvedGoals());
+        }
     }
 
     /// <summary><c>Tactic.Intro(names)</c>: one binder per name, or one binder under its own name when there is none.</summary>

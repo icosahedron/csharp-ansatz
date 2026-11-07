@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using System.Globalization;
+using System.IO.Compression;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -42,7 +44,7 @@ internal static class VerifyCommand
     /// <returns>0 when every theorem was proved (warnings allowed); 1 when an error was reported; 2 for bad arguments or unreadable input.</returns>
     public static int Run(string[] args, TextWriter output, TextWriter error, ServerSettings? server = null, CancellationToken cancellationToken = default)
     {
-        string? directory = null, cscArgs = null, projectDir = null, outPath = null, reportDir = null, bundlePath = null, cacheDir = null;
+        string? directory = null, cscArgs = null, projectDir = null, outPath = null, reportDir = null, bundlePath = null, cacheDir = null, explain = null;
         bool msbuild = false, keepConditionalCheck = false, recheck = false, timings = false;
         bool? useServer = null;
         long? kernelFuel = null, tacticFuel = null, timeoutSeconds = null;
@@ -84,6 +86,10 @@ internal static class VerifyCommand
                 case "--timings":
                     timings = true;
                     break;
+                case "--explain" when hasValue:
+                    // warrant explain's way in (ExplainCommand): verify one unit's closure with a trace of its script.
+                    explain = args[++i];
+                    break;
                 case "--kernel-fuel" when hasValue && Count(args[i + 1]) is { } n:
                     kernelFuel = n;
                     i++;
@@ -104,7 +110,8 @@ internal static class VerifyCommand
                     return 2;
             }
         }
-        if ((directory is null) == (cscArgs is null) || (projectDir is not null && cscArgs is null))
+        if ((directory is null) == (cscArgs is null) || (projectDir is not null && cscArgs is null)
+            || (explain is not null && (outPath is not null || reportDir is not null || cacheDir is not null)))
         {
             error.WriteLine($"usage: {Usage}");
             return 2;
@@ -143,6 +150,7 @@ internal static class VerifyCommand
                 // M5b KTD14: the NDJSON of --out needs every admitted declaration, which a cached unit does not admit
                 // until export reads certificates from the cache (plan U16), so --out verifies without the cache.
                 CacheDirectory = outPath is null && cacheDir is not null ? Path.GetFullPath(cacheDir) : null,
+                Explain = explain,
                 Recheck = recheck,
                 SidecarPath = sidecarPath,
                 UseServer = useServer,
@@ -187,6 +195,9 @@ internal static class VerifyCommand
 
         /// <summary>Whether each unit's time is printed after the summary (<c>--timings</c>, M5b KTD30).</summary>
         public bool Timings { get; init; }
+
+        /// <summary>The unit <c>warrant explain</c> traces, as the user named it (M5b KTD24); null for a verify.</summary>
+        public string? Explain { get; init; }
 
         /// <summary>How the server is found and started.</summary>
         public required ServerSettings Server { get; init; }
@@ -260,7 +271,29 @@ internal static class VerifyCommand
 
     private static int Verify(CSharpCompilation compilation, ExtractionResult extraction, Settings settings, EngineOptions options, Reporter report)
     {
-        var inputs = extraction.Units.Select(u => new EngineUnit(u.Unit, u.DisplayName, u.Spans)).ToList();
+        var extracted = extraction.Units.ToList();
+        var diagnostics = extraction.Diagnostics.ToList();
+        ExtractedUnit? explained = null;
+        if (settings.Explain is { } query)
+        {
+            // M5b KTD24: the unit and what it needs, with nothing else reported.
+            if (ExplainedUnit(extracted, query, report) is not { } target)
+            {
+                return 2;
+            }
+            explained = target;
+            var closure = Closure(target, extracted);
+            extracted = [.. extracted.Where(u => closure.Contains(u.Key))];
+            diagnostics = [.. diagnostics.Where(d => d.MemberKey is not null && closure.Contains(d.MemberKey))];
+        }
+        var inputs = extracted.Select(u => new EngineUnit(u.Unit, u.DisplayName, u.Spans)).ToList();
+        // What the server needs to keep this run's assumption report (KTD25): the claims are source text, which only the
+        // client has.
+        var claims = inputs
+            .Where(u => u.Unit.Kind == VirUnitKind.Theorem)
+            .Select(u => (u.Unit.Key, Text: AssumptionReports.ClaimSpan(u) is { } span ? report.Sources.Text(span) : null))
+            .Where(c => c.Text is not null)
+            .ToImmutableDictionary(c => c.Key, c => c.Text!, StringComparer.Ordinal);
         // M5b KTD1, KTD6: the same request the server takes, verified by the same service in-process. The spans and the
         // source text stay here, where the outcomes are rendered.
         var request = new VerifyRequest(
@@ -271,8 +304,16 @@ internal static class VerifyCommand
             VerifyBudgets.From(options),
             settings.Recheck,
             Priority: 0,
-            [.. extraction.Units.Select(u => new RequestUnit(u.Key, u.Unit.Kind, u.DisplayName, VirWriter.Write(u.Unit)))]);
-        var (response, result, path) = Execute(request, settings, report);
+            [.. extracted.Select(u => new RequestUnit(u.Key, u.Unit.Kind, u.DisplayName, VirWriter.Write(u.Unit)))])
+        {
+            Report = new VerifyReport(compilation.Options.CheckOverflow, OutcomeText.BundleName(settings.BundlePath), claims),
+        };
+        var execution = Execute(request, explained?.Key, settings, report);
+        var (response, path) = (execution.Response, execution.Path);
+        if (explained is not null)
+        {
+            PrintTrace(explained, execution.Steps, report);
+        }
         // Both paths render from the response's wire outcomes, so they print the same bytes (M5b R3, KTD28).
         var outcomes = response.Units.Select(u => u.Outcome).ToList();
 
@@ -282,16 +323,16 @@ internal static class VerifyCommand
             report.Line($"  {unit.DisplayName.PadRight(width)}  {Describe(unit)}");
         }
 
-        foreach (var d in extraction.Diagnostics)
+        foreach (var d in diagnostics)
         {
             report.Diagnostic(TranslateCommand.Severity(d.Severity), d.Id, d.Location, d.Message);
         }
-        var units = extraction.Units.ToDictionary(u => u.Key, StringComparer.Ordinal);
+        var units = extracted.ToDictionary(u => u.Key, StringComparer.Ordinal);
         var engineUnits = inputs.ToDictionary(u => u.Unit.Key, StringComparer.Ordinal);
         // A proved theorem's outcome needs its certificate, which the wire leaves out; nothing below reports one.
         foreach (var unit in outcomes.Where(u => u.Kind != OutcomeKind.Proved).Select(u => u.ToOutcome([])))
         {
-            var location = units.TryGetValue(unit.Key, out var extracted) ? extracted.Location : null;
+            var location = units.TryGetValue(unit.Key, out var extractedUnit) ? extractedUnit.Location : null;
             var name = TranslateCommand.MessageName(compilation, unit);
             switch (unit)
             {
@@ -329,20 +370,23 @@ internal static class VerifyCommand
             }
         }
 
-        if (settings.OutPath is not null)
+        // An interrupted export has no certificates to write.
+        if (settings.OutPath is not null && !execution.Certificates.IsEmpty)
         {
-            // Execute runs --out in-process (only that path holds the admitted declarations), so the result is there.
-            var admitted = result ?? throw new InvalidOperationException("--out ran without an in-process result");
-            using var stream = File.Create(settings.OutPath);
-            admitted.WriteNdjson(stream);
-            report.Line($"wrote the bundle and {admitted.Admitted.Length} admitted declaration(s) to {settings.OutPath}");
+            // Export's certificates (KTD25), from either path: the bytes M5a wrote, compressed for the wire.
+            using (var stream = File.Create(settings.OutPath))
+            using (var gzip = new GZipStream(new MemoryStream(execution.Certificates.ToArray()), CompressionMode.Decompress))
+            {
+                gzip.CopyTo(stream);
+            }
+            report.Line($"wrote the bundle and {execution.Admitted} admitted declaration(s) to {settings.OutPath}");
         }
         if (settings.ReportDir is not null)
         {
             Directory.CreateDirectory(settings.ReportDir);
             var reportSettings = new ReportSettings(compilation.Options.CheckOverflow, OutcomeText.BundleName(settings.BundlePath));
-            // As for --out: --report runs in-process.
-            var assumptions = AssumptionReports.Build(result ?? throw new InvalidOperationException("--report ran without an in-process result"), inputs, reportSettings, report.Sources.Text);
+            // From the wire outcomes, on either path, as the server builds the report it keeps (KTD25).
+            var assumptions = AssumptionReports.Build(outcomes, inputs, reportSettings, report.Sources.Text);
             File.WriteAllText(Path.Combine(settings.ReportDir, "report.md"), MarkdownReport.Render(assumptions));
             File.WriteAllText(Path.Combine(settings.ReportDir, "report.json"), JsonReport.Render(assumptions));
             report.Line($"wrote report.md and report.json to {settings.ReportDir}");
@@ -379,27 +423,39 @@ internal static class VerifyCommand
     /// service; the server answers a request all at once, so a lost connection leaves no unit with a result, and the
     /// whole request runs again. An interrupted run is not a failure: its units come back cancelled.
     /// </summary>
-    /// <returns>The response; the engine's result when the run was in-process; and the path taken, <c>server</c> or <c>in-process</c>.</returns>
-    private static (VerifyResponse Response, EngineResult? Result, string Path) Execute(VerifyRequest request, Settings settings, Reporter report)
+    /// <param name="request">The request.</param>
+    /// <param name="explain">The unit to trace (<c>explain</c>); null for a verify, or an export when <c>--out</c> is given.</param>
+    /// <param name="settings">The settings.</param>
+    /// <param name="report">Where the fallback message goes.</param>
+    /// <returns>The response, the path taken (<c>server</c> or <c>in-process</c>), and what export or explain added.</returns>
+    private static Execution Execute(VerifyRequest request, string? explain, Settings settings, Reporter report)
     {
         var token = settings.CancellationToken;
-        // --out and --report need the declarations the run admitted, which only an in-process run holds.
-        if (settings.UseServer == true && settings.OutPath is null && settings.ReportDir is null)
+        var (interval, timeout) = (settings.Server.HeartbeatInterval, settings.Server.HeartbeatTimeout);
+        if (settings.UseServer == true)
         {
             try
             {
-                var response = Task.Run(async () =>
+                return Task.Run(async () =>
                 {
                     using var client = await ServerClient.ConnectOrStartAsync(settings.Server, settings.Hashes, settings.BundlePath, settings.SidecarPath, token)
                         .ConfigureAwait(false);
-                    return await client.VerifyAsync(request, settings.Server.HeartbeatInterval, settings.Server.HeartbeatTimeout, token)
-                        .ConfigureAwait(false);
+                    if (explain is not null)
+                    {
+                        var explained = await client.ExplainAsync(new ExplainRequest(request, explain), interval, timeout, token).ConfigureAwait(false);
+                        return new Execution(explained.Response, "server") { Steps = explained.Steps };
+                    }
+                    if (settings.OutPath is not null)
+                    {
+                        var exported = await client.ExportAsync(request, interval, timeout, token).ConfigureAwait(false);
+                        return new Execution(exported.Response, "server") { Certificates = exported.Certificates, Admitted = exported.Admitted };
+                    }
+                    return new Execution(await client.VerifyAsync(request, interval, timeout, token).ConfigureAwait(false), "server");
                 }).GetAwaiter().GetResult();
-                return (response, null, "server");
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-                return (Cancelled(request), null, "server");
+                return new Execution(Cancelled(request), "server");
             }
             catch (ServerUnavailableException ex)
             {
@@ -408,8 +464,157 @@ internal static class VerifyCommand
         }
         var service = settings.Server.InProcessService;
         using var owned = service is null ? new VerificationService(SemanticsBundle.Load(settings.BundlePath), settings.Sidecar, hashes: settings.Hashes) : null;
-        var run = (owned ?? service!).Run(request, token);
-        return (run.Response, run.Result, "in-process");
+        var inProcess = owned ?? service!;
+        if (explain is not null)
+        {
+            var explained = inProcess.Explain(new ExplainRequest(request, explain), token);
+            return new Execution(explained.Response, "in-process") { Steps = explained.Steps };
+        }
+        if (settings.OutPath is not null)
+        {
+            var exported = inProcess.Export(request, token);
+            return new Execution(exported.Response, "in-process") { Certificates = exported.Certificates, Admitted = exported.Admitted };
+        }
+        return new Execution(inProcess.Verify(request, token), "in-process");
+    }
+
+    /// <summary>What <see cref="Execute"/> got back.</summary>
+    /// <param name="Response">The verification.</param>
+    /// <param name="Path"><c>server</c> or <c>in-process</c>.</param>
+    private sealed record Execution(VerifyResponse Response, string Path)
+    {
+        /// <summary>Export's gzip-compressed certificate file; empty for a verify, or when the run was interrupted.</summary>
+        public ReadOnlyMemory<byte> Certificates { get; init; }
+
+        /// <summary>The number of declarations the export's run admitted.</summary>
+        public int Admitted { get; init; }
+
+        /// <summary>The traced unit's steps (<c>explain</c>).</summary>
+        public ImmutableArray<TacticStep> Steps { get; init; } = [];
+    }
+
+    /// <summary>
+    /// The unit <c>warrant explain</c> names (KTD24): by documentation-comment ID, by display name, or by the end of a
+    /// display name after a dot, with or without its parameter list, as a diagnostic names it (<c>Increments.AlwaysLarger(int)</c>).
+    /// An unknown or ambiguous name lists the units, and the run stops.
+    /// </summary>
+    private static ExtractedUnit? ExplainedUnit(List<ExtractedUnit> units, string query, Reporter report)
+    {
+        static string WithoutParameters(string name) => name.IndexOf('(', StringComparison.Ordinal) is var i and >= 0 ? name[..i] : name;
+        static bool EndsWith(string name, string suffix) =>
+            string.Equals(name, suffix, StringComparison.Ordinal) || name.EndsWith("." + suffix, StringComparison.Ordinal);
+        Func<ExtractedUnit, bool>[] rules =
+        [
+            u => string.Equals(u.Key, query, StringComparison.Ordinal),
+            u => string.Equals(u.DisplayName, query, StringComparison.Ordinal),
+            u => EndsWith(u.DisplayName, query),
+            u => EndsWith(WithoutParameters(u.DisplayName), query),
+        ];
+        foreach (var rule in rules)
+        {
+            var matches = units.Where(rule).ToList();
+            if (matches.Count == 1)
+            {
+                return matches[0];
+            }
+            if (matches.Count > 1)
+            {
+                report.Line($"'{query}' names {matches.Count} units; name one of them:");
+                foreach (var m in matches)
+                {
+                    report.Line($"  {m.DisplayName}");
+                }
+                return null;
+            }
+        }
+        report.Line($"no unit is named '{query}'; the units are:");
+        foreach (var u in units.OrderBy(u => u.DisplayName, StringComparer.Ordinal))
+        {
+            report.Line($"  {u.DisplayName}");
+        }
+        return null;
+    }
+
+    /// <summary>The unit and every unit it depends on, transitively.</summary>
+    private static HashSet<string> Closure(ExtractedUnit target, List<ExtractedUnit> units)
+    {
+        var byKey = units.ToDictionary(u => u.Key, StringComparer.Ordinal);
+        var closure = new HashSet<string>(StringComparer.Ordinal);
+        var work = new Stack<string>([target.Key]);
+        while (work.Count > 0)
+        {
+            var key = work.Pop();
+            if (closure.Add(key) && byKey.TryGetValue(key, out var unit))
+            {
+                foreach (var dep in unit.Unit.Deps)
+                {
+                    work.Push(dep);
+                }
+            }
+        }
+        return closure;
+    }
+
+    /// <summary>
+    /// The trace of the explained unit (KTD24): each tactic as its source reads, where it is, and the goals before and
+    /// after it or why it failed; a tactic inside <c>AllGoals</c> or <c>Try</c> is numbered under it.
+    /// </summary>
+    private static void PrintTrace(ExtractedUnit unit, ImmutableArray<TacticStep> steps, Reporter report)
+    {
+        report.Line(unit.Location is { } at ? $"explaining {unit.DisplayName}  {report.Sources.Position(at)}" : $"explaining {unit.DisplayName}");
+        report.Line("");
+        if (steps.IsEmpty)
+        {
+            report.Line(unit.Unit.Kind == VirUnitKind.Theorem
+                ? "  no proof script ran; the outcome below says how the claim was decided"
+                : "  not a theorem; the outcome below is its translation");
+            report.Line("");
+            return;
+        }
+        var numbers = new List<int>();
+        foreach (var step in steps)
+        {
+            if (numbers.Count > step.Depth + 1)
+            {
+                numbers.RemoveRange(step.Depth + 1, numbers.Count - step.Depth - 1);
+            }
+            if (numbers.Count == step.Depth + 1)
+            {
+                numbers[step.Depth]++;
+            }
+            else
+            {
+                numbers.Add(1);
+            }
+            var indent = new string(' ', 2 * step.Depth);
+            VirSpan? span = step.Node is { } id && unit.Spans.TryGetSpan(id, out var s) ? s : null;
+            var label = span is null ? step.Tactic : report.Sources.Text(span) ?? step.Tactic;
+            report.Line($"{indent}[{string.Join(".", numbers)}] {label}{(span is null ? "" : "   " + report.Sources.Position(span))}");
+            Block(indent, "before:", step.Before);
+            if (step.Failure is { } failure)
+            {
+                Block(indent, "failed:", failure);
+            }
+            else if (step.After is { } after)
+            {
+                Block(indent, "after:", after);
+            }
+            else
+            {
+                report.Line($"{indent}  stopped here: the run ended inside this tactic");
+            }
+        }
+        report.Line("");
+
+        void Block(string indent, string title, string text)
+        {
+            report.Line($"{indent}  {title}");
+            var lines = text.Length == 0 ? ["no goals"] : text.Split('\n');
+            foreach (var line in lines)
+            {
+                report.Line(line.Length == 0 ? "" : $"{indent}    {line}");
+            }
+        }
     }
 
     /// <summary>The response of a request interrupted before the server answered: every unit cancelled.</summary>

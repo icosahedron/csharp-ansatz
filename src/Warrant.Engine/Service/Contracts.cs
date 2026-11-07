@@ -29,7 +29,42 @@ public sealed record VerifyRequest(
     VerifyBudgets Budgets,
     bool Recheck,
     int Priority,
-    ImmutableArray<RequestUnit> Units);
+    ImmutableArray<RequestUnit> Units)
+{
+    /// <summary>
+    /// What the service needs to build the run's assumption report, which it keeps per project directory for
+    /// <c>report(project)</c> (M5b KTD25); null for no report.
+    /// </summary>
+    public VerifyReport? Report { get; init; }
+}
+
+/// <summary>
+/// The parts of an assumption report only the client knows (M5b KTD25): the compilation's overflow setting, the bundle's
+/// name as reports print it, and each theorem's claim as its source reads.
+/// </summary>
+/// <param name="CheckOverflow">Whether the compilation checks arithmetic for overflow.</param>
+/// <param name="Bundle">The semantics bundle's name, as <see cref="Reports.ReportSettings.Bundle"/> has it.</param>
+/// <param name="Claims">Each theorem's claim text, by unit key; a theorem without one has no entry.</param>
+public sealed record VerifyReport(bool CheckOverflow, string Bundle, ImmutableDictionary<string, string> Claims);
+
+/// <summary>A request to verify one unit with a trace of its proof script (M5b KTD24, <c>warrant explain</c>).</summary>
+/// <param name="Request">The unit and its closure; its cache directory is ignored, since an explanation runs the tactics.</param>
+/// <param name="UnitKey">The unit to trace.</param>
+public sealed record ExplainRequest(VerifyRequest Request, string UnitKey);
+
+/// <summary>The answer to an <see cref="ExplainRequest"/>.</summary>
+/// <param name="Response">The verification of the request's units.</param>
+/// <param name="Steps">The traced unit's proof script, step by step; empty when it has no script or it did not run.</param>
+public sealed record ExplainResponse(VerifyResponse Response, ImmutableArray<TacticStep> Steps);
+
+/// <summary>The answer to <c>export(request)</c> (M5b KTD25): the verification, and the certificate file of what it admitted.</summary>
+/// <param name="Response">The verification of the request's units, without the cache.</param>
+/// <param name="Certificates">
+/// The semantics bundle and every declaration the run admitted, as lean4export NDJSON compressed with gzip: the file
+/// <c>warrant verify --out</c> writes, which another kernel can check on its own.
+/// </param>
+/// <param name="Admitted">The number of declarations the run admitted.</param>
+public sealed record ExportResponse(VerifyResponse Response, ReadOnlyMemory<byte> Certificates, int Admitted);
 
 /// <summary>A project's budgets for each unit (M5a R13, M5b R5): every field of the kernel's and the tactics' limits.</summary>
 /// <param name="KernelFuel">The kernel's fuel per unit.</param>
@@ -297,6 +332,15 @@ public static class ServerProtocol
     /// <summary><c>shutdown()</c>: lets the running requests finish, then exits.</summary>
     public const string Shutdown = "shutdown";
 
+    /// <summary><c>explain(request)</c>: verifies an <see cref="ExplainRequest"/> with a trace; answers an <see cref="ExplainResponse"/>.</summary>
+    public const string Explain = "explain";
+
+    /// <summary><c>export(request)</c>: verifies a <see cref="VerifyRequest"/> without the cache; answers an <see cref="ExportResponse"/>.</summary>
+    public const string Export = "export";
+
+    /// <summary><c>report(project)</c>: answers the JSON assumption report of the project directory's last verify, or null.</summary>
+    public const string Report = "report";
+
     /// <summary>The error of a <c>hello</c> with another protocol version; the server then drains and exits.</summary>
     public const int ProtocolMismatchError = -32001;
 
@@ -359,6 +403,9 @@ public sealed record ActiveRequest(string RequestId, string ProjectDirectory, in
 [JsonSourceGenerationOptions(UseStringEnumConverter = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(VerifyRequest))]
 [JsonSerializable(typeof(VerifyResponse))]
+[JsonSerializable(typeof(ExplainRequest))]
+[JsonSerializable(typeof(ExplainResponse))]
+[JsonSerializable(typeof(ExportResponse))]
 [JsonSerializable(typeof(HelloResponse))]
 [JsonSerializable(typeof(ServerStatus))]
 [JsonSerializable(typeof(int))]

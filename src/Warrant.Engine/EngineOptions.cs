@@ -42,4 +42,10 @@ public sealed record EngineOptions
     /// reported as an internal error (WRT0010), never as a proof.
     /// </summary>
     internal Func<Expr, Expr>? TamperWithProof { get; init; }
+
+    /// <summary>
+    /// When set, each theorem with a proof script records its steps (M5b KTD24) and gives them here, with its key, once the
+    /// script has run, from whichever worker ran it. For <c>warrant explain</c>; null records nothing.
+    /// </summary>
+    public Action<string, System.Collections.Immutable.ImmutableArray<TacticStep>>? TacticTrace { get; init; }
 }

@@ -332,12 +332,31 @@ public static partial class Pipeline
         /// <exception cref="OperationCanceledException">The run was cancelled during the counterexample search (KTD32).</exception>
         private UnitOutcome RunScript(EngineUnit unit, TheoremShell shell, string display, ImmutableArray<UnitAssumption> assumptions, TheoremBudget budget)
         {
-            var key = unit.Unit.Key;
-            var kind = unit.Unit.Kind;
             var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = run.Names };
             var printer = new GoalPrinter(Env, run.Names);
-            var tactics = new TacticM(meta, []);
-            var runner = new TacticRunner(tactics);
+            var recorder = options.TacticTrace is null
+                ? null
+                : new TacticRecorder(goals => printer.PpGoals(meta.MCtx, goals), node => VirTree.IdOf(unit.Unit, node));
+            try
+            {
+                return RunScript(unit, shell, display, assumptions, budget, meta, printer, new TacticRunner(new TacticM(meta, []), recorder));
+            }
+            finally
+            {
+                if (recorder is not null)
+                {
+                    options.TacticTrace!(unit.Unit.Key, recorder.Steps);
+                }
+            }
+        }
+
+        private UnitOutcome RunScript(
+            EngineUnit unit, TheoremShell shell, string display, ImmutableArray<UnitAssumption> assumptions, TheoremBudget budget,
+            MetaM meta, GoalPrinter printer, TacticRunner runner)
+        {
+            var key = unit.Unit.Key;
+            var kind = unit.Unit.Kind;
+            var tactics = runner.State;
 
             UnitOutcome NotProved(string message, IEnumerable<MVarId> goals, TacticNode? at) => new NotProvedOutcome(
                 key, kind, display, assumptions, message, printer.PpGoals(meta.MCtx, goals), at is null ? null : VirTree.IdOf(unit.Unit, at),

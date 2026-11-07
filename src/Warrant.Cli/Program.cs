@@ -21,7 +21,8 @@ internal static class Cli
           warrant translate <directory> [--out <file.ndjson>] [--report <file.md>] [--check-overflow] [--bundle <path>]
           warrant verify --csc-args <file> [--project-dir <dir>] [options]
           warrant verify <directory> [options]
-          warrant server status | cancel <request id> | shutdown
+          warrant explain <unit> [--project-dir <dir>] [--csc-args <file>] [--sources <dir>] [--server auto|off]
+          warrant server status | cancel <request id> | shutdown | report <project dir>
           warrant import <file.ndjson[.gz]>... --store <dir> [--verified] [--fuel N]
           warrant check-store <dir> [--fuel N] [--quiet]
 
@@ -60,8 +61,12 @@ internal static class Cli
                                             runs and verifying in-process when it cannot be used (auto); or always
                                             in-process (off, the default); --out and --report always verify in-process
                   --timings                 print each unit's time after the summary
+        explain verifies one unit and the units it needs, and prints each tactic of its proof script with the goals before
+                and after it, then the unit's outcome; it compiles from the project's last build (obj/**/warrant.csc.args),
+                --csc-args or a --sources directory, and never uses the result cache
         server  manages the verification server of this toolchain: status prints what it holds and runs, cancel stops a
-                request, shutdown stops it after its running requests (exit 0 when no server runs, except for cancel)
+                request, shutdown stops it after its running requests, report prints the JSON assumption report of a
+                project's last verify (exit 0 when no server runs, except for cancel and report)
         import  writes a new version of the store in --store from the files, read in order; a constant may come again in a
                 later file only if it is the same constant. Readers of the previous version are not disturbed.
                   --verified  check every declaration with the kernel first and store what it admitted (default:
@@ -73,7 +78,7 @@ internal static class Cli
 
     public static int Run(string[] args)
     {
-        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate" or "verify" or "server" or "import" or "check-store") || (args[0] == "export" && args.Length < 3))
+        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate" or "verify" or "explain" or "server" or "import" or "check-store") || (args[0] == "export" && args.Length < 3))
         {
             Console.Error.WriteLine(Usage);
             return 2;
@@ -85,7 +90,8 @@ internal static class Cli
                 "stats" => Stats(args[1]),
                 "export" => Check(args[1], args.Skip(3).ToArray(), output: args[2]),
                 "translate" => TranslateCommand.Run(args[1..], Console.Out, Console.Error),
-                "verify" => Verify(args[1..]),
+                "verify" => Interruptible(args[1..], (a, token) => VerifyCommand.Run(a, Console.Out, Console.Error, cancellationToken: token)),
+                "explain" => Interruptible(args[1..], (a, token) => ExplainCommand.Run(a, Console.Out, Console.Error, cancellationToken: token)),
                 "server" => ServerCommand.Run(args[1..], Console.Out, Console.Error),
                 "import" => ImportCommand.Run(args[1..], Console.Out, Console.Error),
                 "check-store" => CheckStoreCommand.Run(args[1..], Console.Out, Console.Error),
@@ -103,7 +109,7 @@ internal static class Cli
     /// The build task reads verify's output as UTF-8 without a BOM, whatever the console's code page (goals hold ⊢). The
     /// first Ctrl+C interrupts the run, cancelling it on the server or in-process (M5b R6); a second one ends the process.
     /// </summary>
-    private static int Verify(string[] args)
+    private static int Interruptible(string[] args, Func<string[], CancellationToken, int> command)
     {
         Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         using var interrupt = new CancellationTokenSource();
@@ -118,7 +124,7 @@ internal static class Cli
         Console.CancelKeyPress += OnCancel;
         try
         {
-            return VerifyCommand.Run(args, Console.Out, Console.Error, cancellationToken: interrupt.Token);
+            return command(args, interrupt.Token);
         }
         finally
         {

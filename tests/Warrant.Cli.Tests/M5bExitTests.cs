@@ -97,6 +97,7 @@ public sealed class M5bExitTests : IDisposable
         {
             var cache = CacheDirectory(compilation);
             string[] args = [Path.Combine(Corpus, compilation), "--server", "auto", "--cache-dir", cache, "--timings"];
+            int start = await TacticRunsSoFar(server);
             var (coldCode, cold) = server.Verify(args);
             var before = (await server.StatusAsync()).Counters;
 
@@ -110,6 +111,10 @@ public sealed class M5bExitTests : IDisposable
             // one; rejected: none), and each is reported from it.
             int entries = Directory.Exists(cache) ? Directory.GetFiles(cache, "*.json").Length : 0;
             Assert.Equal(compilation switch { "accepted" => 10, "refuted" => 2, _ => 0 }, entries);
+            if (entries > 0)
+            {
+                Assert.True(before.TacticRuns > start, "the first verify ran no tactics, so the counter proves nothing");
+            }
             var timings = Timings(warm);
             Assert.Equal(entries, timings.Count(t => t.Source == "cache"));
             Assert.Equal(entries, after.Hits - before.Hits);
@@ -127,8 +132,10 @@ public sealed class M5bExitTests : IDisposable
     {
         var cache = CacheDirectory("accepted");
         string[] args = [Path.Combine(Corpus, "accepted"), "--server", "auto", "--cache-dir", cache, "--timings"];
+        int start = await TacticRunsSoFar(server);
         var (_, cold) = server.Verify(args);
         var before = (await server.StatusAsync()).Counters;
+        Assert.True(before.TacticRuns > start, "the first verify ran no tactics, so the counter proves nothing");
 
         var (code, recheck) = server.Verify([.. args, "--recheck"]);
 
@@ -166,6 +173,7 @@ public sealed class M5bExitTests : IDisposable
         var (code, recheck) = server.Verify([.. args, "--recheck"]);
 
         Assert.Equal(1, code);
+        Assert.Contains("timings (server): connected to the running server in ", recheck, StringComparison.Ordinal);
         var rejected = Assert.Single(Regex.Matches(recheck, @"(?m)^.+: error WRT0010: .*$"));
         Assert.Contains($"cached certificate for '{tampered.Outcome.DisplayName}' was rejected by the kernel: ", rejected.Value, StringComparison.Ordinal);
         Assert.Empty(Regex.Matches(recheck, @"(?m)^.+: error (?!WRT0010)"));
@@ -185,14 +193,26 @@ public sealed class M5bExitTests : IDisposable
         using var slow = new SourceDirectory(SourceDirectory.Slow());
         Assert.Equal(0, server.Verify([fast.Path, "--server", "auto"]).Code);
         // Deciding A30(0) > 0 needs far more than this fuel and time allow to finish: only the cancel ends it.
-        var run = Task.Run(() => server.Verify([slow.Path, "--server", "auto", "--kernel-fuel", "100000000000", "--timeout", "3600"]));
+        using var abandon = new CancellationTokenSource();
+        var run = Task.Run(() => server.Verify(
+            [slow.Path, "--server", "auto", "--kernel-fuel", "100000000000", "--timeout", "120"], cancellationToken: abandon.Token));
         var running = await server.WaitForStatusAsync(s => s.ActiveRequests.Length == 1);
         await Task.Delay(1000);
         Assert.False(run.IsCompleted, "the request finished before it was cancelled");
 
         var cancelled = Stopwatch.StartNew();
         var (cancelCode, cancelOutput) = server.Command("cancel", running.ActiveRequests[0].RequestId);
-        var (code, output) = await run;
+        int code;
+        string output;
+        try
+        {
+            // A cancel that does not work fails here within seconds, rather than waiting for the request's own limit.
+            (code, output) = await run.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            await abandon.CancelAsync();
+        }
         cancelled.Stop();
 
         Assert.Equal((0, $"Cancelled request {running.ActiveRequests[0].RequestId}.\n"), (cancelCode, cancelOutput));
@@ -288,6 +308,19 @@ public sealed class M5bExitTests : IDisposable
     /// Runs an item against a server of its own, then shuts the server down and checks that its process exited and that
     /// nothing answers on its endpoint.
     /// </summary>
+    /// <summary>The server's tactic counter, or 0 before the first verify has started a server.</summary>
+    private static async Task<int> TacticRunsSoFar(TestServer server)
+    {
+        try
+        {
+            return (await server.StatusAsync()).Counters.TacticRuns;
+        }
+        catch (InvalidOperationException)
+        {
+            return 0;
+        }
+    }
+
     private static async Task WithServer(Func<TestServer, Task> item)
     {
         var server = new TestServer();

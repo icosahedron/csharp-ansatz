@@ -508,7 +508,11 @@ server: an agent is thrown away after the job, and the server would only
 outlive it. Set `WarrantUseServer` yourself to change that. The same setting
 matters on a shared machine: the server keeps users apart, but not one user's
 elevated and non-elevated processes (GitHub issue #43), so where non-elevated
-code is not trusted, build elevated with `WarrantUseServer=false`.
+code is not trusted, build elevated with `WarrantUseServer=false` and
+`WarrantRecheck=true` (or `WarrantUseCache=false`), since the result cache in
+`obj/` is just as writable. Warrant itself loads from your NuGet package
+folder, so full separation also needs a package folder that non-elevated code
+cannot write, such as a machine-wide `NUGET_PACKAGES`.
 
 ## Have another kernel check your proofs
 

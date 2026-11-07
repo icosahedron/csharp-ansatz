@@ -63,7 +63,8 @@ A failed check means "no server": the build verifies in-process and logs why.
 
 These checks keep other users out; they do not separate one user's elevation levels.
 An elevated build's server runs from a copy in the user's own profile, which the same user's non-elevated processes can write to, so non-elevated code could change what a later elevated build's server runs (GitHub issue #43).
-On a machine where non-elevated code is not trusted, build elevated with `WarrantUseServer=false`, which verifies in-process from the package's own files.
+On a machine where non-elevated code is not trusted, build elevated with `WarrantUseServer=false` and `WarrantRecheck=true` (or `WarrantUseCache=false`): the first stops using the server's copy, the second stops trusting cache entries under `obj/`, which the same processes can also write (decision D17).
+Warrant itself still loads from the NuGet package folder in the user's profile, which they can write too, so full separation also needs a package folder they cannot write, such as a machine-wide `NUGET_PACKAGES`.
 
 ## Starting and stopping
 

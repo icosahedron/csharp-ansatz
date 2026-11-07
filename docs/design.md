@@ -652,7 +652,10 @@ Built in M5b ([docs/m5b/01](m5b/01-server-and-protocol.md)).
 - The server isolates users, not elevation levels: an elevated build's server
   runs from a copy that the same user's non-elevated processes can write to.
   On a machine where non-elevated code is not trusted, build elevated with
-  `WarrantUseServer=false` (GitHub issue #43).
+  `WarrantUseServer=false` and `WarrantRecheck=true` (or `WarrantUseCache=false`),
+  since the cache under `obj/` is just as writable; Warrant itself loads from
+  the user's NuGet package folder, so full separation also needs a package
+  folder non-elevated code cannot write (GitHub issue #43).
 
 ### 8.2 Content-addressed cache
 

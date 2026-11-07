@@ -58,6 +58,7 @@ stop_server() {
 trap 'warrant server shutdown >/dev/null 2>&1 || true' EXIT
 
 samples=(accepted refuted rejected)
+rm -rf "$work/cache" "$work/m5a" "$work/empty"
 cp -r "$repo/tests/corpus/m5a" "$work/m5a"
 mkdir -p "$work/empty"
 

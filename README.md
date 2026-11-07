@@ -72,7 +72,7 @@ dotnet test
 | `src/Warrant.Store` | Store v1: imported Lean libraries on disk, loaded lazily |
 | `src/Warrant.Analyzers` | Extraction's diagnostics in the IDE |
 | `src/Warrant.Build` | The MSBuild task that runs `warrant verify` after the compiler |
-| `src/Warrant.Cli` | `warrant`: `check`, `export`, `translate`, `verify`, `explain`, `server`, `import`, `check-store` |
+| `src/Warrant.Cli` | `warrant`: `check`, `stats`, `export`, `translate`, `verify`, `explain`, `server`, `import`, `check-store`, `sample-store` |
 | `tools/lean-replay` | Lean program used by `scripts/cross-check.sh` to re-check files with Lean's own kernel |
 | `tests/` | Unit tests, the C# corpora and the export corpus (`tests/data`, see its README for provenance) |
 

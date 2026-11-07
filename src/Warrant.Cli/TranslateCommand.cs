@@ -238,6 +238,10 @@ internal static class TranslateCommand
                 ? $"{severity} {id}: {message}"
                 : string.Create(CultureInfo.InvariantCulture, $"{FilePath(location.Path)}({location.StartLine},{location.StartColumn}): {severity} {id}: {message}");
 
+        /// <summary>A span's start as a diagnostic prints it: <c>path(line,column)</c>.</summary>
+        public string Position(VirSpan location) =>
+            string.Create(CultureInfo.InvariantCulture, $"{FilePath(location.Path)}({location.StartLine},{location.StartColumn})");
+
         /// <summary>A source path under the directory as the user named it, in the separator style they used.</summary>
         public string FilePath(string relative)
         {

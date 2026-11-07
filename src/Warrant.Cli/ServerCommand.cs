@@ -10,7 +10,7 @@ using Warrant.Engine.Service;
 /// </summary>
 internal static class ServerCommand
 {
-    public const string Usage = "warrant server status | cancel <request id> | shutdown";
+    public const string Usage = "warrant server status | cancel <request id> | shutdown | report <project dir>";
 
     /// <summary>Runs the verb.</summary>
     /// <param name="args">The arguments after <c>server</c>.</param>
@@ -37,7 +37,7 @@ internal static class ServerCommand
                 return 1;
             }
         }
-        if (args is not (["status"] or ["shutdown"] or ["cancel", _]))
+        if (args is not (["status"] or ["shutdown"] or ["cancel", _] or ["report", _]))
         {
             error.WriteLine($"usage: {Usage}");
             return 2;
@@ -64,7 +64,7 @@ internal static class ServerCommand
         {
             var endpoint = ServerClient.Resolve(settings, ServerLauncher.CopyDirectory(settings, hashes));
             output.WriteLine($"No Warrant verification server is running for this toolchain (endpoint {endpoint.Address}).");
-            return args[0] == "cancel" ? 1 : 0;
+            return args[0] is "cancel" or "report" ? 1 : 0;
         }
         try
         {
@@ -73,6 +73,15 @@ internal static class ServerCommand
                 case "status":
                     Print(await client.StatusAsync().ConfigureAwait(false), output);
                     return 0;
+                case "report":
+                    // M5b KTD25: the JSON assumption report of the project's last verify, as --report writes report.json.
+                    if (await client.ReportAsync(Path.GetFullPath(args[1])).ConfigureAwait(false) is { } report)
+                    {
+                        output.Write(report);
+                        return 0;
+                    }
+                    output.WriteLine($"The server has no report for {Path.GetFullPath(args[1])}; verify it through the server first.");
+                    return 1;
                 case "cancel":
                     if (await client.CancelAsync(args[1]).ConfigureAwait(false))
                     {

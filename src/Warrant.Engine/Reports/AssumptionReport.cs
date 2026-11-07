@@ -101,51 +101,72 @@ public static class AssumptionReports
     /// <summary>The kernel's name and version, from the kernel assembly.</summary>
     public static string DefaultKernel { get; } = KernelName();
 
-    /// <summary>Builds the report of a run.</summary>
-    /// <param name="result">The engine's result.</param>
-    /// <param name="units">The units the engine was given, for the theorems' claim spans; may be empty.</param>
-    /// <param name="settings">What the report says about the run as a whole.</param>
-    /// <param name="sourceText">The source text of a span, for claims; null to leave claims out.</param>
+    /// <summary>Builds the report of an engine result (M4 R16, docs/m4/06).</summary>
+    /// <param name="result">The result.</param>
+    /// <param name="units">The engine's input units, for their spans and their dependencies.</param>
+    /// <param name="settings">The overflow setting and the bundle's name.</param>
+    /// <param name="sourceText">Reads a span's source text, for theorems' claims; null to leave claims out.</param>
     /// <returns>The report.</returns>
     public static AssumptionReport Build(
         EngineResult result, IEnumerable<EngineUnit> units, ReportSettings settings, Func<VirSpan, string?>? sourceText = null)
     {
         ArgumentNullException.ThrowIfNull(result);
+        return Build([.. result.Units.Select(Service.OutcomeDto.From)], units, settings, sourceText);
+    }
+
+    /// <summary>
+    /// Builds the report of outcomes as the wire carries them (M5b KTD25), which is what the CLI renders on either path
+    /// and what the server keeps for <c>report(project)</c>, so the two are the same report.
+    /// </summary>
+    /// <param name="outcomes">The outcomes, in the request's order.</param>
+    /// <param name="units">The engine's input units, for their spans and their dependencies.</param>
+    /// <param name="settings">The overflow setting and the bundle's name.</param>
+    /// <param name="sourceText">Reads a span's source text, for theorems' claims; null to leave claims out.</param>
+    /// <returns>The report.</returns>
+    public static AssumptionReport Build(
+        IReadOnlyList<Service.OutcomeDto> outcomes, IEnumerable<EngineUnit> units, ReportSettings settings, Func<VirSpan, string?>? sourceText = null)
+    {
+        ArgumentNullException.ThrowIfNull(units);
+        var byKey = units.GroupBy(u => u.Unit.Key, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        return Build(outcomes, byKey, settings, key =>
+            sourceText is not null && byKey.TryGetValue(key, out var unit) && ClaimSpan(unit) is { } span ? sourceText(span) : null);
+    }
+
+    /// <summary>
+    /// Builds the report of wire outcomes with the theorems' claims given by key, for the server, which has no source text:
+    /// the client sends each theorem's claim with the request.
+    /// </summary>
+    /// <param name="outcomes">The outcomes, in the request's order.</param>
+    /// <param name="units">The engine's input units, by key, for their dependencies.</param>
+    /// <param name="settings">The overflow setting and the bundle's name.</param>
+    /// <param name="claim">A theorem's claim text by its key, or null.</param>
+    /// <returns>The report.</returns>
+    public static AssumptionReport Build(
+        IReadOnlyList<Service.OutcomeDto> outcomes, IReadOnlyDictionary<string, EngineUnit> units, ReportSettings settings, Func<string, string?> claim)
+    {
+        ArgumentNullException.ThrowIfNull(outcomes);
         ArgumentNullException.ThrowIfNull(units);
         ArgumentNullException.ThrowIfNull(settings);
-        var byKey = units.GroupBy(u => u.Unit.Key, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        var names = result.Units.ToDictionary(u => u.Key, u => u.DisplayName, StringComparer.Ordinal);
+        ArgumentNullException.ThrowIfNull(claim);
+        var names = outcomes.ToDictionary(u => u.Key, u => u.DisplayName, StringComparer.Ordinal);
         string Name(string key) => names.TryGetValue(key, out var n) ? n : LeanNames.FallbackDisplay(key);
 
-        var reports = ImmutableArray.CreateBuilder<UnitReport>(result.Units.Length);
-        foreach (var outcome in result.Units)
+        var reports = ImmutableArray.CreateBuilder<UnitReport>(outcomes.Count);
+        foreach (var dto in outcomes)
         {
-            string? claim = null;
-            if (outcome.UnitKind == VirUnitKind.Theorem && sourceText is not null && byKey.TryGetValue(outcome.Key, out var unit)
-                && ClaimSpan(unit) is { } span)
-            {
-                claim = sourceText(span);
-            }
-            var (status, by, detail) = outcome switch
-            {
-                TranslatedOutcome => (ReportStatus.Translated, (string?)null, (string?)null),
-                ProvedOutcome p => (ReportStatus.Verified, ProofName(p.By), null),
-                FalseOutcome => (ReportStatus.Failed, null, OutcomeText.FalseDetail),
-                NotProvedOutcome n => (ReportStatus.Failed, null, OutcomeText.NotProvedDetail(n)),
-                UndecidedOutcome u => (ReportStatus.Failed, null, OutcomeText.UndecidedDetail(u.Reason)),
-                InternalErrorOutcome i => (ReportStatus.Failed, null, OutcomeText.InternalErrorDetail(i.Reason)),
-                FailedOutcome f => (ReportStatus.Failed, null, f.Reason),
-                SkippedOutcome s => (ReportStatus.Failed, null, s.Reason),
-                CancelledOutcome => (ReportStatus.Failed, null, "the run was cancelled before this unit finished."),
-                _ => throw new InvalidOperationException($"Unknown outcome {outcome.GetType().Name}."),
-            };
-            var assumptions = outcome.Assumptions
-                .Select(a => Render(a, outcome.Key, Name))
+            var text = dto.UnitKind == VirUnitKind.Theorem ? claim(dto.Key) : null;
+            // A proved theorem's wire form has no certificate, which the report does not need.
+            var (status, by, detail, name) = dto.Kind == Service.OutcomeKind.Proved
+                ? (ReportStatus.Verified, ProofName(dto.By ?? ProofKind.Script), (string?)null, "proved")
+                : Describe(dto.ToOutcome([]));
+            ImmutableArray<UnitAssumption> assumptions = [.. dto.Assumptions.Select(a => new UnitAssumption(a.UnitKey, new VirAssumption(a.Kind, a.Subject)))];
+            var rendered = assumptions
+                .Select(a => Render(a, dto.Key, Name))
                 .OrderBy(a => a.Inherited)
                 .ToImmutableArray();
-            reports.Add(new UnitReport(outcome.Key, outcome.UnitKind, outcome.DisplayName, status, OutcomeName(outcome), by, claim, detail, assumptions)
+            reports.Add(new UnitReport(dto.Key, dto.UnitKind, dto.DisplayName, status, name, by, text, detail, rendered)
             {
-                Global = ReliesOnRecursion(outcome.Key, byKey) ? [Stack] : [],
+                Global = ReliesOnRecursion(dto.Key, units) ? [Stack] : [],
             });
         }
 
@@ -153,11 +174,29 @@ public static class AssumptionReports
         return new AssumptionReport(settings.Kernel ?? DefaultKernel, settings.Bundle, global, reports.MoveToImmutable());
     }
 
+    private static (ReportStatus Status, string? By, string? Detail, string Name) Describe(UnitOutcome outcome)
+    {
+        var (status, by, detail) = outcome switch
+        {
+            TranslatedOutcome => (ReportStatus.Translated, (string?)null, (string?)null),
+            ProvedOutcome p => (ReportStatus.Verified, ProofName(p.By), null),
+            FalseOutcome => (ReportStatus.Failed, null, OutcomeText.FalseDetail),
+            NotProvedOutcome n => (ReportStatus.Failed, null, OutcomeText.NotProvedDetail(n)),
+            UndecidedOutcome u => (ReportStatus.Failed, null, OutcomeText.UndecidedDetail(u.Reason)),
+            InternalErrorOutcome i => (ReportStatus.Failed, null, OutcomeText.InternalErrorDetail(i.Reason)),
+            FailedOutcome f => (ReportStatus.Failed, null, f.Reason),
+            SkippedOutcome s => (ReportStatus.Failed, null, s.Reason),
+            CancelledOutcome => (ReportStatus.Failed, null, "the run was cancelled before this unit finished."),
+            _ => throw new InvalidOperationException($"Unknown outcome {outcome.GetType().Name}."),
+        };
+        return (status, by, detail, OutcomeName(outcome));
+    }
+
     /// <summary>
     /// Whether a unit is a recursive method, or depends on one, transitively, through the units the engine was given
     /// (KTD31).
     /// </summary>
-    private static bool ReliesOnRecursion(string key, Dictionary<string, EngineUnit> units)
+    private static bool ReliesOnRecursion(string key, IReadOnlyDictionary<string, EngineUnit> units)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var work = new Stack<string>([key]);

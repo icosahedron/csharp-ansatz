@@ -8,7 +8,6 @@ namespace Warrant.Server;
 /// The protocol's methods (M5b KTD2, KTD12, KTD26; docs/m5b/01), one instance per connection. Its public methods are
 /// exactly the protocol's, each named by <see cref="JsonRpcMethodAttribute"/>, so nothing else is callable.
 /// </summary>
-/// <remarks><c>explain</c>, <c>export</c> and <c>report</c> arrive with plan unit U16 and are not registered yet.</remarks>
 internal sealed class RpcTarget(ServerHost host, VerificationService service)
 {
     /// <summary>The wire's JSON options (<see cref="ServerProtocol.CreateSerializerOptions"/>).</summary>
@@ -54,6 +53,49 @@ internal sealed class RpcTarget(ServerHost host, VerificationService service)
             () => service.Verify(request, running.Token), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).ConfigureAwait(false);
         host.Log.Write($"verified {request.RequestId} in {response.Elapsed.TotalMilliseconds:0} ms{(running.Token.IsCancellationRequested ? " (cancelled)" : "")}");
         return response;
+    }
+
+    /// <summary>
+    /// Verifies one unit and its closure with a trace of its proof script (KTD24), without the cache, on a thread of its
+    /// own; it is cancelled as <see cref="VerifyAsync"/> is.
+    /// </summary>
+    /// <param name="request">The request and the unit to trace.</param>
+    /// <param name="cancellationToken">The RPC's token.</param>
+    /// <returns>The response and the steps.</returns>
+    /// <exception cref="LocalRpcException">The server is draining, or another running request has the id.</exception>
+    [JsonRpcMethod(ServerProtocol.Explain)]
+    public Task<ExplainResponse> ExplainAsync(ExplainRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return RunAsync(request.Request, "explain", token => service.Explain(request, token), r => r.Response, cancellationToken);
+    }
+
+    /// <summary>Verifies a request without the cache and returns the certificate file of what it admitted (KTD25).</summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">The RPC's token.</param>
+    /// <returns>The response and the certificates.</returns>
+    /// <exception cref="LocalRpcException">The server is draining, or another running request has the id.</exception>
+    [JsonRpcMethod(ServerProtocol.Export)]
+    public Task<ExportResponse> ExportAsync(VerifyRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return RunAsync(request, "export", token => service.Export(request, token), r => r.Response, cancellationToken);
+    }
+
+    /// <summary>The JSON assumption report of a project directory's last verify that asked for one (KTD25).</summary>
+    /// <param name="projectDirectory">The directory, as the request named it.</param>
+    /// <returns>The report, or null when there is none.</returns>
+    [JsonRpcMethod(ServerProtocol.Report)]
+    public string? Report(string projectDirectory) => service.Report(projectDirectory);
+
+    private async Task<T> RunAsync<T>(VerifyRequest request, string verb, Func<CancellationToken, T> work, Func<T, VerifyResponse> response, CancellationToken cancellationToken)
+    {
+        using var running = host.Begin(request, cancellationToken);
+        host.Log.Write($"{verb} {request.RequestId}: {request.Units.Length} units of {request.ProjectDirectory}");
+        var result = await Task.Factory.StartNew(
+            () => work(running.Token), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).ConfigureAwait(false);
+        host.Log.Write($"{verb} {request.RequestId} done in {response(result).Elapsed.TotalMilliseconds:0} ms{(running.Token.IsCancellationRequested ? " (cancelled)" : "")}");
+        return result;
     }
 
     /// <summary>Cancels the running request with an id, whichever connection sent it.</summary>

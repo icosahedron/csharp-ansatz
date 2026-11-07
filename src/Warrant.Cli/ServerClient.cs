@@ -155,11 +155,35 @@ internal sealed class ServerClient : IDisposable
     /// <returns>The response, with one result per unit in the request's order.</returns>
     /// <exception cref="ServerUnavailableException">The connection was lost, the server failed the request or stopped answering, or its answer does not match the request.</exception>
     /// <exception cref="OperationCanceledException">The request was cancelled and the server answered with a cancellation.</exception>
-    public async Task<VerifyResponse> VerifyAsync(VerifyRequest request, TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken)
+    public Task<VerifyResponse> VerifyAsync(VerifyRequest request, TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken) =>
+        CallAsync<VerifyResponse>(ServerProtocol.Verify, request, request, r => r, heartbeatInterval, heartbeatTimeout, cancellationToken);
+
+    /// <summary><c>explain(request)</c> (M5b KTD24), watched and checked as <see cref="VerifyAsync"/> is.</summary>
+    /// <exception cref="ServerUnavailableException">As for <see cref="VerifyAsync"/>.</exception>
+    /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
+    public Task<ExplainResponse> ExplainAsync(ExplainRequest request, TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken)
     {
-        VerifyResponse response;
+        ArgumentNullException.ThrowIfNull(request);
+        return CallAsync<ExplainResponse>(ServerProtocol.Explain, request, request.Request, r => r.Response, heartbeatInterval, heartbeatTimeout, cancellationToken);
+    }
+
+    /// <summary><c>export(request)</c> (M5b KTD25), watched and checked as <see cref="VerifyAsync"/> is.</summary>
+    /// <exception cref="ServerUnavailableException">As for <see cref="VerifyAsync"/>.</exception>
+    /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
+    public Task<ExportResponse> ExportAsync(VerifyRequest request, TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken) =>
+        CallAsync<ExportResponse>(ServerProtocol.Export, request, request, r => r.Response, heartbeatInterval, heartbeatTimeout, cancellationToken);
+
+    /// <summary><c>report(project)</c>: the JSON report of the project directory's last verify, or null (M5b KTD25).</summary>
+    public Task<string?> ReportAsync(string projectDirectory, CancellationToken cancellationToken = default) =>
+        _rpc.InvokeWithCancellationAsync<string?>(ServerProtocol.Report, [projectDirectory], cancellationToken);
+
+    private async Task<T> CallAsync<T>(
+        string method, object argument, VerifyRequest request, Func<T, VerifyResponse> responseOf,
+        TimeSpan heartbeatInterval, TimeSpan heartbeatTimeout, CancellationToken cancellationToken)
+    {
+        T answer;
         using var abandon = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var call = _rpc.InvokeWithCancellationAsync<VerifyResponse>(ServerProtocol.Verify, [request], abandon.Token);
+        var call = _rpc.InvokeWithCancellationAsync<T>(method, [argument], abandon.Token);
         while (!cancellationToken.IsCancellationRequested
             && await Task.WhenAny(call, Task.Delay(heartbeatInterval, cancellationToken)).ConfigureAwait(false) != call)
         {
@@ -181,7 +205,7 @@ internal sealed class ServerClient : IDisposable
         }
         try
         {
-            response = await call.ConfigureAwait(false);
+            answer = await call.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -195,12 +219,13 @@ internal sealed class ServerClient : IDisposable
         {
             throw new ServerUnavailableException($"the server failed the request: {ex.Message}", ex);
         }
+        var response = answer is null ? null : responseOf(answer);
         if (response is null || response.Units.Length != request.Units.Length
             || !response.Units.Select(u => u.Outcome.Key).SequenceEqual(request.Units.Select(u => u.Key), StringComparer.Ordinal))
         {
             throw new ServerUnavailableException("the server's answer does not match the request");
         }
-        return response;
+        return answer!;
     }
 
     /// <summary><c>status()</c>.</summary>

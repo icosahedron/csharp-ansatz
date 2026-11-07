@@ -107,8 +107,33 @@ The location is the tactic that failed, here `Tactic.Omega()`.
 - **No counterexample, goal looks true.** The tactics weren't strong enough.
   See the next guide.
 
-`warrant explain <unit>`, which prints every intermediate step of the tactic
-script, comes with M5b.
+To see every step, run `warrant explain` with the name the diagnostic gives
+(M5b). It prints each tactic as you wrote it, with the goals before and after
+it, so a `simp` that turned the goal into something `omega` cannot use shows
+up as the step where the goal went wrong:
+
+```text
+$ warrant explain "Increments.AlwaysLarger(int)" --project-dir src/Payouts
+explaining Increments.AlwaysLarger(int)  …/Increments.cs(11,18)
+
+[1] Tactic.Unfold(nameof(Increment))   …/Increments.cs(13,18)
+  before:
+    x : Int32
+    ⊢ Increment x > x
+  after:
+    x : Int32
+    ⊢ x + 1 > x
+[2] Tactic.Omega()   …/Increments.cs(13,52)
+  before:
+    x : Int32
+    ⊢ x + 1 > x
+  failed:
+    omega could not prove the goal:
+    …
+```
+
+It uses the project's last build (`obj/**/warrant.csc.args`), or `--sources
+<dir>` for a directory of files, and it never uses the result cache.
 
 ## Get a proof through when the tactics give up
 

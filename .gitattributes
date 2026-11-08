@@ -1,4 +1,3 @@
 # The M4 corpus is compiled in memory; LF everywhere keeps source spans and VIR hashes identical
 # across checkouts (docs/m4/02).
 tests/corpus/** text eol=lf
-

@@ -77,6 +77,14 @@ internal sealed class TestServer : IAsyncDisposable
         }
     }
 
+    /// <summary><c>warrant server &lt;args&gt;</c> against this server.</summary>
+    public (int Code, string Output) Command(params string[] args)
+    {
+        using var output = new StringWriter { NewLine = "\n" };
+        var code = ServerCommand.Run(args, output, output, Settings);
+        return (code, output.ToString());
+    }
+
     /// <summary><c>warrant verify</c> in-process, with this server's settings, changed by <paramref name="configure"/>.</summary>
     public (int Code, string Output) Verify(
         string[] args, VerificationService? inProcess = null, Func<ServerSettings, ServerSettings>? configure = null, CancellationToken cancellationToken = default)
@@ -234,6 +242,23 @@ public sealed class ServerClientTests
         var (again, secondOutput) = server.Verify([source.Path, "--server", "auto"]);
         Assert.True(again == 0, secondOutput);
         Assert.Equal(status.ProcessId, (await server.StatusAsync()).ProcessId);
+    }
+
+    [Fact]
+    public async Task TimingsSayWhetherTheRunStartedTheServerOrConnectedToTheRunningOneAndNameNoConnectionInProcess()
+    {
+        await using var server = new TestServer();
+        using var source = new SourceDirectory(SourceDirectory.Fast);
+
+        var (code, started) = server.Verify([source.Path, "--server", "auto", "--timings"]);
+        var (again, connected) = server.Verify([source.Path, "--server", "auto", "--timings"]);
+        var (off, inProcess) = server.Verify([source.Path, "--server", "off", "--timings"]);
+
+        Assert.Equal((0, 0, 0), (code, again, off));
+        Assert.Matches(@"\[server\]\ntimings \(server\): started the server and connected in \d+\.\d ms\ntimings \(server\): \d+\.\d ms for the request\n", started);
+        Assert.Matches(@"\[server\]\ntimings \(server\): connected to the running server in \d+\.\d ms\ntimings \(server\): \d+\.\d ms for the request\n", connected);
+        Assert.Matches(@"not proved\.\ntimings \(in-process\): \d+\.\d ms for the request\n", inProcess);
+        Assert.DoesNotContain("connected", inProcess, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -442,10 +467,10 @@ public sealed class ServerClientTests
         using var fast = new SourceDirectory(SourceDirectory.Fast);
         Assert.Equal(0, server.Verify([fast.Path, "--server", "auto"]).Code);
 
-        var (statusCode, status) = Server(server, "status");
-        var (cancelCode, cancel) = Server(server, "cancel", "no-such-request");
+        var (statusCode, status) = server.Command("status");
+        var (cancelCode, cancel) = server.Command("cancel", "no-such-request");
         int pid = (await server.StatusAsync()).ProcessId;
-        var (shutdownCode, shutdown) = Server(server, "shutdown");
+        var (shutdownCode, shutdown) = server.Command("shutdown");
         TestServer.WaitForExit(pid);
 
         Assert.Equal(0, statusCode);
@@ -457,13 +482,6 @@ public sealed class ServerClientTests
         Assert.Equal((1, "No request no-such-request is running.\n"), (cancelCode, cancel));
         Assert.Equal((0, $"The server (process {pid}) is shutting down once its running requests finish.\n"), (shutdownCode, shutdown));
         Assert.Null(await server.ConnectAsync());
-    }
-
-    private static (int Code, string Output) Server(TestServer server, params string[] args)
-    {
-        using var output = new StringWriter { NewLine = "\n" };
-        var code = ServerCommand.Run(args, output, output, server.Settings);
-        return (code, output.ToString());
     }
 
     private static int CountOf(string text, string value)

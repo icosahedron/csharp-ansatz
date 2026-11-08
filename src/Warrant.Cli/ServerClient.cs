@@ -26,6 +26,9 @@ internal sealed class ServerClient : IDisposable
     /// <summary>The server's answer to <c>hello</c>.</summary>
     public HelloResponse? Hello { get; private set; }
 
+    /// <summary>Whether <see cref="ConnectOrStartAsync"/> started the server, rather than finding it running (<c>--timings</c>, M5b KTD30).</summary>
+    public bool Started { get; private set; }
+
     /// <summary>
     /// Connects to the server for the given toolchain files, starting one detached when none answers (KTD4), and says
     /// <c>hello</c>. A running server has <see cref="ServerSettings.ConnectTimeout"/> to accept the connection; a started
@@ -48,6 +51,7 @@ internal sealed class ServerClient : IDisposable
         var client = await TryConnectAsync(endpoint, settings.ConnectTimeout, waitForStart: false, cancellationToken).ConfigureAwait(false);
         bool started = client is null;
         client ??= await StartAsync(settings, directory, endpoint, bundlePath, sidecarPath, cancellationToken).ConfigureAwait(false);
+        client.Started = started;
         try
         {
             await client.HelloAsync(settings.StartTimeout, cancellationToken).ConfigureAwait(false);

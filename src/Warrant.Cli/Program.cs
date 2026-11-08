@@ -25,6 +25,7 @@ internal static class Cli
           warrant server status | cancel <request id> | shutdown | report <project dir>
           warrant import <file.ndjson[.gz]>... --store <dir> [--verified] [--fuel N]
           warrant check-store <dir> [--fuel N] [--quiet]
+          warrant sample-store <dir> [--count N] [--seed N]
 
         check   re-checks every declaration with the kernel (exit 0 accept, 1 reject, 2 decline)
                 --fuel N          step budget per type checker (default 100000000)
@@ -60,7 +61,7 @@ internal static class Cli
                   --server auto|off         verify through the per-user verification server, starting it when none
                                             runs and verifying in-process when it cannot be used (auto); or always
                                             in-process (off, the default); --out and --report always verify in-process
-                  --timings                 print each unit's time after the summary
+                  --timings                 print each unit's time after the summary, and how long reaching the server took
         explain verifies one unit and the units it needs, and prints each tactic of its proof script with the goals before
                 and after it, then the unit's outcome; it compiles from the project's last build (obj/**/warrant.csc.args),
                 --csc-args or a --sources directory, and never uses the result cache
@@ -74,11 +75,13 @@ internal static class Cli
                   --fuel N    step budget per type checker in verified mode (default 100000000)
         check-store re-checks every declaration of the store's current version with the kernel, in stored order
                     (exit 0 accept, 1 reject, 2 decline)
+        sample-store opens the store's current version, looks up N distinct constants chosen at random by name (default
+                     1000, seed 1) and prints the time taken, the GC heap and the working set, for measuring a store
         """;
 
     public static int Run(string[] args)
     {
-        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate" or "verify" or "explain" or "server" or "import" or "check-store") || (args[0] == "export" && args.Length < 3))
+        if (args.Length < 2 || args[0] is not ("check" or "stats" or "export" or "translate" or "verify" or "explain" or "server" or "import" or "check-store" or "sample-store") || (args[0] == "export" && args.Length < 3))
         {
             Console.Error.WriteLine(Usage);
             return 2;
@@ -95,6 +98,7 @@ internal static class Cli
                 "server" => ServerCommand.Run(args[1..], Console.Out, Console.Error),
                 "import" => ImportCommand.Run(args[1..], Console.Out, Console.Error),
                 "check-store" => CheckStoreCommand.Run(args[1..], Console.Out, Console.Error),
+                "sample-store" => SampleStoreCommand.Run(args[1..], Console.Out, Console.Error),
                 _ => Check(args[1], args.Skip(2).ToArray()),
             };
         }

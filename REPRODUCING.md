@@ -157,6 +157,34 @@ M5b began by checking it ([docs/mathlib.md](docs/mathlib.md)).
 3. **Have Lean agree twice.** Lean's kernel accepts the export, and it accepts
    the file `warrant export` writes from it.
 
+### Milestone 5b: a server, a cache and a store
+
+The plan is [docs/plans/2026-11-05-1640-feat-m5b-server-cache-store-plan.md](docs/plans/2026-11-05-1640-feat-m5b-server-cache-store-plan.md),
+and the design is explained chapter by chapter in [docs/m5b/](docs/m5b/README.md).
+
+1. **One service, two hosts.** The verification moved into a
+   `VerificationService` that the server and the CLI's in-process path both
+   run, and a parity test compares their output byte for byte, ten times over,
+   on the M4 and M5a corpora.
+2. **Make every run give the same answer.** Theorems run in parallel, a cached
+   result must equal a fresh one, and the server must agree with the
+   in-process path, so the counterexample search lost its clock and a script's
+   `Lean.Const` may no longer reach a constant it does not depend on.
+3. **Keep cancellation reject-only.** The kernel polls a cancellation token
+   where it already checked its deadline; tests show a cancelled check can
+   only reject, and that Meta does not turn it into "not proved".
+4. **Cache, then make CI distrust the cache.** Entries are keyed by the
+   closure hash, the toolchain identity and the bundle's and sidecar's hashes;
+   `WarrantRecheck` re-checks every cached proof against a statement rebuilt
+   from the current code. A test swaps one cached proof for another theorem's
+   and expects WRT0010.
+5. **Lay the store out against Mathlib.** Store v1 was measured on all of
+   Mathlib (a 1.45 GB store, a 21 MB managed heap after 1,000 lookups), and
+   the Init + semantics store passes `check-store` with the kernel.
+6. **Write the exit criterion as tests.** Each item of design §11's M5b row
+   is a test in `M5bExitTests`, and `scripts/measure-m5b.sh` records the
+   baselines M8 starts from.
+
 ### Notes on the environment
 
 - The cloud container had no .NET; the SDK was installed with Microsoft's
@@ -201,15 +229,23 @@ dotnet build
 dotnet test
 ```
 
-Expected result: **983 tests pass and 17 are skipped**. The skipped ones are
-opt-in tests that need external files or tools: `AcceptsFullInit` and
-`WritesFixturesForLean` (the kernel's Lean cross-checks), the export-script test
-(needs `LEAN_TOOLCHAIN_BIN`), the two differential-cost measurements (need
-`WARRANT_DIFFERENTIAL_COST`), and the 12 build tests that pack the packages and
-run real builds (need `WARRANT_BUILD_INTEGRATION=1`, step 7b). By project:
-33 Cic, 43 Vir, 321 Extraction, 82 Semantics, 117 Meta, 42 Lean4Export,
-104 Kernel, 175 Engine, 30 Cli and 36 Build. No Lean toolchain is needed; the
-whole suite takes about two minutes.
+Expected result on Windows: **1,209 tests pass and 29 are skipped**. The
+skipped ones are opt-in tests that need external files or tools:
+`AcceptsFullInit` and the two Init store tests (need `WARRANT_INIT_EXPORT`,
+steps 5 and 7d), `WritesFixturesForLean` (used by `scripts/cross-check.sh`),
+the export-script test (needs `LEAN_TOOLCHAIN_BIN`), the two differential-cost
+measurements (need `WARRANT_DIFFERENTIAL_COST`), the 18 build tests that pack
+the packages and run real builds (need `WARRANT_BUILD_INTEGRATION=1`, step 7b),
+and four server tests of Unix socket directories, which run only on Linux and
+macOS (where one Windows-only server test is skipped instead). With
+`WARRANT_BUILD_INTEGRATION=1` and `WARRANT_INIT_EXPORT` set, 1,230 pass and 8
+are skipped. By project, with both set: 33 Cic, 44 Vir, 339 Extraction,
+82 Semantics, 122 Meta, 42 Lean4Export, 114 Kernel, 262 Engine, 21 Store,
+13 Server, 11 Analyzers and 4 more under Roslyn 4.8, 87 Cli and 56 Build. The
+build reports no warnings. No Lean toolchain is needed. Without the opt-ins the
+whole suite takes about five minutes on a 32-core machine, most of it the CLI
+tests, which start real servers; each of them shuts its server down, so no
+`warrant-server` process is left afterwards.
 
 ### 3. Run the kernel on the committed corpus
 
@@ -283,7 +319,10 @@ The script downloads the Lean 4.35.0 toolchain, builds lean4export at commit
 export takes about 15 seconds and produces a 348 MB file with 57,919
 declaration records. Metadata is exported as it is for the semantics bundle, so the
 Init constants the bundle repeats are identical to these and the two files can be
-imported into one store (`EXPORT_MDATA=0` exports without it).
+imported into one store (`EXPORT_MDATA=0` exports without it). An Init export
+made before the script did this (commit `3d0566f`) has no metadata, and
+importing it with the bundle fails with "'Nat.beq' differs from the constant of
+that name an earlier file declared"; export it again.
 
 On Windows, run the scripts from Git Bash and point them at a toolchain
 installed with elan instead of the Linux download:
@@ -388,6 +427,25 @@ running each theorem's `.By(...)` script. On a directory it compiles every
 Warrant: 20 verified units, 7 theorems proved, 0 not proved.
 ```
 
+From M5b it runs in-process unless `--server auto` is given, and uses a result
+cache only with `--cache-dir`:
+
+```sh
+warrant verify tests/corpus/m5a/accepted --server auto --cache-dir /tmp/m5a-cache --timings
+warrant verify tests/corpus/m5a/accepted --server auto --cache-dir /tmp/m5a-cache            # (10 from cache)
+warrant verify tests/corpus/m5a/accepted --server auto --cache-dir /tmp/m5a-cache --recheck  # (10 from cache, 10 rechecked)
+warrant explain AlwaysLarger --sources tests/corpus/m5a/refuted                              # each tactic with its goals
+warrant server status
+warrant server shutdown
+```
+
+The first starts a verification server (about 3 seconds, most of it loading
+and checking the semantics bundle) and ends with
+`Warrant: 20 verified units, 7 theorems proved, 0 not proved. [server]`, then
+`--timings`' lines. The second takes its theorems and recursive methods from
+the cache and runs no tactics; the third has the kernel re-check each cached
+proof. `server status` prints the server's memory and cache counters.
+
 On `refuted/` it reports `AlwaysLarger` with the counterexample
 `x = 2147483647` and `Bad`'s decrease obligation, each with `omega`'s
 constraints and the goal ([docs/m5a/README.md](docs/m5a/README.md) shows the
@@ -412,13 +470,17 @@ WARRANT_BUILD_INTEGRATION=1 dotnet test tests/Warrant.Build.Tests
 They build the `Increment` sample with `dotnet build`, Visual Studio 2026's
 `MSBuild.exe` (a `net10.0` sample) and Visual Studio 2022's `MSBuild.exe` (a
 `net8.0` sample pinned to SDK 9 by its own `global.json`, because SDK 10 needs
-MSBuild 18), and expect the same WRT0001 diagnostics, with goal and
+MSBuild 18), each through a verification server of its own that the test shuts
+down afterwards, and expect the same WRT0001 diagnostics, with goal and
 counterexample, from each. They find Visual Studio with `vswhere`; a version
 that is not installed is reported as not run, never as passed. Other tests
 cover a green build, a second build, design-time builds, multi-targeting, an
 `#if` that differs between frameworks, a missing `Warrant.Build` (WRT0011),
 a library consumed by an application, and code that needs the SDK's regex
-source generator, which the CLI runs.
+source generator, which the CLI runs. From M5b they also build a green sample
+three times (the second from the cache, the third with `WarrantRecheck=true`),
+check that `dotnet clean` deletes the cache and nothing else, and that the IDE
+analyzer runs only in design-time builds.
 
 How Visual Studio's Error List shows a multi-line WRT0001 is checked by hand,
 in the IDE; that check has not been done yet.
@@ -435,6 +497,31 @@ WARRANT_PBT_LONG=1 dotnet test --filter Differential
 A failure prints `Replay with WARRANT_PBT_SEED=seed,gamma`; set that variable
 to replay it. `WARRANT_PBT_SEED=random` draws a new seed, and
 `WARRANT_PBT_COUNT` sets the count ([tests/Warrant.Engine.Tests/Differential/README.md](tests/Warrant.Engine.Tests/Differential/README.md)).
+
+### 7d. M5b's exit criterion
+
+```sh
+dotnet test tests/Warrant.Cli.Tests --filter M5bExit
+WARRANT_INIT_EXPORT=$PWD/init.ndjson dotnet test tests/Warrant.Cli.Tests --filter M5bExit
+```
+
+Each item of design §11's M5b row is one test in `M5bExitTests`
+([docs/m5b/08](docs/m5b/08-testing-and-baselines.md#the-exit-criterion-as-tests)),
+each against a `warrant-server` process of its own. Without
+`WARRANT_INIT_EXPORT`, 8 pass and the Init + semantics store test is skipped;
+with the Init export of step 5, all 9 pass. That test imports Init and the
+bundle into a verified store and runs `check-store` on it, which took about
+2 minutes 50 seconds on a 32-core machine. Analyzer determinism is tested in
+`Warrant.Analyzers.Tests`
+(`TwentyConcurrentRunsGiveByteIdenticalDiagnosticsAndTheAnalyzerNeverThrows`),
+and the build matrix through the server in step 7b.
+
+To build the same store by hand:
+
+```sh
+warrant import init.ndjson tests/data/warrant-semantics.ndjson.gz --store init-semantics --verified
+warrant check-store init-semantics --quiet      # accepted 57,944, rejected 0; 59,374 constants
+```
 
 ### 8. Cross-check against Lean's own kernel
 
@@ -466,9 +553,16 @@ rec-of-subst-prop.ndjson     reject    reject    accept         ok
 sparse-name-index.ndjson     accept    accept    accept         ok
 C# fixtures                  -         accept    accept         ok
 M4 corpus                    -         accept    accept         ok
+M5a corpus                   -         accept    accept         ok
+M5a tampered                 -         reject    reject         ok
 
 all verdicts agree
 ```
+
+The last two rows are M5a's: `warrant verify tests/corpus/m5a/accepted --out`
+must exit 0 and Lean must accept its certificate, and a copy whose last
+theorem's proof is swapped for the one before it must be rejected by both
+kernels. On Windows (Git Bash, 2026-11-07) every row agrees.
 
 Lean declines the original `Nat.add_succ` only because its parser reads format
 3.1.0. Warrant's export of it is 3.1.0, and Lean accepts that. With the full
@@ -539,6 +633,23 @@ times, the peak memory and the slowest declarations from one run are in
 [docs/mathlib.md](docs/mathlib.md). Windows does not report a process's
 peak memory once it exits, so that run sampled it while the check ran.
 
+### 11. Baselines for M8
+
+```sh
+scripts/measure-m5b.sh                         # the latency and server memory tables
+MEASURE_DIR=/big/disk scripts/measure-m5b.sh mathlib.ndjson   # and the Mathlib store
+```
+
+The script builds the CLI in Release and, for each M5a sample, runs
+`warrant verify --timings` cold (it starts a server), warm, from the cache,
+with `--recheck` and in-process, on a server of its own that it shuts down at
+the end. Given the Mathlib export of step 10, it also imports it into a
+trusted store in `MEASURE_DIR` (allow about 1.5 GB) and opens it with
+`warrant sample-store`. It prints Markdown tables; the run recorded in
+[docs/m5b/08](docs/m5b/08-testing-and-baselines.md#baselines-for-m8) and
+design §11 was made on a 32-core Windows workstation, from Git Bash; its
+Mathlib import took 139 s.
+
 ---
 
 ## Repository map
@@ -554,12 +665,15 @@ peak memory once it exits, so that run sampled it while the check ran.
 | `src/Warrant.Extraction` | C# (Roslyn `IOperation`) to VIR, and the M4 subset checks |
 | `src/Warrant.Semantics` | VIR to CIC: types, definitions and theorem statements |
 | `src/Warrant.Meta` | the untrusted Meta layer: metavariables, reduction and unification, the attribute sidecar, the tactics, `simp` and `omega` |
-| `src/Warrant.Engine` | admission, proofs, proof scripts, counterexamples, read-back, assumption reports and NDJSON output |
-| `src/Warrant.Cli` | the `warrant` tool (`check`, `stats`, `export`, `translate`, `verify`) |
-| `src/Warrant.Build` | the MSBuild task and targets that run `warrant verify` after `CoreCompile` |
+| `src/Warrant.Engine` | admission, proofs, proof scripts, counterexamples, read-back, assumption reports and NDJSON output; the `VerificationService`, its worker pool and the result cache (`Service/`) |
+| `src/Warrant.Server` | `warrant-server`: the endpoint, the JSON-RPC methods, the lifecycle and the log |
+| `src/Warrant.Store` | store v1: the writer, the reader and the kernel's lazy constant source |
+| `src/Warrant.Analyzers` | the IDE analyzer, which compiles in the Extraction and Vir sources |
+| `src/Warrant.Cli` | the `warrant` tool (`check`, `stats`, `export`, `translate`, `verify`, `explain`, `server`, `import`, `check-store`, `sample-store`), the server client and launcher |
+| `src/Warrant.Build` | the MSBuild task and targets that run `warrant verify` after `CoreCompile`, and delete the result cache on `Clean` |
 | `lean/` | the semantics library, proved in Lean, and the bundle roots |
 | `tools/lean-replay` | Lean program: check an NDJSON file with Lean's own kernel |
 | `tools/warrant-attrs` | Lean program: export the attribute sidecar |
 | `tests/` | unit, corpus and soundness tests; `tests/data` is the kernel corpus, the semantics bundle and the attribute sidecar, `tests/corpus/m4` and `tests/corpus/m5a` the C# corpora |
-| `scripts/` | `export-lean-library.sh`, `export-semantics.sh`, `export-attributes.sh`, `cross-check.sh`, `cross-kernel.sh`, `count-export.py`, shared `lib/lean-toolchain.sh` and `lib/arena.sh` |
+| `scripts/` | `export-lean-library.sh`, `export-semantics.sh`, `export-attributes.sh`, `cross-check.sh`, `cross-kernel.sh`, `measure-m5b.sh`, `count-export.py`, shared `lib/lean-toolchain.sh` and `lib/arena.sh` |
 | `docs/` | design, kernel notes, conversation history |

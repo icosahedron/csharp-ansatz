@@ -132,8 +132,11 @@ explaining Increments.AlwaysLarger(int)  …/Increments.cs(11,18)
     …
 ```
 
-It uses the project's last build (`obj/**/warrant.csc.args`), or `--sources
-<dir>` for a directory of files, and it never uses the result cache.
+It uses the project's last build (`obj/**/warrant.csc.args`), `--csc-args
+<file>`, or `--sources <dir>` for a directory of files, and it never uses the
+result cache, because an explanation must come from running the tactics. It
+verifies in-process unless you add `--server auto`. Steps inside
+`Tactic.AllGoals` or `Tactic.Try` are numbered under them (`[3.1]`, `[3.2]`).
 
 ## Get a proof through when the tactics give up
 
@@ -152,9 +155,9 @@ Try these in order:
    simp: `Tactic.Simp(nameof(First))`. A theorem cannot name itself.
 4. **Use a Lean library lemma.** A declaration in the semantics bundle is
    available by name, for example
-   `Tactic.Simp(Lean.Const("Int32.lt_iff_toInt_lt"))`. In M5a that is the
-   semantics library and the part of Init it depends on, not all of Init; the
-   rest comes with M5b's store.
+   `Tactic.Simp(Lean.Const("Int32.lt_iff_toInt_lt"))`. That is the semantics
+   library and the part of Init it depends on, not all of Init; M5b's store
+   can hold the rest, but proofs see it only from M6, when Std comes in.
 5. **Raise a budget.** If the theorem fails with WRT0006, it ran out of fuel
    or time. Give it more with `[Theorem(TacticFuel = …, TimeoutSeconds = …)]`
    or the project's `WarrantTacticFuel`, `WarrantKernelFuel` and
@@ -467,31 +470,49 @@ describes the fall-through path, because early exits are where these bugs live.
 
 ## Run verification in CI
 
-*M5a for the task, M5b for the cache.*
+*M5a for the task, M5b for the cache and the server.*
 
 `Warrant.Build` fails the build when a required proof fails, so a normal
-`dotnet build` in CI is enough. In M5a every build proves every theorem again
-and re-checks it with the kernel: there is no cache to trust. Check the build
-log for the summary line, `Warrant: n verified units, n theorems proved, n not
-proved.`; a project that references `Warrant` without `Warrant.Build`, or turns
-`WarrantEnabled` off, gets warning WRT0011 instead.
+`dotnet build` in CI is enough. Check the build log for the summary line,
+`Warrant: n verified units, n theorems proved, n not proved.`; a project that
+references `Warrant` without `Warrant.Build`, or turns `WarrantEnabled` off,
+gets warning WRT0011 instead.
 
 To publish the assumptions for reviewers, run
 `warrant verify --csc-args obj/<configuration>/<framework>/warrant.csc.args --report <dir>`
 after the build and keep `report.md` as a build artifact; the build itself does
-not write a report in M5a.
+not write a report.
 
-From M5b, a cache serves unchanged proofs, and one setting matters:
+From M5b a result cache under `obj/warrant/cache/` serves unchanged proofs, and
+a cache hit is trusted: nothing re-checks it. The cache entry was written only
+after the kernel accepted the proof, and a damaged entry is a miss, but someone
+who can edit `obj/` could plant one. Where others rely on the build's verdict,
+have the kernel re-check every cached proof:
 
 ```xml
 <PropertyGroup>
-  <!-- Re-check cached certificates with the kernel instead of trusting the cache. -->
+  <!-- Re-check cached proofs with the kernel instead of trusting the cache. -->
   <WarrantRecheck>true</WarrantRecheck>
 </PropertyGroup>
 ```
 
-Recheck runs only the kernel, not the tactics, so it costs little compared with
-proving from scratch. Turn it on in CI.
+Recheck runs only the kernel, not the tactics, against each theorem as it is
+built from the current code, so it costs little compared with proving from
+scratch, and the summary says how many it re-checked:
+`7 theorems proved (10 from cache, 10 rechecked)`. A fresh CI checkout has an
+empty cache, so recheck matters when the job restores `obj/` from an earlier
+one. Turn it on in CI.
+
+CI builds (`ContinuousIntegrationBuild=true`) do not start the verification
+server: an agent is thrown away after the job, and the server would only
+outlive it. Set `WarrantUseServer` yourself to change that. The same setting
+matters on a shared machine: the server keeps users apart, but not one user's
+elevated and non-elevated processes (GitHub issue #43), so where non-elevated
+code is not trusted, build elevated with `WarrantUseServer=false` and
+`WarrantRecheck=true` (or `WarrantUseCache=false`), since the result cache in
+`obj/` is just as writable. Warrant itself loads from your NuGet package
+folder, so full separation also needs a package folder that non-elevated code
+cannot write, such as a machine-wide `NUGET_PACKAGES`.
 
 ## Have another kernel check your proofs
 

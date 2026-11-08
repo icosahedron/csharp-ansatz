@@ -100,7 +100,7 @@ flowchart TB
 
 ## What M5a deliberately leaves out
 
-- The server, cache, store, `explain` and analyzers (M5b).
+- The server, cache, store, `explain` and analyzers, which M5b built ([docs/m5b/](../m5b/README.md)).
 - Contracts, exceptions, `null`, `/`, `%`, `decimal` and strings (M6 and M7).
 - `decide` over finite domains, `split` and `grind`.
 - Structural recursion, which M5a's types cannot reach (chapter 3), and mutual recursion.

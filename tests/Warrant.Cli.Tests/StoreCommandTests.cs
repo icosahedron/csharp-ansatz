@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using Warrant.Cic;
 using Warrant.Engine;
 using Warrant.Engine.Reports;
@@ -147,6 +149,24 @@ public sealed class StoreCommandTests : IDisposable
         Assert.Equal(2835, fresh.ConstantCount);
     }
 
+    [Fact]
+    public void SampleStoreLooksUpTheRequestedNumberOfConstantsAndReportsTheMemoryAfterwards()
+    {
+        const int Count = 50, QuotientCheckRecords = 4;
+        Assert.Equal(0, Import(Bundle, "--store", Store).Code);
+
+        var (code, output, error) = Run(SampleStoreCommand.Run, [Store, "--count", $"{Count}", "--seed", "7"]);
+
+        Assert.True(code == 0, error);
+        var lines = output.Split('\n');
+        Assert.Matches(@"^opened store .+ \(v1-[0-9a-f]{12}, 2,835 constants\) in \d+\.\d ms$", lines[0]);
+        var looked = Regex.Match(lines[1], $@"^looked up {Count} random constants \(seed 7\) in \d+\.\d ms, decoding (\d+) records$");
+        Assert.True(looked.Success, lines[1]);
+        Assert.InRange(int.Parse(looked.Groups[1].Value, CultureInfo.InvariantCulture), 1, Count + QuotientCheckRecords);
+        Assert.Matches(@"^GC heap \d+\.\d MB, working set \d+\.\d MB$", lines[2]);
+        Assert.Equal("", lines[3]);
+    }
+
     [Theory]
     [InlineData("import")]
     [InlineData("import", "x.ndjson")]
@@ -155,9 +175,16 @@ public sealed class StoreCommandTests : IDisposable
     [InlineData("check-store")]
     [InlineData("check-store", "a", "b")]
     [InlineData("check-store", "a", "--slow")]
+    [InlineData("sample-store")]
+    [InlineData("sample-store", "a", "--count", "many")]
     public void BadArgumentsExitTwoWithTheUsage(params string[] args)
     {
-        var (code, _, error) = args[0] == "import" ? Import(args[1..]) : CheckStore(args[1..]);
+        var (code, _, error) = args[0] switch
+        {
+            "import" => Import(args[1..]),
+            "check-store" => CheckStore(args[1..]),
+            _ => Run(SampleStoreCommand.Run, args[1..]),
+        };
 
         Assert.Equal(2, code);
         Assert.Contains("usage: warrant " + args[0], error, StringComparison.Ordinal);

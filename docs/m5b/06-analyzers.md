@@ -56,7 +56,7 @@ Two tests compare them on every compilation of the M4 and M5a corpora, against a
 ## Determinism
 
 Analyzer output must be the same on every run (design §3.2).
-The analyzer keeps no state between compilations (RS1008) and runs concurrently, so the test runs it 20 times with concurrent execution on a multi-file compilation, sorts the diagnostics by file, position, ID and message, and requires all 20 lists to be byte-identical.
+The analyzer keeps no state between compilations (RS1008) and runs concurrently, so the test (`TwentyConcurrentRunsGiveByteIdenticalDiagnosticsAndTheAnalyzerNeverThrows`) runs it 20 times with concurrent execution on a multi-file compilation, sorts the diagnostics by file, position, ID and message, and requires all 20 lists to be byte-identical.
 The order Roslyn reports concurrent diagnostics in is not guaranteed, so the test compares sorted lists; the analyzer's own order within one member is deterministic and checked separately.
 
 ## IDE only

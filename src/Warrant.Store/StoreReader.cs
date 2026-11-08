@@ -110,6 +110,14 @@ public sealed class StoreReader : IDisposable
         return _index.TryFind(name, out kind, out record);
     }
 
+    /// <summary>
+    /// The name of the index's entry at <paramref name="index"/>, from 0 to <see cref="ConstantCount"/> - 1, in the index's
+    /// order, which is not the stored order: for choosing constants without reading their records (<c>warrant sample-store</c>).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="index"/> is out of range.</exception>
+    /// <exception cref="StoreFormatException">The entry's key is malformed.</exception>
+    public Name NameAt(int index) => _index.NameAt(index);
+
     /// <summary>Reads and decodes a record.</summary>
     /// <exception cref="StoreFormatException">The record is malformed.</exception>
     public Declaration Read(RecordLocation record, NameInterner? interner = null)

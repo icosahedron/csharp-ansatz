@@ -37,8 +37,9 @@ from verified definitions.** See §2.
 | D12 | Enums are **open by default**: modelled as their underlying integer, so proofs cover unnamed values. `[Closed]` opts in to modelling exactly the named values; that is an assumption, listed in the report, and the analyzer warns on integer casts to the type (§12 Q3). | Decided |
 | D13 | `[Closed]` also applies to **closed-set classes**, recognised **by shape**: sealed, private constructors only, and static instances of the type itself, each an initialised get-only auto-property or `static readonly` field whose initialiser is a `new` of the class. They translate to an `inductive` with one constructor per instance, and `==` compares a generated `$index` (not `DecidableEq`; see §6.1); a `[Closed]` class without that shape is error WRT0009. Adjust the shape rule if real code needs it (§12 Q16). | Decided |
 | D14 | **Budgets** (§12 Q8): kernel fuel stays at 20M steps for builds and 100M for corpus runs, tactics get their own fuel (171,970 steps by default), and each theorem gets a 30-second wall-clock limit. All three are adjustable per project (MSBuild properties) and per theorem (`[Theorem]` arguments). Exhausting one fails the theorem. | Decided (M5a is built on it) |
-| D15 | **CI trust** (§12 Q9): every build re-checks every proof with the kernel. M5a has no cache; trusting signed caches waits for M5b's cache. | Decided for M5a |
-| D16 | **The CLI builds the compilation, not the MSBuild task** (§8.3): the task passes Csc's own arguments to `warrant verify`, which runs as a child process. | Decided (M5a is built on it) |
+| D15 | **CI trust** (§12 Q9): every build re-checks every proof with the kernel. M5a has no cache; trusting signed caches waits for M5b's cache. | Decided for M5a; replaced by D17 |
+| D16 | **The CLI builds the compilation, not the MSBuild task** (§8.3): the task passes Csc's own arguments to `warrant verify`, which runs as a child process. M5b keeps the child: it compiles and extracts, and sends VIR to the server, which stays free of Roslyn (§3.2). | Decided (M5a and M5b are built on it) |
+| D17 | **Cache trust** (§12 Q9): a cache hit is trusted locally. An entry is written only after the kernel admitted the unit's certificate, and carries a content hash and the toolchain identity, so accidental damage or another build of Warrant is a miss; a deliberate edit of `obj/warrant/` is outside what a local build defends against. `WarrantRecheck=true` makes the kernel re-check every cached proof against statements rebuilt from the current code, without tactics, and is recommended for CI. Chosen over kernel-checking every hit, which would make `WarrantRecheck` redundant, and over entries signed with a per-user key, which adds key management and stops CI agents sharing entries (§8.2). | Decided (M5b is built on it) |
 
 ---
 
@@ -110,34 +111,41 @@ the translation. Warrant addresses this in three ways:
  │                                                                            │
  │  C# project                                                                │
  │     │                                                                      │
- │     ├──► Roslyn compiler ──► Warrant.Analyzers   (pure, fast checks:     │
- │     │                         unsupported constructs, malformed specs)     │
+ │     ├──► Roslyn in the IDE (design-time builds) ──► Warrant.Analyzers      │
+ │     │       extraction's own checks: unsupported constructs, malformed     │
+ │     │       scripts, closed shapes; no I/O and no proof results            │
  │     │                                                                      │
- │     └──► MSBuild: Warrant.Build task (after CoreCompile)                 │
- │             │  builds a CSharpCompilation from the Csc inputs              │
- │             │  Warrant.Extraction: IOperation / CFG ──► VIR units        │
+ │     └──► MSBuild: Warrant.Build task (after CoreCompile)                   │
+ │             │  writes Csc's arguments, runs the CLI as a child process     │
  │             ▼                                                              │
- │        JSON-RPC over named pipe / Unix socket                              │
+ │        warrant verify (CLI child, net10.0)                                 │
+ │             │  rebuilds the CSharpCompilation from Csc's arguments         │
+ │             │  Warrant.Extraction: IOperation ──► VIR units + span table   │
  │             │                                                              │
- │  ┌──────────▼──────────── warrant-server (net10.0) ──────────────────┐   │
- │  │  Result cache (content-addressed: verdicts + proof certificates)    │   │
- │  │      │ miss                                                         │   │
- │  │      ▼                                                              │   │
- │  │  Warrant.Semantics   VIR ──► CIC model (over the Warrant Lean   │   │
- │  │                        library) + goals                             │   │
- │  │      ▼                                                              │   │
- │  │  Warrant.Meta / Tactics   VC generation, simp, omega, … ──►       │   │
- │  │                             proof terms   (untrusted)               │   │
- │  │      ▼                                                              │   │
- │  │  Warrant.Kernel      type-checks every proof term   (trusted)     │   │
- │  │      ▲                                                              │   │
- │  │  Warrant.Store       Init / Std / Mathlib / Warrant semantics,  │   │
- │  │                        lazily loaded, from lean4export NDJSON       │   │
- │  └─────────────────────────────────────────────────────────────────────┘   │
- │             │                                                              │
+ │        JSON-RPC over a named pipe / Unix socket: canonical VIR bytes       │
+ │             │   (no server: the same service runs inside the CLI)          │
+ │  ┌──────────▼ warrant-server (net10.0, one per user and toolchain) ─┐      │
+ │  │  Result cache (per project, obj/warrant/cache/: outcomes and     │      │
+ │  │  per-unit proof certificates, keyed by closure hash)             │      │
+ │  │      │ miss                                                      │      │
+ │  │      ▼                                                           │      │
+ │  │  Warrant.Semantics   VIR ──► CIC model and theorem statements    │      │
+ │  │      ▼                                                           │      │
+ │  │  Warrant.Meta / tactics   simp, omega, … ──► proof terms         │      │
+ │  │                            (untrusted; theorems run in parallel) │      │
+ │  │      ▼                                                           │      │
+ │  │  Warrant.Kernel      type-checks every proof term   (trusted)    │      │
+ │  │      ▲                                                           │      │
+ │  │  the semantics bundle, loaded and checked once per server        │      │
+ │  └──────────────────────────────────────────────────────────────────┘      │
+ │             │  outcomes with VIR node IDs                                  │
  │             ▼                                                              │
- │   diagnostics (build errors with goals) + assumption reports +             │
- │   exported NDJSON certificates ──► other kernels (Lean, Ansatz, arena)     │
+ │   CLI: diagnostics at current lines (build errors with goals),             │
+ │   assumption reports, exported NDJSON certificates ──► other kernels       │
+ │   (Lean, Ansatz, arena)                                                    │
+ │                                                                            │
+ │  Warrant.Store (warrant import, check-store): Init, Std and Mathlib on     │
+ │  disk, loaded lazily by name; the verification base from M6                │
  └────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -148,12 +156,15 @@ the translation. Warrant addresses this in three ways:
   file and network I/O in them. Loading a declaration store and running
   tactics there is the wrong fit: Ansatz needs 5–6 GB of heap for its hardest
   Mathlib declarations.
-- **Large state should be loaded once.** The store, the elaborated environment
-  and the caches persist across builds. The precedent is Roslyn's own compiler
-  server (`VBCSCompiler`), which the build starts on demand and reuses.
-- **One engine, many clients.** The MSBuild task, the CLI, and a later IDE
-  extension or language server all talk to the same server, so their results
-  agree.
+- **Large state should be loaded once.** The checked semantics bundle, the
+  attribute sidecar, the simp sets and the cache's recent entries persist
+  across builds. The precedent is Roslyn's own compiler server
+  (`VBCSCompiler`), which the build starts on demand and reuses.
+- **One engine, many clients.** The verification itself is one class,
+  `VerificationService` in `Warrant.Engine`; the server hosts it, and the CLI
+  hosts the same class in-process when no server can be used, so the two
+  paths give byte-identical output (a parity test checks it). A later IDE
+  extension or language server talks to the same server.
 - The kernel and tactics can target modern .NET (net10.0: `Span`, vectorized
   hashing, `BigInteger` performance) instead of `netstandard2.0`.
 
@@ -162,18 +173,24 @@ the translation. Warrant addresses this in three ways:
 | Component | Runs in | Target | Responsibility |
 |---|---|---|---|
 | `Warrant` (user API) | user app | netstandard2.0 | Attributes, `Spec.*`, `Prove`, `Tactic.*`. No runtime behaviour (§5). |
-| `Warrant.Analyzers` | compiler / IDE | netstandard2.0 | Deterministic checks only: supported subset, spec well-formedness, calling `[Theorem]` methods, missing contracts on externals. No I/O. |
-| `Warrant.Extraction` | analyzer + build task | netstandard2.0 | Roslyn `IOperation` tree → VIR, and the subset checks. Shared, so the analyzer and the build agree on what is supported. Compiled against Roslyn 4.8.0 so that older compilers can load it. M4 reads only the operation tree; the `ControlFlowGraph` may return for loops in M7. |
-| `Warrant.Frontend` | build task, CLI, tests | net10.0 | Builds the `CSharpCompilation` that extraction reads: references, language version, nullable analysis, overflow setting. In M4 it serves the CLI and the tests with fixed corpus settings; from M5a it takes them from the `Csc` inputs (§8.3). |
-| `Warrant.Vir` | everywhere | netstandard2.0 and net10.0 | The **Verification IR**, its canonical serialization and its hashes. This is the wire protocol between extraction and the server. The reader is built for net10.0 only. |
+| `Warrant.Analyzers` | IDE (design-time builds) | netstandard2.0 | Extraction's own diagnostics as the developer types: supported subset, proof-script well-formedness, calling `[Theorem]` methods, unmodelled callees, closed shapes. One assembly that compiles in the Extraction and Vir sources. No I/O, never proof results, and removed from command-line builds, where the CLI reports each diagnostic once (M5b, [docs/m5b/06](m5b/06-analyzers.md)). |
+| `Warrant.Extraction` | analyzer + CLI | netstandard2.0 | Roslyn `IOperation` tree → VIR, and the subset checks. Shared, so the analyzer and the build agree on what is supported. Compiled against Roslyn 4.8.0 so that older compilers can load it. M4 reads only the operation tree; the `ControlFlowGraph` may return for loops in M7. |
+| `Warrant.Frontend` | CLI, tests | net10.0 | Builds the `CSharpCompilation` that extraction reads: references, language version, nullable analysis, overflow setting. In M4 it serves the CLI and the tests with fixed corpus settings; from M5a it takes them from the `Csc` inputs (§8.3). |
+| `Warrant.Vir` | everywhere | netstandard2.0 and net10.0 | The **Verification IR**, its canonical serialization and its hashes. Its canonical bytes are what the CLI sends the server. The reader is built for net10.0 only. |
 | `Warrant.Semantics` | server | net10.0 | VIR → CIC: types, definitions and theorem statements (§4.2). Trusted (§9). No Roslyn. |
-| `Warrant.Engine` | server, CLI | net10.0 | The pipeline after VIR: admits translated declarations into a fork of the checked bundle, emits proofs, classifies outcomes, reads values back for messages, writes reports and NDJSON. Untrusted (§9). No Roslyn, so the server can host it unchanged. |
-| `Warrant.Build` | MSBuild | netstandard2.0 | After `CoreCompile`: extract, send to the server (starting it if needed), report diagnostics, write reports. Authoritative for builds and CI. |
-| `warrant-server` | own process | net10.0 | Cache, translation, tactics, kernel, store. Stays free of Roslyn: it only sees VIR. |
-| `warrant` CLI | own process | net10.0 | `verify`, `check-store`, `import`, `export`, `explain`; runs the engine in-process for CI without a daemon. In M4 it has `translate`, which runs the frontend, extraction and the engine on a directory of C#. |
+| `Warrant.Engine` | server, CLI | net10.0 | The pipeline after VIR and the `VerificationService` both hosts run: admits translated declarations into a fork of the checked bundle, runs theorems in parallel, emits proofs, classifies outcomes, reads values back for messages, keeps the result cache, writes reports and NDJSON. Untrusted (§9). No Roslyn, so the server can host it unchanged. |
+| `Warrant.Store` | CLI | net10.0 | Store v1: immutable, memory-mapped versions of imported Lean libraries, and the kernel's lazy constant source (§7.3). |
+| `Warrant.Build` | MSBuild | netstandard2.0 | After `CoreCompile`: write Csc's arguments and run the CLI as a child process (D16), turn its records into diagnostics, delete the result cache on `Clean`. Authoritative for builds and CI. No Roslyn. |
+| `warrant-server` | own process | net10.0 | Hosts the `VerificationService`: the checked bundle, the cache's recent entries, translation, tactics and kernel. Stays free of Roslyn: it only sees VIR. |
+| `warrant` CLI | own process | net10.0 | The server's client and the build's child: compiles, extracts, sends VIR to the server (starting it when needed) or verifies in-process, and renders diagnostics and reports. Verbs: `check`, `stats`, `export`, `translate`, `verify`, `explain`, `server status\|cancel\|shutdown\|report`, `import`, `check-store`, `sample-store`. |
 
-Keeping Roslyn out of the server means the server's input (VIR) is small,
-canonical, and hashable. That is what makes the cache (§8.2) reliable.
+The line between client and server falls after extraction, not in the build
+task as first drawn: M5a moved compiling and extracting into the CLI child,
+because the task cannot load a Roslyn new enough for C# 14 (§8.3), and M5b
+kept them there, so the server never loads Roslyn and each build pays one
+short process start. Keeping Roslyn out of the server means the server's input
+(VIR) is small, canonical, and hashable. That is what makes the cache (§8.2)
+reliable.
 
 ---
 
@@ -233,7 +250,7 @@ VIR is a small, language-level IR of the supported C# subset. It is not CIC.
   `OverflowException` in unannotated code).
 
 VIR has a canonical JSON encoding, written by hand rather than by a serializer, so the netstandard2.0 and net10.0 builds write the same bytes.
-A binary encoding waits until M5b's server transmits VIR.
+M5b's CLI sends these bytes to the server as they are; a binary encoding was not needed.
 
 VIR grows additively.
 It contains only the nodes the current milestone needs; a later milestone adds node kinds and fields but never changes the encoding of an existing one, and every unit records the VIR schema version, which is part of its hash.
@@ -529,12 +546,17 @@ nested inductives.
 - Two modes:
   - **Trusted import:** accept declarations that Lean already checked. This is
     fast, and suitable for development.
-  - **Verified import:** re-check every declaration with our kernel. This is
-    the default for CI on the semantics bundle, and is the main kernel test.
+  - **Verified import:** re-check every declaration with our kernel. The
+    semantics bundle is always loaded this way: `warrant verify` checks it on
+    every in-process run, and the server once when it starts. It is also the
+    main kernel test.
+  Both modes are `warrant import`'s, which writes a store (§7.3): `--verified`
+  stores what the kernel admitted, and the default stores the declarations as
+  read.
 - The bundle shipped with Warrant is `warrant-semantics`
   (`tests/data/warrant-semantics.ndjson.gz`): the Warrant semantics library and
   every Init constant the translator emits, with their whole dependency closure
-  (2,483 constants at Lean 4.35.0), exported by `scripts/export-semantics.sh`.
+  (2,835 constants at Lean 4.35.0), exported by `scripts/export-semantics.sh`.
   The kernel and corpus tests also use Ansatz's `init-medium` subset of Lean
   4.33.1's Init (5,118 constants in 4,631 declaration records, 3.3 MB gzipped),
   but it is not shipped: it has no `Int32` or `Int64`.
@@ -542,20 +564,42 @@ nested inductives.
 
 ### 7.3 Store
 
-> Scheduled with the verification server (M5b): the store's layout depends on how the server
-> caches checked environments, and at Init scale loading NDJSON is not a bottleneck.
+Built in M5b as store v1 ([docs/m5b/05](m5b/05-store.md)), laid out against
+the Mathlib run's figure: 12.6 GB peak with every constant in memory. We don't
+port Ansatz's datahike/konserve store. Instead, a versioned on-disk binary
+format in `Warrant.Store`:
 
-We don't port Ansatz's datahike/konserve store. Instead, a versioned on-disk
-binary format:
+- A store is a directory of immutable version directories (`v1-<hash12>/`)
+  and a `current` file naming the active one. `warrant import` writes a new
+  version and replaces `current` atomically; readers keep the version they
+  opened, so a store is never rewritten in place (Windows will not overwrite a
+  mapped file).
+- Each version holds `decls.bin`, one self-contained record per declaration
+  (its own name, level and expression tables), stored once per content hash
+  and read by offset; `names.idx`, a sorted name index that is memory-mapped
+  for lazy loading; and `manifest.json`, which records the format, the Lean
+  and lean4export versions, each source file's SHA-256 (the bundle's among
+  them, so the attribute sidecar's binding holds), the import mode, the
+  toolchain identity that verified it, whether quotients are initialized, and
+  the counts. Every file starts with a magic number, a format version and its
+  length, checked before anything is read.
+- The kernel reads it through `IConstantSource` (look up a constant by name,
+  a count, the quotient flag), which `KernelEnvironment.Find` consults after
+  its own constants. The store's adapter materializes a constant the first
+  time it is asked for. The kernel sets the quotient flag only when the source
+  holds the quotient constants exactly as `Quotient.ExpectedConstants`
+  defines them.
+- `warrant import <files>... --store <dir> [--verified]` and
+  `warrant check-store <dir>` write and re-check it. The Init + semantics
+  store (57,944 declarations, 59,374 constants) passes `check-store`.
 
-- content-addressed expression and declaration blobs
-- a name index for lazy loading
-- memory-mapped reads
-- a manifest that records the Lean version, the lean4export format version,
-  and the bundle hashes
-
-The interface is roughly `IDeclarationStore { TryGet(Name), Contains(Name),
-Find(prefix) }`.
+In M5b the verification environment stays the shipped bundle, loaded and
+checked when the server starts; the store serves the CLI verbs and the
+lazy-loading tests. When a store becomes the verification base (M6, for Std),
+its record decoder becomes trusted code and joins the toolchain identity.
+Measured on Mathlib (§11): a trusted import of all 712,205 declarations takes
+139 s and makes a 1.45 GB store; opening it and looking up 1,000 random
+constants leaves a 21 MB managed heap and an 88 MB working set.
 
 ### 7.4 Export (D6)
 
@@ -573,37 +617,84 @@ Lean rendering is still useful, but as a separate debugging feature.
 
 ### 8.1 Process and protocol
 
-- `warrant-server` is a net10.0 process, one per user and machine, with
-  per-solution sessions. The build task starts it on demand, and it shuts down
-  after an idle timeout.
-- Transport: JSON-RPC (StreamJsonRpc) over a named pipe on Windows or a Unix
-  domain socket elsewhere. The protocol is versioned, and a mismatch causes a
-  restart.
-- Core methods: `verify(units[], priority)`, `cancel(id)`, `status`,
-  `explain(unitId)` (goals, context, tactic trace), `export(unitIds)`,
-  `report(project)`.
-- Scheduling: units are verified in parallel, with per-unit fuel and
-  wall-clock limits. IDE requests take priority over builds, and work is
-  cancelled when the source changes.
+Built in M5b ([docs/m5b/01](m5b/01-server-and-protocol.md)).
+
+- `warrant-server` is a net10.0 process, one per user, elevation and
+  toolchain. The `warrant` CLI child that the build runs starts it on demand,
+  detached so that a cancelled build cannot kill it, from a per-user copy of
+  its files, so it never locks the package folder or a repository's `bin/`. It
+  loads and checks the semantics bundle before it serves, and exits 10 minutes
+  after its last connection closes and no work runs.
+- Transport: JSON-RPC (StreamJsonRpc, System.Text.Json) over a named pipe
+  opened with `CurrentUserOnly` on Windows, or a Unix domain socket in a 0700
+  per-user directory elsewhere. The endpoint's name hashes the user, the
+  elevation, the server's directory and the toolchain identity, so a rebuilt
+  or upgraded Warrant gets its own server. The protocol is versioned: a client
+  with another version makes the server drain and exit, and the next client
+  starts a matching one.
+- Methods: `hello(protocol)`, `verify(request)`, `cancel(id)`, `status()`,
+  `explain(request)` (one unit's tactic trace, with the goals before and after
+  each step), `export(request)` (the certificate file), `report(project)` (the
+  JSON assumption report of the project's last verify) and `shutdown()`.
+  `warrant server status | cancel | shutdown | report` drive them.
+- Scheduling: a request's theorems run in parallel on a pool of
+  `min(processors − 1, 8)` large-stack workers, each in its own fork of the
+  frozen environment; every unit has its fuel and wall-clock budget, timed
+  from when a worker starts it. A request is cancelled by `cancel(id)`, by
+  `$/cancelRequest` or by its client disconnecting, and the cancellation
+  reaches the kernel and Meta, which poll it every 1,024 steps. A request
+  carries a priority, so that IDE requests can take priority over builds; it
+  is unused until an IDE client exists.
+- When the server cannot be started, reached or trusted, or fails a request,
+  the CLI verifies in-process with the same service and logs the reason as a
+  message, not a warning. CI builds (`ContinuousIntegrationBuild=true`) do not
+  use the server by default (`WarrantUseServer=false`).
+- The server isolates users, not elevation levels: an elevated build's server
+  runs from a copy that the same user's non-elevated processes can write to.
+  On a machine where non-elevated code is not trusted, build elevated with
+  `WarrantUseServer=false` and `WarrantRecheck=true` (or `WarrantUseCache=false`),
+  since the cache under `obj/` is just as writable; Warrant itself loads from
+  the user's NuGet package folder, so full separation also needs a package
+  folder non-elevated code cannot write (GitHub issue #43).
 
 ### 8.2 Content-addressed cache
 
-- **Key:** the unit's closure hash (§4.1), which covers its own canonical VIR
-  and the closure hashes of every unit it calls or mentions; the contracts it
-  depends on; the semantics-bundle hash; the environment and store hashes; and
-  the kernel version. Hashing only the *statements* of dependencies is not
-  enough under a shallow embedding: a theorem proved by computation depends on
-  its callees' bodies, so editing a callee's body can turn a proved theorem
-  false without changing the theorem's text.
-- **Value:** the verdict, the **proof certificate** (proof terms as NDJSON),
-  diagnostics, and the assumption report. Cached diagnostics refer to VIR node
-  IDs, not source positions; they are mapped to spans through the span table of
-  the current extraction, so a cached result never points at stale lines.
-- Stored on disk per project (`obj/warrant/`) and in a per-user shared cache.
-- **Proof replay:** a cached certificate can be re-checked by the kernel alone,
-  without re-running tactics. That is cheap compared with proof search, so CI
-  can run with `WarrantRecheck=true`. CI then trusts only the kernel, not the
-  cache contents.
+Built in M5b ([docs/m5b/04](m5b/04-cache-and-recheck.md)).
+
+- **Key:** a SHA-256 over the cache format version, the **toolchain
+  identity** (a hash of the module version IDs of Warrant's verification
+  assemblies, so any change to their code invalidates every entry), the
+  semantics bundle's and the attribute sidecar's SHA-256, the unit's closure
+  hash (§4.1), and the display names of the units in its closure. The closure
+  hash covers the unit's own canonical VIR, its compilation facts, and the
+  closure hashes of every unit it calls or mentions. Hashing only the
+  *statements* of dependencies is not enough under a shallow embedding: a
+  theorem proved by computation depends on its callees' bodies, so editing a
+  callee's body can turn a proved theorem false without changing the
+  theorem's text. Budgets are not in the key: a proved entry hits when the
+  current budgets are at least what its proof used, and an outcome that
+  depends on the budgets (false, not proved, out of fuel) hits only with the
+  same budgets.
+- **Value:** one JSON file per entry: the outcome with the unit's
+  assumptions, the budgets, the unit's **proof certificate** (the lean4export
+  NDJSON of the declarations it admitted) and a SHA-256 of the body. Outcomes
+  refer to VIR node IDs, not source positions; the CLI maps them to spans
+  through the span table of the current extraction, so a cached result never
+  points at stale lines. Proved, false, not-proved and out-of-fuel outcomes of
+  theorems and recursive definitions are cached; time-outs, internal errors and
+  cancellations are not.
+- Stored on disk per project, in `$(WarrantCacheDir)` (by default
+  `$(BaseIntermediateOutputPath)warrant/cache/`, which `dotnet clean`
+  deletes), with the 4,096 most recent entries in the server's memory. A
+  per-user cache shared across projects is deferred.
+- **Trust (D17):** a hit is trusted locally and runs nothing for its unit.
+  A unit that misses has its closure admitted from cached terms, each checked
+  by the kernel as it is admitted, so only the misses run tactics.
+- **Proof replay:** with `WarrantRecheck=true` (`--recheck`), every cached
+  proof is checked by the kernel against a theorem statement that
+  `Warrant.Semantics` builds afresh from today's VIR, without running tactics.
+  A rejected certificate is WRT0010 and its entry is deleted. CI can run with
+  it and then trusts only the kernel, not the cache contents.
 
 ### 8.3 Build integration
 
@@ -617,10 +708,29 @@ VIR and proves (D16). This changed in M5a for two reasons: extraction is
 built against Roslyn 4.8, which cannot parse the C# 14 that SDK 10 defaults
 to, and loading Roslyn into Visual Studio's .NET Framework MSBuild depends on
 fragile assembly binding. The task is a netstandard2.0 `ToolTask` with no
-Roslyn reference. Generated sources exist only inside Csc, so code that does
-not compile without them is error WRT0012. M5b replaces the child process with
-the server ([docs/m5a/07](m5a/07-verify-and-build.md)). The task emits errors
-such as this one from M5a:
+Roslyn reference. Generated sources are not in Csc's arguments, so the CLI
+runs the project's source generators itself; a generator that cannot load or
+throws is error WRT0012 ([docs/m5a/07](m5a/07-verify-and-build.md)).
+
+M5b keeps the child process and makes it the server's client
+([docs/m5b/02](m5b/02-client-and-build.md)): after extracting, it sends the
+units' VIR to the server (starting it when needed), or verifies in-process
+when the server cannot be used, and it renders the outcomes itself, because
+only it has the compilation and the source text. The targets add three
+properties and pass them to the CLI:
+
+| Property | Default | Effect |
+|---|---|---|
+| `WarrantUseServer` | `true`; `false` when `ContinuousIntegrationBuild` is `true` | `--server auto`, or `--server off` to always verify in-process. |
+| `WarrantRecheck` | `false` | `--recheck`: the kernel re-checks every cached proof (§8.2). |
+| `WarrantCacheDir` | `$(BaseIntermediateOutputPath)warrant/cache/` | `--cache-dir`; `dotnet clean` deletes it. `WarrantUseCache=false` verifies without a cache. |
+
+The summary line says how many results came from the cache and, when the
+server was asked for, which path was taken:
+`Warrant: 20 verified units, 7 theorems proved (10 from cache), 0 not proved. [server]`.
+The target still has no `Inputs` and `Outputs`: every build runs the CLI,
+and the cache decides what is re-run. The task emits errors such as this one
+from M5a:
 
 ```text
 Increments.cs(13,52,13,66): error WRT0001: Theorem 'Increments.AlwaysLarger(int)' could not be proved: omega could not prove the goal. Counterexample: x = 2147483647.
@@ -722,7 +832,7 @@ in the engine can make a true claim fail but never a false one pass.
 | M3 | Exporter, cross-kernel harness, FsCheck property tests | Certificates check in at least one external kernel. Mathlib is a stretch goal. ✅ Lean's kernel re-checks everything Warrant admits, including full Init and C#-built types (see [kernel.md](kernel.md)); the store moved to M5b |
 | M4 | VIR, extraction of the pure subset (`int`/`long`/`bool`, enums, records, `if`/`switch`; theorems are parameterless `[Theorem]` methods returning `Prove.That(bool)`; recursion is rejected until M5a, and `/`, `%` and checked arithmetic are rejected with a diagnostic until M6, and non-null record parameters are recorded as assumptions), semantics library v0 with CLR-agreement tests (§10.6), translation, differential testing | A fixed corpus (`tests/corpus/m4/`) translates, including a `Validate`-shaped method over records and enums (`int` in place of `decimal`), and every rejected construct has a corpus method that is rejected with the diagnostic. Differential tests pass; null-record inputs check that .NET throws and that the non-null assumption is recorded. CLR-agreement tests pass for every modelled operation. Theorems without free parameters are closed by `rfl`/`decide` proof terms the translator emits. The translated corpus, exported with its Init + semantics closure, passes a new translated-output step in `scripts/cross-check.sh`. |
 | M5a | `Warrant.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `unfold`, `simp`, `omega`, `all_goals`, `try`), quantified theorems and `Prove.That(...).By(...)`, well-founded recursion with `Spec.Decreases` (structural recursion is unreachable for M5a's types, §4.2), translator-generated equation lemmas for recursive definitions, a development-time export of simp, instance and reducibility attributes for Init and the semantics library next to the NDJSON bundle (untrusted tactic input; Std is added in M6), `Int32`/`Int64` → `Int` bridging lemmas and an omega-prep simp set (§6.2), in-process `warrant verify` (§3.2), a thin MSBuild task that runs `warrant verify` as a child process (the net10.0 engine cannot load in .NET Framework MSBuild) | First end-to-end result: `Increment(x) > x` fails the build with its goal and the counterexample `x = 2147483647` shown under `dotnet build`, Visual Studio 2026's MSBuild and Visual Studio 2022's MSBuild; `ValidImpliesPositive` (`int`) passes with `Unfold` then `Simp`; a well-founded method whose decrease needs `omega`, and a quantified theorem over a translated `int` method closed by `simp` then `omega`, pass. Differential tests pass for a well-founded unit, both by kernel evaluation and by rewriting with its equation lemma. The certificate of a verified C# theorem passes the translated-output step of `scripts/cross-check.sh`. ✅ as described in [docs/m5a/](m5a/README.md); how Visual Studio's Error List shows a multi-line goal is still to be checked by hand |
-| M5b | Server, content-addressed cache, store v1 (trusted and verified import), CLI verbs, analyzers | The M5a result through the server. A second build is served from the cache without running tactics, `WarrantRecheck=true` re-checks cached certificates with the kernel alone, and the Init + semantics store passes `warrant check-store` in verified mode. `cancel` aborts a running verify, a unit over its fuel or wall-clock budget reports a timeout, and analyzer output is identical across runs. Baseline per-unit verification latency and server memory are recorded for M8. Store v1 is laid out against the Mathlib run's figure: 12.6 GB peak with every constant in memory. |
+| M5b | Server, content-addressed cache, store v1 (trusted and verified import), CLI verbs, analyzers | The M5a result through the server. A second build is served from the cache without running tactics, `WarrantRecheck=true` re-checks cached certificates with the kernel alone, and the Init + semantics store passes `warrant check-store` in verified mode. `cancel` aborts a running verify, a unit over its fuel or wall-clock budget reports a timeout, and analyzer output is identical across runs. Baseline per-unit verification latency and server memory are recorded for M8. Store v1 is laid out against the Mathlib run's figure: 12.6 GB peak with every constant in memory. ✅ as described in [docs/m5b/](m5b/README.md): each item is a test in `M5bExitTests` (9 of 9 pass, the Init + semantics store with `WARRANT_INIT_EXPORT`; analyzer determinism is `Warrant.Analyzers.Tests`' 20 concurrent runs), and the build matrix (`dotnet build`, Visual Studio 2026's and 2022's MSBuild) adds a second build from the cache, a recheck build and `dotnet clean`. Baselines on a 32-core Windows 11 workstation (.NET SDK 10.0.403, 2026-11-07; [docs/m5b/08](m5b/08-testing-and-baselines.md#baselines-for-m8)), for the M5a accepted sample's 20 units: starting the server, which loads and checks the bundle, and connecting take 2.9 s; a warm request 630 ms (46 ms per unit on average, 176 ms at most); a second request served from the cache 39 ms; a recheck 239 ms; in-process, the request takes 548 ms of a 4.4 s run that also loads the bundle. The server holds a 37 MB managed heap (110 MB working set) after start and 65 MB (150 MB) after the corpus. A trusted Mathlib store imports in 139 s into 1.45 GB, opens in 69 ms and serves 1,000 random lookups in 114 ms with a 21 MB managed heap and an 88 MB working set. |
 | M6 | Contracts: `Spec.Requires`/`Ensures`, contract classes, effect monad (exceptions, null, overflow, `/` and `%`), VC generation with `@[spec]` lemmas in the attribute sidecar, assumption reports, a minimal `decimal` model (96-bit mantissa and scale, comparisons, add/subtract without overflow; `==` is numeric equality, so `1.0m == 1.00m`, also inside records). Readonly fields whose type has a contract become theorem parameters (other field access waits for M7). First step: the Std closure the library imports is kernel-checked and cross-checked | Pure parts of the payment example verified, and `ProcessPayment` verified with the store as a hypothesis. Differential tests with contract-satisfying mocked externals pass, every new model operation (including the minimal `decimal`) passes CLR-agreement tests, generators include zero divisors, `MinValue / -1` and equal `decimal`s with different scales, and `ProcessPayment`'s certificate passes `scripts/cross-check.sh`. |
 | M7 | Regions, loops with invariants, heap model for mutable objects, full `decimal` arithmetic and rounding, strings | The payment example verified without restructuring into records (the target code in §5.3). CLR-agreement tests pass for the `decimal`, string and heap models. |
 | M8 | Live IDE feedback (language server / extension), `grind`, typed Mathlib handles (after the Mathlib run), performance work | Not defined yet (§12 Q15). Define one before starting. |
@@ -732,7 +842,9 @@ arena cross-checks, trace diffing, and the §10.3 property tests not yet
 covered) is tracked on its own tickets. The Ansatz/arena cross-checks and the
 property tests were done in M5a, and the Mathlib run at the start of M5b
 ([kernel.md](kernel.md#mathlib)): Warrant and Lean's kernel accept all of it,
-and checking it peaks at 12.6 GB. Trace diffing is still open.
+and checking it peaks at 12.6 GB. Trace diffing is still open. From M5b, an
+open item about the server's security on a shared account is GitHub issue #43
+(§8.1).
 
 Porting sources: the **Lean 4 sources are authoritative** (`src/kernel/` for
 the kernel, `src/Lean/Meta/` for tactics). **Ansatz is the second reference**
@@ -767,12 +879,24 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
    use in the M5a corpus), and 30 seconds of wall clock per theorem, set per
    project with `WarrantKernelFuel`, `WarrantTacticFuel` and
    `WarrantTimeoutSeconds` and per theorem with `[Theorem(KernelFuel = …,
-   TacticFuel = …, TimeoutSeconds = …)]`. In-process `warrant verify` enforces
-   them until M5b's server does. The pipeline for contracts waits for M6.
+   TacticFuel = …, TimeoutSeconds = …)]`. Since M5b every unit runs under
+   them, definitions, equation lemmas and decrease proofs included, through
+   the server and in-process alike, and the counterexample search is bounded
+   by fuel alone, so it finds the same values under any load. The pipeline for
+   contracts waits for M6.
 9. **CI trust policy.** Always recheck certificates, or trust signed caches?
    *Decided for M5a (D15):* every build re-checks every proof with the
    kernel, so the MSBuild task has no `Inputs`/`Outputs` and M5a has no cache.
-   Signed caches and `WarrantRecheck` are M5b's question.
+   *Decided for M5b (D17):* cache hits are trusted locally, and
+   `WarrantRecheck=true` makes the kernel re-check every cached proof against
+   statements rebuilt from the current code, without running tactics; the
+   docs recommend it for CI. Entries are not signed: a per-user key adds key
+   management and stops CI agents sharing entries, and kernel-checking every
+   hit would make `WarrantRecheck` redundant. An entry is written only after
+   the kernel accepted its certificate and carries a content hash, so
+   accidental damage is a miss; a deliberate edit of `obj/warrant/` is outside
+   what a local build defends against, and recheck is the defence where that
+   matters.
 10. **Lean version pin.** Pinned to Lean v4.35.0 and lean4export `5a9a355`
     (`scripts/lib/lean-toolchain.sh`). The kernel was ported against v4.33.1
     and re-diffed against v4.35.0: the only kernel change in between removes
@@ -794,7 +918,8 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
 15. **M8 exit criterion.** What latency and memory budget makes live IDE
     feedback good enough, and should M8's four items (IDE, `grind`, typed
     handles, performance) be separate tickets? M5b's recorded baselines are the
-    starting point. Define it before M8 starts.
+    starting point ([docs/m5b/08](m5b/08-testing-and-baselines.md#baselines-for-m8)).
+    Define it before M8 starts.
 
 Questions 16 to 20 came from rewriting ten functions of a production C#
 codebase (the claims modules of an insurance platform) in the §5 surface, one

@@ -198,3 +198,79 @@ internal static class CheckStoreCommand
         return KernelCheck.Run(checker, reader.ReadAll(new NameInterner()), output, quiet, slowest: 0, sw);
     }
 }
+
+/// <summary>
+/// <c>warrant sample-store &lt;dir&gt; [--count N] [--seed N]</c> (M5b R15, KTD30; docs/m5b/08): opens the store's current
+/// version as the kernel's lazy base, looks up <c>N</c> distinct constants chosen at random by name (1,000 by default,
+/// seed 1), and prints the time each step took and the process's memory afterwards: the managed heap after a full
+/// collection, and the working set, which also counts the store's mapped pages.
+/// </summary>
+internal static class SampleStoreCommand
+{
+    public const string Usage = "warrant sample-store <dir> [--count N] [--seed N]";
+
+    public static int Run(string[] args, TextWriter output, TextWriter error)
+    {
+        string? store = null;
+        int count = 1000, seed = 1;
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--count" when i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out count):
+                    i++;
+                    break;
+                case "--seed" when i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.None, CultureInfo.InvariantCulture, out seed):
+                    i++;
+                    break;
+                case var option when option.StartsWith("--", StringComparison.Ordinal) || store is not null:
+                    error.WriteLine($"unknown option '{option}'\nusage: {Usage}");
+                    return 2;
+                default:
+                    store = args[i];
+                    break;
+            }
+        }
+        if (store is null)
+        {
+            error.WriteLine($"usage: {Usage}");
+            return 2;
+        }
+
+        var sw = Stopwatch.StartNew();
+        using var reader = StoreReader.Open(store);
+        var source = new StoreConstantSource(reader);
+        var env = new KernelEnvironment(source);
+        var opened = sw.Elapsed;
+        output.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"opened store {reader.StoreDirectory} ({reader.Version}, {reader.ConstantCount:N0} constants) in {opened.TotalMilliseconds:0.0} ms"));
+
+        var random = new Random(seed);
+        var chosen = new HashSet<int>();
+        count = Math.Min(count, reader.ConstantCount);
+        while (chosen.Count < count)
+        {
+            chosen.Add(random.Next(reader.ConstantCount));
+        }
+        sw.Restart();
+        foreach (var index in chosen)
+        {
+            var name = reader.NameAt(index);
+            if (env.Find(name) is null)
+            {
+                error.WriteLine($"the store's index names '{name}', which the store does not hold");
+                return 1;
+            }
+        }
+        var looked = sw.Elapsed;
+        output.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"looked up {count:N0} random constants (seed {seed}) in {looked.TotalMilliseconds:0.0} ms, decoding {source.MaterializedRecords:N0} records"));
+
+        long heap = GC.GetTotalMemory(forceFullCollection: true);
+        using var process = Process.GetCurrentProcess();
+        output.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"GC heap {heap / (1024.0 * 1024.0):0.0} MB, working set {process.WorkingSet64 / (1024.0 * 1024.0):0.0} MB"));
+        GC.KeepAlive(env);
+        return 0;
+    }
+}

@@ -12,4 +12,8 @@
     <ProjectReference Include="..\Warrant.Meta\Warrant.Meta.csproj" />
     <InternalsVisibleTo Include="Warrant.Engine.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Lean 4.35.0's declarations of its standard axioms and the types they mention, from the committed bundle (#26). -->
+    <EmbeddedResource Include="StandardAxioms.ndjson" LogicalName="Warrant.Engine.StandardAxioms.ndjson" />
+  </ItemGroup>
 </Project>

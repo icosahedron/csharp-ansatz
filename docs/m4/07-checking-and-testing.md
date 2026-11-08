@@ -99,7 +99,7 @@ warrant translate <directory> [--out <file.ndjson>] [--report <file.md>] [--chec
 ```
 
 It compiles every `.cs` file under the directory with the `Warrant.Frontend` factory (chapter 3), extracts VIR, hands it to the engine, and prints one line per unit plus any diagnostics in the compiler's `file(line,col): error CODE: message` format.
-`--check-overflow` compiles the files as a project with `CheckForOverflowUnderflow` on would be compiled, and `--bundle` names a semantics bundle other than the one copied next to the CLI.
+`--check-overflow` compiles the files as a project with `CheckForOverflowUnderflow` on would be compiled, and `--bundle` names a semantics bundle other than the one copied next to the CLI. A bundle that declares an axiom besides Lean's standard three, or declares one of them differently from Lean, does not load (chapter 1).
 The start and end of `warrant translate tests/corpus/m4/accepted`:
 
 ```text
@@ -146,6 +146,7 @@ Claims.Payments.Validate(Claims.Payment)              TRANSLATED   (kernel: Warr
   Assumed (global):
     - Arithmetic wraps on overflow (overflow checking is off)
     - The semantics bundle models C# 14 int, long and bool
+    - The only axioms are Lean's standard ones: propext, Classical.choice, Quot.sound
 
 Claims.Payments.RejectsZero()                         VERIFIED     (by rfl; kernel: Warrant 1.0, bundle: warrant-semantics sha256:eab5c4e44f05)
   Claim: Validate(new Payment(1, 0, PaymentStatus.Pending)) == PaymentResult.InvalidAmount
@@ -154,6 +155,7 @@ Claims.Payments.RejectsZero()                         VERIFIED     (by rfl; kern
   Assumed (global):
     - Arithmetic wraps on overflow (overflow checking is off)
     - The semantics bundle models C# 14 int, long and bool
+    - The only axioms are Lean's standard ones: propext, Classical.choice, Quot.sound
 ```
 
 The kernel is named by the major and minor version of the `Warrant.Kernel` assembly, and the bundle by its file name and the first 12 hex digits of its SHA-256, so a report says exactly which model it rests on.

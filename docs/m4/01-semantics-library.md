@@ -78,6 +78,8 @@ The last theorem is quantified, so `decide` cannot prove it; Init already proves
 Quantified proofs from Init can rest on Lean's three standard axioms (`propext`, `Classical.choice`, `Quot.sound`); this one does.
 That is fine for documentation theorems, and it does not leak into translated code: the proof terms the engine emits for C# theorems use no axioms (chapter 6).
 No library declaration may depend on `sorryAx`, and the export script checks that (plan, U2).
+Loading checks the axioms again, because `--bundle` accepts any file: a bundle that declares any other axiom is rejected, and so is one whose `propext`, `Classical.choice` or `Quot.sound`, or the `Eq`, `Iff` or `Nonempty` their statements mention, differs from Lean 4.35.0's (`src/Warrant.Engine/StandardAxioms.ndjson`, taken from the committed bundle).
+The assumption report lists the three axioms as a global assumption.
 
 These theorems are documentation that a machine checks.
 They are not what makes the model faithful.

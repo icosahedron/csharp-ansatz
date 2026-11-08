@@ -178,6 +178,7 @@ Corpus.Recursion.Sum(int)                             TRANSLATED   (kernel: Warr
     - Each recursive call returns without exhausting the stack
     - Arithmetic wraps on overflow (overflow checking is off)
     - The semantics bundle models C# 14 int, long and bool
+    - The only axioms are Lean's standard ones: propext, Classical.choice, Quot.sound
 ```
 
 This is the `report.md` that `warrant verify tests/corpus/m5a/accepted --report <dir>` writes.

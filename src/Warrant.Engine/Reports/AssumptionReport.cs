@@ -86,6 +86,12 @@ public static class AssumptionReports
     /// <summary>What the bundle models, a global assumption of every unit.</summary>
     public const string BundleModels = "The semantics bundle models C# 14 int, long and bool";
 
+    /// <summary>
+    /// The axioms every proof may rest on, a global assumption of every unit: the bundle loads only if these are its only
+    /// axioms (#26), and translation adds none.
+    /// </summary>
+    public static readonly string Axioms = "The only axioms are Lean's standard ones: " + string.Join(", ", SemanticsBundle.StandardAxioms);
+
     /// <summary>The overflow assumption when overflow checking is off.</summary>
     public const string Wraps = "Arithmetic wraps on overflow (overflow checking is off)";
 
@@ -170,7 +176,7 @@ public static class AssumptionReports
             });
         }
 
-        var global = ImmutableArray.Create(settings.CheckOverflow ? Throws : Wraps, BundleModels);
+        var global = ImmutableArray.Create(settings.CheckOverflow ? Throws : Wraps, BundleModels, Axioms);
         return new AssumptionReport(settings.Kernel ?? DefaultKernel, settings.Bundle, global, reports.MoveToImmutable());
     }
 

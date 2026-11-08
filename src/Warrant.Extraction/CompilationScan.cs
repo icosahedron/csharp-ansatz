@@ -44,6 +44,20 @@ internal sealed class ExtractionContext
         return model;
     }
 
+    private readonly Dictionary<Compilation, (List<(IMethodSymbol, SyntaxNode)>, List<IWithOperation>)> _accessorsAndWiths = new();
+
+    /// <summary>A compilation's <c>[UnsafeAccessor]</c> declarations and <c>with</c> expressions, computed once (#55).</summary>
+    public (List<(IMethodSymbol, SyntaxNode)> Accessors, List<IWithOperation> Withs) AccessorsAndWiths(
+        Compilation compilation, Func<(List<(IMethodSymbol, SyntaxNode)>, List<IWithOperation>)> find)
+    {
+        if (!_accessorsAndWiths.TryGetValue(compilation, out var found))
+        {
+            found = find();
+            _accessorsAndWiths.Add(compilation, found);
+        }
+        return found;
+    }
+
     /// <summary>The compilation that declares a symbol: the compilation itself or a referenced project's (#32).</summary>
     public Compilation CompilationOf(ISymbol symbol) =>
         IsOwn(symbol) ? Compilation : _referenced.First(c => SymbolEqualityComparer.Default.Equals(c.Assembly, symbol.ContainingAssembly));
@@ -127,8 +141,14 @@ internal sealed class CompilationScan
     /// <summary>Every object creation, in source order.</summary>
     public List<IObjectCreationOperation> Creations { get; } = [];
 
-    /// <summary>Every call of <see cref="object.MemberwiseClone"/>, which creates an instance without a constructor (#55).</summary>
-    public List<IInvocationOperation> MemberwiseClones { get; } = [];
+    /// <summary>
+    /// Every call of <see cref="object.MemberwiseClone"/> and every method group naming it, which create an instance
+    /// without a constructor (#55), with the receiver's type and the types the use is written in, innermost first.
+    /// </summary>
+    public List<(SyntaxNode Syntax, ITypeSymbol? Receiver, IReadOnlyList<INamedTypeSymbol> EnclosingTypes)> MemberwiseClones { get; } = [];
+
+    /// <summary>Every <c>with</c> expression, which copies a record without its declared constructors (#55).</summary>
+    public List<IWithOperation> Withs { get; } = [];
 
     /// <summary>
     /// Every method declared with <c>[UnsafeAccessor]</c>, with the syntax that declares it: one can call a private
@@ -187,11 +207,28 @@ internal sealed class CompilationScan
                 .ThenBy(n => n.SpanStart),
             cancellationToken);
 
-        // An [UnsafeAccessor] can call a private constructor from any class, so the accessors of the whole referenced
-        // compilation count, and those of the compilation being verified.
+        // An [UnsafeAccessor] can call a private constructor from any class, and a with expression can copy a record from
+        // anywhere, so those of the whole referenced compilation count, and those of the compilation being verified.
         scan.UnsafeAccessors.Clear();
-        var compilations = new[] { context.CompilationOf(type), context.Compilation }.Distinct();
-        foreach (var tree in compilations.SelectMany(c => c.SyntaxTrees).OrderBy(t => t.FilePath, StringComparer.Ordinal))
+        scan.Withs.Clear();
+        foreach (var compilation in new[] { context.CompilationOf(type), context.Compilation }.Distinct())
+        {
+            var (accessors, withs) = context.AccessorsAndWiths(compilation, () => AccessorsAndWiths(context, compilation, cancellationToken));
+            scan.UnsafeAccessors.AddRange(accessors);
+            scan.Withs.AddRange(withs);
+        }
+        scan.UnsafeAccessors.Sort((a, b) => CompareSyntax(a.Syntax, b.Syntax));
+        scan.Withs.Sort((a, b) => CompareSyntax(a.Syntax, b.Syntax));
+        return scan;
+    }
+
+    /// <summary>A compilation's <c>[UnsafeAccessor]</c> declarations and <c>with</c> expressions, found once per extraction.</summary>
+    private static (List<(IMethodSymbol, SyntaxNode)>, List<IWithOperation>) AccessorsAndWiths(
+        ExtractionContext context, Compilation compilation, CancellationToken cancellationToken)
+    {
+        var accessors = new List<(IMethodSymbol, SyntaxNode)>();
+        var withs = new List<IWithOperation>();
+        foreach (var tree in compilation.SyntaxTrees.OrderBy(t => t.FilePath, StringComparer.Ordinal))
         {
             var model = context.Model(tree);
             foreach (var node in tree.GetRoot(cancellationToken).DescendantNodes())
@@ -199,12 +236,27 @@ internal sealed class CompilationScan
                 cancellationToken.ThrowIfCancellationRequested();
                 if (UnsafeAccessor(model, node, cancellationToken) is { } accessor)
                 {
-                    scan.UnsafeAccessors.Add((accessor, node));
+                    accessors.Add((accessor, node));
+                }
+                else if (node is WithExpressionSyntax && model.GetOperation(node, cancellationToken) is IWithOperation with)
+                {
+                    withs.Add(with);
                 }
             }
         }
-        scan.UnsafeAccessors.Sort((a, b) => CompareSyntax(a.Syntax, b.Syntax));
-        return scan;
+        return (accessors, withs);
+    }
+
+    /// <summary>The types a node is written in, innermost first, as original definitions.</summary>
+    private static List<INamedTypeSymbol> EnclosingTypes(SemanticModel model, SyntaxNode node)
+    {
+        var types = new List<INamedTypeSymbol>();
+        var symbol = model.GetEnclosingSymbol(node.SpanStart);
+        for (var t = symbol as INamedTypeSymbol ?? symbol?.ContainingType; t is not null; t = t.ContainingType)
+        {
+            types.Add(t.OriginalDefinition);
+        }
+        return types;
     }
 
     /// <summary>The method a declaration declares, if it is an <c>[UnsafeAccessor]</c>, which must be <c>extern</c>.</summary>
@@ -257,7 +309,13 @@ internal sealed class CompilationScan
                             scan.Creations.Add(creation);
                             break;
                         case IInvocationOperation { TargetMethod: { Name: nameof(MemberwiseClone), ContainingType.SpecialType: SpecialType.System_Object } } clone:
-                            scan.MemberwiseClones.Add(clone);
+                            scan.MemberwiseClones.Add((clone.Syntax, clone.Instance?.Type, EnclosingTypes(model, clone.Syntax)));
+                            break;
+                        case IMethodReferenceOperation { Method: { Name: nameof(MemberwiseClone), ContainingType.SpecialType: SpecialType.System_Object } } group:
+                            scan.MemberwiseClones.Add((group.Syntax, group.Instance?.Type, EnclosingTypes(model, group.Syntax)));
+                            break;
+                        case IWithOperation with:
+                            scan.Withs.Add(with);
                             break;
                     }
                 }
@@ -266,6 +324,7 @@ internal sealed class CompilationScan
         scan.UnnamedClosedValues.Sort((a, b) => CompareSyntax(a.Operation.Syntax, b.Operation.Syntax));
         scan.Creations.Sort((a, b) => CompareSyntax(a.Syntax, b.Syntax));
         scan.MemberwiseClones.Sort((a, b) => CompareSyntax(a.Syntax, b.Syntax));
+        scan.Withs.Sort((a, b) => CompareSyntax(a.Syntax, b.Syntax));
         scan.UnsafeAccessors.Sort((a, b) => CompareSyntax(a.Syntax, b.Syntax));
         return scan;
     }

@@ -297,7 +297,7 @@ public sealed class ReferencedClosedClassTests
         var lib = Library("namespace Lib; " + library);
         var result = Extract(Consumer(lib, UsesColor + consumerExtra), lib);
 
-        Assert.Equal("WRT0009 | instance created without a constructor call", Inline.Only(result, "T:Lib.Color"));
+        Assert.Equal("WRT0009 | instance created or changed without a constructor call", Inline.Only(result, "T:Lib.Color"));
         Assert.Equal("WRT0002 | depends on a rejected unit", Inline.Only(result, "M:C.F(Lib.Color)"));
     }
 

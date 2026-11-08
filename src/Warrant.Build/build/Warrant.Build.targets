@@ -64,23 +64,32 @@
     and referencing projects fail closed until this project is built again. When CoreCompile was up to date the record from
     the compile that produced the assembly stands.
   -->
+  <!-- Every assembly beside an analyzer: the generator loader resolves an analyzer's dependencies from its directory (#51). -->
+  <Target Name="_WarrantAnalyzerSiblings" Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <ItemGroup>
+      <_WarrantAnalyzerDirectory Include="@(Analyzer->'%(RootDir)%(Directory)'->Distinct())" />
+      <_WarrantAnalyzerSibling Include="%(_WarrantAnalyzerDirectory.Identity)*.dll" />
+    </ItemGroup>
+  </Target>
+
   <Target Name="_WarrantHashSourcesBeforeCompile"
           BeforeTargets="CoreCompile"
+          DependsOnTargets="_WarrantAnalyzerSiblings"
           Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true'">
-    <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles);@(ReferencePathWithRefAssemblies);@(Analyzer)" Algorithm="SHA256" HashEncoding="hex">
+    <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles);@(ReferencePathWithRefAssemblies);@(Analyzer);@(_WarrantAnalyzerSibling)" Algorithm="SHA256" HashEncoding="hex">
       <Output TaskParameter="Items" ItemName="_WarrantSourceHashBefore" />
     </GetFileHash>
   </Target>
 
   <Target Name="WarrantRecordSource"
           AfterTargets="CoreCompile"
-          DependsOnTargets="_WarrantWriteCscArgs"
+          DependsOnTargets="_WarrantWriteCscArgs;_WarrantAnalyzerSiblings"
           Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true' and '@(CscCommandLineArgs)' != ''">
     <PropertyGroup>
       <_WarrantCscArgsFileFull>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(_WarrantCscArgsFile)'))</_WarrantCscArgsFileFull>
       <_WarrantSourceRecordFile>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'warrant.source'))</_WarrantSourceRecordFile>
     </PropertyGroup>
-    <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles);@(ReferencePathWithRefAssemblies);@(Analyzer)" Algorithm="SHA256" HashEncoding="hex">
+    <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles);@(ReferencePathWithRefAssemblies);@(Analyzer);@(_WarrantAnalyzerSibling)" Algorithm="SHA256" HashEncoding="hex">
       <Output TaskParameter="Items" ItemName="_WarrantSourceHashAfter" />
     </GetFileHash>
     <GetFileHash Files="$(_WarrantCscArgsFileFull)" Algorithm="SHA256" HashEncoding="hex">

@@ -98,7 +98,8 @@ project=C:\src\Shapes
 file=<SHA-256>|C:\src\Shapes\Color.cs
 ```
 
-There is one `file=` line for the argument file and for every source, additional file, analyzer configuration, referenced assembly, and analyzer or generator assembly the project's `Csc` read (#51): a reference decides what the source means, through a base class or a constant, and a generator adds source.
+There is one `file=` line for the argument file and for every source, additional file, analyzer configuration, referenced assembly, and analyzer or generator assembly the project's `Csc` read, and for every assembly beside an analyzer, which the generator loader resolves the analyzer's dependencies from (#51): a reference decides what the source means, through a base class or a constant, and a generator adds source.
+`Load` checks the hashes before it rebuilds the compilation and again after the generators have run, so an edit during the rebuild is caught too, and it declines an argument file that names a response file (`@file`), which the record does not cover.
 They are hashed just before `CoreCompile` and again after it, and the record is written only when `Csc` ran and both hashes agree, so it describes the text `Csc` read.
 A file saved during the compile deletes the record instead, and a build that finds `CoreCompile` up to date leaves the record of the compile that produced the assembly in place.
 `--reference-source` names a record, and the build passes one for each referenced project that wrote one.

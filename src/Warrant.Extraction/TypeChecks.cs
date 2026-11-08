@@ -259,12 +259,13 @@ internal static class TypeChecks
             }
         }
 
-        //    Nor is an instance created without one where Warrant can see it (#55): by MemberwiseClone, which only the class
-        //    and its base classes can call on an instance of it, or by an [UnsafeAccessor] that calls a constructor or
-        //    MemberwiseClone. Reflection, serializers and code Warrant does not see are the closed assumption's.
+        //    Nor is an instance created, or a static instance replaced, without one where Warrant can see it (#55):
+        //    MemberwiseClone written in the class or a base class (the only places that can call it on an instance), a
+        //    with expression, or an [UnsafeAccessor] that calls a constructor or MemberwiseClone or reaches a field.
+        //    Reflection, serializers and code Warrant does not see are the closed assumption's.
         if (CreatedWithoutConstructor(type, scan.Value) is { } bypass)
         {
-            throw Reject(type, "instance created without a constructor call", DiagnosticIds.NotClosedShape, bypass.GetLocation());
+            throw Reject(type, "instance created or changed without a constructor call", DiagnosticIds.NotClosedShape, bypass.GetLocation());
         }
 
         // 5. At least one instance.
@@ -282,11 +283,18 @@ internal static class TypeChecks
     }
 
     /// <summary>
-    /// The first place that can create an instance of a closed class without calling its constructor (#55), or null: a
-    /// <see cref="object.MemberwiseClone"/> whose receiver is the class or one of its base classes, or an
-    /// <c>[UnsafeAccessor]</c> that calls a constructor of the class, of a base class or of an unnamed type (an
-    /// <c>object</c> return, which <c>[UnsafeAccessorType]</c> can point anywhere), or that calls
-    /// <see cref="object.MemberwiseClone"/>.
+    /// The first place that can create an instance of a closed class without calling its constructor, or change one of its
+    /// static instances, or null (#55):
+    /// <list type="bullet">
+    /// <item><see cref="object.MemberwiseClone"/>, called or named as a method group, written in the class or a base class
+    /// (whatever the receiver: <c>base.</c>, a type parameter, a nested type's outer instance), or on a receiver of the
+    /// class or a base class;</item>
+    /// <item>a <c>with</c> expression on the class or a base class;</item>
+    /// <item>an <c>[UnsafeAccessor]</c> that calls a constructor of anything but a named type outside the lineage (an
+    /// <c>object</c> or <c>dynamic</c> return can be pointed anywhere by <c>[UnsafeAccessorType]</c>), that calls
+    /// <see cref="object.MemberwiseClone"/>, or that reaches a field through a lineage, <c>object</c> or <c>dynamic</c>
+    /// type, since a field accessor can make two static instances one object; or one whose kind is unknown.</item>
+    /// </list>
     /// </summary>
     private static SyntaxNode? CreatedWithoutConstructor(INamedTypeSymbol type, CompilationScan scan)
     {
@@ -298,19 +306,24 @@ internal static class TypeChecks
             lineage.Add(Symbols.Key(t.OriginalDefinition));
         }
         bool InLineage(ITypeSymbol? t) => t is INamedTypeSymbol n && lineage.Contains(Symbols.Key(n.OriginalDefinition));
+        bool Unnamed(ITypeSymbol t) => t.SpecialType == SpecialType.System_Object || t.TypeKind is TypeKind.Dynamic or TypeKind.TypeParameter;
 
         var candidates = new List<SyntaxNode>();
-        candidates.AddRange(scan.MemberwiseClones.Where(c => InLineage(c.Instance?.Type)).Select(c => c.Syntax));
+        candidates.AddRange(scan.MemberwiseClones
+            .Where(c => InLineage(c.Receiver) || c.EnclosingTypes.Any(InLineage))
+            .Select(c => c.Syntax));
+        candidates.AddRange(scan.Withs.Where(w => InLineage(w.Type)).Select(w => w.Syntax));
         foreach (var (method, syntax) in scan.UnsafeAccessors)
         {
             var attribute = method.GetAttributes().First(a => Symbols.IsUnsafeAccessor(a.AttributeClass));
             var kind = attribute.ConstructorArguments.Length == 1 && attribute.ConstructorArguments[0].Value is int k ? k : -1;
             var name = attribute.NamedArguments.FirstOrDefault(a => a.Key == "Name").Value.Value as string ?? method.Name;
-            const int Constructor = 0, Method = 1, StaticMethod = 2;
-            bool constructs = kind == Constructor
-                && (InLineage(method.ReturnType) || method.ReturnType.SpecialType == SpecialType.System_Object);
+            const int Constructor = 0, Method = 1, StaticMethod = 2, Field = 3, StaticField = 4;
+            var signature = method.Parameters.Select(p => p.Type).Append(method.ReturnType).ToList();
+            bool constructs = kind == Constructor && (InLineage(method.ReturnType) || Unnamed(method.ReturnType) || method.ReturnType is not INamedTypeSymbol);
             bool clones = kind is Method or StaticMethod && name == nameof(MemberwiseClone);
-            if (constructs || clones || kind == -1)
+            bool reachesField = kind is Field or StaticField && signature.Any(t => InLineage(t) || Unnamed(t));
+            if (constructs || clones || reachesField || kind is < Constructor or > StaticField)
             {
                 candidates.Add(syntax);
             }

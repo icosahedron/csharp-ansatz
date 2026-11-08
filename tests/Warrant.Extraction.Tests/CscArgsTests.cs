@@ -409,6 +409,33 @@ public sealed class CscArgsTests : IDisposable
     }
 
     [Fact]
+    public void AnAssemblyBesideAGeneratorChangedAfterTheRecordIsDeclined()
+    {
+        // The generator loader resolves a generator's dependencies from its directory, so they are hashed too (#51).
+        var (_, problems) = CompileWithGenerator(SourceGeneratorAssemblies.Intercepting, "public static class C { }");
+        Assert.Empty(problems);
+        var directory = Path.GetDirectoryName(Directory.GetFiles(Path.Combine(project, "analyzers"), "TestGenerator.dll", SearchOption.AllDirectories).Single())!;
+        var helper = Path.Combine(directory, "Helper.dll");
+        File.WriteAllBytes(helper, [1, 2, 3]);
+        var source = ReferencedSource.Open(Record(args: Path.Combine(project, "generated.csc.args")));
+        File.AppendAllBytes(helper, [4]);
+
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("Helper.dll changed since Sample was compiled; build Sample again", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnArgumentFileWithAResponseFileIsDeclined()
+    {
+        Compile("public static class C { }");
+        File.WriteAllText(Path.Combine(project, "more.rsp"), "/define:EXTRA");
+        File.AppendAllText(ArgsFile, Environment.NewLine + "@more.rsp" + Environment.NewLine);
+
+        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(Record()).Load(project));
+        Assert.Contains("a response file (@file) is not covered", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnEditedArgumentFileIsDeclined()
     {
         Compile("public static class C { }");

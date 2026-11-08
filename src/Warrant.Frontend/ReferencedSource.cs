@@ -110,22 +110,23 @@ public sealed class ReferencedSource
         }
 
         // Every file the compiler read: the arguments themselves, the sources, the generators' additional files, the
-        // analyzer configuration, the referenced assemblies and the analyzer and generator assemblies (#51). Each must be
-        // in the record with the hash it had when the assembly was compiled. A reference decides what the source means (a
-        // base class, a constant) and a generator adds source, so either changing changes what is checked.
-        var args = CompilationFactory.ParseCscArgs(Checked(_argsFile), _project);
-        var read = new List<string>();
-        read.AddRange(args.SourceFiles.Select(f => f.Path));
-        read.AddRange(args.AdditionalFiles.Select(f => f.Path));
-        read.AddRange(args.AnalyzerConfigPaths);
-        read.AddRange(args.MetadataReferences.Select(r => r.Reference));
-        read.AddRange(args.AnalyzerReferences.Select(r => r.FilePath));
-        foreach (var file in read.Select(f => Path.GetFullPath(Path.Combine(_project, f))).Distinct(PathComparer))
+        // analyzer configuration, the referenced assemblies, and the analyzer and generator assemblies with every assembly
+        // beside them, which the generator loader resolves their dependencies from (#51). Each must be in the record with
+        // the hash it had when the assembly was compiled. A reference decides what the source means (a base class, a
+        // constant) and a generator adds source, so either changing changes what is checked.
+        var files = ReadFiles(CompilationFactory.ParseCscArgs(Checked(_argsFile), _project));
+        foreach (var file in files)
         {
             Checked(file);
         }
 
+        // The compilation reads the files again, so they are checked again once it is built and its generators have run:
+        // an edit in between is caught, unless it was undone before the second check, as for any edit (the summary).
         var compilation = CompilationFactory.FromCscArgs(_argsFile, _project, pathBase, out var generatorProblems);
+        foreach (var file in ReadFiles(CompilationFactory.ParseCscArgs(Checked(_argsFile), _project)).Concat(files).Distinct(PathComparer))
+        {
+            Checked(file);
+        }
         if (!string.Equals(compilation.AssemblyName, AssemblyName, StringComparison.Ordinal))
         {
             throw new InvalidDataException($"{_recordPath}: the arguments compile '{compilation.AssemblyName}', not '{AssemblyName}'");
@@ -135,6 +136,30 @@ public sealed class ReferencedSource
             throw new InvalidDataException($"{AssemblyName}'s recorded source does not compile: {failure.Message}");
         }
         return _compilation = compilation;
+    }
+
+    /// <summary>The full paths of the files an argument list makes the compiler and the generator loader read.</summary>
+    /// <exception cref="InvalidDataException">The arguments name a response file, which the record does not cover.</exception>
+    private List<string> ReadFiles(CSharpCommandLineArguments args)
+    {
+        if (File.ReadAllLines(_argsFile, Encoding.UTF8).Any(l => l.StartsWith('@')))
+        {
+            throw new InvalidDataException($"{_argsFile}: a response file (@file) is not covered by {AssemblyName}'s source record");
+        }
+        var read = new List<string>();
+        read.AddRange(args.SourceFiles.Select(f => f.Path));
+        read.AddRange(args.AdditionalFiles.Select(f => f.Path));
+        read.AddRange(args.AnalyzerConfigPaths);
+        read.AddRange(args.MetadataReferences.Select(r => r.Reference));
+        foreach (var analyzer in args.AnalyzerReferences.Select(r => Path.GetFullPath(Path.Combine(_project, r.FilePath))))
+        {
+            read.Add(analyzer);
+            if (Path.GetDirectoryName(analyzer) is { } directory && Directory.Exists(directory))
+            {
+                read.AddRange(Directory.EnumerateFiles(directory, "*.dll"));
+            }
+        }
+        return read.Select(f => Path.GetFullPath(Path.Combine(_project, f))).Distinct(PathComparer).Order(PathComparer).ToList();
     }
 
     private string Checked(string file)

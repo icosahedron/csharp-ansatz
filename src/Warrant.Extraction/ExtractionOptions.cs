@@ -29,7 +29,9 @@ public sealed class ExtractionOptions
     /// (<c>Warrant.Frontend.ReferencedSource</c>), or null when there is none; null for no referenced sources (#32). It is
     /// asked only for the assembly of a <c>[Closed]</c> class that a unit uses, which is then checked from that source as
     /// a class of the compilation itself is, and a unit that uses it assumes the referenced assembly was built from that
-    /// source. A compilation whose assembly identity is not the reference's is not used. It may throw
+    /// source. A compilation whose assembly identity is not the reference's is not used, and none is used with
+    /// <see cref="KeepConditionalCheck"/>, since a multi-targeted project ships with every framework's build of the
+    /// referenced project, not only the one recorded. It may throw
     /// <see cref="System.IO.InvalidDataException"/>, which extraction lets through.
     /// </summary>
     public Func<string, CSharpCompilation?>? ReferencedSource { get; init; }

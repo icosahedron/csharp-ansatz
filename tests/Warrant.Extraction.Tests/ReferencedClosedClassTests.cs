@@ -147,17 +147,122 @@ public sealed class ReferencedClosedClassTests
 
         var d = Assert.Single(result.DiagnosticsFor("M:C.F(Lib.Color)"));
         Assert.Equal(("WRT0002", "type defined outside the compilation"), (d.Id, d.Construct));
-        Assert.Contains("no recorded source for Lib; its project must import Warrant.Build", d.Message, StringComparison.Ordinal);
+        Assert.Contains("no recorded source for Lib that it can use; its project must import Warrant.Build", d.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ASourceWhoseAssemblyIdentityDiffersIsNotUsed()
+    public void ASourceOfTheSameNameButAnotherVersionIsNotUsed()
     {
+        // The lookup is by name; only the identity check stops a source of another version standing for the reference.
         var library = Library(Colors);
-        var other = Library(Colors, name: "Other");
-        var result = Extract(Consumer(library, UsesColor), other);
+        var otherVersion = Library("[assembly: System.Reflection.AssemblyVersion(\"2.0.0.0\")]\n" + Colors);
+        Assert.Equal(library.AssemblyName, otherVersion.AssemblyName);
+        var result = Extract(Consumer(library, UsesColor), otherVersion);
 
         Assert.Equal("WRT0002 | type defined outside the compilation", Inline.Only(result, "M:C.F(Lib.Color)"));
+    }
+
+    [Fact]
+    public void AMultiTargetedProjectDoesNotUseAReferencedSource()
+    {
+        // The source is one target framework's build of the library; the other frameworks' builds of it may differ.
+        var library = Library(Colors);
+        var result = Extractor.Extract(Consumer(library, UsesColor), new ExtractionOptions
+        {
+            BuildDefines = true,
+            KeepConditionalCheck = true,
+            ReferencedSource = name => name == "Lib" ? library : null,
+        });
+
+        Assert.Equal("WRT0002 | type defined outside the compilation", Inline.Only(result, "M:C.F(Lib.Color)"));
+    }
+
+    [Fact]
+    public void AReferencedClassWhoseFullNameTheCompilationAlsoDeclaresIsNotUsed()
+    {
+        // Type units are keyed by documentation-comment ID, which does not name the assembly.
+        var library = Library(Colors);
+        using var image = new MemoryStream();
+        Assert.True(library.Emit(image).Success);
+        var consumer = CompilationFactory.Create(
+            [new SourceFile("Test.cs", """
+                extern alias L;
+                using Warrant;
+                namespace Lib { public sealed class Color { } }
+                public static class C
+                {
+                    [Verified]
+                    public static int F(L::Lib.Color c) => c == L::Lib.Color.Red ? 1 : 0;
+                }
+                """)],
+            checkOverflow: false).AddReferences(MetadataReference.CreateFromImage(image.ToArray()).WithAliases(["L"]));
+        Assert.Empty(consumer.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+
+        var result = Extract(consumer, library);
+
+        Assert.Equal("WRT0002 | type defined outside the compilation", Inline.Only(result, "M:C.F(Lib.Color)"));
+    }
+
+    /// <summary>Two closed classes sharing a non-generic base whose <c>==</c> compares values.</summary>
+    private const string Shared = """
+        public abstract class Named(string name)
+        {
+            public string Name { get; } = name;
+            public override bool Equals(object? o) => o is Named n && n.Name == Name;
+            public override int GetHashCode() => Name.GetHashCode();
+            public static bool operator ==(Named? left, Named? right) => left?.Name == right?.Name;
+            public static bool operator !=(Named? left, Named? right) => !(left == right);
+        }
+
+        [Closed]
+        public sealed class A : Named
+        {
+            private A(string name) : base(name) { }
+            public static A X { get; } = new("X");
+        }
+
+        [Closed]
+        public sealed class B : Named
+        {
+            private B(string name) : base(name) { }
+            public static B X { get; } = new("X");
+        }
+        """;
+
+    [Theory]
+    [InlineData("a == B.X")]
+    [InlineData("a == (Named)A.X")]
+    [InlineData("(Named)a != A.X")]
+    public void AnInheritedEqualityIsModelledOnlyBetweenInstancesOfOneClosedClass(string comparison)
+    {
+        // A.X == B.X is true at runtime (both named "X"), so identity would be wrong; each class's own closed-equality
+        // assumption says nothing about comparing it with another class.
+        var result = Inline.Extract(Shared + $$"""
+
+            public static class C
+            {
+                [Verified]
+                public static bool F(A a) => {{comparison}};
+            }
+            """);
+
+        Assert.Equal("WRT0002 | user-defined operator", Inline.Only(result, "M:C.F(A)"));
+    }
+
+    [Fact]
+    public void AnInheritedEqualityBetweenInstancesOfOneClosedClassIsModelled()
+    {
+        var result = Inline.Extract(Shared + """
+
+            public static class C
+            {
+                [Verified]
+                public static bool F(A a) => a == A.X;
+            }
+            """);
+
+        Assert.True(result.Diagnostics.Count == 0, Diagnostics(result));
+        Assert.Contains(new VirAssumption(VirAssumptionKind.ClosedEquality, "T:A"), Inline.Unit(result, "M:C.F(A)").Assumptions);
     }
 
     [Theory]

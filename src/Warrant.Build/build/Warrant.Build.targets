@@ -53,37 +53,70 @@
   </Target>
 
   <!--
-    #32: the source record (Warrant.Frontend.ReferencedSource): the assembly name, the argument file, the project directory,
-    and the SHA-256 of every file the compiler read. A project that references this one checks the hashes again before it
-    reads the source, so a file edited after this compile is caught rather than checked in place of the compiled one.
-    Written for every target framework, since each inner build is a different reference.
+    #32: the source record (Warrant.Frontend.ReferencedSource), $(IntermediateOutputPath)warrant.source: the assembly name,
+    the argument file, the project directory, and the SHA-256 of every file the compiler read. A project that references this
+    one checks the hashes again before it reads the source, so a file edited after this compile is caught rather than checked
+    in place of the compiled one. Written for every target framework, since each inner build is a different reference.
+
+    The inputs are hashed just before CoreCompile and again after it, and the record is written only when Csc ran and both
+    hashes agree, so it describes the text Csc read. When they differ (a file saved during the compile) the record is deleted
+    and referencing projects fail closed until this project is built again. When CoreCompile was up to date the record from
+    the compile that produced the assembly stands.
   -->
+  <Target Name="_WarrantHashSourcesBeforeCompile"
+          BeforeTargets="CoreCompile"
+          Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_WarrantSourceHashBefore" />
+    </GetFileHash>
+  </Target>
+
   <Target Name="WarrantRecordSource"
           AfterTargets="CoreCompile"
           DependsOnTargets="_WarrantWriteCscArgs"
-          Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+          Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true' and '@(CscCommandLineArgs)' != ''">
     <PropertyGroup>
       <_WarrantCscArgsFileFull>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(_WarrantCscArgsFile)'))</_WarrantCscArgsFileFull>
       <_WarrantSourceRecordFile>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'warrant.source'))</_WarrantSourceRecordFile>
     </PropertyGroup>
-    <ItemGroup Condition="Exists('$(_WarrantCscArgsFileFull)')">
-      <_WarrantSourceFile Include="$(_WarrantCscArgsFileFull);@(Compile);@(AdditionalFiles);@(EditorConfigFiles)" />
-    </ItemGroup>
-    <GetFileHash Condition="'@(_WarrantSourceFile)' != ''" Files="@(_WarrantSourceFile)" Algorithm="SHA256" HashEncoding="hex">
-      <Output TaskParameter="Items" ItemName="_WarrantSourceHash" />
+    <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_WarrantSourceHashAfter" />
     </GetFileHash>
+    <GetFileHash Files="$(_WarrantCscArgsFileFull)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_WarrantArgsHash" />
+    </GetFileHash>
+    <!--
+      Compare the files hashed both times. The SDK adds some inputs after the first hash (its analysis-level global
+      config); those come from the SDK, not from edits, and are hashed into the record from the second hash only. Every
+      file in the second hash with no identical first-hash line is either late or changed, so the counts must agree.
+    -->
+    <ItemGroup>
+      <_WarrantBeforeLine Include="@(_WarrantSourceHashBefore->'%(FullPath)|%(FileHash)')" />
+      <_WarrantAfterLine Include="@(_WarrantSourceHashAfter->'%(FullPath)|%(FileHash)')" />
+      <_WarrantBeforePath Include="@(_WarrantSourceHashBefore->'%(FullPath)')" />
+      <_WarrantLatePath Include="@(_WarrantSourceHashAfter->'%(FullPath)')" Exclude="@(_WarrantBeforePath)" />
+      <_WarrantDifferentLine Include="@(_WarrantAfterLine)" Exclude="@(_WarrantBeforeLine)" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_WarrantSourceUnchanged>false</_WarrantSourceUnchanged>
+      <_WarrantSourceUnchanged Condition="'@(_WarrantDifferentLine->Count())' == '@(_WarrantLatePath->Count())'">true</_WarrantSourceUnchanged>
+    </PropertyGroup>
     <ItemGroup>
       <_WarrantSourceLine Include="warrant-source 1" />
       <_WarrantSourceLine Include="assembly=$(TargetName)" />
       <_WarrantSourceLine Include="args=$(_WarrantCscArgsFileFull)" />
       <_WarrantSourceLine Include="project=$(MSBuildProjectDirectory)" />
-      <_WarrantSourceLine Include="@(_WarrantSourceHash->'file=%(FileHash)|%(FullPath)')" />
+      <_WarrantSourceLine Include="@(_WarrantArgsHash->'file=%(FileHash)|%(FullPath)')" />
+      <_WarrantSourceLine Include="@(_WarrantSourceHashAfter->'file=%(FileHash)|%(FullPath)')" />
     </ItemGroup>
-    <WriteLinesToFile Condition="'@(_WarrantSourceHash)' != ''"
+    <WriteLinesToFile Condition="'$(_WarrantSourceUnchanged)' == 'true'"
                       File="$(_WarrantSourceRecordFile)"
                       Lines="@(_WarrantSourceLine)"
                       Overwrite="true"
                       WriteOnlyWhenDifferent="true" />
+    <Delete Condition="'$(_WarrantSourceUnchanged)' != 'true'" Files="$(_WarrantSourceRecordFile)" />
+    <Message Condition="'$(_WarrantSourceUnchanged)' != 'true'" Importance="high"
+             Text="Warrant: a source file changed while $(TargetName) compiled, so it has no source record; build it again before verifying a project that uses its [Closed] classes." />
     <ItemGroup>
       <FileWrites Include="$(_WarrantSourceRecordFile)" />
     </ItemGroup>

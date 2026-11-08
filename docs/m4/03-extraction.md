@@ -158,7 +158,7 @@ A record's generated `Equals` compares a closed-class field through the last of 
 An `==` or `!=` declared on a base class (a smart enum's `SetBase<T>.operator ==`) is modelled the same way when both operands are instances of one closed class, under the same assumption (#32).
 
 A closed class defined in a referenced project is checked from the source that project's build recorded, with the same steps, and the units that use it also assume that the referenced assembly was built from that source (#32; [M5a chapter 7](../m5a/07-verify-and-build.md#types-from-referenced-projects)).
-Without a record it is WRT0002 `type defined outside the compilation`, as is any other type from another assembly.
+Without a record, in a multi-targeted project, or when another assembly or the compilation also declares its full name, it is WRT0002 `type defined outside the compilation`, as is any other type from another assembly.
 
 ## Assumptions
 

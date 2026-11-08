@@ -409,6 +409,18 @@ public sealed class CscArgsTests : IDisposable
     }
 
     [Fact]
+    public void AWarningMadeAnErrorDoesNotStopExtraction()
+    {
+        var (compilation, _) = CompileWithArgs(
+            "public class C { public string S { get; set; } [Verified] public static int F(int x) => x; }", "/warnaserror+:Nullable");
+
+        var result = Extractor.Extract(compilation, new ExtractionOptions { BuildDefines = true });
+
+        Assert.False(result.HasCompileErrors);
+        Assert.NotNull(result.Find("M:C.F(System.Int32)"));
+    }
+
+    [Fact]
     public void AFileThatIsNotARecordIsDeclined()
     {
         var notARecord = Path.Combine(project, "warrant.source");

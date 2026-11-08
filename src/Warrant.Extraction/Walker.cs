@@ -95,7 +95,7 @@ internal sealed partial class Walker
                         "type defined outside the compilation",
                         at,
                         closedClass
-                            ? $"{Symbols.Display(type)}, and Warrant has no recorded source for {named.ContainingAssembly.Name}; its project must import Warrant.Build"
+                            ? $"{Symbols.Display(type)}, and Warrant has no recorded source for {named.ContainingAssembly.Name} that it can use; its project must import Warrant.Build, and a multi-targeted project cannot use it"
                             : Symbols.Display(type));
             }
             if (named.IsGenericType)

@@ -303,7 +303,9 @@ there if it has nothing to verify. Its build then records its source, and the
 project you verify checks the class from that source exactly as it checks its
 own. The assumption report adds that the referenced assembly is the one built
 from the source Warrant checked. If the library changed since it was last
-built, the verify fails with WRT0012 and asks you to build it again.
+built, the verify fails with WRT0012 and asks you to build it again. A
+multi-targeted project can't use a closed class from another project yet,
+because each framework ships with its own build of that project.
 
 ## Deal with overflow
 

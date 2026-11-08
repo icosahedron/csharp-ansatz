@@ -187,8 +187,9 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
             Samples.Diagnostics(log, dir));
         Assert.Single(Regex.Matches(log, "Warrant: 2 verified units, 0 theorems proved, 1 not proved\\."));
         Assert.Contains("1 Error(s)", log, StringComparison.Ordinal);
-        Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.csc.args")));
-        Assert.False(File.Exists(Path.Combine(dir, "obj", "Debug", "net10.0", "warrant.csc.args")));
+        // Every framework records its source (#32), since a referencing project may use any of them; only the first verifies.
+        Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.source")));
+        Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", "net10.0", "warrant.source")));
     }
 
     [HostFact(BuildHost.Dotnet)]

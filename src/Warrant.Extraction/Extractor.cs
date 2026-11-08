@@ -59,10 +59,14 @@ public static class Extractor
             throw new ArgumentNullException(nameof(compilation));
         }
         options ??= ExtractionOptions.Default;
+        // A referenced project's source is one target framework's build of it, while a multi-targeted project
+        // (KeepConditionalCheck) ships for every framework, whose builds of the referenced project can differ. So its
+        // closed classes are used only when the run is for one configuration (#32).
+        var referencedSource = options.KeepConditionalCheck ? null : options.ReferencedSource;
         // With a build's defines (from Csc, KTD21), the code is translated under that build's configuration only.
         if (options.BuildDefines && !options.KeepConditionalCheck)
         {
-            return ExtractOne(compilation, options.ReferencedSource, cancellationToken);
+            return ExtractOne(compilation, referencedSource, cancellationToken);
         }
         // Otherwise code under #if could be code no build runs, or could add an overload or a type that changes what
         // other code binds to. So every combination of the symbols the #if conditions test is extracted, and a unit is
@@ -72,7 +76,7 @@ public static class Extractor
         var symbols = ConditionalSymbols(compilation, cancellationToken);
         if (symbols.Count == 0)
         {
-            return ExtractOne(compilation, options.ReferencedSource, cancellationToken);
+            return ExtractOne(compilation, referencedSource, cancellationToken);
         }
         if (symbols.Count > MaxConditionalSymbols)
         {
@@ -106,7 +110,7 @@ public static class Extractor
         {
             var result = ExtractOne(
                 ReferenceEquals(defined, given) ? compilation : WithSymbols(compilation, symbols, defined, cancellationToken),
-                options.ReferencedSource,
+                referencedSource,
                 cancellationToken);
             if (result.HasCompileErrors)
             {

@@ -8,9 +8,11 @@ namespace Warrant.Frontend;
 /// A referenced project's compilation, rebuilt from the source its own build recorded (#32; docs/m5a/07, "Types from
 /// referenced projects"). A <c>[Closed]</c> class's shape and construction checks need its source, which the project being
 /// verified sees only as metadata. Every project that imports <c>Warrant.Build</c> writes a record after its compile:
-/// its assembly name, its compiler arguments and the SHA-256 of every file those arguments read. <see cref="Load"/> hashes
-/// those files again and declines if any differs, so the source checked is the source the referenced assembly was
-/// compiled from, unless a file changed and changed back in between.
+/// <c>obj/&lt;configuration&gt;/&lt;framework&gt;/warrant.source</c>, holding its assembly name, its compiler arguments and the
+/// SHA-256 of every file those arguments read, hashed before and after the compile and written only when both agree.
+/// <see cref="Load"/> hashes those files again and declines if any differs, so the source checked is the source the
+/// referenced assembly was compiled from, unless a file changed and changed back in between. The assemblies the
+/// arguments reference and the generators they load are not hashed.
 /// </summary>
 /// <remarks>
 /// The record's format, one entry per line, as <c>Warrant.Build.targets</c> writes it:
@@ -26,9 +28,6 @@ namespace Warrant.Frontend;
 /// </remarks>
 public sealed class ReferencedSource
 {
-    /// <summary>The record's file name, in the referenced project's intermediate directory.</summary>
-    public const string FileName = "warrant.source";
-
     private const string Header = "warrant-source 1";
 
     private readonly string _recordPath;

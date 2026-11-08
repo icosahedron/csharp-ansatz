@@ -123,7 +123,8 @@ internal static class Samples
             VirList.Of(
                 new VirAssumption(VirAssumptionKind.NonNull, "this"),
                 new VirAssumption(VirAssumptionKind.Closed, OutcomeKey),
-                new VirAssumption(VirAssumptionKind.ClosedEquality, OutcomeKey)),
+                new VirAssumption(VirAssumptionKind.ClosedEquality, OutcomeKey),
+                new VirAssumption(VirAssumptionKind.ReferencedSource, OutcomeKey)),
             Facts,
             VirList.Of(StatusKey, PaymentKey, "M:Payouts.Payment.IsLarge"),
             self: PaymentKey);

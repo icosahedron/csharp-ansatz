@@ -51,6 +51,14 @@ internal sealed class ExtractionContext
     /// </summary>
     public INamedTypeSymbol? FromReferencedSource(INamedTypeSymbol type)
     {
+        // Type units are keyed by documentation-comment ID, which does not name the assembly, so the type's full name must
+        // name only it among the compilation and its references (no extern-aliased twin, no type of the compilation's own).
+        var metadataName = MetadataName(type);
+        if (!SymbolEqualityComparer.Default.Equals(Compilation.GetTypeByMetadataName(metadataName), type))
+        {
+            return null;
+        }
+
         // A referenced compilation stands for the reference with its assembly identity, and only for that one.
         if (type.ContainingAssembly is not { } assembly || type.IsGenericType || _referencedSource?.Invoke(assembly.Name) is not { } source
             || !source.Assembly.Identity.Equals(assembly.Identity))
@@ -61,7 +69,7 @@ internal sealed class ExtractionContext
         {
             _referenced.Add(source);
         }
-        var declared = source.GetTypeByMetadataName(MetadataName(type));
+        var declared = source.GetTypeByMetadataName(metadataName);
         return declared is not null && string.Equals(Symbols.Key(declared), Symbols.Key(type), StringComparison.Ordinal) ? declared : null;
     }
 

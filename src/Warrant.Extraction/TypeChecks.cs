@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 using Warrant.Vir;
@@ -133,6 +135,13 @@ internal static class TypeChecks
         foreach (var property in properties)
         {
             var at = property.DeclaringSyntaxReferences[0].GetSyntax();
+
+            // The model's $eq compares a closed-class field by instance, but the generated Equals calls
+            // EqualityComparer<T>.Default.Equals, which reaches the class's own equality (#25).
+            if (property.Type is INamedTypeSymbol fieldClass && Symbols.Shape(fieldClass) == TypeShape.ClosedClass && HasOwnEquality(fieldClass))
+            {
+                throw Reject(type, "record field of a closed class with its own equality", at: at.GetLocation());
+            }
             var fieldType = walker.MapType(property.Type, property.NullableAnnotation == NullableAnnotation.Annotated, at);
             fields.Add(new VirField(property.Name, fieldType));
         }
@@ -199,6 +208,7 @@ internal static class TypeChecks
         // 3. Every static member of the class's own type is an initialised get-only auto-property or static readonly field,
         //    whose initialiser creates an instance; anything else could return a different object on each read.
         var instances = new List<ISymbol>();
+        var creations = new List<IObjectCreationOperation>();
         var allowed = new HashSet<(SyntaxTree, int, int)>();
         foreach (var member in type.GetMembers().Where(m => m.IsStatic && !m.IsImplicitlyDeclared))
         {
@@ -221,7 +231,8 @@ internal static class TypeChecks
                     "static instance that is not an initialised get-only auto-property or readonly field",
                     DiagnosticIds.NotClosedShape);
             }
-            allowed.Add((creation.SyntaxTree, creation.SpanStart, creation.Span.Length));
+            allowed.Add((creation.Syntax.SyntaxTree, creation.Syntax.SpanStart, creation.Syntax.Span.Length));
+            creations.Add(creation);
             instances.Add(member);
         }
 
@@ -229,6 +240,13 @@ internal static class TypeChecks
         if (type.StaticConstructors.Any(c => !c.IsImplicitlyDeclared))
         {
             throw Reject(type, "static constructor", DiagnosticIds.NotClosedShape);
+        }
+
+        //    Creating the instances cannot throw. If it could, the type initialiser would fail and every use of the class
+        //    would throw TypeInitializationException, while the model still has the instances (#24).
+        if (ConstructionCouldThrow(context, type, creations, allowed) is { } throwing)
+        {
+            throw Reject(type, "constructor or initialiser that could throw", DiagnosticIds.NotClosedShape, throwing.GetLocation());
         }
 
         // 4. The constructors are called nowhere else.
@@ -266,7 +284,7 @@ internal static class TypeChecks
                 ExpressionBody: null,
                 AccessorList: { } accessors,
                 Initializer: { } init,
-            } && accessors.Accessors.All(a => a.Body is null && a.ExpressionBody is null):
+            } && HasOnlyAutoAccessors(accessors):
                 return init.Value;
             case IFieldSymbol { IsReadOnly: true } when syntax is VariableDeclaratorSyntax { Initializer: { } init }:
                 return init.Value;
@@ -275,8 +293,8 @@ internal static class TypeChecks
         }
     }
 
-    /// <summary>The syntax of the object creation an initialiser consists of, if it creates an instance of the type.</summary>
-    private static SyntaxNode? Creation(ExtractionContext context, ExpressionSyntax initializer, INamedTypeSymbol type)
+    /// <summary>The object creation an initialiser consists of, if it creates an instance of the type.</summary>
+    private static IObjectCreationOperation? Creation(ExtractionContext context, ExpressionSyntax initializer, INamedTypeSymbol type)
     {
         var op = context.Model(initializer.SyntaxTree).GetOperation(initializer);
         while (op is IConversionOperation { IsImplicit: true } c)
@@ -285,8 +303,181 @@ internal static class TypeChecks
         }
         return op is IObjectCreationOperation { Constructor: { } ctor } creation
             && SymbolEqualityComparer.Default.Equals(ctor.ContainingType, type)
-            ? creation.Syntax
+            ? creation
             : null;
+    }
+
+    /// <summary>
+    /// The first piece of code that runs while a closed class's instances are created and that could throw, or null if
+    /// there is none (#24). Only this is allowed, on the class and on each of its base classes:
+    /// <list type="bullet">
+    /// <item>the static instances' creations, with constant arguments and no object initialiser;</item>
+    /// <item>every other field, property or event initialiser, static or not, a constant;</item>
+    /// <item>
+    /// every instance constructor, a <c>this(...)</c> or <c>base(...)</c> call whose arguments are constants or parameters,
+    /// and a body of assignments of constants or parameters to the class's own fields and auto-properties;
+    /// </item>
+    /// <item>a base class's primary constructor passing only constants or parameters to its own base;</item>
+    /// <item>no static constructor on a base class (the class's own is rejected by step 3), and every base class declared in source.</item>
+    /// </list>
+    /// An assignment to a virtual, abstract or overriding property is not allowed: it can dispatch to an override's setter.
+    /// Implicit identity, numeric, reference and nullable conversions that are not user-defined cannot throw, so they are
+    /// allowed; a user-defined conversion runs code, so it is not.
+    /// </summary>
+    private static SyntaxNode? ConstructionCouldThrow(
+        ExtractionContext context, INamedTypeSymbol type, List<IObjectCreationOperation> creations, HashSet<(SyntaxTree, int, int)> instanceCreations)
+    {
+        foreach (var creation in creations)
+        {
+            if (creation.Initializer is not null)
+            {
+                return creation.Syntax;
+            }
+            if (creation.Arguments.FirstOrDefault(a => !IsConstant(a.Value) || a.InConversion.IsUserDefined) is { } argument)
+            {
+                return argument.Syntax;
+            }
+        }
+
+        for (var t = type; t is not null && t.SpecialType != SpecialType.System_Object; t = t.BaseType)
+        {
+            bool constructorsUnreadable = t.DeclaringSyntaxReferences.IsEmpty;
+            if (constructorsUnreadable)
+            {
+                return type.DeclaringSyntaxReferences[0].GetSyntax();
+            }
+            if (!SymbolEqualityComparer.Default.Equals(t, type) && t.StaticConstructors.FirstOrDefault(c => !c.IsImplicitlyDeclared) is { } cctor)
+            {
+                return cctor.DeclaringSyntaxReferences[0].GetSyntax();
+            }
+            foreach (var declaration in t.DeclaringSyntaxReferences.Select(r => r.GetSyntax()).OfType<TypeDeclarationSyntax>())
+            {
+                var model = context.Model(declaration.SyntaxTree);
+
+                // A primary constructor's call to its base (the class's own primary constructor is rejected by step 2).
+                if (declaration.BaseList?.Types.OfType<PrimaryConstructorBaseTypeSyntax>().FirstOrDefault() is { } primaryBase)
+                {
+                    foreach (var argument in primaryBase.ArgumentList.Arguments)
+                    {
+                        if (model.GetOperation(argument) is not IArgumentOperation a || !IsConstantOrParameter(a.Value) || a.InConversion.IsUserDefined)
+                        {
+                            return argument;
+                        }
+                    }
+                }
+
+                foreach (var member in declaration.Members)
+                {
+                    var initializers = member switch
+                    {
+                        BaseFieldDeclarationSyntax f when !f.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)) =>
+                            f.Declaration.Variables.Select(v => v.Initializer),
+                        PropertyDeclarationSyntax p => [p.Initializer],
+                        _ => [],
+                    };
+                    foreach (var clause in initializers.OfType<EqualsValueClauseSyntax>())
+                    {
+                        // The initialiser operation's value includes the conversion to the member's type, which may be
+                        // user-defined; the expression's own operation does not.
+                        var value = clause.Value;
+                        if (!instanceCreations.Contains((value.SyntaxTree, value.SpanStart, value.Span.Length))
+                            && !(model.GetOperation(clause) is ISymbolInitializerOperation init && IsConstant(init.Value)))
+                        {
+                            return value;
+                        }
+                    }
+                    if (member is ConstructorDeclarationSyntax ctor && !ctor.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))
+                        && ConstructorCouldThrow(model, t, ctor) is { } throwing)
+                    {
+                        return throwing;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /// <summary>The first part of an instance constructor that could throw, or null (see <see cref="ConstructionCouldThrow"/>).</summary>
+    private static SyntaxNode? ConstructorCouldThrow(SemanticModel model, INamedTypeSymbol owner, ConstructorDeclarationSyntax syntax)
+    {
+        if (model.GetOperation(syntax) is not IConstructorBodyOperation body)
+        {
+            return syntax;
+        }
+        if (body.Initializer is { } initializer)
+        {
+            var call = initializer is IExpressionStatementOperation s ? s.Operation : initializer;
+            if (call is not IInvocationOperation { TargetMethod: var target } invocation
+                || !(SymbolEqualityComparer.Default.Equals(target.ContainingType, owner)
+                    || SymbolEqualityComparer.Default.Equals(target.ContainingType, owner.BaseType)))
+            {
+                return initializer.Syntax;
+            }
+            if (invocation.Arguments.FirstOrDefault(a => !IsConstantOrParameter(a.Value) || a.InConversion.IsUserDefined) is { } argument)
+            {
+                return argument.Syntax;
+            }
+        }
+        foreach (var statement in Statements(body.BlockBody).Concat(Statements(body.ExpressionBody)))
+        {
+            if (statement is not IExpressionStatementOperation { Operation: ISimpleAssignmentOperation { IsRef: false } assignment }
+                || !IsOwnStorage(owner, assignment.Target)
+                || !IsConstantOrParameter(assignment.Value))
+            {
+                return statement.Syntax;
+            }
+        }
+        return null;
+    }
+
+    private static ImmutableArray<IOperation> Statements(IBlockOperation? block) => block?.Operations ?? ImmutableArray<IOperation>.Empty;
+
+    /// <summary>
+    /// Whether an assignment target is a field, or a compiler-written auto-property that no override can replace, of
+    /// <c>this</c> declared on the owner.
+    /// </summary>
+    private static bool IsOwnStorage(INamedTypeSymbol owner, IOperation target) => target switch
+    {
+        IFieldReferenceOperation { Instance: IInstanceReferenceOperation, Field: { IsStatic: false } field } =>
+            SymbolEqualityComparer.Default.Equals(field.ContainingType, owner),
+        IPropertyReferenceOperation
+        {
+            Instance: IInstanceReferenceOperation,
+            Property: { IsStatic: false, IsVirtual: false, IsAbstract: false, IsOverride: false, Parameters.IsEmpty: true } property,
+        } =>
+            SymbolEqualityComparer.Default.Equals(property.ContainingType, owner) && IsAutoProperty(owner, property),
+        _ => false,
+    };
+
+    /// <summary>Whether a property has a compiler-generated backing field and no accessor with a body.</summary>
+    private static bool IsAutoProperty(INamedTypeSymbol owner, IPropertySymbol property) =>
+        owner.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property))
+        && property.DeclaringSyntaxReferences.Length == 1
+        && property.DeclaringSyntaxReferences[0].GetSyntax() is PropertyDeclarationSyntax { ExpressionBody: null, AccessorList: { } accessors }
+        && HasOnlyAutoAccessors(accessors);
+
+    /// <summary>Whether no accessor has a body, as in a compiler-written auto-property.</summary>
+    private static bool HasOnlyAutoAccessors(AccessorListSyntax accessors) =>
+        accessors.Accessors.All(a => a.Body is null && a.ExpressionBody is null);
+
+    private static bool IsConstant(IOperation? op) =>
+        op is { ConstantValue.HasValue: true } || WithoutSafeConversions(op) is { ConstantValue.HasValue: true };
+
+    private static bool IsConstantOrParameter(IOperation? op) =>
+        IsConstant(op) || WithoutSafeConversions(op) is IParameterReferenceOperation;
+
+    /// <summary>
+    /// The operand under implicit identity, numeric, reference and nullable conversions that are not user-defined, which
+    /// cannot throw.
+    /// </summary>
+    private static IOperation? WithoutSafeConversions(IOperation? op)
+    {
+        while (op is IConversionOperation { IsImplicit: true, Conversion: { IsUserDefined: false } conversion } c
+            && (conversion.IsIdentity || conversion.IsNumeric || conversion.IsReference || conversion.IsNullable))
+        {
+            op = c.Operand;
+        }
+        return op;
     }
 
     /// <summary>Whether the class or a base class overrides <c>Equals</c>, defines <c>==</c>, or implements <c>IEquatable&lt;T&gt;</c>.</summary>

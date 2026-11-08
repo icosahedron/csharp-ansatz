@@ -12,4 +12,9 @@
     <ProjectReference Include="..\Warrant.Meta\Warrant.Meta.csproj" />
     <InternalsVisibleTo Include="Warrant.Engine.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Lean 4.35.0's declarations that fix what the standard axioms and the kernel's name-reduced constants mean, made
+         from the committed bundle by scripts/pin-kernel-declarations.cs (#26). -->
+    <EmbeddedResource Include="PinnedDeclarations.ndjson.gz" LogicalName="Warrant.Engine.PinnedDeclarations.ndjson.gz" />
+  </ItemGroup>
 </Project>

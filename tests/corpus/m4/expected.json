@@ -157,6 +157,8 @@
       "T:Corpus.Rejected.Factory": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0009", "construct": "constructor called outside the static instances" }] },
       "T:Corpus.Rejected.Empty": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0009", "construct": "no static instances" }] },
       "T:Corpus.Rejected.Reassigned": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0009", "construct": "static constructor" }] },
+      "T:Corpus.Rejected.Throws": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0009", "construct": "constructor or initialiser that could throw" }] },
+      "M:Corpus.Rejected.ClosedClasses.UsesThrows(Corpus.Rejected.Throws)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "T:Corpus.Rejected.Tier": { "outcome": "translated" },
       "M:Corpus.Rejected.ClosedClasses.ReadsAField(Corpus.Rejected.Tier)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "closed class instance member" }] },
 
@@ -165,6 +167,8 @@
 
       "T:Corpus.Rejected.Unsealed": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "unsealed record" }] },
       "T:Corpus.Rejected.OwnEquality": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "record with its own equality" }] },
+      "T:Corpus.Rejected.Graded": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "record field of a closed class with its own equality" }] },
+      "M:Corpus.Rejected.Types.UsesGraded(Corpus.Rejected.Graded,Corpus.Rejected.Graded)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "T:Corpus.Rejected.ExtraState": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "record with other instance state" }] },
       "T:Corpus.Rejected.OwnCopy": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "record with its own copy constructor" }] },
       "M:Corpus.Rejected.Types.UsesOwnCopy(Corpus.Rejected.OwnCopy)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },

@@ -24,6 +24,26 @@ public sealed record OwnCopy(int X)
     private OwnCopy(OwnCopy original) => X = original.X + 100;
 }
 
+// The generated Equals compares Grade through Grade.Equals, under which A and B are equal; the model would compare
+// them as two instances.
+[Closed]
+public sealed class Grade
+{
+    public static Grade A { get; } = new(1);
+
+    public static Grade B { get; } = new(1);
+
+    private Grade(int rank) => Rank = rank;
+
+    public int Rank { get; }
+
+    public override bool Equals(object? obj) => obj is Grade g && g.Rank == Rank;
+
+    public override int GetHashCode() => Rank;
+}
+
+public sealed record Graded(Grade Grade);
+
 public readonly record struct Pair(int A, int B);
 
 public sealed record Left(Right Other);
@@ -50,6 +70,9 @@ public static class Types
 
     [Verified]
     public static bool UsesOwnEquality(OwnEquality a, OwnEquality b) => a == b;
+
+    [Verified]
+    public static bool UsesGraded(Graded a, Graded b) => a == b;
 
     [Verified]
     public static int UsesExtraState(ExtraState e) => e.X;

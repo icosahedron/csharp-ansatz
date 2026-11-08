@@ -196,7 +196,7 @@ diagnostic message uses.
 | `and/not pattern over a closed type` | WRT0002 | A switch over a closed type is its recursor, so each arm must name members: constants, `or` and `_`. |
 | `closed class instance member` | WRT0002 | The model keeps only which instance a value is. |
 | `switch section mixing default with case labels` | WRT0002 | `case 1: default:`. Write the `case` as its own section. |
-| `unsealed record`, `record struct`, `record with its own equality`, `record with other instance state`, `record with a base record`, `record that is not positional` | WRT0002 | `==` on a record must be field-by-field over its positional properties. |
+| `unsealed record`, `record struct`, `record with its own equality`, `record with other instance state`, `record with a base record`, `record that is not positional`, `record field of a closed class with its own equality` | WRT0002 | `==` on a record must be field-by-field over its positional properties, each compared as the model compares it. |
 | `record with its own copy constructor` | WRT0002 | `with` runs the copy constructor, and the model copies the fields, as only the compiler's copy constructor does. |
 | `preprocessor conditional` | WRT0002 | A member that translates differently depending on which `#if` symbols the build defines, for example one with an `#if DEBUG` in its body, or one that calls an overload declared under `#if`. Extraction compares every combination of the symbols the conditions test (at most six), skipping combinations that do not compile. Code an `#if` does not affect is translated as usual. M5a takes the real defines from `Csc`. |
 | `cyclic record types` | WRT0002 | Without `null`, no value of such a type can be built. |
@@ -209,7 +209,7 @@ diagnostic message uses.
 | `Spec.Implies outside a theorem statement`, `Prove.That outside a theorem statement` | WRT0004 | |
 | A call to a member that is neither `[Verified]` nor modelled | WRT0005 | For example `System.Math.Abs(int)`. |
 | `integer cast to a closed enum`, `unboxing to a closed enum`, `arithmetic on a closed enum`, `closed enum without a member valued 0` | WRT0008 (warning) | Anywhere in the compilation, verified or not. |
-| A `[Closed]` class without the closed shape | WRT0009 | Names the failed step: `not sealed`, `constructor that is not private`, `static instance that is not an initialised get-only auto-property or readonly field`, `static constructor`, `constructor called outside the static instances`, or `no static instances`. |
+| A `[Closed]` class without the closed shape | WRT0009 | Names the failed step: `not sealed`, `constructor that is not private`, `static instance that is not an initialised get-only auto-property or readonly field`, `static constructor`, `constructor or initialiser that could throw`, `constructor called outside the static instances`, or `no static instances`. |
 
 ### The M5a additions
 
@@ -344,6 +344,7 @@ Corpus.Recursion.Sum(int)                             TRANSLATED   (kernel: Warr
     - Each recursive call returns without exhausting the stack
     - Arithmetic wraps on overflow (overflow checking is off)
     - The semantics bundle models C# 14 int, long and bool
+    - The only axioms are Lean's standard ones: propext, Classical.choice, Quot.sound
 ```
 
 The target layout, with contracts (M6):

@@ -20,11 +20,12 @@ public sealed class ReportTests(EngineFixture engine) : IClassFixture<EngineFixt
         Assert.Equal(VirAssumptionKind.NonNull, p.Kind);
         Assert.Equal("p is not null", p.Text);
         Assert.False(p.Inherited);
-        Assert.Equal([AssumptionReports.Wraps, AssumptionReports.BundleModels], report.Global.ToArray());
+        Assert.Equal([AssumptionReports.Wraps, AssumptionReports.BundleModels, AssumptionReports.Axioms], report.Global.ToArray());
 
         var markdown = MarkdownReport.Render(report);
         Assert.Contains("Assumed (parameters):\n    - p is not null\n", markdown, StringComparison.Ordinal);
         Assert.Contains("    - The semantics bundle models C# 14 int, long and bool\n", markdown, StringComparison.Ordinal);
+        Assert.Contains("    - The only axioms are Lean's standard ones: propext, Classical.choice, Quot.sound\n", markdown, StringComparison.Ordinal);
         Assert.Contains("    - Arithmetic wraps on overflow (overflow checking is off)\n", markdown, StringComparison.Ordinal);
     }
 

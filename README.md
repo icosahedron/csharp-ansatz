@@ -51,6 +51,13 @@ static Proof ValidImpliesPositive(Payment p) =>
 for the rest of the surface. A developer guide to writing proofs, which marks what
 runs and what is planned, is in [docs/proving](docs/proving/README.md).)*
 
+## Why "Warrant"
+
+> A warrant for an argument is the underlying justification or logical bridge that
+> connects your evidence (data) to your conclusion (claim). It explains why the data
+> proves the point you are making, transforming a collection of facts into a cohesive
+> and persuasive argument.
+
 ## Building
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).

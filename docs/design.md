@@ -780,6 +780,7 @@ The trusted base is drawn by assembly.
 | `Warrant.Semantics` (VIR → CIC) | The faithfulness gap. It builds every declaration whole, including each theorem's name and *statement*, because a wrong statement proves the wrong claim. | Small and syntax-directed; differential testing against compiled .NET, and CLR-agreement tests for every operation it emits. |
 | `Warrant.Extraction` (C# → VIR) | Same gap, one layer earlier. | Same differential tests, end to end. |
 | `Warrant.Frontend`'s compilation options | They decide what the C# means (language version, references, overflow checking). | The build task takes them from `Csc`'s own inputs (§8.3). |
+| A referenced project's source record (#32) | A `[Closed]` class from that project is checked from the source the record names. | The record's file hashes are checked again before use, and every unit using the class lists the `referenced-source` assumption ([docs/m5a/07](m5a/07-verify-and-build.md#types-from-referenced-projects)). |
 | `Warrant.Vir` (model, writer and reader) | Translation sees only what VIR carries. | Round-trip, golden-file and cross-framework encoding tests. |
 | Semantic-model *definitions* in `lean/Warrant`, and the Init definitions it reuses | The claim that "this models C#". | Reviewed; tested against .NET behaviour (for example exhaustively for 8- and 16-bit types, sampled for 32/64-bit). |
 | Declared contracts and global assumptions | By design. | Listed in every assumption report. |

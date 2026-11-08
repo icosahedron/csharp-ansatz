@@ -106,23 +106,25 @@ public static class CompilationFactory
     /// <param name="generatorProblems">Why a generator failed to load or threw; empty when every generator ran.</param>
     /// <returns>The compilation, which may have errors: see <see cref="Failure"/>.</returns>
     /// <exception cref="InvalidDataException">The arguments are not valid compiler arguments.</exception>
-    public static CSharpCompilation FromCscArgs(string argsFile, string projectDirectory, out IReadOnlyList<string> generatorProblems)
+    public static CSharpCompilation FromCscArgs(string argsFile, string projectDirectory, out IReadOnlyList<string> generatorProblems) =>
+        FromCscArgs(argsFile, projectDirectory, projectDirectory, out generatorProblems);
+
+    /// <summary>
+    /// As <see cref="FromCscArgs(string, string, out IReadOnlyList{string})"/>, with each tree's path relative to
+    /// <paramref name="pathBase"/> instead of the project's directory. A referenced project's sources are named relative to
+    /// the project being verified, so diagnostics about them point at the right files (#32).
+    /// </summary>
+    internal static CSharpCompilation FromCscArgs(string argsFile, string projectDirectory, string pathBase, out IReadOnlyList<string> generatorProblems)
     {
         var fullProject = Path.GetFullPath(projectDirectory);
-        var lines = File.ReadAllLines(argsFile, Encoding.UTF8).Where(l => l.Length > 0).ToArray();
-        var args = CSharpCommandLineParser.Default.Parse(lines, fullProject, sdkDirectory: null);
-        var errors = args.Errors.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
-        if (errors.Count > 0)
-        {
-            throw new InvalidDataException(
-                $"{argsFile}: " + string.Join("; ", errors.Select(d => d.GetMessage(System.Globalization.CultureInfo.InvariantCulture))));
-        }
+        var fullBase = Path.GetFullPath(pathBase);
+        var args = ParseCscArgs(argsFile, fullProject);
 
         var trees = args.SourceFiles.Select(file =>
         {
             using var stream = File.OpenRead(file.Path);
             var text = SourceText.From(stream, args.Encoding, args.ChecksumAlgorithm);
-            var path = Path.GetRelativePath(fullProject, file.Path).Replace('\\', '/');
+            var path = Path.GetRelativePath(fullBase, file.Path).Replace('\\', '/');
             return CSharpSyntaxTree.ParseText(text, args.ParseOptions, path);
         }).ToList();
         var references = args.MetadataReferences.Select(r =>
@@ -139,7 +141,7 @@ public static class CompilationFactory
             set = AnalyzerConfigSet.Create(configs);
             var treeOptions = trees.ToDictionary(
                 t => t.FilePath,
-                t => set.GetOptionsForSourcePath(Path.GetFullPath(Path.Combine(fullProject, t.FilePath))),
+                t => set.GetOptionsForSourcePath(Path.GetFullPath(Path.Combine(fullBase, t.FilePath))),
                 StringComparer.Ordinal);
             options = options.WithSyntaxTreeOptionsProvider(new AnalyzerConfigTreeOptions(set.GlobalConfigOptions, treeOptions));
         }
@@ -147,8 +149,23 @@ public static class CompilationFactory
 
         var analyzers = args.AnalyzerReferences.Select(r => Path.GetFullPath(Path.Combine(fullProject, r.FilePath))).ToList();
         var additionalFiles = args.AdditionalFiles.Select(f => Path.GetFullPath(Path.Combine(fullProject, f.Path))).ToList();
-        (compilation, generatorProblems) = SourceGenerators.Run(compilation, analyzers, additionalFiles, set, args.ParseOptions, fullProject);
+        (compilation, generatorProblems) = SourceGenerators.Run(compilation, analyzers, additionalFiles, set, args.ParseOptions, fullBase);
         return compilation;
+    }
+
+    /// <summary>Parses an argument file written one argument per line.</summary>
+    /// <exception cref="InvalidDataException">The arguments are not valid compiler arguments.</exception>
+    internal static CSharpCommandLineArguments ParseCscArgs(string argsFile, string fullProject)
+    {
+        var lines = File.ReadAllLines(argsFile, Encoding.UTF8).Where(l => l.Length > 0).ToArray();
+        var args = CSharpCommandLineParser.Default.Parse(lines, fullProject, sdkDirectory: null);
+        var errors = args.Errors.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        if (errors.Count > 0)
+        {
+            throw new InvalidDataException(
+                $"{argsFile}: " + string.Join("; ", errors.Select(d => d.GetMessage(System.Globalization.CultureInfo.InvariantCulture))));
+        }
+        return args;
     }
 
     /// <summary>
@@ -178,7 +195,9 @@ public static class CompilationFactory
         CSharpCompilation compilation, IReadOnlyList<string>? generatorProblems = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(compilation);
-        var errors = compilation.GetDiagnostics(cancellationToken).Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
+        // A warning made an error (/warnaserror) is not counted: Csc may have suppressed it with a DiagnosticSuppressor,
+        // which Warrant does not run (#32, a nullable suppressor), and no warning changes what the code means.
+        var errors = compilation.GetDiagnostics(cancellationToken).Where(d => d.Severity == DiagnosticSeverity.Error && !d.IsWarningAsError).ToList();
         var problems = generatorProblems ?? [];
         // A generator that did not run fails the compilation even when the code compiles without its output: Csc may
         // have run it (a newer compiler, a different loader), and output such as an interceptor or a closer overload

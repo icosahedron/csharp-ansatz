@@ -26,7 +26,7 @@ using Warrant.Vir;
 internal static class VerifyCommand
 {
     public const string Usage = """
-        warrant verify --csc-args <file> [--project-dir <dir>] [options]
+        warrant verify --csc-args <file> [--project-dir <dir>] [--reference-source <record>]... [options]
                warrant verify <directory> [options]
           options: --format text|msbuild  --out <file.ndjson>  --report <dir>  --keep-conditional-check
                    --kernel-fuel <n>  --tactic-fuel <n>  --timeout <seconds>  --bundle <path>  --cache-dir <dir>  --recheck
@@ -48,6 +48,7 @@ internal static class VerifyCommand
         string? directory = null, cscArgs = null, projectDir = null, outPath = null, reportDir = null, bundlePath = null, cacheDir = null, explain = null;
         bool msbuild = false, keepConditionalCheck = false, recheck = false, timings = false;
         bool? useServer = null;
+        var referenceSources = new List<string>();
         long? kernelFuel = null, tacticFuel = null, timeoutSeconds = null;
         for (int i = 0; i < args.Length; i++)
         {
@@ -59,6 +60,10 @@ internal static class VerifyCommand
                     break;
                 case "--project-dir" when hasValue:
                     projectDir = args[++i];
+                    break;
+                case "--reference-source" when hasValue:
+                    // A referenced project's source record (#32), written by Warrant.Build after that project's compile.
+                    referenceSources.Add(args[++i]);
                     break;
                 case "--format" when hasValue && args[i + 1] is "text" or "msbuild":
                     msbuild = args[++i] == "msbuild";
@@ -111,7 +116,7 @@ internal static class VerifyCommand
                     return 2;
             }
         }
-        if ((directory is null) == (cscArgs is null) || (projectDir is not null && cscArgs is null)
+        if ((directory is null) == (cscArgs is null) || ((projectDir is not null || referenceSources.Count > 0) && cscArgs is null)
             || (explain is not null && (outPath is not null || reportDir is not null || cacheDir is not null)))
         {
             error.WriteLine($"usage: {Usage}");
@@ -157,6 +162,7 @@ internal static class VerifyCommand
                 UseServer = useServer,
                 Timings = timings,
                 Server = server ?? new ServerSettings(),
+                ReferenceSources = referenceSources,
                 CancellationToken = cancellationToken,
             };
             return cscArgs is not null
@@ -203,6 +209,9 @@ internal static class VerifyCommand
         /// <summary>How the server is found and started.</summary>
         public required ServerSettings Server { get; init; }
 
+        /// <summary>The referenced projects' source records (<c>--reference-source</c>, #32).</summary>
+        public IReadOnlyList<string> ReferenceSources { get; init; } = [];
+
         /// <summary>Interrupts the run.</summary>
         public CancellationToken CancellationToken { get; init; }
 
@@ -245,7 +254,31 @@ internal static class VerifyCommand
             report.Summary(0, 0, 0);
             return 1;
         }
-        var extraction = Extractor.Extract(compilation, new ExtractionOptions { BuildDefines = true, KeepConditionalCheck = keepConditionalCheck });
+        // The referenced projects' records by assembly name (#32). A source is checked and compiled only when a closed class
+        // from it is used; one that does not check out then fails the run, since verifying without it would report its
+        // closed classes as unsupported for a reason that is only a stale build.
+        var records = new Dictionary<string, ReferencedSource>(StringComparer.Ordinal);
+        ExtractionResult extraction;
+        try
+        {
+            foreach (var path in settings.ReferenceSources.Where(File.Exists))
+            {
+                var record = ReferencedSource.Open(path);
+                records.TryAdd(record.AssemblyName, record);
+            }
+            extraction = Extractor.Extract(compilation, new ExtractionOptions
+            {
+                BuildDefines = true,
+                KeepConditionalCheck = keepConditionalCheck,
+                ReferencedSource = name => records.TryGetValue(name, out var record) ? record.Load(root) : null,
+            });
+        }
+        catch (InvalidDataException ex)
+        {
+            report.Diagnostic("error", CompilationFailure.Code, null, $"Warrant cannot read a referenced project's source: {ex.Message}", []);
+            report.Summary(0, 0, 0);
+            return 1;
+        }
         return Verify(compilation, extraction, settings, settings.Engine(KernelLimits.Interactive), report);
     }
 

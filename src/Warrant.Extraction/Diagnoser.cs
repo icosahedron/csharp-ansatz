@@ -72,7 +72,7 @@ public sealed class Diagnoser
             return [];
         }
         var key = Symbols.Key(member);
-        var diagnostics = new Extractor.Run(_compilation, cancellationToken, _scan).ExecuteFor(member, _attributed.Value);
+        var diagnostics = new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true).ExecuteFor(member, _attributed.Value);
         var types = new HashSet<string>(diagnostics.Select(d => d.MemberKey).Where(k => k is not null && !_attributed.Value.ContainsKey(k))!, StringComparer.Ordinal);
         return diagnostics.Where(d => d.MemberKey == key || (d.MemberKey is not null && types.Contains(d.MemberKey))).ToList();
     }
@@ -92,7 +92,7 @@ public sealed class Diagnoser
             return [];
         }
         var key = Symbols.Key(type);
-        return new Extractor.Run(_compilation, cancellationToken, _scan).ExecuteFor(type, _attributed.Value)
+        return new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true).ExecuteFor(type, _attributed.Value)
             .Where(d => d.MemberKey == key)
             .ToList();
     }

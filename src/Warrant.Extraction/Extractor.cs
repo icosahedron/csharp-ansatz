@@ -59,10 +59,14 @@ public static class Extractor
             throw new ArgumentNullException(nameof(compilation));
         }
         options ??= ExtractionOptions.Default;
+        // A referenced project's source is one target framework's build of it, while a multi-targeted project
+        // (KeepConditionalCheck) ships for every framework, whose builds of the referenced project can differ. So its
+        // closed classes are used only when the run is for one configuration (#32).
+        var referencedSource = options.KeepConditionalCheck ? null : options.ReferencedSource;
         // With a build's defines (from Csc, KTD21), the code is translated under that build's configuration only.
         if (options.BuildDefines && !options.KeepConditionalCheck)
         {
-            return ExtractOne(compilation, cancellationToken);
+            return ExtractOne(compilation, referencedSource, cancellationToken);
         }
         // Otherwise code under #if could be code no build runs, or could add an overload or a type that changes what
         // other code binds to. So every combination of the symbols the #if conditions test is extracted, and a unit is
@@ -72,7 +76,7 @@ public static class Extractor
         var symbols = ConditionalSymbols(compilation, cancellationToken);
         if (symbols.Count == 0)
         {
-            return ExtractOne(compilation, cancellationToken);
+            return ExtractOne(compilation, referencedSource, cancellationToken);
         }
         if (symbols.Count > MaxConditionalSymbols)
         {
@@ -105,7 +109,9 @@ public static class Extractor
         foreach (var defined in combinations)
         {
             var result = ExtractOne(
-                ReferenceEquals(defined, given) ? compilation : WithSymbols(compilation, symbols, defined, cancellationToken), cancellationToken);
+                ReferenceEquals(defined, given) ? compilation : WithSymbols(compilation, symbols, defined, cancellationToken),
+                referencedSource,
+                cancellationToken);
             if (result.HasCompileErrors)
             {
                 firstFailure ??= result;
@@ -118,10 +124,13 @@ public static class Extractor
         return results.Count == 0 ? firstFailure! : Agreeing(results, symbols);
     }
 
-    private static ExtractionResult ExtractOne(CSharpCompilation compilation, CancellationToken cancellationToken)
+    private static ExtractionResult ExtractOne(
+        CSharpCompilation compilation, Func<string, CSharpCompilation?>? referencedSource, CancellationToken cancellationToken)
     {
+        // As in CompilationFactory.Failure, a warning made an error is not one: Csc may have suppressed it, and it does not
+        // change what the code means.
         var errors = compilation.GetDiagnostics(cancellationToken)
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .Where(d => d.Severity == DiagnosticSeverity.Error && !d.IsWarningAsError)
             .Select(d => new ExtractionDiagnostic(
                 d.Id, ExtractionSeverity.Error, null, null, Symbols.Span(d.Location), d.GetMessage(CultureInfo.InvariantCulture)))
             .ToList();
@@ -129,7 +138,7 @@ public static class Extractor
         {
             return new ExtractionResult([], Sort(errors), hasCompileErrors: true);
         }
-        return new Run(compilation, cancellationToken).Execute();
+        return new Run(compilation, cancellationToken, referencedSource: referencedSource).Execute();
     }
 
     /// <summary>The symbols any <c>#if</c> or <c>#elif</c> condition in the compilation tests, sorted ordinally.</summary>
@@ -323,11 +332,21 @@ public static class Extractor
         /// <param name="compilation">The compilation.</param>
         /// <param name="cancellationToken">Cancels the run.</param>
         /// <param name="scan">The compilation's scan, shared by runs on the same compilation; null to make one when needed.</param>
-        public Run(CSharpCompilation compilation, CancellationToken cancellationToken, Lazy<CompilationScan>? scan = null)
+        /// <param name="referencedSource">A referenced project's compilation by assembly name, for its closed classes (#32).</param>
+        /// <param name="deferReferenced">
+        /// Whether a closed class from another assembly is accepted unchecked, with no type unit: the analyzer's setting,
+        /// since only the build has the referenced projects' source and checks such classes.
+        /// </param>
+        public Run(
+            CSharpCompilation compilation,
+            CancellationToken cancellationToken,
+            Lazy<CompilationScan>? scan = null,
+            Func<string, CSharpCompilation?>? referencedSource = null,
+            bool deferReferenced = false)
         {
             _compilation = compilation;
             _cancellationToken = cancellationToken;
-            _context = new ExtractionContext(compilation, Facts(compilation));
+            _context = new ExtractionContext(compilation, Facts(compilation), referencedSource, deferReferenced);
             _scan = scan ?? new Lazy<CompilationScan>(() => CompilationScan.Run(_context, _cancellationToken), LazyThreadSafetyMode.None);
         }
 
@@ -508,7 +527,11 @@ public static class Extractor
 
         private void AddType(INamedTypeSymbol type)
         {
-            var build = TypeChecks.Build(_context, _scan, type);
+            // A referenced project's closed class is checked against its own declarations, in its own compilation (#32).
+            var scan = _context.IsOwn(type)
+                ? _scan
+                : new Lazy<CompilationScan>(() => CompilationScan.OfDeclarations(_context, type, _cancellationToken), LazyThreadSafetyMode.None);
+            var build = TypeChecks.Build(_context, scan, type);
             var candidate = new Candidate(Symbols.Key(type), type, VirUnitKind.Type)
             {
                 Type = build,
@@ -919,6 +942,10 @@ public static class Extractor
             foreach (var key in closed.Where(k => _candidates[k].Type!.OwnEquality))
             {
                 result.Add(new VirAssumption(VirAssumptionKind.ClosedEquality, key));
+            }
+            foreach (var key in closed.Where(k => !_context.IsOwn(_candidates[k].Symbol)))
+            {
+                result.Add(new VirAssumption(VirAssumptionKind.ReferencedSource, key));
             }
             return new VirList<VirAssumption>(result);
         }

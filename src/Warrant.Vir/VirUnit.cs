@@ -149,6 +149,12 @@ public enum VirAssumptionKind
 
     /// <summary><c>closed-equality</c>: the closed class's own equality agrees with identity on its instances.</summary>
     ClosedEquality,
+
+    /// <summary>
+    /// <c>referenced-source</c>: the closed class comes from a referenced assembly, whose shape and construction were
+    /// checked from the source its project's build recorded; that assembly is assumed to be built from that source (#32).
+    /// </summary>
+    ReferencedSource,
 }
 
 /// <summary>The <c>facts</c> of a unit.</summary>

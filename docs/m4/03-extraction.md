@@ -155,6 +155,10 @@ If the class or one of its base classes overrides `Equals` or defines `==`, the 
 That is true for the closed-set pattern only if the override agrees with identity on the static instances, so extraction records it as an assumption, and the differential tests check it (KTD11).
 They check `==`, `Equals(object)` and `EqualityComparer<T>.Default.Equals` separately.
 A record's generated `Equals` compares a closed-class field through the last of those, and the assumption would not reach the units that compare the record, so a record field of a closed class with its own equality is rejected instead (see "Records").
+An `==` or `!=` declared on a base class (a smart enum's `SetBase<T>.operator ==`) is modelled the same way when both operands are instances of one closed class, under the same assumption (#32).
+
+A closed class defined in a referenced project is checked from the source that project's build recorded, with the same steps, and the units that use it also assume that the referenced assembly was built from that source (#32; [M5a chapter 7](../m5a/07-verify-and-build.md#types-from-referenced-projects)).
+Without a record, in a multi-targeted project, or when another assembly or the compilation also declares its full name, it is WRT0002 `type defined outside the compilation`, as is any other type from another assembly.
 
 ## Assumptions
 
@@ -165,6 +169,7 @@ Each unit collects the assumptions its translation relies on, for the assumption
   A record parameter that the method reads throws `NullReferenceException` at the first member access; a closed-class value is only ever compared, so `null` simply behaves as one more value the model does not have.
   A parameter annotated nullable (`Payment?`) is rejected until M6 brings `Option`.
 - **Closed values.** For each `[Closed]` type the unit uses: only its named members exist, and for a class with its own equality, that equality agrees with identity.
+  For a class from a referenced project, also that the referenced assembly is the one built from the source Warrant checked (`referenced-source`).
 - **Global.** The semantics bundle, the overflow setting the unit was translated under, and that the only axioms are Lean's standard three (chapter 1).
   They are the same for every unit in a run, and the report lists them under "Assumed (global)" (chapter 7).
 

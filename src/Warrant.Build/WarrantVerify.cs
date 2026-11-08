@@ -33,6 +33,12 @@ public sealed class WarrantVerify : ToolTask
     [Required]
     public string ProjectDirectory { get; set; } = "";
 
+    /// <summary>
+    /// The source records of the referenced projects that import <c>Warrant.Build</c> (<c>--reference-source</c>, #32), so
+    /// the closed classes they define can be checked from their source.
+    /// </summary>
+    public ITaskItem[] ReferenceSources { get; set; } = [];
+
     /// <summary>The framework-dependent CLI, <c>warrant.dll</c>.</summary>
     [Required]
     public string CliPath { get; set; } = "";
@@ -124,6 +130,10 @@ public sealed class WarrantVerify : ToolTask
         builder.AppendSwitch("verify");
         builder.AppendSwitchIfNotNull("--csc-args ", CscArgsFile);
         builder.AppendSwitchIfNotNull("--project-dir ", ProjectDirectory);
+        foreach (var record in ReferenceSources)
+        {
+            builder.AppendSwitchIfNotNull("--reference-source ", record.ItemSpec);
+        }
         builder.AppendSwitch("--format msbuild");
         AppendIfSet(builder, "--kernel-fuel ", KernelFuel);
         AppendIfSet(builder, "--tactic-fuel ", TacticFuel);

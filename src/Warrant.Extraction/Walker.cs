@@ -79,9 +79,24 @@ internal sealed partial class Walker
         }
         if (Symbols.Shape(type) != TypeShape.Other && type is INamedTypeSymbol named)
         {
-            if (!SymbolEqualityComparer.Default.Equals(named.ContainingAssembly, _context.Compilation.Assembly))
+            if (!_context.IsOwn(named))
             {
-                throw Reject("type defined outside the compilation", at, Symbols.Display(type));
+                // A closed class from a referenced project is checked from the source its build recorded (#32). The
+                // analyzer has no such source and leaves the check to the build.
+                bool closedClass = Symbols.Shape(named) == TypeShape.ClosedClass;
+                if (closedClass && _context.DeferReferenced && !named.IsGenericType)
+                {
+                    var referenced = Symbols.Key(named);
+                    Deps.Add(referenced);
+                    return VirType.Ref(referenced);
+                }
+                named = (closedClass ? _context.FromReferencedSource(named) : null)
+                    ?? throw Reject(
+                        "type defined outside the compilation",
+                        at,
+                        closedClass
+                            ? $"{Symbols.Display(type)}, and Warrant has no recorded source for {named.ContainingAssembly.Name} that it can use; its project must import Warrant.Build, and a multi-targeted project cannot use it"
+                            : Symbols.Display(type));
             }
             if (named.IsGenericType)
             {
@@ -632,7 +647,40 @@ internal sealed partial class Walker
             // Modelled by identity; the type unit records that its own equality agrees (KTD11).
             return Track(new CompareExpr(op, CompareKind.Closed, Expr(b.LeftOperand), Expr(b.RightOperand)), syntax);
         }
+        if (equality && InheritedClosedOperands(b, type) is var (left, right))
+        {
+            // A base class's operator on two instances of one closed class (#32): modelled by identity like the class's
+            // own, with the same assumption, since HasOwnEquality counts base classes.
+            return Track(new CompareExpr(op, CompareKind.Closed, Expr(left), Expr(right)), syntax);
+        }
         throw Reject("user-defined operator", syntax, Symbols.Display(method));
+    }
+
+    /// <summary>
+    /// The operands of a user-defined equality declared on a base class of a closed class, when both are instances of that
+    /// closed class implicitly converted to the operator's parameter type; null otherwise.
+    /// </summary>
+    private static (IOperation Left, IOperation Right)? InheritedClosedOperands(IBinaryOperation b, INamedTypeSymbol declaring)
+    {
+        if (ClosedOperand(b.LeftOperand) is not { } left || ClosedOperand(b.RightOperand) is not { } right
+            || !SymbolEqualityComparer.Default.Equals(left.Type, right.Type))
+        {
+            return null;
+        }
+        for (var t = ((INamedTypeSymbol)left.Type!).BaseType; t is not null; t = t.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(t, declaring))
+            {
+                return (left, right);
+            }
+        }
+        return null;
+
+        static IOperation? ClosedOperand(IOperation op) =>
+            op is IConversionOperation { IsImplicit: true, Conversion: { IsReference: true, IsUserDefined: false }, Operand: { Type: { } inner } operand }
+                && Symbols.Shape(inner) == TypeShape.ClosedClass
+                ? operand
+                : null;
     }
 
     private VirExpr Unary(IUnaryOperation u)

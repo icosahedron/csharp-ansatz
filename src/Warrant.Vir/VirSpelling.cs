@@ -86,6 +86,7 @@ internal static class VirSpelling
         VirAssumptionKind.NonNull => "non-null",
         VirAssumptionKind.Closed => "closed",
         VirAssumptionKind.ClosedEquality => "closed-equality",
+        VirAssumptionKind.ReferencedSource => "referenced-source",
         _ => throw Bad(kind),
     };
 

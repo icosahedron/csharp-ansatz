@@ -168,7 +168,8 @@ public static class JsonReport
     {
         VirAssumptionKind.NonNull => "non-null",
         VirAssumptionKind.Closed => "closed",
-        _ => "closed-equality",
+        VirAssumptionKind.ClosedEquality => "closed-equality",
+        _ => "referenced-source",
     };
 
     private static VirAssumptionKind ParseAssumption(string s) => s switch
@@ -176,6 +177,7 @@ public static class JsonReport
         "non-null" => VirAssumptionKind.NonNull,
         "closed" => VirAssumptionKind.Closed,
         "closed-equality" => VirAssumptionKind.ClosedEquality,
+        "referenced-source" => VirAssumptionKind.ReferencedSource,
         _ => throw new ArgumentException($"unknown assumption kind '{s}'"),
     };
 }

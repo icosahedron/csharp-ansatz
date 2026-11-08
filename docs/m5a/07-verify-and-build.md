@@ -98,7 +98,7 @@ project=C:\src\Shapes
 file=<SHA-256>|C:\src\Shapes\Color.cs
 ```
 
-There is one `file=` line for the argument file and for every source, additional file and analyzer configuration the project's `Csc` read.
+There is one `file=` line for the argument file and for every source, additional file, analyzer configuration, referenced assembly, and analyzer or generator assembly the project's `Csc` read (#51): a reference decides what the source means, through a base class or a constant, and a generator adds source.
 They are hashed just before `CoreCompile` and again after it, and the record is written only when `Csc` ran and both hashes agree, so it describes the text `Csc` read.
 A file saved during the compile deletes the record instead, and a build that finds `CoreCompile` up to date leaves the record of the compile that produced the assembly in place.
 `--reference-source` names a record, and the build passes one for each referenced project that wrote one.
@@ -111,7 +111,6 @@ So is a closed class used by a multi-targeted project: it verifies in its first 
 And so is a class whose full name the compilation or another reference also declares (an extern-aliased twin): type units are keyed by documentation-comment ID, which does not name the assembly.
 Each unit that uses such a class carries a `referenced-source` assumption: the referenced assembly is the one built from the source Warrant checked.
 Nothing compares the two directly. The record ties them only as far as the referenced project's build is trusted, which is the trust the verified project's own argument file already needs.
-The assemblies the referenced project references and its generators' assemblies are not hashed, so one that changes while the files the project's `Csc` read stay the same is not noticed.
 The analyzer has no referenced source, so it reports nothing for such a class and leaves the check to the build.
 
 The reference used to list `warrant verify <project>`.

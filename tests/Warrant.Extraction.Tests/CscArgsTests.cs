@@ -318,14 +318,13 @@ public sealed class CscArgsTests : IDisposable
     }
 
     /// <summary>
-    /// A source record as Warrant.Build writes it (#32): every file in the project except the reference pack, hashed
-    /// now, so the record covers what the arguments read.
+    /// A source record as Warrant.Build writes it (#32, #51): every file in the project, references and generators
+    /// included, hashed now, so the record covers what the arguments read.
     /// </summary>
-    private string Record(string assembly = "Sample")
+    private string Record(string assembly = "Sample", string? args = null)
     {
-        var lines = new List<string> { "warrant-source 1", $"assembly={assembly}", $"args={ArgsFile}", $"project={project}" };
-        foreach (var file in Directory.EnumerateFiles(project, "*", SearchOption.AllDirectories)
-            .Where(f => !f.StartsWith(Path.Combine(project, "refs"), StringComparison.Ordinal)))
+        var lines = new List<string> { "warrant-source 1", $"assembly={assembly}", $"args={args ?? ArgsFile}", $"project={project}" };
+        foreach (var file in Directory.EnumerateFiles(project, "*", SearchOption.AllDirectories))
         {
             using var stream = File.OpenRead(file);
             lines.Add($"file={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant()}|{file}");
@@ -370,6 +369,43 @@ public sealed class CscArgsTests : IDisposable
 
         var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(record).Load(project));
         Assert.Contains("C.cs, which Sample is compiled from, is not in the record", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReferenceChangedAfterTheRecordIsDeclined()
+    {
+        // #51: a referenced assembly decides what the source means (a base class, a constant), so it is hashed too.
+        Compile("public static class C { }");
+        var source = ReferencedSource.Open(Record());
+        File.AppendAllBytes(Path.Combine(project, "refs", "Warrant.dll"), [0]);
+
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("Warrant.dll changed since Sample was compiled; build Sample again", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReferenceTheRecordDoesNotCoverIsDeclined()
+    {
+        Compile("public static class C { }");
+        var record = Record();
+        File.WriteAllLines(record, File.ReadAllLines(record).Where(l => !l.EndsWith("System.Runtime.dll", StringComparison.Ordinal)));
+
+        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(record).Load(project));
+        Assert.Contains("System.Runtime.dll, which Sample is compiled from, is not in the record", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AGeneratorChangedAfterTheRecordIsDeclined()
+    {
+        // #51: a generator can add a partial part or a constructor to a closed class, so its assembly is hashed too.
+        var (_, problems) = CompileWithGenerator(SourceGeneratorAssemblies.Intercepting, "public static class C { }");
+        Assert.Empty(problems);
+        var source = ReferencedSource.Open(Record(args: Path.Combine(project, "generated.csc.args")));
+        var generator = Directory.GetFiles(Path.Combine(project, "analyzers"), "TestGenerator.dll", SearchOption.AllDirectories).Single();
+        File.AppendAllBytes(generator, [0]);
+
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("TestGenerator.dll changed since Sample was compiled; build Sample again", e.Message, StringComparison.Ordinal);
     }
 
     [Fact]

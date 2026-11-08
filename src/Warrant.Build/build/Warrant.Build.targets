@@ -54,7 +54,8 @@
 
   <!--
     #32: the source record (Warrant.Frontend.ReferencedSource), $(IntermediateOutputPath)warrant.source: the assembly name,
-    the argument file, the project directory, and the SHA-256 of every file the compiler read. A project that references this
+    the argument file, the project directory, and the SHA-256 of every file the compiler read: sources, additional files,
+    analyzer configuration, referenced assemblies, and analyzer and generator assemblies (#51). A project that references this
     one checks the hashes again before it reads the source, so a file edited after this compile is caught rather than checked
     in place of the compiled one. Written for every target framework, since each inner build is a different reference.
 
@@ -66,7 +67,7 @@
   <Target Name="_WarrantHashSourcesBeforeCompile"
           BeforeTargets="CoreCompile"
           Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true'">
-    <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles)" Algorithm="SHA256" HashEncoding="hex">
+    <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles);@(ReferencePathWithRefAssemblies);@(Analyzer)" Algorithm="SHA256" HashEncoding="hex">
       <Output TaskParameter="Items" ItemName="_WarrantSourceHashBefore" />
     </GetFileHash>
   </Target>
@@ -79,7 +80,7 @@
       <_WarrantCscArgsFileFull>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(_WarrantCscArgsFile)'))</_WarrantCscArgsFileFull>
       <_WarrantSourceRecordFile>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'warrant.source'))</_WarrantSourceRecordFile>
     </PropertyGroup>
-    <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles)" Algorithm="SHA256" HashEncoding="hex">
+    <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles);@(ReferencePathWithRefAssemblies);@(Analyzer)" Algorithm="SHA256" HashEncoding="hex">
       <Output TaskParameter="Items" ItemName="_WarrantSourceHashAfter" />
     </GetFileHash>
     <GetFileHash Files="$(_WarrantCscArgsFileFull)" Algorithm="SHA256" HashEncoding="hex">

@@ -11,8 +11,8 @@ namespace Warrant.Frontend;
 /// <c>obj/&lt;configuration&gt;/&lt;framework&gt;/warrant.source</c>, holding its assembly name, its compiler arguments and the
 /// SHA-256 of every file those arguments read, hashed before and after the compile and written only when both agree.
 /// <see cref="Load"/> hashes those files again and declines if any differs, so the source checked is the source the
-/// referenced assembly was compiled from, unless a file changed and changed back in between. The assemblies the
-/// arguments reference and the generators they load are not hashed.
+/// referenced assembly was compiled from, unless a file changed and changed back in between. The files include the
+/// assemblies the arguments reference and the analyzers and generators they load (#51).
 /// </summary>
 /// <remarks>
 /// The record's format, one entry per line, as <c>Warrant.Build.targets</c> writes it:
@@ -109,13 +109,17 @@ public sealed class ReferencedSource
             return _compilation;
         }
 
-        // Every file the compiler read: the arguments themselves, the sources, the generators' additional files and the
-        // analyzer configuration. Each must be in the record with the hash it had when the assembly was compiled.
+        // Every file the compiler read: the arguments themselves, the sources, the generators' additional files, the
+        // analyzer configuration, the referenced assemblies and the analyzer and generator assemblies (#51). Each must be
+        // in the record with the hash it had when the assembly was compiled. A reference decides what the source means (a
+        // base class, a constant) and a generator adds source, so either changing changes what is checked.
         var args = CompilationFactory.ParseCscArgs(Checked(_argsFile), _project);
         var read = new List<string>();
         read.AddRange(args.SourceFiles.Select(f => f.Path));
         read.AddRange(args.AdditionalFiles.Select(f => f.Path));
         read.AddRange(args.AnalyzerConfigPaths);
+        read.AddRange(args.MetadataReferences.Select(r => r.Reference));
+        read.AddRange(args.AnalyzerReferences.Select(r => r.FilePath));
         foreach (var file in read.Select(f => Path.GetFullPath(Path.Combine(_project, f))).Distinct(PathComparer))
         {
             Checked(file);

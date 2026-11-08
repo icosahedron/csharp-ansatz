@@ -51,6 +51,23 @@ static Proof ValidImpliesPositive(Payment p) =>
 for the rest of the surface. A developer guide to writing proofs, which marks what
 runs and what is planned, is in [docs/proving](docs/proving/README.md).)*
 
+## On production code
+
+Warrant is being tried on a private production codebase, a multi-project .NET 10
+solution. Its code isn't published here. Where that stands:
+
+- **Translated:** a `[Verified]` scoring method whose argument is a smart enum from a
+  shared library. Warrant checks the smart enum as a `[Closed]` class from the library's
+  recorded source ([#32](https://github.com/icosahedron/csharp-ansatz/issues/32)): 8
+  verified units.
+- **Proved:** the two theorems about specific inputs.
+- **Not proved yet:** the four theorems that quantify over every input. Their proof
+  scripts fail (`simp` makes no progress on the method's `if`s), so they need different
+  scripts rather than a new Warrant feature.
+- **Other candidates:** of the other methods examined there, one fits the supported
+  subset but hasn't been tried. The rest need `Math.Min` and `Math.Max`, `%`, `throw` or
+  nullable values, which Warrant doesn't translate yet.
+
 ## Why "Warrant"
 
 > A warrant for an argument is the underlying justification or logical bridge that

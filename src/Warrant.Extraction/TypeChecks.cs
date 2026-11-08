@@ -312,7 +312,8 @@ internal static class TypeChecks
     /// there is none (#24). Only this is allowed, on the class and on each of its base classes:
     /// <list type="bullet">
     /// <item>the static instances' creations, with constant arguments and no object initialiser;</item>
-    /// <item>every other field, property or event initialiser, static or not, a constant;</item>
+    /// <item>every other static initialiser of the class itself a constant, and every instance initialiser a constant or a
+    /// primary-constructor parameter;</item>
     /// <item>
     /// every instance constructor, a <c>this(...)</c> or <c>base(...)</c> call whose arguments are constants or parameters,
     /// and a body of assignments of constants or parameters to the class's own fields and auto-properties;
@@ -320,6 +321,9 @@ internal static class TypeChecks
     /// <item>a base class's primary constructor passing only constants or parameters to its own base;</item>
     /// <item>no static constructor on a base class (the class's own is rejected by step 3), and every base class declared in source.</item>
     /// </list>
+    /// A base class's static initialisers are not checked (#47). Without a static constructor the class is
+    /// <c>beforefieldinit</c>, so the runtime runs them when one of its static fields is first read, not when an instance
+    /// is created; and nothing allowed above reads one. A generic base class is checked through its original definition.
     /// An assignment to a virtual, abstract or overriding property is not allowed: it can dispatch to an override's setter.
     /// Implicit identity, numeric, reference and nullable conversions that are not user-defined cannot throw, so they are
     /// allowed; a user-defined conversion runs code, so it is not.
@@ -350,6 +354,9 @@ internal static class TypeChecks
             {
                 return cctor.DeclaringSyntaxReferences[0].GetSyntax();
             }
+            // The declarations' operations are in terms of the original definition, so a generic base is checked as that.
+            var owner = t.OriginalDefinition;
+            bool isBase = !SymbolEqualityComparer.Default.Equals(t, type);
             foreach (var declaration in t.DeclaringSyntaxReferences.Select(r => r.GetSyntax()).OfType<TypeDeclarationSyntax>())
             {
                 var model = context.Model(declaration.SyntaxTree);
@@ -368,8 +375,10 @@ internal static class TypeChecks
 
                 foreach (var member in declaration.Members)
                 {
+                    bool isStatic = member.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword));
                     var initializers = member switch
                     {
+                        _ when isStatic && isBase => [],
                         BaseFieldDeclarationSyntax f when !f.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)) =>
                             f.Declaration.Variables.Select(v => v.Initializer),
                         PropertyDeclarationSyntax p => [p.Initializer],
@@ -380,14 +389,17 @@ internal static class TypeChecks
                         // The initialiser operation's value includes the conversion to the member's type, which may be
                         // user-defined; the expression's own operation does not.
                         var value = clause.Value;
+                        // An instance initialiser stores into the backing field directly, so a primary-constructor parameter is
+                        // as safe there as in a constructor body; a static initialiser has no parameters to read.
                         if (!instanceCreations.Contains((value.SyntaxTree, value.SpanStart, value.Span.Length))
-                            && !(model.GetOperation(clause) is ISymbolInitializerOperation init && IsConstant(init.Value)))
+                            && !(model.GetOperation(clause) is ISymbolInitializerOperation init
+                                && (isStatic ? IsConstant(init.Value) : IsConstantOrParameter(init.Value))))
                         {
                             return value;
                         }
                     }
                     if (member is ConstructorDeclarationSyntax ctor && !ctor.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))
-                        && ConstructorCouldThrow(model, t, ctor) is { } throwing)
+                        && ConstructorCouldThrow(model, owner, ctor) is { } throwing)
                     {
                         return throwing;
                     }
@@ -408,8 +420,7 @@ internal static class TypeChecks
         {
             var call = initializer is IExpressionStatementOperation s ? s.Operation : initializer;
             if (call is not IInvocationOperation { TargetMethod: var target } invocation
-                || !(SymbolEqualityComparer.Default.Equals(target.ContainingType, owner)
-                    || SymbolEqualityComparer.Default.Equals(target.ContainingType, owner.BaseType)))
+                || !(SameDefinition(target.ContainingType, owner) || SameDefinition(target.ContainingType, owner.BaseType)))
             {
                 return initializer.Syntax;
             }
@@ -439,19 +450,24 @@ internal static class TypeChecks
     private static bool IsOwnStorage(INamedTypeSymbol owner, IOperation target) => target switch
     {
         IFieldReferenceOperation { Instance: IInstanceReferenceOperation, Field: { IsStatic: false } field } =>
-            SymbolEqualityComparer.Default.Equals(field.ContainingType, owner),
+            SameDefinition(field.ContainingType, owner),
         IPropertyReferenceOperation
         {
             Instance: IInstanceReferenceOperation,
             Property: { IsStatic: false, IsVirtual: false, IsAbstract: false, IsOverride: false, Parameters.IsEmpty: true } property,
         } =>
-            SymbolEqualityComparer.Default.Equals(property.ContainingType, owner) && IsAutoProperty(owner, property),
+            SameDefinition(property.ContainingType, owner) && IsAutoProperty(owner, property),
         _ => false,
     };
 
+    /// <summary>Whether two types are the same declaration, whatever their type arguments.</summary>
+    private static bool SameDefinition(ITypeSymbol? a, ITypeSymbol? b) =>
+        a is not null && b is not null && SymbolEqualityComparer.Default.Equals(a.OriginalDefinition, b.OriginalDefinition);
+
     /// <summary>Whether a property has a compiler-generated backing field and no accessor with a body.</summary>
     private static bool IsAutoProperty(INamedTypeSymbol owner, IPropertySymbol property) =>
-        owner.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property))
+        owner.OriginalDefinition.GetMembers().OfType<IFieldSymbol>()
+            .Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol?.OriginalDefinition, property.OriginalDefinition))
         && property.DeclaringSyntaxReferences.Length == 1
         && property.DeclaringSyntaxReferences[0].GetSyntax() is PropertyDeclarationSyntax { ExpressionBody: null, AccessorList: { } accessors }
         && HasOnlyAutoAccessors(accessors);

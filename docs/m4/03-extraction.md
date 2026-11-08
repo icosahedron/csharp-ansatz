@@ -132,10 +132,14 @@ A `[Closed]` class is accepted if it has the closed shape (design D13), checked 
    So does any construction that could throw (`constructor or initialiser that could throw`). A throw while the instances are created would fail the type initialiser, and every use of the class would throw `TypeInitializationException`, while the model still has the instances.
    Until M6 models exceptions, only code that cannot throw is allowed, on the class and on each of its base classes:
    - the static instances' `new(...)` calls, with constant arguments and no object initialiser;
-   - every other field, property or event initialiser, static or not, a constant;
+   - every other static initialiser of the class itself a constant, and every instance initialiser, on the class or a base class, a constant or a primary-constructor parameter (`public TValue Value { get; } = value;` stores into the backing field, like an assignment in a constructor body);
    - each instance constructor, a `this(...)` or `base(...)` call whose arguments are constants or parameters, then only assignments of constants or parameters to the class's own fields and auto-properties that no override can replace (not `virtual`, `abstract` or `override`, whose setter could be an override's);
    - a base class's primary constructor passing only constants or parameters to its own base;
    - no static constructor on a base class, and no base class from another assembly, whose constructors cannot be read.
+
+   A base class's static initialisers are not checked (#47): without a static constructor the class is `beforefieldinit`, so the runtime runs them when one of its static fields is first read, not when an instance is created, and nothing allowed above reads one.
+   So a smart-enum base class may keep `static readonly Lazy<...>` lookup tables.
+   A generic base class is checked through its original definition.
 
    Implicit identity, numeric, reference and nullable conversions are allowed, because none of them throws; a user-defined conversion runs code (`static readonly System.Index Start = -1` throws), so it is not.
 4. The private constructors are called nowhere else, so no other instance can be created without reflection.

@@ -75,6 +75,50 @@ public sealed class SemanticsBundleTests
     }
 
     [Fact]
+    public void AConstantTheKernelComputesWithByNameIsRejectedIfItIsNotLeans()
+    {
+        // def Nat.add (n m : Nat) : Nat := n. The kernel still computes Nat.add 1 1 = 2 on literals, while unfolding the
+        // definition gives Nat.add n 1 = n; together they prove False with no axiom.
+        var add = (ConstantDeclaration)Find("Nat.add");
+        var real = (DefinitionInfo)add.Constant;
+        var nat = Expr.Const(Name.Parse("Nat"));
+        var first = Expr.Lam(Name.Parse("n"), nat, Expr.Lam(Name.Parse("m"), nat, Expr.BVar(1)));
+        var forged = new ConstantDeclaration(real with { DefinitionValue = first });
+        var declarations = Committed.Value.Declarations.Select(d => ReferenceEquals(d, add) ? forged : d);
+        Assert.Equal("declares Nat.add differently from Lean 4.35.0.", SemanticsBundle.AxiomProblem(declarations));
+    }
+
+    [Fact]
+    public void AConstantAPinnedDefinitionMentionsIsRejectedIfItIsNotLeans()
+    {
+        // Nat.add unfolds through the constants its value mentions, so those are pinned too.
+        var mentioned = SemanticsBundle.PinnedDeclarations()
+            .OfType<ConstantDeclaration>()
+            .First(d => d.Constant is DefinitionInfo && !SemanticsBundle.KernelReducedNames.Contains(d.Constant.Name));
+        var forged = new ConstantDeclaration(((DefinitionInfo)mentioned.Constant) with { Hints = ReducibilityHints.Opaque });
+        var declarations = Committed.Value.Declarations.Select(d => d.Equals(mentioned) ? forged : d);
+        Assert.Equal($"declares {mentioned.Constant.Name} differently from Lean 4.35.0.", SemanticsBundle.AxiomProblem(declarations));
+    }
+
+    [Fact]
+    public void AKernelReducedNameLeansBundleDoesNotDeclareIsRejected()
+    {
+        // The kernel computes Nat.lor on literals, and the committed bundle does not declare it, so a bundle may not.
+        Assert.DoesNotContain(Committed.Value.Declarations.SelectMany(d => d.Constants), c => c.Name.ToString() == "Nat.lor");
+        var nat = Expr.Const(Name.Parse("Nat"));
+        var lor = new ConstantDeclaration(new DefinitionInfo(
+            Name.Parse("Nat.lor"), EquatableArray<Name>.Empty, nat, Expr.NatLit(0), ReducibilityHints.Abbrev,
+            DefinitionSafety.Safe, [Name.Parse("Nat.lor")]));
+        Assert.Equal(
+            "declares Nat.lor, which the kernel computes with by name and Lean 4.35.0's bundle does not declare.",
+            SemanticsBundle.AxiomProblem(Committed.Value.Declarations.Append(lor)));
+    }
+
+    [Fact]
+    public void TheEmbeddedPinnedDeclarationsAreTheClosureOfTheCommittedBundle() =>
+        Assert.Equal(SemanticsBundle.PinnedClosure(Committed.Value.Declarations), SemanticsBundle.PinnedDeclarations());
+
+    [Fact]
     public void TheReportNamesTheAxiomsAsAGlobalAssumption() =>
         Assert.Equal("The only axioms are Lean's standard ones: propext, Classical.choice, Quot.sound", Reports.AssumptionReports.Axioms);
 }

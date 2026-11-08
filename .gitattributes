@@ -2,5 +2,3 @@
 # across checkouts (docs/m4/02).
 tests/corpus/** text eol=lf
 
-# Read as an embedded resource; LF keeps its bytes the same in every checkout.
-src/Warrant.Engine/StandardAxioms.ndjson text eol=lf

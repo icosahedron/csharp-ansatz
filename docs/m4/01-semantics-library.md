@@ -78,7 +78,12 @@ The last theorem is quantified, so `decide` cannot prove it; Init already proves
 Quantified proofs from Init can rest on Lean's three standard axioms (`propext`, `Classical.choice`, `Quot.sound`); this one does.
 That is fine for documentation theorems, and it does not leak into translated code: the proof terms the engine emits for C# theorems use no axioms (chapter 6).
 No library declaration may depend on `sorryAx`, and the export script checks that (plan, U2).
-Loading checks the axioms again, because `--bundle` accepts any file: a bundle that declares any other axiom is rejected, and so is one whose `propext`, `Classical.choice` or `Quot.sound`, or the `Eq`, `Iff` or `Nonempty` their statements mention, differs from Lean 4.35.0's (`src/Warrant.Engine/StandardAxioms.ndjson`, taken from the committed bundle).
+Loading checks the axioms again, because `--bundle` accepts any file (#26).
+A bundle that declares any other axiom is rejected.
+Names alone fix nothing, though: an axiom named `propext` could state `False`, and the kernel computes `Nat.add`, `Nat.beq`, string literals and the other constants it knows by name (`KernelNames`) on literals whatever the bundle defines them to be, so a different definition would contradict the kernel's own arithmetic without any axiom.
+So every declaration of a standard axiom or of one of those constants, and of every constant they mention, transitively, must be exactly Lean 4.35.0's, and a name the kernel computes with that Lean's bundle does not declare (such as `Nat.lor`) may not be declared at all.
+The reference, `src/Warrant.Engine/PinnedDeclarations.ndjson.gz` (463 declarations), is made from the committed bundle by `scripts/pin-kernel-declarations.cs`, and a test checks that it still matches; run the script whenever the bundle changes.
+The quotient constants need no entry: the kernel builds them itself and compares the bundle's against them.
 The assumption report lists the three axioms as a global assumption.
 
 These theorems are documentation that a machine checks.

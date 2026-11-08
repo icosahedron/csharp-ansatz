@@ -33,6 +33,10 @@ internal static class Symbols
 
     public static bool IsTheorem(ISymbol symbol) => Has(symbol, TheoremAttribute);
 
+    /// <summary>Whether an attribute class is <c>System.Runtime.CompilerServices.UnsafeAccessorAttribute</c> (#55).</summary>
+    public static bool IsUnsafeAccessor(INamedTypeSymbol? attribute) =>
+        attribute?.ToDisplayString() == "System.Runtime.CompilerServices.UnsafeAccessorAttribute";
+
     public static string Key(ISymbol symbol) =>
         symbol.GetDocumentationCommentId() ?? throw new InvalidOperationException($"'{symbol}' has no documentation-comment ID.");
 

@@ -276,7 +276,7 @@ public static class AssumptionReports
         var text = kind switch
         {
             VirAssumptionKind.NonNull => $"{shown} is not null",
-            VirAssumptionKind.Closed => $"{shown} has only its named members",
+            VirAssumptionKind.Closed => $"{shown} has only its named members; nothing creates another through reflection, a serializer or code Warrant does not check",
             VirAssumptionKind.ClosedEquality => $"{shown}'s equality agrees with identity on its named members",
             VirAssumptionKind.ReferencedSource =>
                 $"{shown} comes from a referenced assembly built from the source Warrant checked, as that project's build recorded it",

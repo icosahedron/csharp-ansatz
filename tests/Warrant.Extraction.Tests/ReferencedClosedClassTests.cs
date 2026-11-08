@@ -287,6 +287,22 @@ public sealed class ReferencedClosedClassTests
         Assert.Equal("WRT0002 | depends on a rejected unit", Inline.Only(result, "M:C.F(Lib.Color)"));
     }
 
+    [Theory]
+    // #55: a MemberwiseClone in a base class, and [UnsafeAccessor]s anywhere in the library or in the consumer.
+    [InlineData("public abstract class Base<T> { public T Copy() => (T)MemberwiseClone(); } [Closed] public sealed class Color : Base<Color> { private Color() { } public static Color Red { get; } = new(); }", "")]
+    [InlineData(ColorWithoutBase + " public static class Hack { [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Constructor)] public static extern Color Make(); }", "")]
+    [InlineData(ColorWithoutBase, "public static class Hack { [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Constructor)] public static extern Lib.Color Make(); }")]
+    public void AReferencedClosedClassCreatedWithoutAConstructorIsRejected(string library, string consumerExtra)
+    {
+        var lib = Library("namespace Lib; " + library);
+        var result = Extract(Consumer(lib, UsesColor + consumerExtra), lib);
+
+        Assert.Equal("WRT0009 | instance created without a constructor call", Inline.Only(result, "T:Lib.Color"));
+        Assert.Equal("WRT0002 | depends on a rejected unit", Inline.Only(result, "M:C.F(Lib.Color)"));
+    }
+
+    private const string ColorWithoutBase = "[Closed] public sealed class Color { private Color() { } public static Color Red { get; } = new(); }";
+
     [Fact]
     public void AReferencedRecordIsStillRejected()
     {

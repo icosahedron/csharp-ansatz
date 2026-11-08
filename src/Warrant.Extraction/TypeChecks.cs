@@ -259,6 +259,14 @@ internal static class TypeChecks
             }
         }
 
+        //    Nor is an instance created without one where Warrant can see it (#55): by MemberwiseClone, which only the class
+        //    and its base classes can call on an instance of it, or by an [UnsafeAccessor] that calls a constructor or
+        //    MemberwiseClone. Reflection, serializers and code Warrant does not see are the closed assumption's.
+        if (CreatedWithoutConstructor(type, scan.Value) is { } bypass)
+        {
+            throw Reject(type, "instance created without a constructor call", DiagnosticIds.NotClosedShape, bypass.GetLocation());
+        }
+
         // 5. At least one instance.
         if (instances.Count == 0)
         {
@@ -271,6 +279,43 @@ internal static class TypeChecks
         // Declaration order; for partial classes, by file path and then position.
         instances.Sort(Symbols.CompareByLocation);
         return new ClosedDefinition(new VirList<VirClosedMember>(instances.Select(m => new VirClosedMember(m.Name, null))));
+    }
+
+    /// <summary>
+    /// The first place that can create an instance of a closed class without calling its constructor (#55), or null: a
+    /// <see cref="object.MemberwiseClone"/> whose receiver is the class or one of its base classes, or an
+    /// <c>[UnsafeAccessor]</c> that calls a constructor of the class, of a base class or of an unnamed type (an
+    /// <c>object</c> return, which <c>[UnsafeAccessorType]</c> can point anywhere), or that calls
+    /// <see cref="object.MemberwiseClone"/>.
+    /// </summary>
+    private static SyntaxNode? CreatedWithoutConstructor(INamedTypeSymbol type, CompilationScan scan)
+    {
+        // By documentation-comment ID: the compilation being verified sees a referenced class as metadata, a different symbol
+        // from the one its recorded source declares (#32), and the ID names it uniquely there.
+        var lineage = new HashSet<string>(StringComparer.Ordinal);
+        for (var t = type; t is not null && t.SpecialType != SpecialType.System_Object; t = t.BaseType)
+        {
+            lineage.Add(Symbols.Key(t.OriginalDefinition));
+        }
+        bool InLineage(ITypeSymbol? t) => t is INamedTypeSymbol n && lineage.Contains(Symbols.Key(n.OriginalDefinition));
+
+        var candidates = new List<SyntaxNode>();
+        candidates.AddRange(scan.MemberwiseClones.Where(c => InLineage(c.Instance?.Type)).Select(c => c.Syntax));
+        foreach (var (method, syntax) in scan.UnsafeAccessors)
+        {
+            var attribute = method.GetAttributes().First(a => Symbols.IsUnsafeAccessor(a.AttributeClass));
+            var kind = attribute.ConstructorArguments.Length == 1 && attribute.ConstructorArguments[0].Value is int k ? k : -1;
+            var name = attribute.NamedArguments.FirstOrDefault(a => a.Key == "Name").Value.Value as string ?? method.Name;
+            const int Constructor = 0, Method = 1, StaticMethod = 2;
+            bool constructs = kind == Constructor
+                && (InLineage(method.ReturnType) || method.ReturnType.SpecialType == SpecialType.System_Object);
+            bool clones = kind is Method or StaticMethod && name == nameof(MemberwiseClone);
+            if (constructs || clones || kind == -1)
+            {
+                candidates.Add(syntax);
+            }
+        }
+        return candidates.OrderBy(n => n.SyntaxTree.FilePath, StringComparer.Ordinal).ThenBy(n => n.SpanStart).FirstOrDefault();
     }
 
     /// <summary>The initialiser of a get-only auto-property or a static readonly field, or null if the member is neither.</summary>

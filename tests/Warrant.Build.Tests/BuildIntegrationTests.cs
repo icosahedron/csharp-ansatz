@@ -282,6 +282,17 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         Assert.Single(Regex.Matches(log, @"Warrant: 4 verified units, 2 theorems proved, 0 not proved\."));
         Assert.True(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source")));
 
+        // A build in which Shapes is up to date keeps its record (IncrementalClean deletes a file no target lists in
+        // FileWrites), so Painter, compiled again after an edit, still checks Color from it.
+        File.AppendAllText(Directory.GetFiles(painter, "*.cs").Single(), "// edited\n");
+        (exitCode, log) = host.Build(painter);
+        Report(host, painter, log);
+
+        Assert.True(exitCode == 0, log);
+        Assert.True(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source")));
+        Assert.True(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.csc.args")));
+        Assert.Single(Regex.Matches(log, @"Warrant: 4 verified units, 2 theorems proved \(2 from cache\), 0 not proved\."));
+
         // An edit to Shapes that Painter's build does not compile again is caught, not checked in place of the compiled one.
         File.AppendAllText(Path.Combine(shapes, "Color.cs"), "// edited\n");
         (exitCode, log) = host.Build(painter, "-p:BuildProjectReferences=false");

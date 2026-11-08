@@ -61,6 +61,18 @@ public sealed class Empty
     private Empty() { }
 }
 
+// Step 3: the constructor divides by its argument, so the type initialiser throws and every use of the class
+// throws TypeInitializationException, while the model would still have the instance.
+[Closed]
+public sealed class Throws
+{
+    public static Throws Zero { get; } = new(0);
+
+    private Throws(int divisor) => Ratio = 100 / divisor;
+
+    public int Ratio { get; }
+}
+
 [Closed]
 public sealed class Tier
 {
@@ -75,4 +87,7 @@ public static class ClosedClasses
 {
     [Verified]
     public static int ReadsAField(Tier t) => t.Rank;
+
+    [Verified]
+    public static bool UsesThrows(Throws t) => t == Throws.Zero;
 }

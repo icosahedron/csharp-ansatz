@@ -101,7 +101,8 @@ Extraction checks that:
 - `Equals(T)`, `GetHashCode`, `EqualityContract` and the `==` operator are all implicitly declared;
 - each positional property is the compiler's auto-property;
 - the record declares no other instance field, and no other property with a backing field.
-- the copy constructor is the compiler's, because `with` runs it and the model copies the fields.
+- the copy constructor is the compiler's, because `with` runs it and the model copies the fields;
+- no positional property's type is a `[Closed]` class with its own equality (`record field of a closed class with its own equality`). The generated `Equals` compares such a field through `EqualityComparer<T>.Default.Equals`, which reaches the class's `Equals`, while the model compares instances.
 
 A user-written `Equals` would make `==` mean something other than field-by-field equality, and an unsealed record can be compared with a subclass instance whose `EqualityContract` differs.
 Extra instance state is subtler: the generated `Equals` compares *every* instance field, so a record with `public int Extra { get; init; }` beside its positional properties is equal to another only if `Extra` matches too, while a model built from the primary constructor would ignore it (KTD10).
@@ -128,6 +129,14 @@ A `[Closed]` class is accepted if it has the closed shape (design D13), checked 
 2. Every instance constructor is `private`, and the class has no primary constructor.
 3. Every `static` member whose type is the class itself is either a get-only auto-property with an initialiser (`{ get; } = new(...)`) or a `static readonly` field with an initialiser, and the initialiser is a `new` of the class itself. A property with a getter body or an expression body (`=> new(...)`) fails this step, because it returns a new instance on every read. So does an initialiser that is not a `new`: with `public static Outcome B { get; } = A;`, `A` and `B` are one object, but the model would make them two constructors that the kernel proves different.
    A static constructor also fails this step: it runs after the initialisers and can assign `B = A` itself (or throw).
+   So does any construction that could throw (`constructor or initialiser that could throw`). A throw while the instances are created would fail the type initialiser, and every use of the class would throw `TypeInitializationException`, while the model still has the instances.
+   Until M6 models exceptions, only code that cannot throw is allowed, on the class and on each of its base classes:
+   - the static instances' `new(...)` calls, with constant arguments and no object initialiser;
+   - every other field, property or event initialiser, static or not, a constant;
+   - each instance constructor, a `this(...)` or `base(...)` call whose arguments are constants or parameters, then only assignments of constants or parameters to the class's own fields and auto-properties;
+   - no static constructor on a base class, and no base class from another assembly, whose constructors cannot be read.
+
+   Implicit identity, numeric, reference and nullable conversions are allowed, because none of them throws.
 4. The private constructors are called nowhere else, so no other instance can be created without reflection.
 5. There is at least one such member.
 
@@ -139,7 +148,8 @@ Instance fields and properties of a closed class are ignored by the model, and r
 
 If the class or one of its base classes overrides `Equals` or defines `==`, the model still treats equality as "same instance".
 That is true for the closed-set pattern only if the override agrees with identity on the static instances, so extraction records it as an assumption, and the differential tests check it (KTD11).
-They check `==`, `Equals(object)` and `EqualityComparer<T>.Default.Equals` separately, because a record's generated `Equals` compares a closed-class field through the last of those, not through `==`.
+They check `==`, `Equals(object)` and `EqualityComparer<T>.Default.Equals` separately.
+A record's generated `Equals` compares a closed-class field through the last of those, and the assumption would not reach the units that compare the record, so a record field of a closed class with its own equality is rejected instead (see "Records").
 
 ## Assumptions
 

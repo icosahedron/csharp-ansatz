@@ -132,11 +132,89 @@ public class ExtractionTests
     [InlineData("public sealed class K { private K() { } }", "no static instances")]
     [InlineData("public sealed class K { public static readonly K A = new(); public static readonly K B = new(); static K() { B = A; } private K() { } }", "static constructor")]
     [InlineData("public sealed class K { public static K A { get; } = new(); static K() { } private K() { } }", "static constructor")]
+    [InlineData("public sealed class K { public static K A { get; } = new(0); private K(int x) { if (x == 0) throw new System.Exception(); } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(0); private K(int x) => Ratio = 10 / x; public int Ratio { get; } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(\"a\"); private K(string s) => Length = s.Length; public int Length { get; } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(); private K() { } private readonly int _x = int.Parse(\"x\"); }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(); private K() { } private static readonly int Bad = int.Parse(\"x\"); }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(int.Parse(\"1\")); private K(int x) => X = x; public int X { get; } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new() { X = 1 }; private K() { } public int X { get; init; } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(1); private K(int x) : this(x.ToString()) { } private K(string s) { } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(1); private K(int x) => X = x; private int _x; public int X { get => _x; set => _x = 100 / value; } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : B { public static K A { get; } = new(); private K() { } } public abstract class B { protected B() => throw new System.Exception(); }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : B { public static K A { get; } = new(); private K() { } } public abstract class B { static B() { } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : System.Collections.ArrayList { public static K A { get; } = new(); private K() { } }", "constructor or initialiser that could throw")]
     public void ClosedClassFailingAStepIsWrt0009NamingIt(string declaration, string step)
     {
         var result = Extract("[Closed]\n" + declaration);
         Assert.Equal("WRT0009 | " + step, Only(result, "T:K"));
         Assert.Equal(ExtractionSeverity.Error, Assert.Single(result.Diagnostics).Severity);
+    }
+
+    [Theory]
+    [InlineData("public sealed class K { public static K A { get; } = new(\"a\", 1); public static readonly K B = new(null, 2); private K(string? name, long rank) { Name = name; _rank = rank; } public string? Name { get; } private readonly long _rank; }")]
+    [InlineData("public sealed class K { public static K A { get; } = new(); private K() : this(\"a\", 1 + 2) { } private K(string name, int rank) => Rank = rank; public int Rank { get; } private const int Max = 10; private static readonly int Limit = Max * 2; private readonly string _label = \"x\"; }")]
+    public void ClosedClassWhoseConstructionCannotThrowIsAccepted(string declaration)
+    {
+        var result = Extract("[Closed]\n" + declaration + "\npublic static class C { [Verified] public static bool Same(K a, K b) => a == b; }");
+        Assert.Empty(result.Diagnostics);
+        Assert.Contains("T:K", result.Units.Select(u => u.Key));
+    }
+
+    [Fact]
+    public void RecordFieldOfAClosedClassWithItsOwnEqualityIsRejected()
+    {
+        var result = Extract("""
+            [Closed]
+            public sealed class Level
+            {
+                public static Level Low { get; } = new(1);
+                public static Level High { get; } = new(1);
+                private Level(int rank) => Rank = rank;
+                public int Rank { get; }
+                public override bool Equals(object? obj) => obj is Level l && l.Rank == Rank;
+                public override int GetHashCode() => Rank;
+            }
+
+            public sealed record Tagged(Level Level, int X);
+            public sealed record MaybeTagged(Level? Level);
+
+            public static class C
+            {
+                [Verified] public static bool Same(Tagged a, Tagged b) => a == b;
+                [Verified] public static bool Same(MaybeTagged a, MaybeTagged b) => a == b;
+            }
+            """);
+        Assert.Equal("WRT0002 | record field of a closed class with its own equality", Only(result, "T:Tagged"));
+        Assert.Equal("WRT0002 | record field of a closed class with its own equality", Only(result, "T:MaybeTagged"));
+        Assert.Equal("WRT0002 | depends on a rejected unit", Only(result, "M:C.Same(Tagged,Tagged)"));
+        Assert.Empty(result.DiagnosticsFor("T:Level"));
+    }
+
+    [Fact]
+    public void RecordEqualityOverAClosedClassFieldComparesItByInstance()
+    {
+        var result = Extract("""
+            [Closed]
+            public sealed class Level
+            {
+                public static Level Low { get; } = new();
+                public static Level High { get; } = new();
+                private Level() { }
+            }
+
+            public sealed record Tagged(Level Level, int X);
+
+            public static class C
+            {
+                [Verified] public static bool Same(Tagged a, Tagged b) => a == b;
+            }
+            """);
+        Assert.Empty(result.Diagnostics);
+        var fields = Assert.IsType<RecordDefinition>(Unit(result, "T:Tagged").Definition).Fields;
+        Assert.Equal(["Level", "X"], fields.Select(f => f.Name));
+        Assert.Contains("T:Level", Unit(result, "T:Tagged").Deps);
+        Assert.Equal(CompareKind.Record, Assert.IsType<CompareExpr>(Unit(result, "M:C.Same(Tagged,Tagged)").Body).Kind);
     }
 
     [Fact]

@@ -122,6 +122,22 @@
     </ItemGroup>
   </Target>
 
+  <!--
+    The argument file and the source record are this build's outputs even when CoreCompile was up to date and the targets
+    above that list them did not run. IncrementalClean deletes a file the last build wrote that this one does not list, which
+    would leave every up-to-date project without its record. It is hooked before _CleanGetCurrentAndPriorFileWrites, which
+    collects FileWrites as a dependency of IncrementalClean, so before IncrementalClean would be too late. Keeping a record from an earlier compile is safe: a referencing
+    project hashes every file again before it uses the record.
+  -->
+  <Target Name="_WarrantKeepRecordedFiles"
+          BeforeTargets="_CleanGetCurrentAndPriorFileWrites"
+          Condition="('$(WarrantEnabled)' == 'true' or '$(WarrantRecordSource)' == 'true') and '$(DesignTimeBuild)' != 'true'">
+    <ItemGroup>
+      <FileWrites Include="$(IntermediateOutputPath)warrant.csc.args" />
+      <FileWrites Include="$(IntermediateOutputPath)warrant.source" Condition="'$(WarrantRecordSource)' == 'true'" />
+    </ItemGroup>
+  </Target>
+
   <!-- #32: what Build and GetTargetPath return for this project names its source record, so referencing projects find it. -->
   <Target Name="_WarrantSourceRecordMetadata"
           AfterTargets="GetTargetPathWithTargetPlatformMoniker"

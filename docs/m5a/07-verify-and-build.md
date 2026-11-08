@@ -141,6 +141,9 @@ The `Warrant.Build` package's targets, in outline:
 <Target Name="_WarrantHashSourcesBeforeCompile" BeforeTargets="CoreCompile" Condition="..." />
 <Target Name="WarrantRecordSource" AfterTargets="CoreCompile" DependsOnTargets="_WarrantWriteCscArgs" Condition="..." />
 
+<!-- Both files stay in FileWrites when CoreCompile was up to date, so IncrementalClean keeps them. -->
+<Target Name="_WarrantKeepRecordedFiles" BeforeTargets="_CleanGetCurrentAndPriorFileWrites" Condition="..." />
+
 <!-- #32: what Build and GetTargetPath return gets WarrantSourceRecord metadata, which reaches the consumer's ReferencePath. -->
 <Target Name="_WarrantSourceRecordMetadata" AfterTargets="GetTargetPathWithTargetPlatformMoniker" Condition="..." />
 

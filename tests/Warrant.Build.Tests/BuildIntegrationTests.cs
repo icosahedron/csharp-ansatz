@@ -257,6 +257,48 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
     }
 
     [HostFact(BuildHost.Dotnet)]
+    public void AClosedClassFromAReferencedProjectIsCheckedFromItsRecordedSource()
+    {
+        // #32: Shapes is not verified itself, but imports Warrant.Build, so it records its source after its compile.
+        var host = BuildHost.Find(BuildHost.Dotnet).Host!;
+        var shapes = packages.Sample(
+            "Shapes",
+            Samples.Project($"<TargetFramework>{Samples.Net10}</TargetFramework><WarrantEnabled>false</WarrantEnabled>"),
+            new Dictionary<string, string> { ["Color.cs"] = Samples.ReferencedColor });
+        var painter = packages.Sample(
+            "Painter",
+            Samples.Project($"<TargetFramework>{Samples.Net10}</TargetFramework>") + """
+              <ItemGroup>
+                <ProjectReference Include="..\Shapes\Shapes.csproj" />
+              </ItemGroup>
+            """,
+            Samples.UsesReferencedColor);
+
+        var (exitCode, log) = host.Build(painter);
+        Report(host, painter, log);
+
+        Assert.True(exitCode == 0, log);
+        Assert.Single(Regex.Matches(log, @"Warrant: 4 verified units, 2 theorems proved, 0 not proved\."));
+        Assert.True(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source")));
+
+        // An edit to Shapes that Painter's build does not compile again is caught, not checked in place of the compiled one.
+        File.AppendAllText(Path.Combine(shapes, "Color.cs"), "// edited\n");
+        (exitCode, log) = host.Build(painter, "-p:BuildProjectReferences=false");
+        Report(host, painter, log);
+
+        Assert.Equal(1, exitCode);
+        Assert.Matches(@"error WRT0012: .*Color\.cs changed since Shapes was compiled; build Shapes again", log);
+
+        // A construction that could throw is rejected in Shapes' file, and the method that uses the class with it.
+        File.WriteAllText(Path.Combine(shapes, "Color.cs"), Samples.ReferencedColor.Replace("private Color(string name) : base(name) { }", "private Color(string name) : base(name) { _ = 1 / Zero(); } static int Zero() => 0;", StringComparison.Ordinal));
+        (exitCode, log) = host.Build(painter);
+        Report(host, painter, log);
+
+        Assert.Equal(1, exitCode);
+        Assert.Matches(@"Shapes[\\/]Color\.cs\(\d+,\d+,\d+,\d+\): error WRT0009: ", log);
+    }
+
+    [HostFact(BuildHost.Dotnet)]
     public void ASourceThatNeedsASourceGeneratorVerifiesWithTheGeneratedSource()
     {
         var host = BuildHost.Find(BuildHost.Dotnet).Host!;
@@ -472,6 +514,55 @@ internal static class Samples
         }
 
         """;
+
+    /// <summary>A closed class in a project of its own, with a value-comparing <c>==</c> inherited from a generic base (#32).</summary>
+    public const string ReferencedColor = """
+        using Warrant;
+
+        namespace Shapes;
+
+        public abstract class Named<T>(string name) where T : Named<T>
+        {
+            public string Name { get; } = name;
+            public override bool Equals(object? o) => o is Named<T> n && n.Name == Name;
+            public override int GetHashCode() => Name.GetHashCode();
+            public static bool operator ==(Named<T>? left, Named<T>? right) => left?.Name == right?.Name;
+            public static bool operator !=(Named<T>? left, Named<T>? right) => !(left == right);
+        }
+
+        [Closed]
+        public sealed class Color : Named<Color>
+        {
+            private Color(string name) : base(name) { }
+            public static Color Red { get; } = new("Red");
+            public static Color Blue { get; } = new("Blue");
+        }
+
+        """;
+
+    /// <summary>A verified method over <see cref="ReferencedColor"/>, in the project that references it, with two theorems.</summary>
+    public static readonly IReadOnlyDictionary<string, string> UsesReferencedColor = new Dictionary<string, string>
+    {
+        ["Paint.cs"] = """
+            using Warrant;
+            using Shapes;
+
+            namespace Painter;
+
+            public static class Paint
+            {
+                [Verified]
+                public static int Score(Color c) => c == Color.Red ? 8 : 0;
+
+                [Theorem]
+                static Proof RedScores() => Prove.That(Score(Color.Red) == 8);
+
+                [Theorem]
+                static Proof BlueDoesNot() => Prove.That(Score(Color.Blue) == 0);
+            }
+
+            """,
+    };
 
     /// <summary>A project body referencing the packages as a consumer would; <c>$(WarrantVersion)</c> is filled in.</summary>
     public static string Project(string targetFrameworks, bool warrantBuild = true, bool useServer = false) => $"""

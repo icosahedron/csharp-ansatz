@@ -278,6 +278,8 @@ public static class AssumptionReports
             VirAssumptionKind.NonNull => $"{shown} is not null",
             VirAssumptionKind.Closed => $"{shown} has only its named members",
             VirAssumptionKind.ClosedEquality => $"{shown}'s equality agrees with identity on its named members",
+            VirAssumptionKind.ReferencedSource =>
+                $"{shown} comes from a referenced assembly built from the source Warrant checked, as that project's build recorded it",
             _ => throw new InvalidOperationException($"Unknown assumption kind {kind}."),
         };
         var inherited = !string.Equals(assumption.UnitKey, unitKey, StringComparison.Ordinal);

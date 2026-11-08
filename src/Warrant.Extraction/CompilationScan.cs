@@ -4,32 +4,71 @@ using Warrant.Vir;
 
 namespace Warrant.Extraction;
 
-/// <summary>Shared state for one extraction: the compilation, its semantic models, and the type units in use.</summary>
+/// <summary>
+/// Shared state for one extraction: the compilation, the referenced projects' compilations (#32), their semantic models,
+/// and the type units in use.
+/// </summary>
 internal sealed class ExtractionContext
 {
     private readonly Dictionary<SyntaxTree, SemanticModel> _models = new();
     private readonly Dictionary<string, INamedTypeSymbol> _used = new(StringComparer.Ordinal);
     private readonly Queue<INamedTypeSymbol> _pending = new();
+    private readonly Func<string, Compilation?>? _referencedSource;
+    private readonly List<Compilation> _referenced = [];
 
-    public ExtractionContext(Compilation compilation, VirFacts facts)
+    public ExtractionContext(Compilation compilation, VirFacts facts, Func<string, Compilation?>? referencedSource = null, bool deferReferenced = false)
     {
         Compilation = compilation;
         Facts = facts;
+        _referencedSource = referencedSource;
+        DeferReferenced = deferReferenced;
     }
 
     public Compilation Compilation { get; }
 
     public VirFacts Facts { get; }
 
+    /// <summary>Whether a closed class from another assembly is accepted without its source or a type unit (the analyzer).</summary>
+    public bool DeferReferenced { get; }
+
     public SemanticModel Model(SyntaxTree tree)
     {
         if (!_models.TryGetValue(tree, out var model))
         {
-            model = Compilation.GetSemanticModel(tree);
+            var owner = Compilation.ContainsSyntaxTree(tree) ? Compilation : _referenced.First(c => c.ContainsSyntaxTree(tree));
+            model = owner.GetSemanticModel(tree);
             _models.Add(tree, model);
         }
         return model;
     }
+
+    /// <summary>Whether a symbol is declared in the compilation itself, rather than in a reference.</summary>
+    public bool IsOwn(ISymbol symbol) => SymbolEqualityComparer.Default.Equals(symbol.ContainingAssembly, Compilation.Assembly);
+
+    /// <summary>
+    /// A type from a referenced assembly as its project's recorded source declares it, or null if that source was not
+    /// given. The two have the same documentation-comment ID, so the same key.
+    /// </summary>
+    public INamedTypeSymbol? FromReferencedSource(INamedTypeSymbol type)
+    {
+        // A referenced compilation stands for the reference with its assembly identity, and only for that one.
+        if (type.ContainingAssembly is not { } assembly || type.IsGenericType || _referencedSource?.Invoke(assembly.Name) is not { } source
+            || !source.Assembly.Identity.Equals(assembly.Identity))
+        {
+            return null;
+        }
+        if (!_referenced.Contains(source))
+        {
+            _referenced.Add(source);
+        }
+        var declared = source.GetTypeByMetadataName(MetadataName(type));
+        return declared is not null && string.Equals(Symbols.Key(declared), Symbols.Key(type), StringComparison.Ordinal) ? declared : null;
+    }
+
+    private static string MetadataName(INamedTypeSymbol type) =>
+        type.ContainingType is { } outer
+            ? MetadataName(outer) + "+" + type.MetadataName
+            : type.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() + "." + type.MetadataName : type.MetadataName;
 
     /// <summary>Records that a unit uses a record, enum or closed type, so it gets a type unit.</summary>
     public void UseType(INamedTypeSymbol type)
@@ -101,14 +140,27 @@ internal sealed class CompilationScan
         return null;
     }
 
-    public static CompilationScan Run(ExtractionContext context, CancellationToken cancellationToken)
+    public static CompilationScan Run(ExtractionContext context, CancellationToken cancellationToken) =>
+        Run(context, context.Compilation.SyntaxTrees.OrderBy(t => t.FilePath, StringComparer.Ordinal).Select(t => t.GetRoot(cancellationToken)), cancellationToken);
+
+    /// <summary>
+    /// The scan of a referenced project's closed class (#32): its own declarations only. Its instance constructors are
+    /// private, so they can be called only from inside those declarations; WRT0008 is not reported for it.
+    /// </summary>
+    public static CompilationScan OfDeclarations(ExtractionContext context, INamedTypeSymbol type, CancellationToken cancellationToken) =>
+        Run(
+            context,
+            type.DeclaringSyntaxReferences.Select(r => r.GetSyntax(cancellationToken)).OrderBy(n => n.SyntaxTree.FilePath, StringComparer.Ordinal).ThenBy(n => n.SpanStart),
+            cancellationToken);
+
+    private static CompilationScan Run(ExtractionContext context, IEnumerable<SyntaxNode> roots, CancellationToken cancellationToken)
     {
         var scan = new CompilationScan();
-        foreach (var tree in context.Compilation.SyntaxTrees.OrderBy(t => t.FilePath, StringComparer.Ordinal))
+        foreach (var root in roots)
         {
-            var model = context.Model(tree);
+            var model = context.Model(root.SyntaxTree);
             var seen = new HashSet<IOperation>();
-            foreach (var node in tree.GetRoot(cancellationToken).DescendantNodesAndSelf())
+            foreach (var node in root.DescendantNodesAndSelf())
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var op = model.GetOperation(node, cancellationToken);

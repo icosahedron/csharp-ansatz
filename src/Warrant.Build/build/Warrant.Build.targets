@@ -5,8 +5,14 @@
   -->
   <PropertyGroup>
     <WarrantEnabled Condition="'$(WarrantEnabled)' == ''">true</WarrantEnabled>
+    <!--
+      #32: after its compile, a project records its source (obj/warrant.source), so a project that references it can check
+      the [Closed] classes it defines. On even when WarrantEnabled is false, which is how a library that is not verified
+      itself shares its closed classes.
+    -->
+    <WarrantRecordSource Condition="'$(WarrantRecordSource)' == ''">true</WarrantRecordSource>
     <!-- Csc then outputs its full argument list as @(CscCommandLineArgs), which the CLI parses (KTD21). -->
-    <ProvideCommandLineArgs Condition="'$(WarrantEnabled)' == 'true'">true</ProvideCommandLineArgs>
+    <ProvideCommandLineArgs Condition="'$(WarrantEnabled)' == 'true' or '$(WarrantRecordSource)' == 'true'">true</ProvideCommandLineArgs>
     <!-- Both paths are overridable so tests can point at a locally built task and CLI. -->
     <WarrantTaskAssembly Condition="'$(WarrantTaskAssembly)' == ''">$(MSBuildThisFileDirectory)..\tasks\netstandard2.0\Warrant.Build.dll</WarrantTaskAssembly>
     <WarrantCliPath Condition="'$(WarrantCliPath)' == ''">$(MSBuildThisFileDirectory)..\tools\net10.0\any\warrant.dll</WarrantCliPath>
@@ -30,9 +36,8 @@
 
   <UsingTask TaskName="Warrant.Build.WarrantVerify" AssemblyFile="$(WarrantTaskAssembly)" />
 
-  <Target Name="WarrantVerify"
-          AfterTargets="CoreCompile"
-          Condition="'$(WarrantEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and ('$(TargetFrameworks)' == '' or '$(TargetFramework)' == '$(_WarrantFirstTargetFramework)')">
+  <Target Name="_WarrantWriteCscArgs"
+          Condition="('$(WarrantEnabled)' == 'true' or '$(WarrantRecordSource)' == 'true') and '$(DesignTimeBuild)' != 'true'">
     <PropertyGroup>
       <_WarrantCscArgsFile>$(IntermediateOutputPath)warrant.csc.args</_WarrantCscArgsFile>
     </PropertyGroup>
@@ -42,8 +47,70 @@
                       Lines="@(CscCommandLineArgs)"
                       Overwrite="true"
                       WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <FileWrites Include="$(_WarrantCscArgsFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    #32: the source record (Warrant.Frontend.ReferencedSource): the assembly name, the argument file, the project directory,
+    and the SHA-256 of every file the compiler read. A project that references this one checks the hashes again before it
+    reads the source, so a file edited after this compile is caught rather than checked in place of the compiled one.
+    Written for every target framework, since each inner build is a different reference.
+  -->
+  <Target Name="WarrantRecordSource"
+          AfterTargets="CoreCompile"
+          DependsOnTargets="_WarrantWriteCscArgs"
+          Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <_WarrantCscArgsFileFull>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(_WarrantCscArgsFile)'))</_WarrantCscArgsFileFull>
+      <_WarrantSourceRecordFile>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'warrant.source'))</_WarrantSourceRecordFile>
+    </PropertyGroup>
+    <ItemGroup Condition="Exists('$(_WarrantCscArgsFileFull)')">
+      <_WarrantSourceFile Include="$(_WarrantCscArgsFileFull);@(Compile);@(AdditionalFiles);@(EditorConfigFiles)" />
+    </ItemGroup>
+    <GetFileHash Condition="'@(_WarrantSourceFile)' != ''" Files="@(_WarrantSourceFile)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_WarrantSourceHash" />
+    </GetFileHash>
+    <ItemGroup>
+      <_WarrantSourceLine Include="warrant-source 1" />
+      <_WarrantSourceLine Include="assembly=$(TargetName)" />
+      <_WarrantSourceLine Include="args=$(_WarrantCscArgsFileFull)" />
+      <_WarrantSourceLine Include="project=$(MSBuildProjectDirectory)" />
+      <_WarrantSourceLine Include="@(_WarrantSourceHash->'file=%(FileHash)|%(FullPath)')" />
+    </ItemGroup>
+    <WriteLinesToFile Condition="'@(_WarrantSourceHash)' != ''"
+                      File="$(_WarrantSourceRecordFile)"
+                      Lines="@(_WarrantSourceLine)"
+                      Overwrite="true"
+                      WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <FileWrites Include="$(_WarrantSourceRecordFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- #32: what Build and GetTargetPath return for this project names its source record, so referencing projects find it. -->
+  <Target Name="_WarrantSourceRecordMetadata"
+          AfterTargets="GetTargetPathWithTargetPlatformMoniker"
+          Condition="'$(WarrantRecordSource)' == 'true'">
+    <ItemGroup>
+      <TargetPathWithTargetPlatformMoniker>
+        <WarrantSourceRecord>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'warrant.source'))</WarrantSourceRecord>
+      </TargetPathWithTargetPlatformMoniker>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="WarrantVerify"
+          AfterTargets="CoreCompile"
+          DependsOnTargets="_WarrantWriteCscArgs;WarrantRecordSource"
+          Condition="'$(WarrantEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and ('$(TargetFrameworks)' == '' or '$(TargetFramework)' == '$(_WarrantFirstTargetFramework)')">
+    <ItemGroup>
+      <!-- The referenced projects' source records, which reach ReferencePath with the rest of their outputs' metadata. -->
+      <_WarrantReferenceSource Include="@(ReferencePath->'%(WarrantSourceRecord)'->Distinct())" />
+    </ItemGroup>
     <WarrantVerify CscArgsFile="$(_WarrantCscArgsFile)"
                    ProjectDirectory="$(MSBuildProjectDirectory)"
+                   ReferenceSources="@(_WarrantReferenceSource)"
                    CliPath="$(WarrantCliPath)"
                    DotnetHostPath="$(DOTNET_HOST_PATH)"
                    KernelFuel="$(WarrantKernelFuel)"
@@ -53,9 +120,6 @@
                    UseServer="$(WarrantUseServer)"
                    Recheck="$(WarrantRecheck)"
                    CacheDirectory="$(_WarrantVerifyCacheDir)" />
-    <ItemGroup>
-      <FileWrites Include="$(_WarrantCscArgsFile)" />
-    </ItemGroup>
   </Target>
 
   <!--

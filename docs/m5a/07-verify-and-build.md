@@ -51,7 +51,7 @@ Three details follow:
 ## `warrant verify`
 
 ```text
-warrant verify --csc-args <file> [--project-dir <dir>] [options]
+warrant verify --csc-args <file> [--project-dir <dir>] [--reference-source <record>]... [options]
 warrant verify <directory>       [options]                 # M4 corpus settings, like translate
 
 options:
@@ -85,6 +85,31 @@ In this format the summary is a record and is not also printed as a plain line.
 Exit codes are 0 when every theorem is proved (warnings allowed), 1 when at least one error was reported, and 2 for bad arguments or unreadable input, including a missing bundle and a missing or mismatched sidecar.
 A unit the engine could not translate or admit is WRT0010 and exits 1.
 
+### Types from referenced projects
+
+A `[Closed]` class defined in a referenced project reaches the compilation only as metadata, and its shape and construction checks need its source ([M4 chapter 3](../m4/03-extraction.md#closed-types)).
+So every project that imports `Warrant.Build` records its source after its compile, in `obj/<configuration>/<framework>/warrant.source`, even with `WarrantEnabled` set to `false` (#32):
+
+```text
+warrant-source 1
+assembly=Shapes
+args=C:\src\Shapes\obj\Debug\net10.0\warrant.csc.args
+project=C:\src\Shapes
+file=<SHA-256>|C:\src\Shapes\Color.cs
+```
+
+There is one `file=` line for the argument file and for every source, additional file and analyzer configuration the project's `Csc` read.
+`--reference-source` names a record, and the build passes one for each referenced project that wrote one.
+`Warrant.Frontend.ReferencedSource` hashes those files again, declines the run with WRT0012 if any differs or is missing from the record (`Color.cs changed since Shapes was compiled; build Shapes again`), and rebuilds the referenced compilation from its arguments, generators included.
+Its tree paths are relative to the verified project, so diagnostics about the referenced class point at its file.
+
+Extraction matches the referenced compilation to a reference by assembly identity, and then checks a closed class from it exactly as it checks one of its own: the same five steps, with step 4's scan over the class's own declarations, the only place its private constructors can be called.
+A record or open enum from a referenced project is still WRT0002 `type defined outside the compilation`, and so is a closed class whose project wrote no record; the message then says its project must import `Warrant.Build`.
+Each unit that uses such a class carries a `referenced-source` assumption: the referenced assembly is the one built from the source Warrant checked.
+Nothing compares the two directly. The record ties them only as far as the referenced project's build is trusted, which is the trust the verified project's own argument file already needs.
+A generator's assembly is not hashed, so a generator that changes while the files it reads stay the same is not noticed.
+The analyzer has no referenced source, so it reports nothing for such a class and leaves the check to the build.
+
 The reference used to list `warrant verify <project>`.
 Evaluating a project file needs MSBuild, so M5a takes the argument file the build writes, or a directory; a project mode is follow-up work, and the reference now says so.
 
@@ -95,19 +120,30 @@ The `Warrant.Build` package's targets, in outline:
 ```xml
 <PropertyGroup>
   <WarrantEnabled Condition="'$(WarrantEnabled)' == ''">true</WarrantEnabled>
-  <ProvideCommandLineArgs Condition="'$(WarrantEnabled)' == 'true'">true</ProvideCommandLineArgs>
+  <WarrantRecordSource Condition="'$(WarrantRecordSource)' == ''">true</WarrantRecordSource>
+  <ProvideCommandLineArgs Condition="'$(WarrantEnabled)' == 'true' or '$(WarrantRecordSource)' == 'true'">true</ProvideCommandLineArgs>
   <WarrantCliPath Condition="'$(WarrantCliPath)' == ''">$(MSBuildThisFileDirectory)..\tools\net10.0\any\warrant.dll</WarrantCliPath>
   <!-- _WarrantFirstTargetFramework and _WarrantMultiTargeted, computed from $(TargetFrameworks) -->
 </PropertyGroup>
 
-<Target Name="WarrantVerify" AfterTargets="CoreCompile"
-        Condition="'$(WarrantEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true'
-                   and ('$(TargetFrameworks)' == '' or '$(TargetFramework)' == '$(_WarrantFirstTargetFramework)')">
+<Target Name="_WarrantWriteCscArgs" Condition="...">
   <WriteLinesToFile Condition="'@(CscCommandLineArgs)' != ''"
                     File="$(IntermediateOutputPath)warrant.csc.args" Lines="@(CscCommandLineArgs)"
                     Overwrite="true" WriteOnlyWhenDifferent="true" />
+</Target>
+
+<!-- #32: GetFileHash over the argument file, @(Compile), @(AdditionalFiles) and @(EditorConfigFiles), then the record. -->
+<Target Name="WarrantRecordSource" AfterTargets="CoreCompile" DependsOnTargets="_WarrantWriteCscArgs" Condition="..." />
+
+<!-- #32: what Build and GetTargetPath return gets WarrantSourceRecord metadata, which reaches the consumer's ReferencePath. -->
+<Target Name="_WarrantSourceRecordMetadata" AfterTargets="GetTargetPathWithTargetPlatformMoniker" Condition="..." />
+
+<Target Name="WarrantVerify" AfterTargets="CoreCompile" DependsOnTargets="_WarrantWriteCscArgs;WarrantRecordSource"
+        Condition="'$(WarrantEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true'
+                   and ('$(TargetFrameworks)' == '' or '$(TargetFramework)' == '$(_WarrantFirstTargetFramework)')">
   <WarrantVerify CscArgsFile="$(IntermediateOutputPath)warrant.csc.args"
                  ProjectDirectory="$(MSBuildProjectDirectory)"
+                 ReferenceSources="@(ReferencePath->'%(WarrantSourceRecord)'->Distinct())"
                  CliPath="$(WarrantCliPath)" DotnetHostPath="$(DOTNET_HOST_PATH)"
                  KernelFuel="$(WarrantKernelFuel)" TacticFuel="$(WarrantTacticFuel)"
                  TimeoutSeconds="$(WarrantTimeoutSeconds)"

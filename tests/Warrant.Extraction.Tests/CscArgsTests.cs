@@ -316,4 +316,104 @@ public sealed class CscArgsTests : IDisposable
         var compilation = Compile("public static class C { public static int Original() => 0; [Verified] public static int F() => Original(); }");
         Assert.Empty(CompilationFactory.InterceptedCalls(compilation));
     }
+
+    /// <summary>
+    /// A source record as Warrant.Build writes it (#32): every file in the project except the reference pack, hashed
+    /// now, so the record covers what the arguments read.
+    /// </summary>
+    private string Record(string assembly = "Sample")
+    {
+        var lines = new List<string> { "warrant-source 1", $"assembly={assembly}", $"args={ArgsFile}", $"project={project}" };
+        foreach (var file in Directory.EnumerateFiles(project, "*", SearchOption.AllDirectories)
+            .Where(f => !f.StartsWith(Path.Combine(project, "refs"), StringComparison.Ordinal)))
+        {
+            using var stream = File.OpenRead(file);
+            lines.Add($"file={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant()}|{file}");
+        }
+        var record = Path.Combine(project, "warrant.source");
+        File.WriteAllLines(record, lines);
+        return record;
+    }
+
+    [Fact]
+    public void ARecordedSourceLoadsOnceWithPathsRelativeToTheVerifiedProject()
+    {
+        Compile("[Closed] public sealed class Color { private Color() { } public static Color Red { get; } = new(); }");
+        var source = ReferencedSource.Open(Record());
+        var consumer = Path.Combine(project, "app");
+
+        var compilation = source.Load(consumer);
+
+        Assert.Equal("Sample", source.AssemblyName);
+        Assert.Contains("../src/C.cs", compilation.SyntaxTrees.Select(t => t.FilePath));
+        Assert.NotNull(compilation.GetTypeByMetadataName("Color"));
+        Assert.Same(compilation, source.Load(consumer));
+    }
+
+    [Fact]
+    public void ASourceFileEditedAfterTheRecordIsDeclined()
+    {
+        Compile("public static class C { }");
+        var source = ReferencedSource.Open(Record());
+        File.AppendAllText(Path.Combine(project, "src", "C.cs"), "// edited" + Environment.NewLine);
+
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("C.cs changed since Sample was compiled; build Sample again", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASourceFileTheRecordDoesNotCoverIsDeclined()
+    {
+        Compile("public static class C { }");
+        var record = Record();
+        File.WriteAllLines(record, File.ReadAllLines(record).Where(l => !l.EndsWith("C.cs", StringComparison.Ordinal)));
+
+        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(record).Load(project));
+        Assert.Contains("C.cs, which Sample is compiled from, is not in the record", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnEditedArgumentFileIsDeclined()
+    {
+        Compile("public static class C { }");
+        var source = ReferencedSource.Open(Record());
+        File.AppendAllText(ArgsFile, Environment.NewLine + "/define:EXTRA" + Environment.NewLine);
+
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("sample.csc.args changed since Sample was compiled", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARecordNamingAnotherAssemblyIsDeclined()
+    {
+        Compile("public static class C { }");
+        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(Record("Other")).Load(project));
+        Assert.Contains("the arguments compile 'Sample', not 'Other'", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARecordedSourceThatDoesNotCompileIsDeclined()
+    {
+        Compile("public static class C { int F() => missing; }");
+        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(Record()).Load(project));
+        Assert.Contains("Sample's recorded source does not compile", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AWarningMadeAnErrorDoesNotFailTheCompilation()
+    {
+        // Csc may have suppressed it with a DiagnosticSuppressor, which Warrant does not run.
+        var (compilation, problems) = CompileWithArgs("public class C { public string S { get; set; } }", "/warnaserror+:Nullable");
+        Assert.Contains(compilation.GetDiagnostics(), d => d.IsWarningAsError);
+        Assert.Null(CompilationFactory.Failure(compilation, problems));
+    }
+
+    [Fact]
+    public void AFileThatIsNotARecordIsDeclined()
+    {
+        var notARecord = Path.Combine(project, "warrant.source");
+        File.WriteAllText(notARecord, "something else" + Environment.NewLine);
+        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(notARecord));
+        Assert.Contains("not a Warrant source record", e.Message, StringComparison.Ordinal);
+    }
 }

@@ -161,6 +161,22 @@ public sealed class WarrantVerifyTests : IDisposable
     }
 
     [Fact]
+    public void EachReferencedProjectsSourceRecordIsPassed()
+    {
+        // #32. The second path has a space, which must stay one argument.
+        fake.Script([Summary], exitCode: 0);
+        var first = Path.Combine(fake.ProjectDirectory, "Lib", "obj", "warrant.source");
+        var second = Path.Combine(fake.ProjectDirectory, "Other Lib", "obj", "warrant.source");
+        var task = Task();
+        task.ReferenceSources = [new Microsoft.Build.Utilities.TaskItem(first), new Microsoft.Build.Utilities.TaskItem(second)];
+
+        Assert.True(Run(task));
+
+        var args = Assert.Single(fake.Invocations());
+        Assert.Equal(["--reference-source", first, "--reference-source", second, "--format", "msbuild"], args.Skip(5).Take(6));
+    }
+
+    [Fact]
     public void WithoutAHostPathDotnetIsFoundOnThePath()
     {
         fake.Script([Summary], exitCode: 0);

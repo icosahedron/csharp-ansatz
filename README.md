@@ -60,10 +60,11 @@ solution. Its code isn't published here. Where that stands:
   shared library. Warrant checks the smart enum as a `[Closed]` class from the library's
   recorded source ([#32](https://github.com/icosahedron/csharp-ansatz/issues/32)): 8
   verified units.
-- **Proved:** the two theorems about specific inputs.
-- **Not proved yet:** the four theorems that quantify over every input. Their proof
-  scripts fail (`simp` makes no progress on the method's `if`s), so they need different
-  scripts rather than a new Warrant feature.
+- **Proved:** all six theorems. Two are about specific inputs. Four hold for every
+  input: the score's range, which inputs put a queue in each of the top two tiers,
+  and that adding one particular criterion always raises the score. Each of those four
+  proofs splits on the five flags and the smart enum's members, then lets
+  `simp` decide each case. A full run takes about 30 seconds.
 - **Other candidates:** of the other methods examined there, one fits the supported
   subset but hasn't been tried. The rest need `Math.Min` and `Math.Max`, `%`, `throw` or
   nullable values, which Warrant doesn't translate yet.

@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 using Warrant.Vir;
@@ -337,9 +338,9 @@ internal static class TypeChecks
 
         for (var t = type; t is not null && t.SpecialType != SpecialType.System_Object; t = t.BaseType)
         {
-            if (t.DeclaringSyntaxReferences.IsEmpty)
+            bool constructorsUnreadable = t.DeclaringSyntaxReferences.IsEmpty;
+            if (constructorsUnreadable)
             {
-                // A base class from another assembly: its constructors cannot be read.
                 return type.DeclaringSyntaxReferences[0].GetSyntax();
             }
             if (!SymbolEqualityComparer.Default.Equals(t, type) && t.StaticConstructors.FirstOrDefault(c => !c.IsImplicitlyDeclared) is { } cctor)
@@ -353,7 +354,7 @@ internal static class TypeChecks
                 {
                     var initializers = member switch
                     {
-                        BaseFieldDeclarationSyntax f when !f.Modifiers.Any(m => m.Text == "const") =>
+                        BaseFieldDeclarationSyntax f when !f.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)) =>
                             f.Declaration.Variables.Select(v => v.Initializer?.Value),
                         PropertyDeclarationSyntax p => [p.Initializer?.Value],
                         _ => [],
@@ -366,7 +367,7 @@ internal static class TypeChecks
                             return value;
                         }
                     }
-                    if (member is ConstructorDeclarationSyntax ctor && !ctor.Modifiers.Any(m => m.Text == "static")
+                    if (member is ConstructorDeclarationSyntax ctor && !ctor.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword))
                         && ConstructorCouldThrow(model, t, ctor) is { } throwing)
                     {
                         return throwing;

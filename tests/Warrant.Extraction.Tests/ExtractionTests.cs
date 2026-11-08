@@ -157,6 +157,9 @@ public class ExtractionTests
     [InlineData("public sealed class K : G<int> { public static K A { get; } = new(); private K() : base(0) { } } public abstract class G<T>(int y) { public int R { get; } = 100 / y; }", "constructor or initialiser that could throw")]
     [InlineData("public sealed class K : B { public static K A { get; } = new(1); private K(int x) : base(x) { } } public abstract class B(int x) { private readonly S _s = x; } public struct S { public static implicit operator S(int x) => throw new System.Exception(); }", "constructor or initialiser that could throw")]
     [InlineData("public sealed class K : G<int> { public static K A { get; } = new(0); private K(int p) : base(p) { } public override int X { get => 0; set => _ = 100 / value; } } public abstract class G<T> { protected G(int p) { X = p; } public virtual int X { get; set; } }", "constructor or initialiser that could throw")]
+    // Skipping a base's static initialisers relies on a base with a static constructor being rejected, including one
+    // declared in another partial part of a generic base the class instantiates.
+    [InlineData("public sealed class K : G<K> { public static K A { get; } = new(); private K() { } } public abstract partial class G<T> { private static readonly int Bad = int.Parse(\"x\"); } public abstract partial class G<T> { static G() { } }", "constructor or initialiser that could throw")]
     public void ClosedClassFailingAStepIsWrt0009NamingIt(string declaration, string step)
     {
         var result = Extract("[Closed]\n" + declaration);

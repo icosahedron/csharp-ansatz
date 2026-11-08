@@ -284,7 +284,7 @@ internal static class TypeChecks
                 ExpressionBody: null,
                 AccessorList: { } accessors,
                 Initializer: { } init,
-            } && accessors.Accessors.All(a => a.Body is null && a.ExpressionBody is null):
+            } && HasOnlyAutoAccessors(accessors):
                 return init.Value;
             case IFieldSymbol { IsReadOnly: true } when syntax is VariableDeclaratorSyntax { Initializer: { } init }:
                 return init.Value;
@@ -317,9 +317,12 @@ internal static class TypeChecks
     /// every instance constructor, a <c>this(...)</c> or <c>base(...)</c> call whose arguments are constants or parameters,
     /// and a body of assignments of constants or parameters to the class's own fields and auto-properties;
     /// </item>
+    /// <item>a base class's primary constructor passing only constants or parameters to its own base;</item>
     /// <item>no static constructor on a base class (the class's own is rejected by step 3), and every base class declared in source.</item>
     /// </list>
-    /// Implicit conversions that are not user-defined (widening, reference, boxing, nullable) cannot throw, so they are allowed.
+    /// An assignment to a virtual, abstract or overriding property is not allowed: it can dispatch to an override's setter.
+    /// Implicit identity, numeric, reference and nullable conversions that are not user-defined cannot throw, so they are
+    /// allowed; a user-defined conversion runs code, so it is not.
     /// </summary>
     private static SyntaxNode? ConstructionCouldThrow(
         ExtractionContext context, INamedTypeSymbol type, List<IObjectCreationOperation> creations, HashSet<(SyntaxTree, int, int)> instanceCreations)
@@ -330,7 +333,7 @@ internal static class TypeChecks
             {
                 return creation.Syntax;
             }
-            if (creation.Arguments.FirstOrDefault(a => !IsConstant(a.Value)) is { } argument)
+            if (creation.Arguments.FirstOrDefault(a => !IsConstant(a.Value) || a.InConversion.IsUserDefined) is { } argument)
             {
                 return argument.Syntax;
             }
@@ -350,19 +353,35 @@ internal static class TypeChecks
             foreach (var declaration in t.DeclaringSyntaxReferences.Select(r => r.GetSyntax()).OfType<TypeDeclarationSyntax>())
             {
                 var model = context.Model(declaration.SyntaxTree);
+
+                // A primary constructor's call to its base (the class's own primary constructor is rejected by step 2).
+                if (declaration.BaseList?.Types.OfType<PrimaryConstructorBaseTypeSyntax>().FirstOrDefault() is { } primaryBase)
+                {
+                    foreach (var argument in primaryBase.ArgumentList.Arguments)
+                    {
+                        if (model.GetOperation(argument) is not IArgumentOperation a || !IsConstantOrParameter(a.Value) || a.InConversion.IsUserDefined)
+                        {
+                            return argument;
+                        }
+                    }
+                }
+
                 foreach (var member in declaration.Members)
                 {
                     var initializers = member switch
                     {
                         BaseFieldDeclarationSyntax f when !f.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)) =>
-                            f.Declaration.Variables.Select(v => v.Initializer?.Value),
-                        PropertyDeclarationSyntax p => [p.Initializer?.Value],
+                            f.Declaration.Variables.Select(v => v.Initializer),
+                        PropertyDeclarationSyntax p => [p.Initializer],
                         _ => [],
                     };
-                    foreach (var value in initializers.OfType<ExpressionSyntax>())
+                    foreach (var clause in initializers.OfType<EqualsValueClauseSyntax>())
                     {
+                        // The initialiser operation's value includes the conversion to the member's type, which may be
+                        // user-defined; the expression's own operation does not.
+                        var value = clause.Value;
                         if (!instanceCreations.Contains((value.SyntaxTree, value.SpanStart, value.Span.Length))
-                            && !IsConstant(model.GetOperation(value)))
+                            && !(model.GetOperation(clause) is ISymbolInitializerOperation init && IsConstant(init.Value)))
                         {
                             return value;
                         }
@@ -394,7 +413,7 @@ internal static class TypeChecks
             {
                 return initializer.Syntax;
             }
-            if (invocation.Arguments.FirstOrDefault(a => !IsConstantOrParameter(a.Value)) is { } argument)
+            if (invocation.Arguments.FirstOrDefault(a => !IsConstantOrParameter(a.Value) || a.InConversion.IsUserDefined) is { } argument)
             {
                 return argument.Syntax;
             }
@@ -413,12 +432,19 @@ internal static class TypeChecks
 
     private static ImmutableArray<IOperation> Statements(IBlockOperation? block) => block?.Operations ?? ImmutableArray<IOperation>.Empty;
 
-    /// <summary>Whether an assignment target is a field, or a compiler-written auto-property, of <c>this</c> declared on the owner.</summary>
+    /// <summary>
+    /// Whether an assignment target is a field, or a compiler-written auto-property that no override can replace, of
+    /// <c>this</c> declared on the owner.
+    /// </summary>
     private static bool IsOwnStorage(INamedTypeSymbol owner, IOperation target) => target switch
     {
         IFieldReferenceOperation { Instance: IInstanceReferenceOperation, Field: { IsStatic: false } field } =>
             SymbolEqualityComparer.Default.Equals(field.ContainingType, owner),
-        IPropertyReferenceOperation { Instance: IInstanceReferenceOperation, Property: { IsStatic: false, Parameters.IsEmpty: true } property } =>
+        IPropertyReferenceOperation
+        {
+            Instance: IInstanceReferenceOperation,
+            Property: { IsStatic: false, IsVirtual: false, IsAbstract: false, IsOverride: false, Parameters.IsEmpty: true } property,
+        } =>
             SymbolEqualityComparer.Default.Equals(property.ContainingType, owner) && IsAutoProperty(owner, property),
         _ => false,
     };
@@ -428,7 +454,11 @@ internal static class TypeChecks
         owner.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property))
         && property.DeclaringSyntaxReferences.Length == 1
         && property.DeclaringSyntaxReferences[0].GetSyntax() is PropertyDeclarationSyntax { ExpressionBody: null, AccessorList: { } accessors }
-        && accessors.Accessors.All(a => a.Body is null && a.ExpressionBody is null);
+        && HasOnlyAutoAccessors(accessors);
+
+    /// <summary>Whether no accessor has a body, as in a compiler-written auto-property.</summary>
+    private static bool HasOnlyAutoAccessors(AccessorListSyntax accessors) =>
+        accessors.Accessors.All(a => a.Body is null && a.ExpressionBody is null);
 
     private static bool IsConstant(IOperation? op) =>
         op is { ConstantValue.HasValue: true } || WithoutSafeConversions(op) is { ConstantValue.HasValue: true };

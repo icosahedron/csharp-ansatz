@@ -133,10 +133,11 @@ A `[Closed]` class is accepted if it has the closed shape (design D13), checked 
    Until M6 models exceptions, only code that cannot throw is allowed, on the class and on each of its base classes:
    - the static instances' `new(...)` calls, with constant arguments and no object initialiser;
    - every other field, property or event initialiser, static or not, a constant;
-   - each instance constructor, a `this(...)` or `base(...)` call whose arguments are constants or parameters, then only assignments of constants or parameters to the class's own fields and auto-properties;
+   - each instance constructor, a `this(...)` or `base(...)` call whose arguments are constants or parameters, then only assignments of constants or parameters to the class's own fields and auto-properties that no override can replace (not `virtual`, `abstract` or `override`, whose setter could be an override's);
+   - a base class's primary constructor passing only constants or parameters to its own base;
    - no static constructor on a base class, and no base class from another assembly, whose constructors cannot be read.
 
-   Implicit identity, numeric, reference and nullable conversions are allowed, because none of them throws.
+   Implicit identity, numeric, reference and nullable conversions are allowed, because none of them throws; a user-defined conversion runs code (`static readonly System.Index Start = -1` throws), so it is not.
 4. The private constructors are called nowhere else, so no other instance can be created without reflection.
 5. There is at least one such member.
 
@@ -160,7 +161,7 @@ Each unit collects the assumptions its translation relies on, for the assumption
   A record parameter that the method reads throws `NullReferenceException` at the first member access; a closed-class value is only ever compared, so `null` simply behaves as one more value the model does not have.
   A parameter annotated nullable (`Payment?`) is rejected until M6 brings `Option`.
 - **Closed values.** For each `[Closed]` type the unit uses: only its named members exist, and for a class with its own equality, that equality agrees with identity.
-- **Global.** The semantics bundle, and the overflow setting the unit was translated under.
+- **Global.** The semantics bundle, the overflow setting the unit was translated under, and that the only axioms are Lean's standard three (chapter 1).
   They are the same for every unit in a run, and the report lists them under "Assumed (global)" (chapter 7).
 
 ## Diagnostics

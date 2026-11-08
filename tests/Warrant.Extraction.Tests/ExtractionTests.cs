@@ -144,6 +144,15 @@ public class ExtractionTests
     [InlineData("public sealed class K : B { public static K A { get; } = new(); private K() { } } public abstract class B { protected B() => throw new System.Exception(); }", "constructor or initialiser that could throw")]
     [InlineData("public sealed class K : B { public static K A { get; } = new(); private K() { } } public abstract class B { static B() { } }", "constructor or initialiser that could throw")]
     [InlineData("public sealed class K : System.Collections.ArrayList { public static K A { get; } = new(); private K() { } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(); private K() { } private static readonly System.Index Start = -1; }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(1); private K(S s) { } } public struct S { public static implicit operator S(int x) => throw new System.Exception(); }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(); private K() { } public int P { get; } = int.Parse(\"1\"); }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(1L); private K(long x) => X = (int)x; public int X { get; } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : B { public static K A { get; } = new(); private K() : base(0) { } } public abstract class B(int y) : A0(100 / y) { } public abstract class A0 { protected A0(int x) { } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : B { public static K A { get; } = new(0); private K(int p) : base(p) { } public override int X { get => 0; set => _ = 100 / value; } } public abstract class B { protected B(int p) { X = p; } public virtual int X { get; set; } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : B { public static K A { get; } = new(); private K() { } } public abstract class B { private readonly int _x = int.Parse(\"x\"); }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : B { public static K A { get; } = new(); private K() { F = 1; } } public abstract class B { protected int F; }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K { public static K A { get; } = new(); private K() { } private readonly object _boxed = 5; }", "constructor or initialiser that could throw")]
     public void ClosedClassFailingAStepIsWrt0009NamingIt(string declaration, string step)
     {
         var result = Extract("[Closed]\n" + declaration);
@@ -154,6 +163,7 @@ public class ExtractionTests
     [Theory]
     [InlineData("public sealed class K { public static K A { get; } = new(\"a\", 1); public static readonly K B = new(null, 2); private K(string? name, long rank) { Name = name; _rank = rank; } public string? Name { get; } private readonly long _rank; }")]
     [InlineData("public sealed class K { public static K A { get; } = new(); private K() : this(\"a\", 1 + 2) { } private K(string name, int rank) => Rank = rank; public int Rank { get; } private const int Max = 10; private static readonly int Limit = Max * 2; private readonly string _label = \"x\"; }")]
+    [InlineData("public sealed class K : B { public static K A { get; } = new(3); private K(int r) : base(r) => _rank = r; private readonly long _rank; } public abstract class B(int y) : A0(y) { } public abstract class A0 { protected A0(int x) { Rank = x; } public int Rank { get; } }")]
     public void ClosedClassWhoseConstructionCannotThrowIsAccepted(string declaration)
     {
         var result = Extract("[Closed]\n" + declaration + "\npublic static class C { [Verified] public static bool Same(K a, K b) => a == b; }");
@@ -189,6 +199,35 @@ public class ExtractionTests
         Assert.Equal("WRT0002 | record field of a closed class with its own equality", Only(result, "T:MaybeTagged"));
         Assert.Equal("WRT0002 | depends on a rejected unit", Only(result, "M:C.Same(Tagged,Tagged)"));
         Assert.Empty(result.DiagnosticsFor("T:Level"));
+    }
+
+    [Fact]
+    public void RecordFieldOfAClosedClassThatInheritsItsEqualityIsRejected()
+    {
+        var result = Extract("""
+            public abstract class Ranked
+            {
+                protected Ranked(int rank) => Rank = rank;
+                public int Rank { get; }
+                public override bool Equals(object? obj) => obj is Ranked r && r.Rank == Rank;
+                public override int GetHashCode() => Rank;
+            }
+
+            [Closed]
+            public sealed class Level : Ranked
+            {
+                public static Level Low { get; } = new(1);
+                private Level(int rank) : base(rank) { }
+            }
+
+            public sealed record Tagged(Level Level);
+
+            public static class C
+            {
+                [Verified] public static bool Same(Tagged a, Tagged b) => a == b;
+            }
+            """);
+        Assert.Equal("WRT0002 | record field of a closed class with its own equality", Only(result, "T:Tagged"));
     }
 
     [Fact]

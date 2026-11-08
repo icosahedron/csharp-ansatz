@@ -153,6 +153,10 @@ public class ExtractionTests
     [InlineData("public sealed class K : B { public static K A { get; } = new(); private K() { } } public abstract class B { private readonly int _x = int.Parse(\"x\"); }", "constructor or initialiser that could throw")]
     [InlineData("public sealed class K : B { public static K A { get; } = new(); private K() { F = 1; } } public abstract class B { protected int F; }", "constructor or initialiser that could throw")]
     [InlineData("public sealed class K { public static K A { get; } = new(); private K() { } private readonly object _boxed = 5; }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : G<int> { public static K A { get; } = new(); private K() : base(0) { } } public abstract class G<T>(int y) : A0(100 / y) { } public abstract class A0 { protected A0(int x) { } }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : G<int> { public static K A { get; } = new(); private K() : base(0) { } } public abstract class G<T>(int y) { public int R { get; } = 100 / y; }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : B { public static K A { get; } = new(1); private K(int x) : base(x) { } } public abstract class B(int x) { private readonly S _s = x; } public struct S { public static implicit operator S(int x) => throw new System.Exception(); }", "constructor or initialiser that could throw")]
+    [InlineData("public sealed class K : G<int> { public static K A { get; } = new(0); private K(int p) : base(p) { } public override int X { get => 0; set => _ = 100 / value; } } public abstract class G<T> { protected G(int p) { X = p; } public virtual int X { get; set; } }", "constructor or initialiser that could throw")]
     public void ClosedClassFailingAStepIsWrt0009NamingIt(string declaration, string step)
     {
         var result = Extract("[Closed]\n" + declaration);
@@ -164,6 +168,30 @@ public class ExtractionTests
     [InlineData("public sealed class K { public static K A { get; } = new(\"a\", 1); public static readonly K B = new(null, 2); private K(string? name, long rank) { Name = name; _rank = rank; } public string? Name { get; } private readonly long _rank; }")]
     [InlineData("public sealed class K { public static K A { get; } = new(); private K() : this(\"a\", 1 + 2) { } private K(string name, int rank) => Rank = rank; public int Rank { get; } private const int Max = 10; private static readonly int Limit = Max * 2; private readonly string _label = \"x\"; }")]
     [InlineData("public sealed class K : B { public static K A { get; } = new(3); private K(int r) : base(r) => _rank = r; private readonly long _rank; } public abstract class B(int y) : A0(y) { } public abstract class A0 { protected A0(int x) { Rank = x; } public int Rank { get; } }")]
+    // #47: a primary-constructor parameter in an instance initialiser, a base class's non-constant static initialisers
+    // (beforefieldinit: they run on first static-field access, not on construction), and generic base classes.
+    [InlineData("public sealed class K : B { public static K A { get; } = new(1); private K(int x) : base(x) { } } public abstract class B(int x) { public int X { get; } = x; private readonly int _y = x; }")]
+    [InlineData("public sealed class K : B { public static K A { get; } = new(); private K() { } } public abstract class B { private static readonly int Parsed = int.Parse(\"x\"); public static System.Lazy<int> L { get; } = new(() => 1); }")]
+    [InlineData("""
+        public sealed class K : StringSet<K>
+        {
+            public static K Low { get; } = new();
+            public static K High { get; } = new();
+            private K([System.Runtime.CompilerServices.CallerMemberName] string name = "") : base(name) { }
+        }
+        public abstract class StringSet<T>(string value) : SetBase<T, string>(value) where T : StringSet<T>
+        {
+            private static readonly System.Lazy<System.Collections.Generic.Dictionary<string, T>> ByName = new(() => new());
+        }
+        public abstract class SetBase<T, TValue>(TValue value) : System.IEquatable<T> where T : SetBase<T, TValue>
+        {
+            private static readonly System.Lazy<System.Collections.Generic.List<T>> All = new(() => new());
+            public TValue Value { get; } = value;
+            public bool Equals(T? other) => other is not null && System.Collections.Generic.EqualityComparer<TValue>.Default.Equals(Value, other.Value);
+            public override bool Equals(object? o) => o is T t && Equals(t);
+            public override int GetHashCode() => Value!.GetHashCode();
+        }
+        """)]
     public void ClosedClassWhoseConstructionCannotThrowIsAccepted(string declaration)
     {
         var result = Extract("[Closed]\n" + declaration + "\npublic static class C { [Verified] public static bool Same(K a, K b) => a == b; }");

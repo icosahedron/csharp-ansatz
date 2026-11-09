@@ -10,9 +10,9 @@ namespace Warrant.Frontend;
 /// verified sees only as metadata. Every project that imports <c>Warrant.Build</c> writes a record after its compile:
 /// <c>obj/&lt;configuration&gt;/&lt;framework&gt;/warrant.source</c>, holding its assembly name, its compiler arguments and the
 /// SHA-256 of every file those arguments read, hashed before and after the compile and written only when both agree.
-/// <see cref="Load"/> hashes those files again and declines if any differs, so the source checked is the source the
-/// referenced assembly was compiled from, unless a file changed and changed back in between. The files include the
-/// assemblies the arguments reference and the analyzers and generators they load (#51).
+/// <see cref="Load"/> reads those files, hashes them and declines if any differs, then compiles from the bytes it hashed
+/// (#127), so the source checked is the source the referenced assembly was compiled from. The files include the assemblies
+/// the arguments reference and the analyzers and generators they load (#51).
 /// </summary>
 /// <remarks>
 /// The record's format, one entry per line, as <c>Warrant.Build.targets</c> writes it:
@@ -141,18 +141,37 @@ public sealed class ReferencedSource
         // beside them, which the generator loader resolves their dependencies from (#51). Each must be in the record with
         // the hash it had when the assembly was compiled. A reference decides what the source means (a base class, a
         // constant) and a generator adds source, so either changing changes what is checked.
-        var files = ReadFiles(CompilationFactory.ParseCscArgs(Checked(_argsFile), _project));
-        foreach (var file in files)
+        //
+        // Each file is read once, and the compilation is built from the bytes that were hashed (#127): an edit after the
+        // check cannot reach it. The one exception is Roslyn's AnalyzerFileReference, which reads an analyzer's metadata from
+        // disk to find its generator types (the code it runs comes from these bytes), so the analyzers are hashed again
+        // once the generators have run.
+        var snapshot = new Dictionary<string, byte[]>(PathComparer);
+        byte[] Read(string path)
         {
-            Checked(file);
+            var full = Path.GetFullPath(path);
+            if (!snapshot.TryGetValue(full, out var bytes))
+            {
+                snapshot[full] = bytes = Checked(full);
+            }
+            return bytes;
         }
 
-        // The compilation reads the files again, so they are checked again once it is built and its generators have run:
-        // an edit in between is caught, unless it was undone before the second check, as for any edit (the summary).
-        var compilation = CompilationFactory.FromCscArgs(_argsFile, _project, pathBase, out var generatorProblems);
-        foreach (var file in ReadFiles(CompilationFactory.ParseCscArgs(Checked(_argsFile), _project)).Concat(files).Distinct(PathComparer))
+        var argsLines = CompilationFactory.Lines(Read(_argsFile));
+        if (argsLines.Any(l => l.StartsWith('@')))
         {
-            Checked(file);
+            throw new InvalidDataException($"{_argsFile}: a response file (@file) is not covered by {AssemblyName}'s source record");
+        }
+        var args = CompilationFactory.ParseCscArgs(_argsFile, argsLines, _project);
+        foreach (var file in ReadFiles(args))
+        {
+            Read(file);
+        }
+
+        var compilation = CompilationFactory.FromCscArgs(_argsFile, _project, pathBase, Read, out var generatorProblems);
+        foreach (var analyzer in Analyzers(args))
+        {
+            Checked(analyzer);
         }
         if (!string.Equals(compilation.AssemblyName, AssemblyName, StringComparison.Ordinal))
         {
@@ -166,19 +185,14 @@ public sealed class ReferencedSource
     }
 
     /// <summary>The full paths of the files an argument list makes the compiler and the generator loader read.</summary>
-    /// <exception cref="InvalidDataException">The arguments name a response file, which the record does not cover.</exception>
     private List<string> ReadFiles(CSharpCommandLineArguments args)
     {
-        if (File.ReadAllLines(_argsFile, Encoding.UTF8).Any(l => l.StartsWith('@')))
-        {
-            throw new InvalidDataException($"{_argsFile}: a response file (@file) is not covered by {AssemblyName}'s source record");
-        }
         var read = new List<string>();
         read.AddRange(args.SourceFiles.Select(f => f.Path));
         read.AddRange(args.AdditionalFiles.Select(f => f.Path));
         read.AddRange(args.AnalyzerConfigPaths);
         read.AddRange(args.MetadataReferences.Select(r => r.Reference));
-        foreach (var analyzer in args.AnalyzerReferences.Select(r => Path.GetFullPath(Path.Combine(_project, r.FilePath))))
+        foreach (var analyzer in Analyzers(args))
         {
             read.Add(analyzer);
             if (Path.GetDirectoryName(analyzer) is { } directory && Directory.Exists(directory))
@@ -189,26 +203,32 @@ public sealed class ReferencedSource
         return read.Select(f => Path.GetFullPath(Path.Combine(_project, f))).Distinct(PathComparer).Order(PathComparer).ToList();
     }
 
-    private string Checked(string file)
+    private IEnumerable<string> Analyzers(CSharpCommandLineArguments args) =>
+        args.AnalyzerReferences.Select(r => Path.GetFullPath(Path.Combine(_project, r.FilePath))).Distinct(PathComparer);
+
+    /// <summary>A file's bytes, read once, after checking that they hash to what the record says.</summary>
+    private byte[] Checked(string full)
     {
-        var full = Path.GetFullPath(file);
         if (!_hashes.TryGetValue(full, out var recorded))
         {
             throw new InvalidDataException($"{_recordPath}: {full}, which {AssemblyName} is compiled from, is not in the record; build {AssemblyName} again");
         }
-        if (!File.Exists(full) || !string.Equals(Sha256(full), recorded, StringComparison.OrdinalIgnoreCase))
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(full);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidDataException($"{full} changed since {AssemblyName} was compiled; build {AssemblyName} again", e);
+        }
+        if (!string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), recorded, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException($"{full} changed since {AssemblyName} was compiled; build {AssemblyName} again");
         }
-        return full;
+        return bytes;
     }
 
     private static StringComparer PathComparer =>
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-
-    private static string Sha256(string path)
-    {
-        using var stream = File.OpenRead(path);
-        return Convert.ToHexString(SHA256.HashData(stream));
-    }
 }

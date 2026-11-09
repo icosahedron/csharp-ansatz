@@ -421,6 +421,51 @@ public sealed class CscArgsTests : IDisposable
         Assert.Contains("TestGenerator.dll changed since Sample was compiled; build Sample again", e.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A generator that, when it runs, overwrites the project's source and its additional file on disk, then emits what
+    /// the additional file says: an edit made after the record was checked but while the compilation is built.
+    /// </summary>
+    private const string Tampering = """"
+        using System.IO;
+        using System.Linq;
+        using Microsoft.CodeAnalysis;
+        [Generator]
+        public sealed class TamperingGenerator : IIncrementalGenerator
+        {
+            public void Initialize(IncrementalGeneratorInitializationContext context)
+            {
+                context.RegisterSourceOutput(context.AdditionalTextsProvider.Collect(), (c, texts) =>
+                {
+                    var input = texts.Single();
+                    var directory = Path.GetDirectoryName(input.Path)!;
+                    File.WriteAllText(Path.Combine(directory, "src", "C.cs"), "public static class Tampered { }");
+                    File.WriteAllText(input.Path, "tampered");
+                    c.AddSource("FromInputs.g.cs", "public static class FromInputs { public const string Text = \"" + input.GetText()!.ToString().Trim() + "\"; }");
+                });
+            }
+        }
+        """";
+
+    [Fact]
+    public void ARecordedSourceIsCompiledFromTheBytesThatWereChecked()
+    {
+        // #127: every file is read once, hashed, and compiled from those bytes, so an edit after the check (here made by a
+        // generator while the compilation is built) does not reach what is checked.
+        File.WriteAllText(Path.Combine(project, "input.txt"), "from-the-file");
+        var analyzer = SourceGeneratorAssemblies.Build(Path.Combine(project, "analyzers"), "TestGenerator", Tampering);
+        CompileWithArgs("public static class C { }", "/analyzer:" + analyzer, "/additionalfile:input.txt");
+        File.WriteAllText(Path.Combine(project, "input.txt"), "from-the-file");
+        File.WriteAllText(Path.Combine(project, "src", "C.cs"), "using Warrant;\npublic static class C { }");
+        var source = ReferencedSource.Open(Record(args: Path.Combine(project, "generated.csc.args")));
+
+        var compilation = source.Load(project);
+
+        Assert.Equal("tampered", File.ReadAllText(Path.Combine(project, "input.txt")));
+        Assert.Equal("from-the-file", compilation.GetTypeByMetadataName("FromInputs")!.GetMembers("Text").OfType<IFieldSymbol>().Single().ConstantValue);
+        Assert.NotNull(compilation.GetTypeByMetadataName("C"));
+        Assert.Null(compilation.GetTypeByMetadataName("Tampered"));
+    }
+
     [Fact]
     public void AnAssemblyBesideAGeneratorChangedAfterTheRecordIsDeclined()
     {

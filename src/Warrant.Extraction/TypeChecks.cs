@@ -354,7 +354,13 @@ internal static class TypeChecks
     /// <summary>The object creation an initialiser consists of, if it creates an instance of the type.</summary>
     private static IObjectCreationOperation? Creation(ExtractionContext context, ExpressionSyntax initializer, INamedTypeSymbol type)
     {
-        var op = context.Model(initializer.SyntaxTree).GetOperation(initializer);
+        // C# has no operation for parentheses, so they are removed first (#126).
+        var expression = initializer;
+        while (expression is ParenthesizedExpressionSyntax parenthesized)
+        {
+            expression = parenthesized.Expression;
+        }
+        var op = context.Model(expression.SyntaxTree).GetOperation(expression);
         while (op is IConversionOperation { IsImplicit: true } c)
         {
             op = c.Operand;
@@ -447,9 +453,16 @@ internal static class TypeChecks
                         // The initialiser operation's value includes the conversion to the member's type, which may be
                         // user-defined; the expression's own operation does not.
                         var value = clause.Value;
+                        // A static instance's creation is recorded by its own span, which parentheses around it do not
+                        // share (#126).
+                        var creation = value;
+                        while (creation is ParenthesizedExpressionSyntax parenthesized)
+                        {
+                            creation = parenthesized.Expression;
+                        }
                         // An instance initialiser stores into the backing field directly, so a primary-constructor parameter is
                         // as safe there as in a constructor body; a static initialiser has no parameters to read.
-                        if (!instanceCreations.Contains((value.SyntaxTree, value.SpanStart, value.Span.Length))
+                        if (!instanceCreations.Contains((creation.SyntaxTree, creation.SpanStart, creation.Span.Length))
                             && !(model.GetOperation(clause) is ISymbolInitializerOperation init
                                 && (isStatic ? IsConstant(init.Value) : IsConstantOrParameter(init.Value))))
                         {

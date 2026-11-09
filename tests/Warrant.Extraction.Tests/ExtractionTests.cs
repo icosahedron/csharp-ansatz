@@ -184,6 +184,8 @@ public class ExtractionTests
     [Theory]
     [InlineData("public sealed class K { public static K A { get; } = new(\"a\", 1); public static readonly K B = new(null, 2); private K(string? name, long rank) { Name = name; _rank = rank; } public string? Name { get; } private readonly long _rank; }")]
     [InlineData("public sealed class K { public static K A { get; } = new(); private K() : this(\"a\", 1 + 2) { } private K(string name, int rank) => Rank = rank; public int Rank { get; } private const int Max = 10; private static readonly int Limit = Max * 2; private readonly string _label = \"x\"; }")]
+    // #126: a static instance's creation in parentheses.
+    [InlineData("public sealed class K { public static readonly K A = (new K(1)); public static K B { get; } = ((new(2))); private K(int x) => X = x; public int X { get; } }")]
     [InlineData("public sealed class K : B { public static K A { get; } = new(3); private K(int r) : base(r) => _rank = r; private readonly long _rank; } public abstract class B(int y) : A0(y) { } public abstract class A0 { protected A0(int x) { Rank = x; } public int Rank { get; } }")]
     // #55: an [UnsafeAccessor] that constructs another type or reaches its field, and a MemberwiseClone of another type.
     [InlineData("public sealed class K { public static K A { get; } = new(); private K() { } } public sealed class O { private int _x; } public static class H { [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field, Name = \"_x\")] public static extern ref int X(O o); }")]

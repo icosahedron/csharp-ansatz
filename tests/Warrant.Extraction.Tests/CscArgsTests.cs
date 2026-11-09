@@ -254,6 +254,94 @@ public sealed class CscArgsTests : IDisposable
         Assert.Contains(compilation.SyntaxTrees, t => t.FilePath.EndsWith("Added.g.cs", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A generator whose output depends on the paths it sees (#54): it reports the path of the tree declaring <c>Color</c>,
+    /// and adds a public constructor to <c>Color</c> when that path is a full path, as Csc gives it.
+    /// </summary>
+    private const string PathDependent = """"
+        using System.IO;
+        using System.Linq;
+        using Microsoft.CodeAnalysis;
+        [Generator]
+        public sealed class PathGenerator : IIncrementalGenerator
+        {
+            public void Initialize(IncrementalGeneratorInitializationContext context)
+            {
+                context.RegisterSourceOutput(context.CompilationProvider, (c, compilation) =>
+                {
+                    var tree = compilation.SyntaxTrees.First(t => t.ToString().Contains("class Color"));
+                    var constructor = Path.IsPathRooted(tree.FilePath) ? "public Color(int x) { }" : "";
+                    c.AddSource("Paths.g.cs",
+                        "public static class SeenPath { public const string Value = @\"" + tree.FilePath + "\"; }\n"
+                        + "public sealed partial class Color { " + constructor + " }");
+                });
+            }
+        }
+        """";
+
+    [Fact]
+    public void GeneratorsSeeTheTreePathsCscGivesThemAndTheTreesAreThenNamedRelatively()
+    {
+        // #54: Csc gives generators each source's full path, and names their output under the output directory. A
+        // generator keyed on a path must produce here what it produced in the build, or the closed class checked is not
+        // the one compiled: here the constructor it adds when it sees a full path makes Color not closed.
+        var (compilation, problems) = CompileWithGenerator(PathDependent, """
+            [Closed]
+            public sealed partial class Color
+            {
+                public static Color Red { get; } = new();
+                private Color() { }
+            }
+            """);
+        Assert.Empty(problems);
+        Assert.Null(CompilationFactory.Failure(compilation, problems));
+
+        var seen = compilation.GetTypeByMetadataName("SeenPath")!.GetMembers("Value").OfType<IFieldSymbol>().Single().ConstantValue;
+        Assert.Equal(Path.Combine(project, "src", "C.cs"), seen);
+        Assert.Contains("src/C.cs", compilation.SyntaxTrees.Select(t => t.FilePath));
+        Assert.Contains("bin/TestGenerator/PathGenerator/Paths.g.cs", compilation.SyntaxTrees.Select(t => t.FilePath));
+        Assert.Equal("WRT0009 | constructor that is not private", Only(Extractor.Extract(compilation, new ExtractionOptions { BuildDefines = true }), "T:Color"));
+    }
+
+    /// <summary>An interceptor of the older form, which names the intercepted call's file by the path the generator saw.</summary>
+    private const string InterceptingByPath = """"
+        using System.Linq;
+        using Microsoft.CodeAnalysis;
+        using Microsoft.CodeAnalysis.CSharp.Syntax;
+        [Generator]
+        public sealed class PathInterceptor : IIncrementalGenerator
+        {
+            public void Initialize(IncrementalGeneratorInitializationContext context)
+            {
+                context.RegisterSourceOutput(context.CompilationProvider, (c, compilation) =>
+                {
+                    var call = compilation.SyntaxTrees.SelectMany(t => t.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()).First();
+                    var name = ((MemberAccessExpressionSyntax)call.Expression).Name.GetLocation().GetLineSpan();
+                    c.AddSource("Intercept.g.cs",
+                        "namespace System.Runtime.CompilerServices { [System.AttributeUsage(System.AttributeTargets.Method, AllowMultiple = true)] file sealed class InterceptsLocationAttribute(string filePath, int line, int character) : System.Attribute { } }\n"
+                        + "namespace Microsoft.Extensions.Validation.Generated { static class Interceptors { [System.Runtime.CompilerServices.InterceptsLocation(@\"" + call.SyntaxTree.FilePath + "\", "
+                        + (name.StartLinePosition.Line + 1) + ", " + (name.StartLinePosition.Character + 1) + ")] public static int G() => 2; } }");
+                });
+            }
+        }
+        """";
+
+    [Fact]
+    public void AnInterceptorThatNamesItsFileByPathFailsClosed()
+    {
+        // #54: after the generators run, the trees are renamed relative to the project, so an interceptor that wrote the
+        // full path it saw no longer matches a file, and the compilation fails (WRT0012). Before #54 it compiled, and the
+        // intercepted call was rejected in verified code; neither passes silently.
+        var (compilation, problems) = CompileWithGenerator(
+            InterceptingByPath,
+            "public static class C { public static int F() => 1; [Verified] public static int H() => C.F(); }");
+
+        Assert.Empty(problems);
+        var failure = CompilationFactory.Failure(compilation, problems);
+        Assert.NotNull(failure);
+        Assert.Contains("Cannot intercept: compilation does not contain a file with path", failure.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AGeneratorThatThrowsIsNamedInTheFailure()
     {

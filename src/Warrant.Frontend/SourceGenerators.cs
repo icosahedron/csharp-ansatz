@@ -32,6 +32,9 @@ internal static class SourceGenerators
     /// files. Roslyn's <see cref="AnalyzerFileReference"/> still reads an analyzer's metadata from disk itself to find its
     /// generator types; the code that runs is what <paramref name="read"/> returns.
     /// </param>
+    /// <param name="generatedBaseDirectory">
+    /// The directory the generated trees' paths start with, as Csc names them (#54), or null for paths relative to nothing.
+    /// </param>
     /// <returns>The compilation with the generated trees, and the problems that kept a generator from running.</returns>
     public static (CSharpCompilation Compilation, IReadOnlyList<string> Problems) Run(
         CSharpCompilation compilation,
@@ -40,7 +43,8 @@ internal static class SourceGenerators
         AnalyzerConfigSet? configs,
         CSharpParseOptions parseOptions,
         string projectDirectory,
-        Func<string, byte[]> read)
+        Func<string, byte[]> read,
+        string? generatedBaseDirectory)
     {
         if (analyzers.Count == 0)
         {
@@ -74,7 +78,8 @@ internal static class SourceGenerators
 
         var texts = additionalFiles.Select(p => (AdditionalText)new FileText(p, read)).ToImmutableArray();
         var options = new ConfigOptionsProvider(configs, projectDirectory);
-        GeneratorDriver driver = CSharpGeneratorDriver.Create(generators, texts, parseOptions, options);
+        var driverOptions = new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: false, generatedBaseDirectory);
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(generators, texts, parseOptions, options, driverOptions);
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updated, out var diagnostics);
 
         // A generator that throws is reported as a warning (CS8784, CS8785) and its output dropped, so the compilation

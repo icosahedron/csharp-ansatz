@@ -37,6 +37,22 @@ the raw JSON. These are the values asserted in `ReaderCorpusTests`.
 | `sparse-name-index` | 1 | 0 | 1 | 1 | 1/0/0/0/0/0/0/0 = 1 |
 | `warrant-semantics` | 17,414 | 83 | 203,490 | 2,927 | 3/1136/1655/1/4/128/153/130 = 3,210 |
 
+### The `Std.Do` roots (M6 U1)
+
+M6's `Std.Do` section of `lean/bundle-roots.txt` grew the bundle from 2,835 to 3,210 constants (2,599 to 2,927
+declaration records), with no new axiom. M6 KTD3 keeps the bundle a verified load while server start stays under 5 s.
+Measured on 2026-11-09 with `scripts/measure-m5b.sh` and seven alternating cold starts of each bundle
+(`warrant verify tests/corpus/m5a/rejected --server auto --timings`, "started the server and connected in"), on Linux
+with 4 logical cores and the .NET 10.0.403 SDK:
+
+| Bundle | Server start, median (range) | GC heap after start |
+|---|---|---|
+| M5b, 2,835 constants | 4,318 ms (4,231–4,538) | 41 MB |
+| M6 U1, 3,210 constants | 4,775 ms (4,710–4,896) | 62 MB |
+
+The new roots cost about 460 ms (11%) of start time here. The M5b baseline on the 32-core Windows machine of
+docs/m5b/08 was 2.9 s, so the same share puts it near 3.2 s. Warm, cached and rechecked requests did not change.
+
 Regenerate `warrant-semantics.ndjson.gz` with `scripts/export-semantics.sh` after changing `lean/`.
 The export is deterministic: an unchanged library gives a byte-identical file.
 

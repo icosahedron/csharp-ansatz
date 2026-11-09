@@ -10,14 +10,14 @@ namespace Warrant.Meta.Tests;
 /// </summary>
 public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixture<AttributeSidecarFixture>
 {
-    private const string Header = """{"kind":"header","format":1,"lean":"abc","bundleSha256":"00ff"}""";
+    private const string Header = """{"kind":"header","format":2,"lean":"abc","bundleSha256":"00ff"}""";
 
     private Sidecar Sidecar => fixture.Sidecar;
 
     [Fact]
     public void TheHeaderNamesTheBundleAndLean()
     {
-        Assert.Equal(1, Sidecar.Header!.Format);
+        Assert.Equal(2, Sidecar.Header!.Format);
         Assert.Equal(AttributeSidecarFixture.BundleSha256, Sidecar.Header.BundleSha256);
         Assert.Equal("eb6cafb7290e8bd5f2937522d8d804f58f02bafc", Sidecar.Header.LeanGithash);
     }
@@ -26,14 +26,54 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
     public void EveryKindHasTheExportedCount()
     {
         // tests/data/README.md; the simp count includes Lean's own duplicate entry for Nat.not_lt_zero.
-        Assert.Equal(346, Sidecar.SimpEntries.Count);
+        Assert.Equal(393, Sidecar.SimpEntries.Count);
         Assert.Equal(2, Sidecar.SimpEntries.Count(e => e.Name == N("Nat.not_lt_zero")));
         Assert.Equal(3, Sidecar.CongrEntries.Count);
-        Assert.Equal(142, Sidecar.Instances.Count());
-        Assert.Equal(575, Sidecar.ReducibilityStatuses.Count());
-        Assert.Equal(58, Sidecar.DefEqNames.Count());
-        Assert.Equal(324, Sidecar.Matchers.Count());
-        Assert.Equal(57, Sidecar.Classes.Count());
+        Assert.Equal(174, Sidecar.Instances.Count());
+        Assert.Equal(652, Sidecar.ReducibilityStatuses.Count());
+        Assert.Equal(66, Sidecar.DefEqNames.Count());
+        Assert.Equal(337, Sidecar.Matchers.Count());
+        Assert.Equal(75, Sidecar.Classes.Count());
+        Assert.Equal(13, Sidecar.SpecEntries.Count);
+    }
+
+    [Fact]
+    public void TheSpecEntriesAreStdDosTriplesForTheEffectMonadAndNameBundleConstants()
+    {
+        // M6 KTD15: the structural rules and the operations of StateT and ExceptT, all triples, from Std.Do.
+        Assert.Equal(
+            [
+                "Std.Do.Spec.pure", "Std.Do.Spec.bind", "Std.Do.Spec.map", "Std.Do.Spec.seq", "Std.Do.Spec.monadLift_ExceptT",
+                "Std.Do.Spec.get_StateT", "Std.Do.Spec.set_StateT", "Std.Do.Spec.modifyGet_StateT", "Std.Do.Spec.run_ExceptT",
+                "Std.Do.Spec.throw_ExceptT", "Std.Do.Spec.tryCatch_ExceptT", "Std.Do.Spec.throw_MonadExcept", "Std.Do.Spec.tryCatch_MonadExcept",
+            ],
+            Sidecar.SpecEntries.Select(e => e.Name.ToString()));
+        Assert.All(Sidecar.SpecEntries, e =>
+        {
+            Assert.Equal(SpecForm.Triple, e.Form);
+            Assert.Equal(1000, e.Priority);
+            Assert.Equal(N("Std.Do.Triple.SpecLemmas"), e.Module);
+            Assert.True(fixture.Env.Find(e.Name) is TheoremInfo, $"{e.Name} is not a theorem of the bundle");
+        });
+    }
+
+    [Fact]
+    public void TheWPMonadInstancesOfTheEffectMonadsTransformersAreInstances()
+    {
+        var wpMonad = Sidecar.GetInstances(N("Std.Do.WPMonad")).Select(i => i.Name.ToString()).ToHashSet();
+        Assert.Superset(
+            new HashSet<string> { "Std.Do.Id.instWPMonad", "Std.Do.StateT.instWPMonad", "Std.Do.State.instWPMonad", "Std.Do.ExceptT.instWPMonad" },
+            wpMonad);
+        Assert.Contains(Sidecar.GetInstances(N("MonadExceptOf")), i => i.Name == N("instMonadExceptOfExceptTOfMonad"));
+    }
+
+    [Fact]
+    public void AFormatOneSidecarIsRejectedNamingTheVersion()
+    {
+        var ex = Assert.Throws<SidecarFormatException>(() => Read("""{"kind":"header","format":1,"lean":"abc","bundleSha256":"00ff"}"""));
+
+        Assert.Equal(1, ex.LineNumber);
+        Assert.Contains("unsupported sidecar format 1; this loader reads format 2", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -54,9 +94,9 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal(
             new Dictionary<ReducibilityStatus, int>
             {
-                [ReducibilityStatus.Reducible] = 244,
-                [ReducibilityStatus.InstanceReducible] = 212,
-                [ReducibilityStatus.ImplicitReducible] = 114,
+                [ReducibilityStatus.Reducible] = 277,
+                [ReducibilityStatus.InstanceReducible] = 251,
+                [ReducibilityStatus.ImplicitReducible] = 119,
                 [ReducibilityStatus.Irreducible] = 5,
             },
             Sidecar.ReducibilityStatuses.GroupBy(kv => kv.Value).ToDictionary(g => g.Key, g => g.Count()));
@@ -158,6 +198,8 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
     [InlineData("""{"kind":"reducibility","name":"Nat.add","status":"opaque"}""", "unknown reducibility status 'opaque'")]
     [InlineData("""{"kind":"instance","name":"i","class":"C","prio":"high","order":0}""", "'prio' must be")]
     [InlineData(Header, "a second header")]
+    [InlineData("""{"kind":"spec","name":"Std.Do.Spec.pure","prio":1000,"form":"lemma","module":"M"}""", "unknown spec form 'lemma'")]
+    [InlineData("""{"kind":"spec","name":"Std.Do.Spec.pure","prio":1000,"form":"triple"}""", "missing field 'module'")]
     public void MalformedLinesFailNamingTheLine(string line, string message)
     {
         var ex = Assert.Throws<SidecarFormatException>(() => Read(Header, line));
@@ -196,7 +238,7 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal((inst, 1000), (added.Name, added.Priority));
         Assert.True(fork.IsInstance(inst));
         Assert.Equal(baseSidecar.GetInstances(N("DecidableEq")).Count + 1, fork.GetInstances(N("DecidableEq")).Count);
-        Assert.Equal(576, fork.ReducibilityStatuses.Count(kv => kv.Value != ReducibilityStatus.Semireducible));
+        Assert.Equal(653, fork.ReducibilityStatuses.Count(kv => kv.Value != ReducibilityStatus.Semireducible));
         Assert.Same(baseSidecar.Header, fork.Header);
         Assert.Equal(baseSidecar.SimpEntries, fork.SimpEntries);
 

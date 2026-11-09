@@ -6,7 +6,7 @@ using Warrant.Cic;
 namespace Warrant.Meta;
 
 /// <summary>The sidecar's first line: what it was exported from and for.</summary>
-/// <param name="Format">The sidecar format version (1).</param>
+/// <param name="Format">The sidecar format version (2: format 1 had no <c>spec</c> entries).</param>
 /// <param name="LeanGithash">The githash of the Lean toolchain that exported it.</param>
 /// <param name="BundleSha256">The SHA-256 (hex) of the bundle <c>.gz</c> file it describes.</param>
 public sealed record SidecarHeader(int Format, string LeanGithash, string BundleSha256);
@@ -33,6 +33,23 @@ public sealed record CongrEntry(Name Name, Name Function, int Priority, Immutabl
 /// <param name="Priority">Its priority (Lean's default is 1000).</param>
 /// <param name="Order">Its declaration order; among equal priorities, the higher is the more recent and is tried first.</param>
 public sealed record InstanceEntry(Name Name, Name Class, int Priority, int Order);
+
+/// <summary>How a <c>@[spec]</c> lemma states its operation's behaviour (M6 KTD15).</summary>
+public enum SpecForm
+{
+    /// <summary>A Hoare triple <c>⦃P⦄ x ⦃Q⦄</c>, from <c>mvcgen</c>'s spec map.</summary>
+    Triple,
+
+    /// <summary>An equation, from <c>mvcgen</c>'s simp set (<c>@[spec]</c> on an equational lemma).</summary>
+    Equation,
+}
+
+/// <summary>A <c>@[spec]</c> lemma (M6 KTD15): how the VC walker learns what a model operation does.</summary>
+/// <param name="Name">The lemma.</param>
+/// <param name="Priority">Its priority (Lean's default is 1000).</param>
+/// <param name="Form">A triple or an equation.</param>
+/// <param name="Module">The module that registered it.</param>
+public sealed record SpecEntry(Name Name, int Priority, SpecForm Form, Name Module);
 
 /// <summary>A malformed sidecar, or one made for another bundle.</summary>
 public sealed class SidecarFormatException : Exception
@@ -83,7 +100,7 @@ public sealed class SidecarFormatException : Exception
 public sealed class Sidecar
 {
     /// <summary>The sidecar format this loader reads.</summary>
-    public const int FormatVersion = 1;
+    public const int FormatVersion = 2;
 
     private const int DefaultPriority = 1000;
 
@@ -123,6 +140,9 @@ public sealed class Sidecar
 
     /// <summary>The <c>@[congr]</c> lemmas, in registration order.</summary>
     public IReadOnlyList<CongrEntry> CongrEntries => _data.Congr;
+
+    /// <summary>The <c>@[spec]</c> lemmas, in registration order: triples first, then equations (M6 KTD15).</summary>
+    public IReadOnlyList<SpecEntry> SpecEntries => _data.Spec;
 
     /// <summary>Every instance, of every class, this sidecar's own last.</summary>
     public IEnumerable<InstanceEntry> Instances =>
@@ -293,7 +313,7 @@ public sealed class Sidecar
 
     private static Sidecar NewEmpty()
     {
-        var s = new Sidecar(new Data(null, [], [], [], [], []), null);
+        var s = new Sidecar(new Data(null, [], [], [], [], [], []), null);
         s.Freeze();
         return s;
     }
@@ -322,6 +342,7 @@ public sealed class Sidecar
         SidecarHeader? Header,
         ImmutableArray<SimpEntry> Simp,
         ImmutableArray<CongrEntry> Congr,
+        ImmutableArray<SpecEntry> Spec,
         HashSet<Name> DefEq,
         Dictionary<Name, MatcherInfo> Matchers,
         Dictionary<Name, ImmutableArray<int>> Classes);
@@ -340,6 +361,8 @@ public sealed class Sidecar
 
         private readonly ImmutableArray<SimpEntry>.Builder _simp = ImmutableArray.CreateBuilder<SimpEntry>();
         private readonly ImmutableArray<CongrEntry>.Builder _congr = ImmutableArray.CreateBuilder<CongrEntry>();
+        private readonly ImmutableArray<SpecEntry>.Builder _spec = ImmutableArray.CreateBuilder<SpecEntry>();
+        private readonly HashSet<Name> _specNames = [];
         private readonly List<InstanceEntry> _instances = [];
         private readonly HashSet<Name> _instanceNames = [];
         private readonly Dictionary<Name, ReducibilityStatus> _statuses = [];
@@ -389,6 +412,7 @@ public sealed class Sidecar
                     case "defeq": DefEq(root); break;
                     case "matcher": Matcher(root); break;
                     case "class": Class(root); break;
+                    case "spec": Spec(root); break;
                     default: throw Error($"unknown kind '{kind}'");
                 }
             }
@@ -400,7 +424,7 @@ public sealed class Sidecar
             {
                 throw Error("empty input: expected a header line");
             }
-            var data = new Data(_header, _simp.ToImmutable(), _congr.ToImmutable(), _defEq, _matchers, _classes);
+            var data = new Data(_header, _simp.ToImmutable(), _congr.ToImmutable(), _spec.ToImmutable(), _defEq, _matchers, _classes);
             var sidecar = new Sidecar(data, null);
             foreach (var (name, status) in _statuses)
             {
@@ -440,6 +464,23 @@ public sealed class Sidecar
             _simp.Add(new SimpEntry(
                 NameOf(e, "name"), Int(e, "prio"), Bool(e, "post"), Bool(e, "inv"), NameOf(e, "module"),
                 [.. Array(e, "leanKeys").Select(k => k.ValueKind == JsonValueKind.String ? k.GetString()! : throw Error("'leanKeys' must hold strings"))]));
+        }
+
+        private void Spec(JsonElement e)
+        {
+            Fields(e, "spec", "name", "prio", "form", "module");
+            var form = Str(e, "form") switch
+            {
+                "triple" => SpecForm.Triple,
+                "equation" => SpecForm.Equation,
+                var other => throw Error($"unknown spec form '{other}'"),
+            };
+            var entry = new SpecEntry(NameOf(e, "name"), Int(e, "prio"), form, NameOf(e, "module"));
+            if (!_specNames.Add(entry.Name))
+            {
+                throw Error($"duplicate spec entry for '{entry.Name}'");
+            }
+            _spec.Add(entry);
         }
 
         private void Congr(JsonElement e)

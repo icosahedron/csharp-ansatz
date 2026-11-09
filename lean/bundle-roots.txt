@@ -443,3 +443,64 @@ Lean.Omega.LinearCombo.coordinate_eval_6
 Lean.Omega.LinearCombo.coordinate_eval_7
 Lean.Omega.LinearCombo.coordinate_eval_8
 Lean.Omega.LinearCombo.coordinate_eval_9
+
+# Std.Do (M6 U1; plan M6 KTD1, KTD2, KTD14, KTD15): the statement and proof vocabulary of contracts,
+# through roots rather than the whole module. The effect monad is ExceptT ClrExn (StateM σ) (KTD4), so the
+# @[spec] lemmas are the structural ones (pure, bind, map, seq) and those of StateT, ExceptT and
+# MonadExcept; Std.Do's loop, iterator, ReaderT, OptionT and EStateM specs are not needed until M7.
+# Structural spec lemmas and the operations of StateT and ExceptT:
+Std.Do.Spec.pure
+Std.Do.Spec.bind
+Std.Do.Spec.map
+Std.Do.Spec.seq
+Std.Do.Spec.get_StateT
+Std.Do.Spec.set_StateT
+Std.Do.Spec.modifyGet_StateT
+Std.Do.Spec.monadLift_ExceptT
+Std.Do.Spec.run_ExceptT
+Std.Do.Spec.throw_ExceptT
+Std.Do.Spec.tryCatch_ExceptT
+Std.Do.Spec.throw_MonadExcept
+Std.Do.Spec.tryCatch_MonadExcept
+# The consequence rules and the triple combinators the VC walker names (KTD13):
+Std.Do.Triple.iff
+Std.Do.Triple.of_entails_wp
+Std.Do.Triple.iff_conseq
+Std.Do.Triple.entails_wp_of_pre_post
+Std.Do.Triple.entails_wp_of_pre
+Std.Do.Triple.entails_wp_of_post
+Std.Do.Triple.pure
+Std.Do.Triple.bind
+Std.Do.Triple.and
+Std.Do.Triple.mp
+# WP and WPMonad for Id, StateT, StateM and ExceptT, and ExceptT's MonadExceptOf. Nothing in a translated
+# term names an instance, and the sidecar exports an instance entry only for a bundle constant.
+Std.Do.Id.instWP
+Std.Do.StateT.instWP
+Std.Do.State.instWP
+Std.Do.ExceptT.instWP
+Std.Do.Id.instWPMonad
+Std.Do.StateT.instWPMonad
+Std.Do.State.instWPMonad
+Std.Do.ExceptT.instWPMonad
+instMonadExceptOfExceptTOfMonad
+# The VC simp set's one-state assertion lemmas (KTD14) and the predicate transformers' equations:
+Std.Do.SPred.entails_1
+Std.Do.SPred.apply_pure_cons
+Std.Do.SPred.down_pure_nil
+Std.Do.SPred.and_cons
+Std.Do.SPred.and_nil
+Std.Do.SPred.or_cons
+Std.Do.SPred.or_nil
+Std.Do.PredTrans.apply_Pure_pure
+Std.Do.PredTrans.apply_pure
+Std.Do.PredTrans.apply_Functor_map
+Std.Do.PredTrans.apply_bind
+Std.Do.PredTrans.apply_Bind_bind
+Std.Do.PredTrans.apply_Seq_seq
+Std.Do.PredTrans.apply_const
+Std.Do.PredTrans.apply_throw
+Std.Do.PredTrans.apply_pushArg
+Std.Do.PredTrans.apply_pushExcept
+Std.Do.PredTrans.apply_dite
+Std.Do.PredTrans.apply_ite

@@ -362,7 +362,7 @@ deterministic: with an unchanged `lean/`, it is byte-identical to the
 committed file. Check the counts independently with:
 
 ```sh
-python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 2,835 constants
+python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 3,210 constants
 ```
 
 The attribute sidecar that tactics read is exported from the same library and

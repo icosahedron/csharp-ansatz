@@ -263,8 +263,12 @@ internal static class VerifyCommand
         {
             foreach (var path in settings.ReferenceSources.Where(File.Exists))
             {
-                var record = ReferencedSource.Open(path);
-                records.TryAdd(record.AssemblyName, record);
+                // A record that names no assembly cannot match a reference; one Warrant cannot otherwise read fails only
+                // when a closed class from its assembly is used (#120).
+                if (ReferencedSource.Open(path) is { AssemblyName: { } name } record)
+                {
+                    records.TryAdd(name, record);
+                }
             }
             extraction = Extractor.Extract(compilation, new ExtractionOptions
             {

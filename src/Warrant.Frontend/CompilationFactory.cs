@@ -107,28 +107,34 @@ public static class CompilationFactory
     /// <returns>The compilation, which may have errors: see <see cref="Failure"/>.</returns>
     /// <exception cref="InvalidDataException">The arguments are not valid compiler arguments.</exception>
     public static CSharpCompilation FromCscArgs(string argsFile, string projectDirectory, out IReadOnlyList<string> generatorProblems) =>
-        FromCscArgs(argsFile, projectDirectory, projectDirectory, out generatorProblems);
+        FromCscArgs(argsFile, projectDirectory, projectDirectory, File.ReadAllBytes, out generatorProblems);
 
     /// <summary>
     /// As <see cref="FromCscArgs(string, string, out IReadOnlyList{string})"/>, with each tree's path relative to
     /// <paramref name="pathBase"/> instead of the project's directory. A referenced project's sources are named relative to
-    /// the project being verified, so diagnostics about them point at the right files (#32).
+    /// the project being verified, so diagnostics about them point at the right files (#32). Every file the compilation and
+    /// its generators read, the argument file included, is read through <paramref name="read"/>, given its full path; a
+    /// referenced project uses it to compile from the bytes it checked against its record (#127).
     /// </summary>
-    internal static CSharpCompilation FromCscArgs(string argsFile, string projectDirectory, string pathBase, out IReadOnlyList<string> generatorProblems)
+    internal static CSharpCompilation FromCscArgs(
+        string argsFile, string projectDirectory, string pathBase, Func<string, byte[]> read, out IReadOnlyList<string> generatorProblems)
     {
         var fullProject = Path.GetFullPath(projectDirectory);
         var fullBase = Path.GetFullPath(pathBase);
-        var args = ParseCscArgs(argsFile, fullProject);
+        var args = ParseCscArgs(argsFile, Lines(read(Path.GetFullPath(argsFile))), fullProject);
 
         var trees = args.SourceFiles.Select(file =>
         {
-            using var stream = File.OpenRead(file.Path);
+            using var stream = new MemoryStream(read(Path.GetFullPath(file.Path)), writable: false);
             var text = SourceText.From(stream, args.Encoding, args.ChecksumAlgorithm);
             var path = Path.GetRelativePath(fullBase, file.Path).Replace('\\', '/');
             return CSharpSyntaxTree.ParseText(text, args.ParseOptions, path);
         }).ToList();
         var references = args.MetadataReferences.Select(r =>
-            (MetadataReference)MetadataReference.CreateFromFile(Path.GetFullPath(Path.Combine(fullProject, r.Reference)), r.Properties));
+        {
+            var path = Path.GetFullPath(Path.Combine(fullProject, r.Reference));
+            return (MetadataReference)MetadataReference.CreateFromImage(ImmutableArray.Create(read(path)), r.Properties, filePath: path);
+        });
 
         var options = args.CompilationOptions;
         AnalyzerConfigSet? set = null;
@@ -136,7 +142,7 @@ public static class CompilationFactory
         {
             var configs = args.AnalyzerConfigPaths
                 .Select(p => Path.GetFullPath(Path.Combine(fullProject, p)))
-                .Select(p => AnalyzerConfig.Parse(SourceText.From(File.ReadAllText(p, Encoding.UTF8)), p))
+                .Select(p => AnalyzerConfig.Parse(SourceText.From(Text(read(p))), p))
                 .ToList();
             set = AnalyzerConfigSet.Create(configs);
             var treeOptions = trees.ToDictionary(
@@ -149,16 +155,37 @@ public static class CompilationFactory
 
         var analyzers = args.AnalyzerReferences.Select(r => Path.GetFullPath(Path.Combine(fullProject, r.FilePath))).ToList();
         var additionalFiles = args.AdditionalFiles.Select(f => Path.GetFullPath(Path.Combine(fullProject, f.Path))).ToList();
-        (compilation, generatorProblems) = SourceGenerators.Run(compilation, analyzers, additionalFiles, set, args.ParseOptions, fullBase);
+        (compilation, generatorProblems) = SourceGenerators.Run(compilation, analyzers, additionalFiles, set, args.ParseOptions, fullBase, read);
         return compilation;
     }
 
-    /// <summary>Parses an argument file written one argument per line.</summary>
-    /// <exception cref="InvalidDataException">The arguments are not valid compiler arguments.</exception>
-    internal static CSharpCommandLineArguments ParseCscArgs(string argsFile, string fullProject)
+    /// <summary>A file's text as <see cref="File.ReadAllText(string, Encoding)"/> reads it with UTF-8: a byte order mark decides.</summary>
+    internal static string Text(byte[] bytes)
     {
-        var lines = File.ReadAllLines(argsFile, Encoding.UTF8).Where(l => l.Length > 0).ToArray();
-        var args = CSharpCommandLineParser.Default.Parse(lines, fullProject, sdkDirectory: null);
+        using var reader = new StreamReader(new MemoryStream(bytes, writable: false), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>A file's lines as <see cref="File.ReadAllLines(string, Encoding)"/> reads them with UTF-8.</summary>
+    internal static string[] Lines(byte[] bytes)
+    {
+        using var reader = new StreamReader(new MemoryStream(bytes, writable: false), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } line)
+        {
+            lines.Add(line);
+        }
+        return [.. lines];
+    }
+
+    /// <summary>Parses an argument file's lines, one argument per line.</summary>
+    /// <param name="argsFile">The argument file, named in errors.</param>
+    /// <param name="lines">Its lines.</param>
+    /// <param name="fullProject">The directory relative paths are relative to.</param>
+    /// <exception cref="InvalidDataException">The arguments are not valid compiler arguments.</exception>
+    internal static CSharpCommandLineArguments ParseCscArgs(string argsFile, string[] lines, string fullProject)
+    {
+        var args = CSharpCommandLineParser.Default.Parse(lines.Where(l => l.Length > 0), fullProject, sdkDirectory: null);
         var errors = args.Errors.Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
         if (errors.Count > 0)
         {

@@ -160,6 +160,10 @@ public sealed class ReferencedClosedClassTests
         var result = Extract(Consumer(library, UsesColor), otherVersion);
 
         Assert.Equal("WRT0002 | type defined outside the compilation", Inline.Only(result, "M:C.F(Lib.Color)"));
+        // #122: the message names the identity mismatch, not a missing Warrant.Build import.
+        var d = Assert.Single(result.DiagnosticsFor("M:C.F(Lib.Color)"));
+        Assert.Contains("the source recorded for Lib compiles Lib, Version=2.0.0.0", d.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("must import Warrant.Build", d.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -201,6 +205,8 @@ public sealed class ReferencedClosedClassTests
         var result = Extract(consumer, library);
 
         Assert.Equal("WRT0002 | type defined outside the compilation", Inline.Only(result, "M:C.F(Lib.Color)"));
+        var d = Assert.Single(result.DiagnosticsFor("M:C.F(Lib.Color)"));
+        Assert.Contains("its full name Lib.Color also names another type", d.Message, StringComparison.Ordinal);
     }
 
     /// <summary>Two closed classes sharing a non-generic base whose <c>==</c> compares values.</summary>
@@ -286,6 +292,22 @@ public sealed class ReferencedClosedClassTests
         Assert.Equal($"{id} | {construct}", Inline.Only(result, "T:Lib.Color"));
         Assert.Equal("WRT0002 | depends on a rejected unit", Inline.Only(result, "M:C.F(Lib.Color)"));
     }
+
+    [Theory]
+    // #55: a MemberwiseClone in a base class, and [UnsafeAccessor]s anywhere in the library or in the consumer.
+    [InlineData("public abstract class Base<T> { public T Copy() => (T)MemberwiseClone(); } [Closed] public sealed class Color : Base<Color> { private Color() { } public static Color Red { get; } = new(); }", "")]
+    [InlineData(ColorWithoutBase + " public static class Hack { [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Constructor)] public static extern Color Make(); }", "")]
+    [InlineData(ColorWithoutBase, "public static class Hack { [System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Constructor)] public static extern Lib.Color Make(); }")]
+    public void AReferencedClosedClassCreatedWithoutAConstructorIsRejected(string library, string consumerExtra)
+    {
+        var lib = Library("namespace Lib; " + library);
+        var result = Extract(Consumer(lib, UsesColor + consumerExtra), lib);
+
+        Assert.Equal("WRT0009 | instance created or changed without a constructor call", Inline.Only(result, "T:Lib.Color"));
+        Assert.Equal("WRT0002 | depends on a rejected unit", Inline.Only(result, "M:C.F(Lib.Color)"));
+    }
+
+    private const string ColorWithoutBase = "[Closed] public sealed class Color { private Color() { } public static Color Red { get; } = new(); }";
 
     [Fact]
     public void AReferencedRecordIsStillRejected()

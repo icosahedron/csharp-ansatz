@@ -259,6 +259,15 @@ internal static class TypeChecks
             }
         }
 
+        //    Nor is an instance created, or a static instance replaced, without one where Warrant can see it (#55):
+        //    MemberwiseClone written in the class or a base class (the only places that can call it on an instance), a
+        //    with expression, or an [UnsafeAccessor] that calls a constructor or MemberwiseClone or reaches a field.
+        //    Reflection, serializers and code Warrant does not see are the closed assumption's.
+        if (CreatedWithoutConstructor(type, scan.Value) is { } bypass)
+        {
+            throw Reject(type, "instance created or changed without a constructor call", DiagnosticIds.NotClosedShape, bypass.GetLocation());
+        }
+
         // 5. At least one instance.
         if (instances.Count == 0)
         {
@@ -271,6 +280,55 @@ internal static class TypeChecks
         // Declaration order; for partial classes, by file path and then position.
         instances.Sort(Symbols.CompareByLocation);
         return new ClosedDefinition(new VirList<VirClosedMember>(instances.Select(m => new VirClosedMember(m.Name, null))));
+    }
+
+    /// <summary>
+    /// The first place that can create an instance of a closed class without calling its constructor, or change one of its
+    /// static instances, or null (#55):
+    /// <list type="bullet">
+    /// <item><see cref="object.MemberwiseClone"/>, called or named as a method group, written in the class or a base class
+    /// (whatever the receiver: <c>base.</c>, a type parameter, a nested type's outer instance), or on a receiver of the
+    /// class or a base class;</item>
+    /// <item>a <c>with</c> expression on the class or a base class;</item>
+    /// <item>an <c>[UnsafeAccessor]</c> that calls a constructor of anything but a named type outside the lineage (an
+    /// <c>object</c> or <c>dynamic</c> return can be pointed anywhere by <c>[UnsafeAccessorType]</c>), that calls
+    /// <see cref="object.MemberwiseClone"/>, or that reaches a field through a lineage, <c>object</c> or <c>dynamic</c>
+    /// type, since a field accessor can make two static instances one object; or one whose kind is unknown.</item>
+    /// </list>
+    /// </summary>
+    private static SyntaxNode? CreatedWithoutConstructor(INamedTypeSymbol type, CompilationScan scan)
+    {
+        // By documentation-comment ID: the compilation being verified sees a referenced class as metadata, a different symbol
+        // from the one its recorded source declares (#32), and the ID names it uniquely there.
+        var lineage = new HashSet<string>(StringComparer.Ordinal);
+        for (var t = type; t is not null && t.SpecialType != SpecialType.System_Object; t = t.BaseType)
+        {
+            lineage.Add(Symbols.Key(t.OriginalDefinition));
+        }
+        bool InLineage(ITypeSymbol? t) => t is INamedTypeSymbol n && lineage.Contains(Symbols.Key(n.OriginalDefinition));
+        bool Unnamed(ITypeSymbol t) => t.SpecialType == SpecialType.System_Object || t.TypeKind is TypeKind.Dynamic or TypeKind.TypeParameter;
+
+        var candidates = new List<SyntaxNode>();
+        candidates.AddRange(scan.MemberwiseClones
+            .Where(c => InLineage(c.Receiver) || c.EnclosingTypes.Any(InLineage))
+            .Select(c => c.Syntax));
+        candidates.AddRange(scan.Withs.Where(w => InLineage(w.Type)).Select(w => w.Syntax));
+        foreach (var (method, syntax) in scan.UnsafeAccessors)
+        {
+            var attribute = method.GetAttributes().First(a => Symbols.IsUnsafeAccessor(a.AttributeClass));
+            var kind = attribute.ConstructorArguments.Length == 1 && attribute.ConstructorArguments[0].Value is int k ? k : -1;
+            var name = attribute.NamedArguments.FirstOrDefault(a => a.Key == "Name").Value.Value as string ?? method.Name;
+            const int Constructor = 0, Method = 1, StaticMethod = 2, Field = 3, StaticField = 4;
+            var signature = method.Parameters.Select(p => p.Type).Append(method.ReturnType).ToList();
+            bool constructs = kind == Constructor && (InLineage(method.ReturnType) || Unnamed(method.ReturnType) || method.ReturnType is not INamedTypeSymbol);
+            bool clones = kind is Method or StaticMethod && name == nameof(MemberwiseClone);
+            bool reachesField = kind is Field or StaticField && signature.Any(t => InLineage(t) || Unnamed(t));
+            if (constructs || clones || reachesField || kind is < Constructor or > StaticField)
+            {
+                candidates.Add(syntax);
+            }
+        }
+        return candidates.OrderBy(n => n.SyntaxTree.FilePath, StringComparer.Ordinal).ThenBy(n => n.SpanStart).FirstOrDefault();
     }
 
     /// <summary>The initialiser of a get-only auto-property or a static readonly field, or null if the member is neither.</summary>
@@ -296,7 +354,13 @@ internal static class TypeChecks
     /// <summary>The object creation an initialiser consists of, if it creates an instance of the type.</summary>
     private static IObjectCreationOperation? Creation(ExtractionContext context, ExpressionSyntax initializer, INamedTypeSymbol type)
     {
-        var op = context.Model(initializer.SyntaxTree).GetOperation(initializer);
+        // C# has no operation for parentheses, so they are removed first (#126).
+        var expression = initializer;
+        while (expression is ParenthesizedExpressionSyntax parenthesized)
+        {
+            expression = parenthesized.Expression;
+        }
+        var op = context.Model(expression.SyntaxTree).GetOperation(expression);
         while (op is IConversionOperation { IsImplicit: true } c)
         {
             op = c.Operand;
@@ -389,9 +453,16 @@ internal static class TypeChecks
                         // The initialiser operation's value includes the conversion to the member's type, which may be
                         // user-defined; the expression's own operation does not.
                         var value = clause.Value;
+                        // A static instance's creation is recorded by its own span, which parentheses around it do not
+                        // share (#126).
+                        var creation = value;
+                        while (creation is ParenthesizedExpressionSyntax parenthesized)
+                        {
+                            creation = parenthesized.Expression;
+                        }
                         // An instance initialiser stores into the backing field directly, so a primary-constructor parameter is
                         // as safe there as in a constructor body; a static initialiser has no parameters to read.
-                        if (!instanceCreations.Contains((value.SyntaxTree, value.SpanStart, value.Span.Length))
+                        if (!instanceCreations.Contains((creation.SyntaxTree, creation.SpanStart, creation.Span.Length))
                             && !(model.GetOperation(clause) is ISymbolInitializerOperation init
                                 && (isStatic ? IsConstant(init.Value) : IsConstantOrParameter(init.Value))))
                         {

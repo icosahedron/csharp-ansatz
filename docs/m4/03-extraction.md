@@ -142,7 +142,12 @@ A `[Closed]` class is accepted if it has the closed shape (design D13), checked 
    A generic base class is checked through its original definition.
 
    Implicit identity, numeric, reference and nullable conversions are allowed, because none of them throws; a user-defined conversion runs code (`static readonly System.Index Start = -1` throws), so it is not.
-4. The private constructors are called nowhere else, so no other instance can be created without reflection.
+4. The private constructors are called nowhere else, and where Warrant can see it no instance is created and no static instance replaced without a constructor call (#55):
+   no `MemberwiseClone`, called or as a method group, written in the class or one of its base classes (the only places that can call it on an instance, whatever the receiver), or on a receiver of their type;
+   no `with` expression on the class or a base class;
+   and no `[UnsafeAccessor]` that calls a constructor of anything but a named type outside the class and its bases (an `object` or `dynamic` return, which `[UnsafeAccessorType]` can point anywhere, counts), that calls `MemberwiseClone`, or that reaches a field through the class, a base class, `object` or `dynamic`, since a field accessor can make two static instances one object.
+   For a class from a referenced project, the accessors and `with` expressions of that whole project and of the project being verified count.
+   Reflection (`Activator.CreateInstance`, `ConstructorInfo.Invoke`, `RuntimeHelpers.GetUninitializedObject`), serializers that skip constructors, and code in assemblies Warrant does not see cannot be found this way; they are what the `closed` assumption excludes, and the assumption report says so.
 5. There is at least one such member.
 
 A class that fails any step is error WRT0009, naming the step (KTD18).

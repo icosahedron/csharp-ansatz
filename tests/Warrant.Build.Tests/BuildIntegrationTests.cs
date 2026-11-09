@@ -190,6 +190,12 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         // Every framework records its source (#32), since a referencing project may use any of them; only the first verifies.
         Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.source")));
         Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", "net10.0", "warrant.source")));
+        // Only the framework that verified says how, so `warrant explain` compiles with its arguments (#124).
+        var explain = File.ReadAllLines(Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.explain"));
+        Assert.Equal("warrant-explain 1", explain[0]);
+        Assert.Contains($"args={Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.csc.args")}", explain);
+        Assert.Contains("keep-conditional-check=true", explain);
+        Assert.False(File.Exists(Path.Combine(dir, "obj", "Debug", "net10.0", "warrant.explain")));
     }
 
     [HostFact(BuildHost.Dotnet)]
@@ -281,6 +287,11 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         Assert.True(exitCode == 0, log);
         Assert.Single(Regex.Matches(log, @"Warrant: 4 verified units, 2 theorems proved, 0 not proved\."));
         Assert.True(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source")));
+        // `warrant explain` passes the records the build passed (#123).
+        Assert.Contains(
+            $"reference-source={Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source")}",
+            File.ReadAllLines(Path.Combine(painter, "obj", "Debug", Samples.Net10, "warrant.explain")));
+        Assert.False(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.explain")));
 
         // A build in which Shapes is up to date keeps its record (IncrementalClean deletes a file no target lists in
         // FileWrites), so Painter, compiled again after an edit, still checks Color from it.
@@ -292,6 +303,21 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         Assert.True(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source")));
         Assert.True(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.csc.args")));
         Assert.Single(Regex.Matches(log, @"Warrant: 4 verified units, 2 theorems proved \(2 from cache\), 0 not proved\."));
+
+        // A record from an older Warrant.Build (format 1, sources only) is rewritten by a build in which Shapes is up to date,
+        // because its sources still have the recorded hashes, so Painter can use it without a rebuild of Shapes.
+        var record = Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source");
+        var sourcesOnly = File.ReadAllLines(record)
+            .Where(l => !l.StartsWith("file=", StringComparison.Ordinal) || l.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || l.EndsWith(".args", StringComparison.OrdinalIgnoreCase))
+            .Select(l => l == "warrant-source 2" ? "warrant-source 1" : l);
+        File.WriteAllLines(record, sourcesOnly);
+        File.AppendAllText(Directory.GetFiles(painter, "*.cs").Single(), "// edited again\n");
+        (exitCode, log) = host.Build(painter);
+        Report(host, painter, log);
+
+        Assert.True(exitCode == 0, log);
+        Assert.Equal("warrant-source 2", File.ReadLines(record).First());
+        Assert.Contains(File.ReadLines(record), l => l.EndsWith(".dll", StringComparison.OrdinalIgnoreCase));
 
         // An edit to Shapes that Painter's build does not compile again is caught, not checked in place of the compiled one.
         File.AppendAllText(Path.Combine(shapes, "Color.cs"), "// edited\n");
@@ -308,6 +334,94 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
 
         Assert.Equal(1, exitCode);
         Assert.Matches(@"Shapes[\\/]Color\.cs\(\d+,\d+,\d+,\d+\): error WRT0009: ", log);
+    }
+
+    [HostFact(BuildHost.Dotnet)]
+    public void AMissingSourceRecordIsRewrittenByCompilingAgainButNotBySkippedCompilation()
+    {
+        var host = BuildHost.Find(BuildHost.Dotnet).Host!;
+        var shapes = packages.Sample(
+            "Shapes",
+            Samples.Project($"<TargetFramework>{Samples.Net10}</TargetFramework><WarrantEnabled>false</WarrantEnabled>"),
+            new Dictionary<string, string> { ["Color.cs"] = Samples.ReferencedColor });
+        var record = Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source");
+        var (exitCode, log) = host.Build(shapes);
+        Assert.True(exitCode == 0 && File.Exists(record), log);
+
+        // #119: the record is a CoreCompile output, so a build that finds it missing compiles again and writes it, although
+        // no source changed. Without that, CoreCompile is up to date and the record stays missing.
+        File.Delete(record);
+        (exitCode, log) = host.Build(shapes);
+        Report(host, shapes, log);
+        Assert.True(exitCode == 0, log);
+        Assert.True(File.Exists(record), log);
+
+        // #121: with SkipCompilerExecution, Csc produces its arguments without compiling, so no record is written for an
+        // assembly that wasn't built.
+        File.Delete(record);
+        (exitCode, log) = host.Build(shapes, "-p:SkipCompilerExecution=true");
+        Report(host, shapes, log);
+        Assert.False(File.Exists(record), log);
+    }
+
+    [HostFact(BuildHost.Dotnet)]
+    public void ASourceSavedDuringTheCompileLeavesNoRecordAndABuildWithNothingNewHashesNothingFirst()
+    {
+        var host = BuildHost.Find(BuildHost.Dotnet).Host!;
+        // A target that saves a source after Csc read it and before the record is written: a save during the compile.
+        var shapes = packages.Sample(
+            "SavedDuringCompile",
+            Samples.Project($"<TargetFramework>{Samples.Net10}</TargetFramework><WarrantEnabled>false</WarrantEnabled>") + """
+              <Target Name="SaveDuringCompile" BeforeTargets="WarrantRecordSource" Condition="'$(SaveDuringCompile)' == 'true'">
+                <WriteLinesToFile File="Color.cs" Lines="// saved during the compile" />
+              </Target>
+              <Target Name="ReportHashedFirst" AfterTargets="_WarrantHashSourcesBeforeCompile">
+                <Message Importance="high" Text="hashed first: @(_WarrantNewInput->'%(Filename)%(Extension)') (of @(_WarrantInputBefore->Count()))" />
+              </Target>
+            """,
+            new Dictionary<string, string> { ["Color.cs"] = Samples.ReferencedColor, ["Other.cs"] = "public static class Other { }\n" });
+        var record = Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source");
+
+        // The files hashed before the compile, and how many inputs there are.
+        static (string[] Files, int Inputs) HashedFirst(string log)
+        {
+            var match = Regex.Match(log, @"hashed first: (?<files>[^(\r\n]*) \(of (?<inputs>[0-9]+)\)");
+            Assert.True(match.Success, log);
+            return (match.Groups["files"].Value.Split(';', StringSplitOptions.RemoveEmptyEntries), int.Parse(match.Groups["inputs"].Value, System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        // Without a record every input is new, so every input is hashed first.
+        var (exitCode, log) = host.Build(shapes);
+        Report(host, shapes, log);
+        Assert.True(exitCode == 0 && File.Exists(record), log);
+        var (files, inputs) = HashedFirst(log);
+        Assert.Equal(inputs, files.Length);
+        Assert.Contains("Color.cs", files);
+
+        // #125: before a build, only the inputs written since the record (less two seconds, a coarse clock's tick) are
+        // hashed, so a build with nothing new hashes neither source; what it does hash are the few files the SDK wrote
+        // just before the last compile, within those two seconds.
+        (exitCode, log) = host.Build(shapes);
+        Report(host, shapes, log);
+        Assert.True(exitCode == 0 && File.Exists(record), log);
+        (files, inputs) = HashedFirst(log);
+        Assert.DoesNotContain("Color.cs", files);
+        Assert.DoesNotContain("Other.cs", files);
+        Assert.True(files.Length * 10 < inputs, log);
+
+        // An edit to Other.cs makes Csc run; Color.cs, not hashed first, is saved after Csc read it. Its last-write time
+        // changed, so there is no record.
+        File.AppendAllText(Path.Combine(shapes, "Other.cs"), "// edited\n");
+        (exitCode, log) = host.Build(shapes, "-p:SaveDuringCompile=true");
+        Assert.True(exitCode == 0, log);
+        (files, _) = HashedFirst(log);
+        Assert.Contains("Other.cs", files);
+        Assert.DoesNotContain("Color.cs", files);
+        Assert.False(File.Exists(record), log);
+        Assert.Contains("a source file changed while SavedDuringCompile compiled", log, StringComparison.Ordinal);
+
+        (exitCode, log) = host.Build(shapes);
+        Assert.True(exitCode == 0 && File.Exists(record), log);
     }
 
     [HostFact(BuildHost.Dotnet)]

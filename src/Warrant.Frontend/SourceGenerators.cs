@@ -27,6 +27,11 @@ internal static class SourceGenerators
     /// <param name="configs">The analyzer configuration, or null when there is none.</param>
     /// <param name="parseOptions">The compiler's parse options, which the generated trees are parsed with.</param>
     /// <param name="projectDirectory">The project directory, which tree paths are relative to.</param>
+    /// <param name="read">
+    /// Reads a file, given its full path: the analyzer assemblies and the dependencies loaded with them, and the additional
+    /// files. Roslyn's <see cref="AnalyzerFileReference"/> still reads an analyzer's metadata from disk itself to find its
+    /// generator types; the code that runs is what <paramref name="read"/> returns.
+    /// </param>
     /// <returns>The compilation with the generated trees, and the problems that kept a generator from running.</returns>
     public static (CSharpCompilation Compilation, IReadOnlyList<string> Problems) Run(
         CSharpCompilation compilation,
@@ -34,7 +39,8 @@ internal static class SourceGenerators
         IReadOnlyList<string> additionalFiles,
         AnalyzerConfigSet? configs,
         CSharpParseOptions parseOptions,
-        string projectDirectory)
+        string projectDirectory,
+        Func<string, byte[]> read)
     {
         if (analyzers.Count == 0)
         {
@@ -42,7 +48,7 @@ internal static class SourceGenerators
         }
 
         var problems = new List<string>();
-        var loader = new Loader(analyzers);
+        var loader = new Loader(analyzers, read);
         var generators = new List<ISourceGenerator>();
         foreach (var path in analyzers)
         {
@@ -56,7 +62,7 @@ internal static class SourceGenerators
             generators.AddRange(reference.GetGenerators(LanguageNames.CSharp));
             // An analyzer that fails to load changes nothing Warrant translates; a generator, or a file that cannot be
             // read well enough to tell, may have written code the compiler compiled.
-            if (failures.Count > 0 && MayDeclareGenerator(path))
+            if (failures.Count > 0 && MayDeclareGenerator(path, read))
             {
                 problems.AddRange(failures);
             }
@@ -66,7 +72,7 @@ internal static class SourceGenerators
             return (compilation, problems);
         }
 
-        var texts = additionalFiles.Select(p => (AdditionalText)new FileText(p)).ToImmutableArray();
+        var texts = additionalFiles.Select(p => (AdditionalText)new FileText(p, read)).ToImmutableArray();
         var options = new ConfigOptionsProvider(configs, projectDirectory);
         GeneratorDriver driver = CSharpGeneratorDriver.Create(generators, texts, parseOptions, options);
         driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var updated, out var diagnostics);
@@ -112,12 +118,11 @@ internal static class SourceGenerators
     /// Whether an analyzer assembly declares a type marked <c>[Microsoft.CodeAnalysis.Generator]</c>, read from its
     /// metadata without loading it. A file whose metadata cannot be read counts as declaring one, so it fails closed.
     /// </summary>
-    internal static bool MayDeclareGenerator(string path)
+    internal static bool MayDeclareGenerator(string path, Func<string, byte[]> read)
     {
         try
         {
-            using var stream = File.OpenRead(path);
-            using var pe = new PEReader(stream);
+            using var pe = new PEReader(ImmutableArray.Create(read(path)));
             if (!pe.HasMetadata)
             {
                 return true;
@@ -167,9 +172,11 @@ internal static class SourceGenerators
     {
         private readonly AssemblyLoadContext _context = new("warrant-analyzers");
         private readonly Dictionary<string, string> _byName = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Func<string, byte[]> _read;
 
-        public Loader(IEnumerable<string> paths)
+        public Loader(IEnumerable<string> paths, Func<string, byte[]> read)
         {
+            _read = read;
             foreach (var path in paths)
             {
                 AddDependencyLocation(path);
@@ -193,20 +200,21 @@ internal static class SourceGenerators
 
         public Assembly LoadFromPath(string fullPath) => Load(_context, fullPath);
 
-        // From the bytes, not the path, so the file is not locked while Warrant runs.
-        private static Assembly Load(AssemblyLoadContext context, string path)
+        // From the bytes, not the path, so the file is not locked while Warrant runs, and a referenced project's generators
+        // are the ones its record hashed (#127).
+        private Assembly Load(AssemblyLoadContext context, string path)
         {
-            using var stream = new MemoryStream(File.ReadAllBytes(path));
+            using var stream = new MemoryStream(_read(Path.GetFullPath(path)), writable: false);
             return context.LoadFromStream(stream);
         }
     }
 
-    private sealed class FileText(string path) : AdditionalText
+    private sealed class FileText(string path, Func<string, byte[]> read) : AdditionalText
     {
         public override string Path { get; } = path;
 
         public override SourceText GetText(CancellationToken cancellationToken = default) =>
-            SourceText.From(File.ReadAllText(Path, Encoding.UTF8), Encoding.UTF8);
+            SourceText.From(CompilationFactory.Text(read(Path)), Encoding.UTF8);
     }
 
     /// <summary>The analyzer configuration as generators see it: the global options, and each file's own.</summary>

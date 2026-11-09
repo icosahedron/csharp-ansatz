@@ -98,9 +98,11 @@ project=C:\src\Shapes
 file=<SHA-256>|C:\src\Shapes\Color.cs
 ```
 
-There is one `file=` line for the argument file and for every source, additional file and analyzer configuration the project's `Csc` read.
-They are hashed just before `CoreCompile` and again after it, and the record is written only when `Csc` ran and both hashes agree, so it describes the text `Csc` read.
-A file saved during the compile deletes the record instead, and a build that finds `CoreCompile` up to date leaves the record of the compile that produced the assembly in place.
+There is one `file=` line for the argument file and for every source, additional file, analyzer configuration, referenced assembly, and analyzer or generator assembly the project's `Csc` read, and for every assembly beside an analyzer, which the generator loader resolves the analyzer's dependencies from (#51): a reference decides what the source means, through a base class or a constant, and a generator adds source.
+`Load` reads each file once, checks its hash, and rebuilds the compilation from those bytes, so an edit after the check cannot reach what is checked (#127). The one exception is Roslyn reading an analyzer's metadata from disk to find its generator types (the code that runs is from the checked bytes), so the analyzers are hashed again after the generators have run. `Load` declines an argument file that names a response file (`@file`), which the record does not cover.
+The record is written only when `Csc` ran and no input was written while it ran, so it describes the text `Csc` read.
+Just before `CoreCompile` every input's last-write time is noted and the inputs written since the last record are hashed, so a build with nothing new hashes almost nothing (#125); after `Csc` ran, every input is hashed for the record, and a last-write time that changed, or a hash that changed for a file hashed before, means a file was saved during the compile.
+That deletes the record instead, and a build that finds `CoreCompile` up to date leaves the record of the compile that produced the assembly in place. The record is one of `CoreCompile`'s outputs, so a build that finds it missing compiles again and writes it (#119), and a build with `SkipCompilerExecution`, where `Csc` gives its arguments without compiling, writes none (#121). `ReferencedSource.Open` never fails on a record it can't use, such as another format or an unknown line; `Load` reports the problem, so a referenced project's record matters only when one of its closed classes is used (#120). When a closed class from another project can't be used, WRT0002 names the reason: no record, an assembly-identity mismatch, a full name another type shares, or a generic type (#122).
 `--reference-source` names a record, and the build passes one for each referenced project that wrote one.
 `Warrant.Frontend.ReferencedSource` hashes those files again, declines the run with WRT0012 if any differs or is missing from the record (`Color.cs changed since Shapes was compiled; build Shapes again`), and rebuilds the referenced compilation from its arguments, generators included.
 Its tree paths are relative to the verified project, so diagnostics about the referenced class point at its file.
@@ -111,7 +113,6 @@ So is a closed class used by a multi-targeted project: it verifies in its first 
 And so is a class whose full name the compilation or another reference also declares (an extern-aliased twin): type units are keyed by documentation-comment ID, which does not name the assembly.
 Each unit that uses such a class carries a `referenced-source` assumption: the referenced assembly is the one built from the source Warrant checked.
 Nothing compares the two directly. The record ties them only as far as the referenced project's build is trusted, which is the trust the verified project's own argument file already needs.
-The assemblies the referenced project references and its generators' assemblies are not hashed, so one that changes while the files the project's `Csc` read stay the same is not noticed.
 The analyzer has no referenced source, so it reports nothing for such a class and leaves the check to the build.
 
 The reference used to list `warrant verify <project>`.
@@ -136,8 +137,8 @@ The `Warrant.Build` package's targets, in outline:
                     Overwrite="true" WriteOnlyWhenDifferent="true" />
 </Target>
 
-<!-- #32: GetFileHash over @(Compile), @(AdditionalFiles) and @(EditorConfigFiles) before CoreCompile and again after it;
-     the record is written only when Csc ran and the two agree. -->
+<!-- #32, #125: before CoreCompile, every input's last-write time, and GetFileHash over the inputs written since the record;
+     after it, GetFileHash over every input. The record is written only when Csc ran and nothing was written meanwhile. -->
 <Target Name="_WarrantHashSourcesBeforeCompile" BeforeTargets="CoreCompile" Condition="..." />
 <Target Name="WarrantRecordSource" AfterTargets="CoreCompile" DependsOnTargets="_WarrantWriteCscArgs" Condition="..." />
 

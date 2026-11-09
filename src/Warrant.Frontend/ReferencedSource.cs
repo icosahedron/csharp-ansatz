@@ -9,15 +9,15 @@ namespace Warrant.Frontend;
 /// referenced projects"). A <c>[Closed]</c> class's shape and construction checks need its source, which the project being
 /// verified sees only as metadata. Every project that imports <c>Warrant.Build</c> writes a record after its compile:
 /// <c>obj/&lt;configuration&gt;/&lt;framework&gt;/warrant.source</c>, holding its assembly name, its compiler arguments and the
-/// SHA-256 of every file those arguments read, hashed before and after the compile and written only when both agree.
-/// <see cref="Load"/> hashes those files again and declines if any differs, so the source checked is the source the
-/// referenced assembly was compiled from, unless a file changed and changed back in between. The assemblies the
-/// arguments reference and the generators they load are not hashed.
+/// SHA-256 of every file those arguments read, hashed after the compile and written only when no file was written during it.
+/// <see cref="Load"/> reads those files, hashes them and declines if any differs, then compiles from the bytes it hashed
+/// (#127), so the source checked is the source the referenced assembly was compiled from. The files include the assemblies
+/// the arguments reference and the analyzers and generators they load (#51).
 /// </summary>
 /// <remarks>
 /// The record's format, one entry per line, as <c>Warrant.Build.targets</c> writes it:
 /// <code>
-/// warrant-source 1
+/// warrant-source 2
 /// assembly=&lt;assembly name&gt;
 /// args=&lt;full path of the argument file&gt;
 /// project=&lt;full path of the project directory&gt;
@@ -25,42 +25,57 @@ namespace Warrant.Frontend;
 /// </code>
 /// Opening a record only reads it; the source is hashed and compiled by <see cref="Load"/>, which a run calls only for an
 /// assembly whose closed class it uses, so a referenced project that cannot be reproduced costs nothing unless it matters.
+/// Format 1, from a Warrant.Build before #51, lists no referenced assemblies or analyzers; <see cref="Load"/> declines it
+/// and says to rebuild the project. A build in which the project is up to date rewrites such a record in format 2 when its
+/// sources are unchanged.
 /// </remarks>
 public sealed class ReferencedSource
 {
-    private const string Header = "warrant-source 1";
+    private const string Header = "warrant-source 2";
+    private const string OldHeader = "warrant-source 1";
 
     private readonly string _recordPath;
     private readonly string _argsFile;
     private readonly string _project;
     private readonly Dictionary<string, string> _hashes;
+    private readonly bool _oldFormat;
+    private readonly string? _problem;
     private CSharpCompilation? _compilation;
 
-    private ReferencedSource(string recordPath, string assemblyName, string argsFile, string project, Dictionary<string, string> hashes)
+    private ReferencedSource(string recordPath, string? assemblyName, string argsFile, string project, Dictionary<string, string> hashes, bool oldFormat, string? problem)
     {
         _recordPath = recordPath;
         AssemblyName = assemblyName;
         _argsFile = argsFile;
         _project = project;
         _hashes = hashes;
+        _oldFormat = oldFormat;
+        _problem = problem;
     }
 
-    /// <summary>The referenced assembly's name.</summary>
-    public string AssemblyName { get; }
+    /// <summary>
+    /// The referenced assembly's name, or null when the record does not name one; such a record can never be used, because
+    /// it cannot be matched to a reference.
+    /// </summary>
+    public string? AssemblyName { get; }
 
-    /// <summary>Reads a record.</summary>
+    /// <summary>
+    /// Reads a record. A record that is not one Warrant can use (another format, an unknown line, a missing entry) is still
+    /// opened, and <see cref="Load"/> reports why, so a referenced project that cannot be used costs nothing unless one of
+    /// its closed classes is used (#120).
+    /// </summary>
     /// <param name="recordPath">The record.</param>
     /// <returns>The record, not yet checked against the files it names.</returns>
-    /// <exception cref="InvalidDataException">The record is malformed.</exception>
     public static ReferencedSource Open(string recordPath)
     {
         ArgumentNullException.ThrowIfNull(recordPath);
         var lines = File.ReadAllLines(recordPath, Encoding.UTF8).Where(l => l.Length > 0).ToList();
-        if (lines.Count == 0 || lines[0] != Header)
+        string? assembly = lines.Where(l => l.StartsWith("assembly=", StringComparison.Ordinal)).Select(l => l["assembly=".Length..]).FirstOrDefault();
+        if (lines.Count == 0 || (lines[0] != Header && lines[0] != OldHeader))
         {
-            throw new InvalidDataException($"{recordPath}: not a Warrant source record");
+            return Unusable(recordPath, assembly, $"{recordPath}: not a Warrant source record this Warrant can read");
         }
-        string? assembly = null, argsFile = null, project = null;
+        string? argsFile = null, project = null;
         var hashes = new Dictionary<string, string>(PathComparer);
         foreach (var line in lines.Skip(1))
         {
@@ -81,15 +96,18 @@ public sealed class ReferencedSource
                     hashes[Path.GetFullPath(value[(bar + 1)..])] = value[..bar];
                     break;
                 default:
-                    throw new InvalidDataException($"{recordPath}: unexpected line '{line}'");
+                    return Unusable(recordPath, assembly, $"{recordPath}: unexpected line '{line}'");
             }
         }
         if (string.IsNullOrEmpty(assembly) || string.IsNullOrEmpty(argsFile) || string.IsNullOrEmpty(project))
         {
-            throw new InvalidDataException($"{recordPath}: the assembly, args or project line is missing");
+            return Unusable(recordPath, assembly, $"{recordPath}: the assembly, args or project line is missing");
         }
-        return new ReferencedSource(recordPath, assembly, Path.GetFullPath(argsFile), Path.GetFullPath(project), hashes);
+        return new ReferencedSource(recordPath, assembly, Path.GetFullPath(argsFile), Path.GetFullPath(project), hashes, lines[0] == OldHeader, null);
     }
+
+    private static ReferencedSource Unusable(string recordPath, string? assembly, string problem) =>
+        new(recordPath, string.IsNullOrEmpty(assembly) ? null : assembly, "", "", new Dictionary<string, string>(PathComparer), false, problem);
 
     /// <summary>
     /// Checks that the files the record names are unchanged and rebuilds the compilation, once; later calls return the
@@ -108,20 +126,53 @@ public sealed class ReferencedSource
         {
             return _compilation;
         }
-
-        // Every file the compiler read: the arguments themselves, the sources, the generators' additional files and the
-        // analyzer configuration. Each must be in the record with the hash it had when the assembly was compiled.
-        var args = CompilationFactory.ParseCscArgs(Checked(_argsFile), _project);
-        var read = new List<string>();
-        read.AddRange(args.SourceFiles.Select(f => f.Path));
-        read.AddRange(args.AdditionalFiles.Select(f => f.Path));
-        read.AddRange(args.AnalyzerConfigPaths);
-        foreach (var file in read.Select(f => Path.GetFullPath(Path.Combine(_project, f))).Distinct(PathComparer))
+        if (_problem is not null)
         {
-            Checked(file);
+            throw new InvalidDataException(_problem);
+        }
+        if (_oldFormat)
+        {
+            throw new InvalidDataException(
+                $"{_recordPath} was written by an older Warrant.Build and does not list {AssemblyName}'s references; build {AssemblyName} again, or rebuild it if that does not rewrite the record");
         }
 
-        var compilation = CompilationFactory.FromCscArgs(_argsFile, _project, pathBase, out var generatorProblems);
+        // Every file the compiler read: the arguments themselves, the sources, the generators' additional files, the
+        // analyzer configuration, the referenced assemblies, and the analyzer and generator assemblies with every assembly
+        // beside them, which the generator loader resolves their dependencies from (#51). Each must be in the record with
+        // the hash it had when the assembly was compiled. A reference decides what the source means (a base class, a
+        // constant) and a generator adds source, so either changing changes what is checked.
+        //
+        // Each file is read once, and the compilation is built from the bytes that were hashed (#127): an edit after the
+        // check cannot reach it. The one exception is Roslyn's AnalyzerFileReference, which reads an analyzer's metadata from
+        // disk to find its generator types (the code it runs comes from these bytes), so the analyzers are hashed again
+        // once the generators have run.
+        var snapshot = new Dictionary<string, byte[]>(PathComparer);
+        byte[] Read(string path)
+        {
+            var full = Path.GetFullPath(path);
+            if (!snapshot.TryGetValue(full, out var bytes))
+            {
+                snapshot[full] = bytes = Checked(full);
+            }
+            return bytes;
+        }
+
+        var argsLines = CompilationFactory.Lines(Read(_argsFile));
+        if (argsLines.Any(l => l.StartsWith('@')))
+        {
+            throw new InvalidDataException($"{_argsFile}: a response file (@file) is not covered by {AssemblyName}'s source record");
+        }
+        var args = CompilationFactory.ParseCscArgs(_argsFile, argsLines, _project);
+        foreach (var file in ReadFiles(args))
+        {
+            Read(file);
+        }
+
+        var compilation = CompilationFactory.FromCscArgs(_argsFile, _project, pathBase, Read, out var generatorProblems);
+        foreach (var analyzer in Analyzers(args))
+        {
+            Checked(analyzer);
+        }
         if (!string.Equals(compilation.AssemblyName, AssemblyName, StringComparison.Ordinal))
         {
             throw new InvalidDataException($"{_recordPath}: the arguments compile '{compilation.AssemblyName}', not '{AssemblyName}'");
@@ -133,26 +184,51 @@ public sealed class ReferencedSource
         return _compilation = compilation;
     }
 
-    private string Checked(string file)
+    /// <summary>The full paths of the files an argument list makes the compiler and the generator loader read.</summary>
+    private List<string> ReadFiles(CSharpCommandLineArguments args)
     {
-        var full = Path.GetFullPath(file);
+        var read = new List<string>();
+        read.AddRange(args.SourceFiles.Select(f => f.Path));
+        read.AddRange(args.AdditionalFiles.Select(f => f.Path));
+        read.AddRange(args.AnalyzerConfigPaths);
+        read.AddRange(args.MetadataReferences.Select(r => r.Reference));
+        foreach (var analyzer in Analyzers(args))
+        {
+            read.Add(analyzer);
+            if (Path.GetDirectoryName(analyzer) is { } directory && Directory.Exists(directory))
+            {
+                read.AddRange(Directory.EnumerateFiles(directory, "*.dll"));
+            }
+        }
+        return read.Select(f => Path.GetFullPath(Path.Combine(_project, f))).Distinct(PathComparer).Order(PathComparer).ToList();
+    }
+
+    private IEnumerable<string> Analyzers(CSharpCommandLineArguments args) =>
+        args.AnalyzerReferences.Select(r => Path.GetFullPath(Path.Combine(_project, r.FilePath))).Distinct(PathComparer);
+
+    /// <summary>A file's bytes, read once, after checking that they hash to what the record says.</summary>
+    private byte[] Checked(string full)
+    {
         if (!_hashes.TryGetValue(full, out var recorded))
         {
             throw new InvalidDataException($"{_recordPath}: {full}, which {AssemblyName} is compiled from, is not in the record; build {AssemblyName} again");
         }
-        if (!File.Exists(full) || !string.Equals(Sha256(full), recorded, StringComparison.OrdinalIgnoreCase))
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(full);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidDataException($"{full} changed since {AssemblyName} was compiled; build {AssemblyName} again", e);
+        }
+        if (!string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), recorded, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException($"{full} changed since {AssemblyName} was compiled; build {AssemblyName} again");
         }
-        return full;
+        return bytes;
     }
 
     private static StringComparer PathComparer =>
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-
-    private static string Sha256(string path)
-    {
-        using var stream = File.OpenRead(path);
-        return Convert.ToHexString(SHA256.HashData(stream));
-    }
 }

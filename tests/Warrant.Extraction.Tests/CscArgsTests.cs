@@ -318,14 +318,13 @@ public sealed class CscArgsTests : IDisposable
     }
 
     /// <summary>
-    /// A source record as Warrant.Build writes it (#32): every file in the project except the reference pack, hashed
-    /// now, so the record covers what the arguments read.
+    /// A source record as Warrant.Build writes it (#32, #51): every file in the project, references and generators
+    /// included, hashed now, so the record covers what the arguments read.
     /// </summary>
-    private string Record(string assembly = "Sample")
+    private string Record(string assembly = "Sample", string? args = null)
     {
-        var lines = new List<string> { "warrant-source 1", $"assembly={assembly}", $"args={ArgsFile}", $"project={project}" };
-        foreach (var file in Directory.EnumerateFiles(project, "*", SearchOption.AllDirectories)
-            .Where(f => !f.StartsWith(Path.Combine(project, "refs"), StringComparison.Ordinal)))
+        var lines = new List<string> { "warrant-source 2", $"assembly={assembly}", $"args={args ?? ArgsFile}", $"project={project}" };
+        foreach (var file in Directory.EnumerateFiles(project, "*", SearchOption.AllDirectories))
         {
             using var stream = File.OpenRead(file);
             lines.Add($"file={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant()}|{file}");
@@ -370,6 +369,128 @@ public sealed class CscArgsTests : IDisposable
 
         var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(record).Load(project));
         Assert.Contains("C.cs, which Sample is compiled from, is not in the record", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReferenceChangedAfterTheRecordIsDeclined()
+    {
+        // #51: a referenced assembly decides what the source means (a base class, a constant), so it is hashed too.
+        Compile("public static class C { }");
+        var source = ReferencedSource.Open(Record());
+        File.AppendAllBytes(Path.Combine(project, "refs", "Warrant.dll"), [0]);
+
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("Warrant.dll changed since Sample was compiled; build Sample again", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReferenceTheRecordDoesNotCoverIsDeclined()
+    {
+        Compile("public static class C { }");
+        var record = Record();
+        File.WriteAllLines(record, File.ReadAllLines(record).Where(l => !l.EndsWith("System.Runtime.dll", StringComparison.Ordinal)));
+
+        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(record).Load(project));
+        Assert.Contains("System.Runtime.dll, which Sample is compiled from, is not in the record", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARecordFromAnOlderWarrantBuildIsDeclinedWithARebuildMessage()
+    {
+        // Format 1 lists no references or analyzers (#51), so it cannot vouch for them.
+        Compile("public static class C { }");
+        var record = Record();
+        File.WriteAllLines(record, File.ReadAllLines(record).Select(l => l == "warrant-source 2" ? "warrant-source 1" : l));
+
+        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(record).Load(project));
+        Assert.Contains("was written by an older Warrant.Build", e.Message, StringComparison.Ordinal);
+        Assert.Contains("rebuild it", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AGeneratorChangedAfterTheRecordIsDeclined()
+    {
+        // #51: a generator can add a partial part or a constructor to a closed class, so its assembly is hashed too.
+        var (_, problems) = CompileWithGenerator(SourceGeneratorAssemblies.Intercepting, "public static class C { }");
+        Assert.Empty(problems);
+        var source = ReferencedSource.Open(Record(args: Path.Combine(project, "generated.csc.args")));
+        var generator = Directory.GetFiles(Path.Combine(project, "analyzers"), "TestGenerator.dll", SearchOption.AllDirectories).Single();
+        File.AppendAllBytes(generator, [0]);
+
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("TestGenerator.dll changed since Sample was compiled; build Sample again", e.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A generator that, when it runs, overwrites the project's source and its additional file on disk, then emits what
+    /// the additional file says: an edit made after the record was checked but while the compilation is built.
+    /// </summary>
+    private const string Tampering = """"
+        using System.IO;
+        using System.Linq;
+        using Microsoft.CodeAnalysis;
+        [Generator]
+        public sealed class TamperingGenerator : IIncrementalGenerator
+        {
+            public void Initialize(IncrementalGeneratorInitializationContext context)
+            {
+                context.RegisterSourceOutput(context.AdditionalTextsProvider.Collect(), (c, texts) =>
+                {
+                    var input = texts.Single();
+                    var directory = Path.GetDirectoryName(input.Path)!;
+                    File.WriteAllText(Path.Combine(directory, "src", "C.cs"), "public static class Tampered { }");
+                    File.WriteAllText(input.Path, "tampered");
+                    c.AddSource("FromInputs.g.cs", "public static class FromInputs { public const string Text = \"" + input.GetText()!.ToString().Trim() + "\"; }");
+                });
+            }
+        }
+        """";
+
+    [Fact]
+    public void ARecordedSourceIsCompiledFromTheBytesThatWereChecked()
+    {
+        // #127: every file is read once, hashed, and compiled from those bytes, so an edit after the check (here made by a
+        // generator while the compilation is built) does not reach what is checked.
+        File.WriteAllText(Path.Combine(project, "input.txt"), "from-the-file");
+        var analyzer = SourceGeneratorAssemblies.Build(Path.Combine(project, "analyzers"), "TestGenerator", Tampering);
+        CompileWithArgs("public static class C { }", "/analyzer:" + analyzer, "/additionalfile:input.txt");
+        File.WriteAllText(Path.Combine(project, "input.txt"), "from-the-file");
+        File.WriteAllText(Path.Combine(project, "src", "C.cs"), "using Warrant;\npublic static class C { }");
+        var source = ReferencedSource.Open(Record(args: Path.Combine(project, "generated.csc.args")));
+
+        var compilation = source.Load(project);
+
+        Assert.Equal("tampered", File.ReadAllText(Path.Combine(project, "input.txt")));
+        Assert.Equal("from-the-file", compilation.GetTypeByMetadataName("FromInputs")!.GetMembers("Text").OfType<IFieldSymbol>().Single().ConstantValue);
+        Assert.NotNull(compilation.GetTypeByMetadataName("C"));
+        Assert.Null(compilation.GetTypeByMetadataName("Tampered"));
+    }
+
+    [Fact]
+    public void AnAssemblyBesideAGeneratorChangedAfterTheRecordIsDeclined()
+    {
+        // The generator loader resolves a generator's dependencies from its directory, so they are hashed too (#51).
+        var (_, problems) = CompileWithGenerator(SourceGeneratorAssemblies.Intercepting, "public static class C { }");
+        Assert.Empty(problems);
+        var directory = Path.GetDirectoryName(Directory.GetFiles(Path.Combine(project, "analyzers"), "TestGenerator.dll", SearchOption.AllDirectories).Single())!;
+        var helper = Path.Combine(directory, "Helper.dll");
+        File.WriteAllBytes(helper, [1, 2, 3]);
+        var source = ReferencedSource.Open(Record(args: Path.Combine(project, "generated.csc.args")));
+        File.AppendAllBytes(helper, [4]);
+
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("Helper.dll changed since Sample was compiled; build Sample again", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnArgumentFileWithAResponseFileIsDeclined()
+    {
+        Compile("public static class C { }");
+        File.WriteAllText(Path.Combine(project, "more.rsp"), "/define:EXTRA");
+        File.AppendAllText(ArgsFile, Environment.NewLine + "@more.rsp" + Environment.NewLine);
+
+        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(Record()).Load(project));
+        Assert.Contains("a response file (@file) is not covered", e.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -421,11 +542,44 @@ public sealed class CscArgsTests : IDisposable
     }
 
     [Fact]
-    public void AFileThatIsNotARecordIsDeclined()
+    public void AFileThatIsNotARecordOpensWithNoAssemblyAndIsDeclinedWhenLoaded()
     {
+        // #120: opening never fails, so a record that can't be used costs nothing unless its closed classes are used.
         var notARecord = Path.Combine(project, "warrant.source");
         File.WriteAllText(notARecord, "something else" + Environment.NewLine);
-        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(notARecord));
-        Assert.Contains("not a Warrant source record", e.Message, StringComparison.Ordinal);
+
+        var source = ReferencedSource.Open(notARecord);
+
+        Assert.Null(source.AssemblyName);
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("not a Warrant source record this Warrant can read", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARecordOfANewerFormatNamesItsAssemblyAndIsDeclinedOnlyWhenLoaded()
+    {
+        Compile("public static class C { }");
+        var record = Record();
+        File.WriteAllLines(record, File.ReadAllLines(record).Select(l => l == "warrant-source 2" ? "warrant-source 3" : l).Append("future=1"));
+
+        var source = ReferencedSource.Open(record);
+
+        Assert.Equal("Sample", source.AssemblyName);
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("not a Warrant source record this Warrant can read", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARecordWithAnUnknownLineIsDeclinedOnlyWhenLoaded()
+    {
+        Compile("public static class C { }");
+        var record = Record();
+        File.AppendAllText(record, "future=1" + Environment.NewLine);
+
+        var source = ReferencedSource.Open(record);
+
+        Assert.Equal("Sample", source.AssemblyName);
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("unexpected line 'future=1'", e.Message, StringComparison.Ordinal);
     }
 }

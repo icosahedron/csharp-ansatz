@@ -112,7 +112,7 @@
       <_WarrantSourceUnchanged Condition="'@(_WarrantDifferentLine->Count())' == '@(_WarrantLatePath->Count())'">true</_WarrantSourceUnchanged>
     </PropertyGroup>
     <ItemGroup>
-      <_WarrantSourceLine Include="warrant-source 1" />
+      <_WarrantSourceLine Include="warrant-source 2" />
       <_WarrantSourceLine Include="assembly=$(TargetName)" />
       <_WarrantSourceLine Include="args=$(_WarrantCscArgsFileFull)" />
       <_WarrantSourceLine Include="project=$(MSBuildProjectDirectory)" />
@@ -130,6 +130,58 @@
     <ItemGroup>
       <FileWrites Include="$(_WarrantSourceRecordFile)" />
     </ItemGroup>
+  </Target>
+
+  <!--
+    A record from an older Warrant.Build (format 1) lists no referenced assemblies or analyzers (#51), so a referencing project
+    declines it, and since #56 a build in which CoreCompile is up to date keeps it. Such a build rewrites it in format 2 when
+    every file the old record lists still has the hash it recorded: the sources are then the ones Csc compiled, and a changed
+    reference or analyzer would have made CoreCompile run. Otherwise the old record is deleted, and the next compile writes
+    a new one. A missing record is not recreated here, because it may have been deleted for a file saved during the compile.
+  -->
+  <Target Name="_WarrantUpgradeSourceRecord"
+          AfterTargets="CoreCompile"
+          DependsOnTargets="_WarrantWriteCscArgs;_WarrantAnalyzerSiblings"
+          Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true' and '@(CscCommandLineArgs)' == ''">
+    <PropertyGroup>
+      <_WarrantCscArgsFileFull>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(_WarrantCscArgsFile)'))</_WarrantCscArgsFileFull>
+      <_WarrantSourceRecordFile>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'warrant.source'))</_WarrantSourceRecordFile>
+    </PropertyGroup>
+    <ReadLinesFromFile Condition="Exists('$(_WarrantSourceRecordFile)')" File="$(_WarrantSourceRecordFile)">
+      <Output TaskParameter="Lines" ItemName="_WarrantOldRecordLine" />
+    </ReadLinesFromFile>
+    <ItemGroup>
+      <_WarrantOldRecordHeader Include="@(_WarrantOldRecordLine)" Condition="'%(Identity)' == 'warrant-source 1'" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_WarrantUpgradeRecord>false</_WarrantUpgradeRecord>
+      <_WarrantUpgradeRecord Condition="'@(_WarrantOldRecordHeader)' != '' and Exists('$(_WarrantCscArgsFileFull)')">true</_WarrantUpgradeRecord>
+    </PropertyGroup>
+    <GetFileHash Condition="'$(_WarrantUpgradeRecord)' == 'true'"
+                 Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles);@(ReferencePathWithRefAssemblies);@(Analyzer);@(_WarrantAnalyzerSibling)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_WarrantUpgradeHash" />
+    </GetFileHash>
+    <GetFileHash Condition="'$(_WarrantUpgradeRecord)' == 'true'" Files="$(_WarrantCscArgsFileFull)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Items" ItemName="_WarrantUpgradeArgsHash" />
+    </GetFileHash>
+    <ItemGroup Condition="'$(_WarrantUpgradeRecord)' == 'true'">
+      <_WarrantUpgradeFileLine Include="@(_WarrantUpgradeArgsHash->'file=%(FileHash)|%(FullPath)')" />
+      <_WarrantUpgradeFileLine Include="@(_WarrantUpgradeHash->'file=%(FileHash)|%(FullPath)')" />
+      <_WarrantOldFileLine Include="@(_WarrantOldRecordLine)" Condition="$([System.String]::Copy('%(Identity)').StartsWith('file='))" />
+      <_WarrantChangedSinceRecord Include="@(_WarrantOldFileLine)" Exclude="@(_WarrantUpgradeFileLine)" />
+      <_WarrantUpgradeLine Include="warrant-source 2" />
+      <_WarrantUpgradeLine Include="assembly=$(TargetName)" />
+      <_WarrantUpgradeLine Include="args=$(_WarrantCscArgsFileFull)" />
+      <_WarrantUpgradeLine Include="project=$(MSBuildProjectDirectory)" />
+      <_WarrantUpgradeLine Include="@(_WarrantUpgradeFileLine)" />
+    </ItemGroup>
+    <WriteLinesToFile Condition="'$(_WarrantUpgradeRecord)' == 'true' and '@(_WarrantChangedSinceRecord)' == ''"
+                      File="$(_WarrantSourceRecordFile)"
+                      Lines="@(_WarrantUpgradeLine)"
+                      Overwrite="true" />
+    <Delete Condition="'$(_WarrantUpgradeRecord)' == 'true' and '@(_WarrantChangedSinceRecord)' != ''" Files="$(_WarrantSourceRecordFile)" />
+    <Message Condition="'$(_WarrantUpgradeRecord)' == 'true' and '@(_WarrantChangedSinceRecord)' != ''" Importance="high"
+             Text="Warrant: $(TargetName)'s source record is from an older Warrant.Build and a file changed since, so it was removed; rebuild $(TargetName) before verifying a project that uses its [Closed] classes." />
   </Target>
 
   <!--

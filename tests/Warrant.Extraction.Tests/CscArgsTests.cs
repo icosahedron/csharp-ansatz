@@ -323,7 +323,7 @@ public sealed class CscArgsTests : IDisposable
     /// </summary>
     private string Record(string assembly = "Sample", string? args = null)
     {
-        var lines = new List<string> { "warrant-source 1", $"assembly={assembly}", $"args={args ?? ArgsFile}", $"project={project}" };
+        var lines = new List<string> { "warrant-source 2", $"assembly={assembly}", $"args={args ?? ArgsFile}", $"project={project}" };
         foreach (var file in Directory.EnumerateFiles(project, "*", SearchOption.AllDirectories))
         {
             using var stream = File.OpenRead(file);
@@ -392,6 +392,19 @@ public sealed class CscArgsTests : IDisposable
 
         var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(record).Load(project));
         Assert.Contains("System.Runtime.dll, which Sample is compiled from, is not in the record", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARecordFromAnOlderWarrantBuildIsDeclinedWithARebuildMessage()
+    {
+        // Format 1 lists no references or analyzers (#51), so it cannot vouch for them.
+        Compile("public static class C { }");
+        var record = Record();
+        File.WriteAllLines(record, File.ReadAllLines(record).Select(l => l == "warrant-source 2" ? "warrant-source 1" : l));
+
+        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(record).Load(project));
+        Assert.Contains("was written by an older Warrant.Build", e.Message, StringComparison.Ordinal);
+        Assert.Contains("rebuild it", e.Message, StringComparison.Ordinal);
     }
 
     [Fact]

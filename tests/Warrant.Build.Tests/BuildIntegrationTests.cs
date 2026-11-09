@@ -293,6 +293,21 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         Assert.True(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.csc.args")));
         Assert.Single(Regex.Matches(log, @"Warrant: 4 verified units, 2 theorems proved \(2 from cache\), 0 not proved\."));
 
+        // A record from an older Warrant.Build (format 1, sources only) is rewritten by a build in which Shapes is up to date,
+        // because its sources still have the recorded hashes, so Painter can use it without a rebuild of Shapes.
+        var record = Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source");
+        var sourcesOnly = File.ReadAllLines(record)
+            .Where(l => !l.StartsWith("file=", StringComparison.Ordinal) || l.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || l.EndsWith(".args", StringComparison.OrdinalIgnoreCase))
+            .Select(l => l == "warrant-source 2" ? "warrant-source 1" : l);
+        File.WriteAllLines(record, sourcesOnly);
+        File.AppendAllText(Directory.GetFiles(painter, "*.cs").Single(), "// edited again\n");
+        (exitCode, log) = host.Build(painter);
+        Report(host, painter, log);
+
+        Assert.True(exitCode == 0, log);
+        Assert.Equal("warrant-source 2", File.ReadLines(record).First());
+        Assert.Contains(File.ReadLines(record), l => l.EndsWith(".dll", StringComparison.OrdinalIgnoreCase));
+
         // An edit to Shapes that Painter's build does not compile again is caught, not checked in place of the compiled one.
         File.AppendAllText(Path.Combine(shapes, "Color.cs"), "// edited\n");
         (exitCode, log) = host.Build(painter, "-p:BuildProjectReferences=false");

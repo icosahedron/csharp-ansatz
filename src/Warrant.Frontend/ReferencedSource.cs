@@ -17,7 +17,7 @@ namespace Warrant.Frontend;
 /// <remarks>
 /// The record's format, one entry per line, as <c>Warrant.Build.targets</c> writes it:
 /// <code>
-/// warrant-source 1
+/// warrant-source 2
 /// assembly=&lt;assembly name&gt;
 /// args=&lt;full path of the argument file&gt;
 /// project=&lt;full path of the project directory&gt;
@@ -25,24 +25,30 @@ namespace Warrant.Frontend;
 /// </code>
 /// Opening a record only reads it; the source is hashed and compiled by <see cref="Load"/>, which a run calls only for an
 /// assembly whose closed class it uses, so a referenced project that cannot be reproduced costs nothing unless it matters.
+/// Format 1, from a Warrant.Build before #51, lists no referenced assemblies or analyzers; <see cref="Load"/> declines it
+/// and says to rebuild the project. A build in which the project is up to date rewrites such a record in format 2 when its
+/// sources are unchanged.
 /// </remarks>
 public sealed class ReferencedSource
 {
-    private const string Header = "warrant-source 1";
+    private const string Header = "warrant-source 2";
+    private const string OldHeader = "warrant-source 1";
 
     private readonly string _recordPath;
     private readonly string _argsFile;
     private readonly string _project;
     private readonly Dictionary<string, string> _hashes;
+    private readonly bool _oldFormat;
     private CSharpCompilation? _compilation;
 
-    private ReferencedSource(string recordPath, string assemblyName, string argsFile, string project, Dictionary<string, string> hashes)
+    private ReferencedSource(string recordPath, string assemblyName, string argsFile, string project, Dictionary<string, string> hashes, bool oldFormat)
     {
         _recordPath = recordPath;
         AssemblyName = assemblyName;
         _argsFile = argsFile;
         _project = project;
         _hashes = hashes;
+        _oldFormat = oldFormat;
     }
 
     /// <summary>The referenced assembly's name.</summary>
@@ -56,7 +62,7 @@ public sealed class ReferencedSource
     {
         ArgumentNullException.ThrowIfNull(recordPath);
         var lines = File.ReadAllLines(recordPath, Encoding.UTF8).Where(l => l.Length > 0).ToList();
-        if (lines.Count == 0 || lines[0] != Header)
+        if (lines.Count == 0 || (lines[0] != Header && lines[0] != OldHeader))
         {
             throw new InvalidDataException($"{recordPath}: not a Warrant source record");
         }
@@ -88,7 +94,7 @@ public sealed class ReferencedSource
         {
             throw new InvalidDataException($"{recordPath}: the assembly, args or project line is missing");
         }
-        return new ReferencedSource(recordPath, assembly, Path.GetFullPath(argsFile), Path.GetFullPath(project), hashes);
+        return new ReferencedSource(recordPath, assembly, Path.GetFullPath(argsFile), Path.GetFullPath(project), hashes, lines[0] == OldHeader);
     }
 
     /// <summary>
@@ -107,6 +113,11 @@ public sealed class ReferencedSource
         if (_compilation is not null)
         {
             return _compilation;
+        }
+        if (_oldFormat)
+        {
+            throw new InvalidDataException(
+                $"{_recordPath} was written by an older Warrant.Build and does not list {AssemblyName}'s references; build {AssemblyName} again, or rebuild it if that does not rewrite the record");
         }
 
         // Every file the compiler read: the arguments themselves, the sources, the generators' additional files, the

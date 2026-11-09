@@ -132,8 +132,10 @@ explaining Increments.AlwaysLarger(int)  …/Increments.cs(11,18)
     …
 ```
 
-It uses the project's last build (`obj/**/warrant.csc.args`), `--csc-args
-<file>`, or `--sources <dir>` for a directory of files, and it never uses the
+It explains the project's last verifying build as that build verified it
+(`obj/**/warrant.explain`: its argument file, the source records of the projects it
+references, and its options), or takes `--csc-args <file>`, or `--sources <dir>` for
+a directory of files, and it never uses the
 result cache, because an explanation must come from running the tactics. It
 verifies in-process unless you add `--server auto`. Steps inside
 `Tactic.AllGoals` or `Tactic.Try` are numbered under them (`[3.1]`, `[3.2]`).

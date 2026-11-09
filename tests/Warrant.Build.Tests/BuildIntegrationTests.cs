@@ -190,6 +190,12 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         // Every framework records its source (#32), since a referencing project may use any of them; only the first verifies.
         Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.source")));
         Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", "net10.0", "warrant.source")));
+        // Only the framework that verified says how, so `warrant explain` compiles with its arguments (#124).
+        var explain = File.ReadAllLines(Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.explain"));
+        Assert.Equal("warrant-explain 1", explain[0]);
+        Assert.Contains($"args={Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.csc.args")}", explain);
+        Assert.Contains("keep-conditional-check=true", explain);
+        Assert.False(File.Exists(Path.Combine(dir, "obj", "Debug", "net10.0", "warrant.explain")));
     }
 
     [HostFact(BuildHost.Dotnet)]
@@ -281,6 +287,11 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         Assert.True(exitCode == 0, log);
         Assert.Single(Regex.Matches(log, @"Warrant: 4 verified units, 2 theorems proved, 0 not proved\."));
         Assert.True(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source")));
+        // `warrant explain` passes the records the build passed (#123).
+        Assert.Contains(
+            $"reference-source={Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source")}",
+            File.ReadAllLines(Path.Combine(painter, "obj", "Debug", Samples.Net10, "warrant.explain")));
+        Assert.False(File.Exists(Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.explain")));
 
         // A build in which Shapes is up to date keeps its record (IncrementalClean deletes a file no target lists in
         // FileWrites), so Painter, compiled again after an edit, still checks Color from it.

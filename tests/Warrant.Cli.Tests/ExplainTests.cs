@@ -134,10 +134,12 @@ public sealed class ExplainTests : IDisposable
         Assert.NotNull(await server.ConnectAsync());
     }
 
-    [Fact]
-    public void WithoutArgumentsExplainUsesTheLatestBuildsArgumentFileUnderObj()
+    /// <summary>
+    /// A project as a build leaves it: the sample's arguments (plus <paramref name="extraArgs"/>) in <c>sample.csc.args</c>,
+    /// <c>src/C.cs</c> holding <paramref name="source"/>, and the reference pack and Warrant under <c>refs/</c>.
+    /// </summary>
+    private string Project(string source, params string[] extraArgs)
     {
-        // A project as a build leaves it: the argument file under obj/, the sources and the reference pack beside it.
         var project = Path.Combine(_root, "project");
         var fixture = Path.Combine(AppContext.BaseDirectory, "cscargs");
         foreach (var file in Directory.EnumerateFiles(fixture, "*", SearchOption.AllDirectories))
@@ -157,7 +159,16 @@ public sealed class ExplainTests : IDisposable
             image.CopyTo(dll);
         }
         Directory.CreateDirectory(Path.Combine(project, "src"));
-        File.WriteAllText(Path.Combine(project, "src", "C.cs"), "using Warrant;\n" + Failing);
+        File.WriteAllText(Path.Combine(project, "src", "C.cs"), "using Warrant;\n" + source);
+        var args = Path.Combine(project, "sample.csc.args");
+        File.AppendAllLines(args, extraArgs);
+        return project;
+    }
+
+    [Fact]
+    public void WithoutArgumentsExplainUsesTheLatestBuildsArgumentFileUnderObj()
+    {
+        var project = Project(Failing);
         var obj = Directory.CreateDirectory(Path.Combine(project, "obj", "Debug", "net10.0")).FullName;
         File.Move(Path.Combine(project, "sample.csc.args"), Path.Combine(obj, ExplainCommand.CscArgsFileName));
 
@@ -169,6 +180,80 @@ public sealed class ExplainTests : IDisposable
         Assert.Contains("[2] Tactic.Omega()", output, StringComparison.Ordinal);
         Assert.Equal(2, none);
         Assert.Contains("no warrant.csc.args under", noneOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExplainUsesTheArgumentsOfTheFrameworkTheBuildVerifiedNotTheNewest()
+    {
+        // #124: every target framework writes its argument file; only the one that verifies writes warrant.explain.
+        var project = Project(Failing);
+        var verified = Directory.CreateDirectory(Path.Combine(project, "obj", "Debug", "net10.0")).FullName;
+        var other = Directory.CreateDirectory(Path.Combine(project, "obj", "Debug", "net8.0")).FullName;
+        var verifiedArgs = Path.Combine(verified, ExplainCommand.CscArgsFileName);
+        File.Move(Path.Combine(project, "sample.csc.args"), verifiedArgs);
+        var otherArgs = Path.Combine(other, ExplainCommand.CscArgsFileName);
+        File.WriteAllLines(otherArgs, ["/langversion:not-a-version", "src/C.cs"]);
+        File.SetLastWriteTimeUtc(otherArgs, File.GetLastWriteTimeUtc(verifiedArgs).AddMinutes(1));
+
+        var (ambiguous, ambiguousOutput) = Explain(["AlwaysLarger", "--project-dir", project]);
+        File.WriteAllLines(Path.Combine(verified, ExplainCommand.BuildFileName),
+            ["warrant-explain 1", $"args={verifiedArgs}", $"project={project}", "keep-conditional-check=true"]);
+        var (code, output) = Explain(["AlwaysLarger", "--project-dir", project]);
+
+        Assert.Equal(2, ambiguous);
+        Assert.Contains("2 warrant.csc.args files under", ambiguousOutput, StringComparison.Ordinal);
+        Assert.Equal(1, code);
+        Assert.Contains($"from {verifiedArgs}", output, StringComparison.Ordinal);
+        Assert.Contains("[2] Tactic.Omega()", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExplainPassesTheReferencedProjectsSourceRecordsTheBuildVerifiedWith()
+    {
+        // #123: a closed class from a referenced project is checked from that project's record, which explain must pass as
+        // the build does. An old-format record makes the difference visible: it is read only when it is passed.
+        var refs = Path.Combine(_root, "project", "refs");
+        Directory.CreateDirectory(refs);
+        var shapes = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
+            "Shapes",
+            [Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                "namespace Shapes; [Warrant.Closed] public sealed class Color { public static Color Red { get; } = new(); private Color() { } }")],
+            [.. Basic.Reference.Assemblies.Net100.References.All, CompilationFactory.WarrantReference],
+            new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        Assert.True(shapes.Emit(Path.Combine(refs, "Shapes.dll")).Success);
+        var project = Project(
+            "public static class Uses { [Verified] public static bool Same(Shapes.Color a, Shapes.Color b) => a == b; }",
+            "/reference:refs/Shapes.dll");
+        var obj = Directory.CreateDirectory(Path.Combine(project, "obj", "Debug", "net10.0")).FullName;
+        var args = Path.Combine(obj, ExplainCommand.CscArgsFileName);
+        File.Move(Path.Combine(project, "sample.csc.args"), args);
+        var record = Path.Combine(_root, "warrant.source");
+        File.WriteAllLines(record, ["warrant-source 1", "assembly=Shapes", $"args={args}", $"project={project}"]);
+
+        var (_, without) = Explain(["Uses.Same", "--project-dir", project]);
+        File.WriteAllLines(Path.Combine(obj, ExplainCommand.BuildFileName),
+            ["warrant-explain 1", $"args={args}", $"project={project}", "keep-conditional-check=false", $"reference-source={record}"]);
+        var (_, with) = Explain(["Uses.Same", "--project-dir", project]);
+
+        // Without the record the unit is rejected (WRT0002, no recorded source), so explain has no such unit; with it, the
+        // record is read and its problem is the run's.
+        Assert.Contains("no unit is named 'Uses.Same'", without, StringComparison.Ordinal);
+        Assert.DoesNotContain("older Warrant.Build", without, StringComparison.Ordinal);
+        Assert.Contains("WRT0012", with, StringComparison.Ordinal);
+        Assert.Contains("warrant.source was written by an older Warrant.Build", with, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUnreadableBuildFileIsDeclined()
+    {
+        var project = Project(Failing);
+        var obj = Directory.CreateDirectory(Path.Combine(project, "obj", "Debug", "net10.0")).FullName;
+        File.WriteAllLines(Path.Combine(obj, ExplainCommand.BuildFileName), ["warrant-explain 2"]);
+
+        var (code, output) = Explain(["AlwaysLarger", "--project-dir", project]);
+
+        Assert.Equal(2, code);
+        Assert.Contains("is not a warrant.explain this Warrant can read", output, StringComparison.Ordinal);
     }
 
     [Fact]

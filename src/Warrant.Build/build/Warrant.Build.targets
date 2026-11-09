@@ -230,6 +230,23 @@
       <!-- The referenced projects' source records, which reach ReferencePath with the rest of their outputs' metadata. -->
       <_WarrantReferenceSource Include="@(ReferencePath->'%(WarrantSourceRecord)'->Distinct())" />
     </ItemGroup>
+    <!--
+      What this run verifies with, for `warrant explain` (#123, #124): the argument file, the referenced projects' records
+      and the options that change what is extracted. Rewritten every run, so the newest one is the last build that
+      verified; only the target framework that verifies writes one.
+    -->
+    <ItemGroup>
+      <_WarrantExplainLine Include="warrant-explain 1" />
+      <_WarrantExplainLine Include="args=$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(_WarrantCscArgsFile)'))" />
+      <_WarrantExplainLine Include="project=$(MSBuildProjectDirectory)" />
+      <_WarrantExplainLine Include="keep-conditional-check=true" Condition="'$(_WarrantMultiTargeted)' == 'true'" />
+      <_WarrantExplainLine Include="keep-conditional-check=false" Condition="'$(_WarrantMultiTargeted)' != 'true'" />
+      <_WarrantExplainLine Include="@(_WarrantReferenceSource->'reference-source=%(Identity)')" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)warrant.explain" Lines="@(_WarrantExplainLine)" Overwrite="true" />
+    <ItemGroup>
+      <FileWrites Include="$(IntermediateOutputPath)warrant.explain" />
+    </ItemGroup>
     <WarrantVerify CscArgsFile="$(_WarrantCscArgsFile)"
                    ProjectDirectory="$(MSBuildProjectDirectory)"
                    ReferenceSources="@(_WarrantReferenceSource)"

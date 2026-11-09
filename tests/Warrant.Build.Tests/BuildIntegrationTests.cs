@@ -365,6 +365,66 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
     }
 
     [HostFact(BuildHost.Dotnet)]
+    public void ASourceSavedDuringTheCompileLeavesNoRecordAndABuildWithNothingNewHashesNothingFirst()
+    {
+        var host = BuildHost.Find(BuildHost.Dotnet).Host!;
+        // A target that saves a source after Csc read it and before the record is written: a save during the compile.
+        var shapes = packages.Sample(
+            "SavedDuringCompile",
+            Samples.Project($"<TargetFramework>{Samples.Net10}</TargetFramework><WarrantEnabled>false</WarrantEnabled>") + """
+              <Target Name="SaveDuringCompile" BeforeTargets="WarrantRecordSource" Condition="'$(SaveDuringCompile)' == 'true'">
+                <WriteLinesToFile File="Color.cs" Lines="// saved during the compile" />
+              </Target>
+              <Target Name="ReportHashedFirst" AfterTargets="_WarrantHashSourcesBeforeCompile">
+                <Message Importance="high" Text="hashed first: @(_WarrantNewInput->'%(Filename)%(Extension)') (of @(_WarrantInputBefore->Count()))" />
+              </Target>
+            """,
+            new Dictionary<string, string> { ["Color.cs"] = Samples.ReferencedColor, ["Other.cs"] = "public static class Other { }\n" });
+        var record = Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source");
+
+        // The files hashed before the compile, and how many inputs there are.
+        static (string[] Files, int Inputs) HashedFirst(string log)
+        {
+            var match = Regex.Match(log, @"hashed first: (?<files>[^(\r\n]*) \(of (?<inputs>[0-9]+)\)");
+            Assert.True(match.Success, log);
+            return (match.Groups["files"].Value.Split(';', StringSplitOptions.RemoveEmptyEntries), int.Parse(match.Groups["inputs"].Value, System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        // Without a record every input is new, so every input is hashed first.
+        var (exitCode, log) = host.Build(shapes);
+        Report(host, shapes, log);
+        Assert.True(exitCode == 0 && File.Exists(record), log);
+        var (files, inputs) = HashedFirst(log);
+        Assert.Equal(inputs, files.Length);
+        Assert.Contains("Color.cs", files);
+
+        // #125: before a build, only the inputs written since the record (less two seconds, a coarse clock's tick) are
+        // hashed, so a build with nothing new hashes neither source; what it does hash are the few files the SDK wrote
+        // just before the last compile, within those two seconds.
+        (exitCode, log) = host.Build(shapes);
+        Report(host, shapes, log);
+        Assert.True(exitCode == 0 && File.Exists(record), log);
+        (files, inputs) = HashedFirst(log);
+        Assert.DoesNotContain("Color.cs", files);
+        Assert.DoesNotContain("Other.cs", files);
+        Assert.True(files.Length * 10 < inputs, log);
+
+        // An edit to Other.cs makes Csc run; Color.cs, not hashed first, is saved after Csc read it. Its last-write time
+        // changed, so there is no record.
+        File.AppendAllText(Path.Combine(shapes, "Other.cs"), "// edited\n");
+        (exitCode, log) = host.Build(shapes, "-p:SaveDuringCompile=true");
+        Assert.True(exitCode == 0, log);
+        (files, _) = HashedFirst(log);
+        Assert.Contains("Other.cs", files);
+        Assert.DoesNotContain("Color.cs", files);
+        Assert.False(File.Exists(record), log);
+        Assert.Contains("a source file changed while SavedDuringCompile compiled", log, StringComparison.Ordinal);
+
+        (exitCode, log) = host.Build(shapes);
+        Assert.True(exitCode == 0 && File.Exists(record), log);
+    }
+
+    [HostFact(BuildHost.Dotnet)]
     public void ASourceThatNeedsASourceGeneratorVerifiesWithTheGeneratedSource()
     {
         var host = BuildHost.Find(BuildHost.Dotnet).Host!;

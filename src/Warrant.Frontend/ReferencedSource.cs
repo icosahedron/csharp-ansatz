@@ -9,7 +9,7 @@ namespace Warrant.Frontend;
 /// referenced projects"). A <c>[Closed]</c> class's shape and construction checks need its source, which the project being
 /// verified sees only as metadata. Every project that imports <c>Warrant.Build</c> writes a record after its compile:
 /// <c>obj/&lt;configuration&gt;/&lt;framework&gt;/warrant.source</c>, holding its assembly name, its compiler arguments and the
-/// SHA-256 of every file those arguments read, hashed before and after the compile and written only when both agree.
+/// SHA-256 of every file those arguments read, hashed after the compile and written only when no file was written during it.
 /// <see cref="Load"/> reads those files, hashes them and declines if any differs, then compiles from the bytes it hashed
 /// (#127), so the source checked is the source the referenced assembly was compiled from. The files include the assemblies
 /// the arguments reference and the analyzers and generators they load (#51).

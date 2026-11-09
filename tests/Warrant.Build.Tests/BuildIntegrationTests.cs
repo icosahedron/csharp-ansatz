@@ -326,6 +326,34 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
     }
 
     [HostFact(BuildHost.Dotnet)]
+    public void AMissingSourceRecordIsRewrittenByCompilingAgainButNotBySkippedCompilation()
+    {
+        var host = BuildHost.Find(BuildHost.Dotnet).Host!;
+        var shapes = packages.Sample(
+            "Shapes",
+            Samples.Project($"<TargetFramework>{Samples.Net10}</TargetFramework><WarrantEnabled>false</WarrantEnabled>"),
+            new Dictionary<string, string> { ["Color.cs"] = Samples.ReferencedColor });
+        var record = Path.Combine(shapes, "obj", "Debug", Samples.Net10, "warrant.source");
+        var (exitCode, log) = host.Build(shapes);
+        Assert.True(exitCode == 0 && File.Exists(record), log);
+
+        // #119: the record is a CoreCompile output, so a build that finds it missing compiles again and writes it, although
+        // no source changed. Without that, CoreCompile is up to date and the record stays missing.
+        File.Delete(record);
+        (exitCode, log) = host.Build(shapes);
+        Report(host, shapes, log);
+        Assert.True(exitCode == 0, log);
+        Assert.True(File.Exists(record), log);
+
+        // #121: with SkipCompilerExecution, Csc produces its arguments without compiling, so no record is written for an
+        // assembly that wasn't built.
+        File.Delete(record);
+        (exitCode, log) = host.Build(shapes, "-p:SkipCompilerExecution=true");
+        Report(host, shapes, log);
+        Assert.False(File.Exists(record), log);
+    }
+
+    [HostFact(BuildHost.Dotnet)]
     public void ASourceThatNeedsASourceGeneratorVerifiesWithTheGeneratedSource()
     {
         var host = BuildHost.Find(BuildHost.Dotnet).Host!;

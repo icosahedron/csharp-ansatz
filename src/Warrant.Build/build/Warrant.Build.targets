@@ -64,6 +64,13 @@
     and referencing projects fail closed until this project is built again. When CoreCompile was up to date the record from
     the compile that produced the assembly stands.
   -->
+  <!--
+    The record is one of CoreCompile's outputs (#119), added by _WarrantHashSourcesBeforeCompile below, where
+    IntermediateOutputPath is known. A build that finds it missing compiles again and writes it. Without this, a record
+    deleted because a file was saved during the compile, or never written, would stay missing while every later build found
+    CoreCompile up to date, and referencing projects would fail until a source changed.
+  -->
+
   <!-- Every assembly beside an analyzer: the generator loader resolves an analyzer's dependencies from its directory (#51). -->
   <Target Name="_WarrantAnalyzerSiblings" Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true'">
     <ItemGroup>
@@ -76,6 +83,9 @@
           BeforeTargets="CoreCompile"
           DependsOnTargets="_WarrantAnalyzerSiblings"
           Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <ItemGroup>
+      <CustomAdditionalCompileOutputs Include="$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'warrant.source'))" />
+    </ItemGroup>
     <GetFileHash Files="@(Compile);@(AdditionalFiles);@(EditorConfigFiles);@(ReferencePathWithRefAssemblies);@(Analyzer);@(_WarrantAnalyzerSibling)" Algorithm="SHA256" HashEncoding="hex">
       <Output TaskParameter="Items" ItemName="_WarrantSourceHashBefore" />
     </GetFileHash>
@@ -84,7 +94,7 @@
   <Target Name="WarrantRecordSource"
           AfterTargets="CoreCompile"
           DependsOnTargets="_WarrantWriteCscArgs;_WarrantAnalyzerSiblings"
-          Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true' and '@(CscCommandLineArgs)' != ''">
+          Condition="'$(WarrantRecordSource)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(SkipCompilerExecution)' != 'true' and '@(CscCommandLineArgs)' != ''">
     <PropertyGroup>
       <_WarrantCscArgsFileFull>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(_WarrantCscArgsFile)'))</_WarrantCscArgsFileFull>
       <_WarrantSourceRecordFile>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'warrant.source'))</_WarrantSourceRecordFile>
@@ -119,11 +129,12 @@
       <_WarrantSourceLine Include="@(_WarrantArgsHash->'file=%(FileHash)|%(FullPath)')" />
       <_WarrantSourceLine Include="@(_WarrantSourceHashAfter->'file=%(FileHash)|%(FullPath)')" />
     </ItemGroup>
+    <!-- Always rewritten, not only when different: the record is a CoreCompile output (see below), so it must be newer than
+         the inputs after every compile, or CoreCompile would never be up to date again. -->
     <WriteLinesToFile Condition="'$(_WarrantSourceUnchanged)' == 'true'"
                       File="$(_WarrantSourceRecordFile)"
                       Lines="@(_WarrantSourceLine)"
-                      Overwrite="true"
-                      WriteOnlyWhenDifferent="true" />
+                      Overwrite="true" />
     <Delete Condition="'$(_WarrantSourceUnchanged)' != 'true'" Files="$(_WarrantSourceRecordFile)" />
     <Message Condition="'$(_WarrantSourceUnchanged)' != 'true'" Importance="high"
              Text="Warrant: a source file changed while $(TargetName) compiled, so it has no source record; build it again before verifying a project that uses its [Closed] classes." />

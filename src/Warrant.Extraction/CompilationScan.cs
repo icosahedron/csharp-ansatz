@@ -66,23 +66,36 @@ internal sealed class ExtractionContext
     public bool IsOwn(ISymbol symbol) => SymbolEqualityComparer.Default.Equals(symbol.ContainingAssembly, Compilation.Assembly);
 
     /// <summary>
-    /// A type from a referenced assembly as its project's recorded source declares it, or null if that source was not
-    /// given. The two have the same documentation-comment ID, so the same key.
+    /// A type from a referenced assembly as its project's recorded source declares it, or null with the reason it cannot be
+    /// used (#122). The two have the same documentation-comment ID, so the same key.
     /// </summary>
-    public INamedTypeSymbol? FromReferencedSource(INamedTypeSymbol type)
+    public INamedTypeSymbol? FromReferencedSource(INamedTypeSymbol type, out string reason)
     {
+        var assemblyName = type.ContainingAssembly?.Name ?? "its assembly";
+
         // Type units are keyed by documentation-comment ID, which does not name the assembly, so the type's full name must
         // name only it among the compilation and its references (no extern-aliased twin, no type of the compilation's own).
         var metadataName = MetadataName(type);
         if (!SymbolEqualityComparer.Default.Equals(Compilation.GetTypeByMetadataName(metadataName), type))
         {
+            reason = $"its full name {metadataName} also names another type in the compilation or its references";
+            return null;
+        }
+        if (type.IsGenericType)
+        {
+            reason = "it is generic";
             return null;
         }
 
         // A referenced compilation stands for the reference with its assembly identity, and only for that one.
-        if (type.ContainingAssembly is not { } assembly || type.IsGenericType || _referencedSource?.Invoke(assembly.Name) is not { } source
-            || !source.Assembly.Identity.Equals(assembly.Identity))
+        if (type.ContainingAssembly is not { } assembly || _referencedSource?.Invoke(assembly.Name) is not { } source)
         {
+            reason = $"Warrant has no recorded source for {assemblyName} that it can use; its project must import Warrant.Build, and a multi-targeted project cannot use it";
+            return null;
+        }
+        if (!source.Assembly.Identity.Equals(assembly.Identity))
+        {
+            reason = $"the source recorded for {assemblyName} compiles {source.Assembly.Identity.GetDisplayName()}, not the referenced {assembly.Identity.GetDisplayName()}; build {assemblyName} with a fixed assembly version, then build again";
             return null;
         }
         if (!_referenced.Contains(source))
@@ -90,7 +103,13 @@ internal sealed class ExtractionContext
             _referenced.Add(source);
         }
         var declared = source.GetTypeByMetadataName(metadataName);
-        return declared is not null && string.Equals(Symbols.Key(declared), Symbols.Key(type), StringComparison.Ordinal) ? declared : null;
+        if (declared is null || !string.Equals(Symbols.Key(declared), Symbols.Key(type), StringComparison.Ordinal))
+        {
+            reason = $"the source recorded for {assemblyName} does not declare it; build {assemblyName} again";
+            return null;
+        }
+        reason = "";
+        return declared;
     }
 
     private static string MetadataName(INamedTypeSymbol type) =>

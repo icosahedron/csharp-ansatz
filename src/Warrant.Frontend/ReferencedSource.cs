@@ -39,9 +39,10 @@ public sealed class ReferencedSource
     private readonly string _project;
     private readonly Dictionary<string, string> _hashes;
     private readonly bool _oldFormat;
+    private readonly string? _problem;
     private CSharpCompilation? _compilation;
 
-    private ReferencedSource(string recordPath, string assemblyName, string argsFile, string project, Dictionary<string, string> hashes, bool oldFormat)
+    private ReferencedSource(string recordPath, string? assemblyName, string argsFile, string project, Dictionary<string, string> hashes, bool oldFormat, string? problem)
     {
         _recordPath = recordPath;
         AssemblyName = assemblyName;
@@ -49,24 +50,32 @@ public sealed class ReferencedSource
         _project = project;
         _hashes = hashes;
         _oldFormat = oldFormat;
+        _problem = problem;
     }
 
-    /// <summary>The referenced assembly's name.</summary>
-    public string AssemblyName { get; }
+    /// <summary>
+    /// The referenced assembly's name, or null when the record does not name one; such a record can never be used, because
+    /// it cannot be matched to a reference.
+    /// </summary>
+    public string? AssemblyName { get; }
 
-    /// <summary>Reads a record.</summary>
+    /// <summary>
+    /// Reads a record. A record that is not one Warrant can use (another format, an unknown line, a missing entry) is still
+    /// opened, and <see cref="Load"/> reports why, so a referenced project that cannot be used costs nothing unless one of
+    /// its closed classes is used (#120).
+    /// </summary>
     /// <param name="recordPath">The record.</param>
     /// <returns>The record, not yet checked against the files it names.</returns>
-    /// <exception cref="InvalidDataException">The record is malformed.</exception>
     public static ReferencedSource Open(string recordPath)
     {
         ArgumentNullException.ThrowIfNull(recordPath);
         var lines = File.ReadAllLines(recordPath, Encoding.UTF8).Where(l => l.Length > 0).ToList();
+        string? assembly = lines.Where(l => l.StartsWith("assembly=", StringComparison.Ordinal)).Select(l => l["assembly=".Length..]).FirstOrDefault();
         if (lines.Count == 0 || (lines[0] != Header && lines[0] != OldHeader))
         {
-            throw new InvalidDataException($"{recordPath}: not a Warrant source record");
+            return Unusable(recordPath, assembly, $"{recordPath}: not a Warrant source record this Warrant can read");
         }
-        string? assembly = null, argsFile = null, project = null;
+        string? argsFile = null, project = null;
         var hashes = new Dictionary<string, string>(PathComparer);
         foreach (var line in lines.Skip(1))
         {
@@ -87,15 +96,18 @@ public sealed class ReferencedSource
                     hashes[Path.GetFullPath(value[(bar + 1)..])] = value[..bar];
                     break;
                 default:
-                    throw new InvalidDataException($"{recordPath}: unexpected line '{line}'");
+                    return Unusable(recordPath, assembly, $"{recordPath}: unexpected line '{line}'");
             }
         }
         if (string.IsNullOrEmpty(assembly) || string.IsNullOrEmpty(argsFile) || string.IsNullOrEmpty(project))
         {
-            throw new InvalidDataException($"{recordPath}: the assembly, args or project line is missing");
+            return Unusable(recordPath, assembly, $"{recordPath}: the assembly, args or project line is missing");
         }
-        return new ReferencedSource(recordPath, assembly, Path.GetFullPath(argsFile), Path.GetFullPath(project), hashes, lines[0] == OldHeader);
+        return new ReferencedSource(recordPath, assembly, Path.GetFullPath(argsFile), Path.GetFullPath(project), hashes, lines[0] == OldHeader, null);
     }
+
+    private static ReferencedSource Unusable(string recordPath, string? assembly, string problem) =>
+        new(recordPath, string.IsNullOrEmpty(assembly) ? null : assembly, "", "", new Dictionary<string, string>(PathComparer), false, problem);
 
     /// <summary>
     /// Checks that the files the record names are unchanged and rebuilds the compilation, once; later calls return the
@@ -113,6 +125,10 @@ public sealed class ReferencedSource
         if (_compilation is not null)
         {
             return _compilation;
+        }
+        if (_problem is not null)
+        {
+            throw new InvalidDataException(_problem);
         }
         if (_oldFormat)
         {

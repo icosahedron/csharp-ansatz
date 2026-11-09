@@ -90,13 +90,12 @@ internal sealed partial class Walker
                     Deps.Add(referenced);
                     return VirType.Ref(referenced);
                 }
-                named = (closedClass ? _context.FromReferencedSource(named) : null)
+                var reason = "";
+                named = (closedClass ? _context.FromReferencedSource(named, out reason) : null)
                     ?? throw Reject(
                         "type defined outside the compilation",
                         at,
-                        closedClass
-                            ? $"{Symbols.Display(type)}, and Warrant has no recorded source for {named.ContainingAssembly.Name} that it can use; its project must import Warrant.Build, and a multi-targeted project cannot use it"
-                            : Symbols.Display(type));
+                        closedClass ? $"{Symbols.Display(type)}, and {reason}" : Symbols.Display(type));
             }
             if (named.IsGenericType)
             {

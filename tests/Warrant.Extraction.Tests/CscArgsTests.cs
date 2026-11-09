@@ -497,11 +497,44 @@ public sealed class CscArgsTests : IDisposable
     }
 
     [Fact]
-    public void AFileThatIsNotARecordIsDeclined()
+    public void AFileThatIsNotARecordOpensWithNoAssemblyAndIsDeclinedWhenLoaded()
     {
+        // #120: opening never fails, so a record that can't be used costs nothing unless its closed classes are used.
         var notARecord = Path.Combine(project, "warrant.source");
         File.WriteAllText(notARecord, "something else" + Environment.NewLine);
-        var e = Assert.Throws<InvalidDataException>(() => ReferencedSource.Open(notARecord));
-        Assert.Contains("not a Warrant source record", e.Message, StringComparison.Ordinal);
+
+        var source = ReferencedSource.Open(notARecord);
+
+        Assert.Null(source.AssemblyName);
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("not a Warrant source record this Warrant can read", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARecordOfANewerFormatNamesItsAssemblyAndIsDeclinedOnlyWhenLoaded()
+    {
+        Compile("public static class C { }");
+        var record = Record();
+        File.WriteAllLines(record, File.ReadAllLines(record).Select(l => l == "warrant-source 2" ? "warrant-source 3" : l).Append("future=1"));
+
+        var source = ReferencedSource.Open(record);
+
+        Assert.Equal("Sample", source.AssemblyName);
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("not a Warrant source record this Warrant can read", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARecordWithAnUnknownLineIsDeclinedOnlyWhenLoaded()
+    {
+        Compile("public static class C { }");
+        var record = Record();
+        File.AppendAllText(record, "future=1" + Environment.NewLine);
+
+        var source = ReferencedSource.Open(record);
+
+        Assert.Equal("Sample", source.AssemblyName);
+        var e = Assert.Throws<InvalidDataException>(() => source.Load(project));
+        Assert.Contains("unexpected line 'future=1'", e.Message, StringComparison.Ordinal);
     }
 }

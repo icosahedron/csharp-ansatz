@@ -160,6 +160,10 @@ public sealed class ReferencedClosedClassTests
         var result = Extract(Consumer(library, UsesColor), otherVersion);
 
         Assert.Equal("WRT0002 | type defined outside the compilation", Inline.Only(result, "M:C.F(Lib.Color)"));
+        // #122: the message names the identity mismatch, not a missing Warrant.Build import.
+        var d = Assert.Single(result.DiagnosticsFor("M:C.F(Lib.Color)"));
+        Assert.Contains("the source recorded for Lib compiles Lib, Version=2.0.0.0", d.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("must import Warrant.Build", d.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -201,6 +205,8 @@ public sealed class ReferencedClosedClassTests
         var result = Extract(consumer, library);
 
         Assert.Equal("WRT0002 | type defined outside the compilation", Inline.Only(result, "M:C.F(Lib.Color)"));
+        var d = Assert.Single(result.DiagnosticsFor("M:C.F(Lib.Color)"));
+        Assert.Contains("its full name Lib.Color also names another type", d.Message, StringComparison.Ordinal);
     }
 
     /// <summary>Two closed classes sharing a non-generic base whose <c>==</c> compares values.</summary>

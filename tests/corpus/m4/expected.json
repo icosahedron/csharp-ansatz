@@ -126,6 +126,8 @@
       "M:Corpus.Rejected.Statements.Unreachable(System.Boolean)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "unreachable code" }] },
       "M:Corpus.Rejected.Statements.MixedDefault(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "switch section mixing default with case labels" }] },
       "M:Corpus.Rejected.Statements.Strings(System.String)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "string" }] },
+      "M:Corpus.Rejected.Statements.RefLocal(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "ref local" }] },
+      "M:Corpus.Rejected.Statements.RefReadonlyLocal(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "ref local" }] },
       "M:Corpus.Rejected.Statements.Decimals(System.Decimal)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "decimal" }] },
       "M:Corpus.Rejected.Statements.Doubles(System.Double)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "floating point" }] },
       "M:Corpus.Rejected.Statements.CallsUnverified(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0005", "construct": "M:System.Math.Abs(System.Int32)" }] },
@@ -167,6 +169,9 @@
 
       "T:Corpus.Rejected.Unsealed": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "unsealed record" }] },
       "T:Corpus.Rejected.OwnEquality": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "record with its own equality" }] },
+      "T:Corpus.Rejected.ExplicitEquality": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "record with its own equality" }] },
+      "T:Corpus.Rejected.HoldsExplicitEquality": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
+      "M:Corpus.Rejected.Types.UsesExplicitEquality(Corpus.Rejected.HoldsExplicitEquality,Corpus.Rejected.HoldsExplicitEquality)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "T:Corpus.Rejected.Graded": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "record field of a closed class with its own equality" }] },
       "M:Corpus.Rejected.Types.UsesGraded(Corpus.Rejected.Graded,Corpus.Rejected.Graded)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "T:Corpus.Rejected.ExtraState": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "record with other instance state" }] },

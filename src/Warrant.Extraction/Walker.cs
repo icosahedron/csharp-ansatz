@@ -221,6 +221,12 @@ internal sealed partial class Walker
                 {
                     throw Reject("nullable type", declaration.Syntax);
                 }
+                // #133: a ref local is another name for a variable, so a write through either is seen through both. The
+                // model has no aliases; as a copy it would lose the write, and it would get around "assignment to a parameter".
+                if (declarator.Symbol.RefKind != RefKind.None)
+                {
+                    throw Reject("ref local", declarator.Syntax);
+                }
                 MapType(declarator.Symbol.Type, annotated: false, declarator.Syntax);
                 var value = Expr(init);
                 int id = _nextLocal++;
@@ -251,6 +257,10 @@ internal sealed partial class Walker
         {
             case ISimpleAssignmentOperation a:
                 {
+                    if (a.IsRef)
+                    {
+                        throw Reject("ref local", syntax);
+                    }
                     int id = Local(a.Target, syntax);
                     return Track(new AssignStmt(id, Expr(a.Value)), syntax);
                 }
@@ -389,6 +399,10 @@ internal sealed partial class Walker
                 return Conversion(c);
             case IConditionalOperation { WhenFalse: { } whenFalse } c:
                 {
+                    if (c.IsRef)
+                    {
+                        throw Reject("ref conditional", syntax);
+                    }
                     var type = MapType(c.Type, annotated: false, syntax);
                     return Track(new CondExpr(type, Expr(c.Condition), Expr(c.WhenTrue), Expr(whenFalse)), syntax);
                 }

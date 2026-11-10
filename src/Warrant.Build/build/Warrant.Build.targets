@@ -29,8 +29,7 @@
     <WarrantCacheDir Condition="'$(WarrantCacheDir)' == ''">$(BaseIntermediateOutputPath)warrant/cache/</WarrantCacheDir>
     <_WarrantCacheDirFull>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(WarrantCacheDir)'))</_WarrantCacheDirFull>
     <_WarrantVerifyCacheDir Condition="'$(WarrantUseCache)' == 'true'">$(_WarrantCacheDirFull)</_WarrantVerifyCacheDir>
-    <!-- The first entry of $(TargetFrameworks), and whether there are two or more: the inner build that verifies. -->
-    <_WarrantFirstTargetFramework>$([System.Text.RegularExpressions.Regex]::Replace('$(TargetFrameworks)', '^[\s;]*([^;\s]*)[\s\S]*$', '$1'))</_WarrantFirstTargetFramework>
+    <!-- Whether $(TargetFrameworks) has two or more entries. Every inner build verifies its own framework's code (#131). -->
     <_WarrantMultiTargeted>$([System.Text.RegularExpressions.Regex]::IsMatch('$(TargetFrameworks)', '[^;\s]\s*;[\s;]*[^;\s]'))</_WarrantMultiTargeted>
   </PropertyGroup>
 
@@ -245,7 +244,13 @@
   <Target Name="WarrantVerify"
           AfterTargets="CoreCompile"
           DependsOnTargets="_WarrantWriteCscArgs;WarrantRecordSource"
-          Condition="'$(WarrantEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and ('$(TargetFrameworks)' == '' or '$(TargetFramework)' == '$(_WarrantFirstTargetFramework)')">
+          Condition="'$(WarrantEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <!--
+      #131: in a multi-targeted project every inner build verifies, with its own argument file. Each framework ships its own
+      assembly, whose code a framework-conditioned Compile item, LangVersion or reference can make different with no #if, and
+      a build of one framework (dotnet build -f, dotnet publish -f, a project reference) runs no other inner build. The
+      frameworks share the result cache, so a unit that is the same in each is proved once.
+    -->
     <ItemGroup>
       <!-- The referenced projects' source records, which reach ReferencePath with the rest of their outputs' metadata. -->
       <_WarrantReferenceSource Include="@(ReferencePath->'%(WarrantSourceRecord)'->Distinct())" />
@@ -253,7 +258,7 @@
     <!--
       What this run verifies with, for `warrant explain` (#123, #124): the argument file, the referenced projects' records
       and the options that change what is extracted. Rewritten every run, so the newest one is the last build that
-      verified; only the target framework that verifies writes one.
+      verified; each target framework writes its own.
     -->
     <ItemGroup>
       <_WarrantExplainLine Include="warrant-explain 1" />

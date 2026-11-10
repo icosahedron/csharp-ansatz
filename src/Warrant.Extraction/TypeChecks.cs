@@ -94,10 +94,13 @@ internal static class TypeChecks
         var primary = Symbols.PrimaryConstructor(type) ?? throw Reject(type, "record that is not positional");
         ReservedNames(type);
 
-        // A user-written equality member makes == mean something other than field-by-field equality (KTD10).
+        // A user-written equality member makes == mean something other than field-by-field equality (KTD10). An explicit
+        // IEquatable<T>.Equals is one (#132): its name is the interface member's qualified name, and it is what
+        // EqualityComparer<T>.Default calls when an enclosing record's generated Equals compares a field of this type.
         bool ownEquality = type.GetMembers().Any(m => !m.IsImplicitlyDeclared && m switch
         {
             IMethodSymbol { Name: "Equals", Parameters.Length: 1 } => true,
+            IMethodSymbol { ExplicitInterfaceImplementations: { IsEmpty: false } implemented } => implemented.Any(IsEquatableEquals),
             IMethodSymbol { Name: "GetHashCode", Parameters.Length: 0 } => true,
             IMethodSymbol { Name: "op_Equality" or "op_Inequality" } => true,
             IPropertySymbol { Name: "EqualityContract" } => true,
@@ -147,6 +150,14 @@ internal static class TypeChecks
         }
         return new RecordDefinition(new VirList<VirField>(fields));
     }
+
+    /// <summary>Whether <paramref name="method"/> is <c>System.IEquatable&lt;T&gt;.Equals</c>, for any <c>T</c>.</summary>
+    private static bool IsEquatableEquals(IMethodSymbol method) =>
+        method.ContainingType.OriginalDefinition is
+        {
+            MetadataName: "IEquatable`1",
+            ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true },
+        };
 
     private static PrimitiveType Underlying(INamedTypeSymbol type)
     {

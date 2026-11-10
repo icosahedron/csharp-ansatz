@@ -204,7 +204,7 @@ diagnostic message uses.
 | `instance member of a class` | WRT0002 | Only records may have verified instance members. |
 | `generic type`, `generic member` | WRT0002 | §12 Q14. |
 | `depends on a rejected unit` | WRT0002 | A member that uses a rejected type or calls a rejected member. |
-| `case guard`, `switch arm guard`, `lambda`, `user-defined operator`, `user-defined conversion`, `indexer`, `property setter`, `ref parameter`, `ref return`, `params argument`, `object initializer`, `object creation`, `constructor other than the primary constructor`, `with on a type that is not a record`, `with on a property that is not positional`, `assignment to a parameter`, `assignment to a field or property`, `local without an initializer`, `expression statement`, `jump statement`, `increment of a non-integer`, `enum arithmetic`, `closed enum constant that names no member`, `pattern that is not a constant`, `type defined outside the compilation`, `enum with an underlying type other than int or long`, `positional property that is not the compiler's auto-property`, `member without a body`, `theorem that is not static`, `theorem that is not Prove.That` | WRT0002 | Less common constructs, each named in its message. Anything else gets a name that starts with `unsupported` (`unsupported expression`, `unsupported operator`, …). |
+| `case guard`, `switch arm guard`, `lambda`, `user-defined operator`, `user-defined conversion`, `indexer`, `property setter`, `ref parameter`, `ref return`, `ref local`, `ref conditional`, `params argument`, `object initializer`, `object creation`, `constructor other than the primary constructor`, `with on a type that is not a record`, `with on a property that is not positional`, `assignment to a parameter`, `assignment to a field or property`, `local without an initializer`, `expression statement`, `jump statement`, `increment of a non-integer`, `enum arithmetic`, `closed enum constant that names no member`, `pattern that is not a constant`, `type defined outside the compilation`, `enum with an underlying type other than int or long`, `positional property that is not the compiler's auto-property`, `member without a body`, `theorem that is not static`, `theorem that is not Prove.That` | WRT0002 | Less common constructs, each named in its message. Anything else gets a name that starts with `unsupported` (`unsupported expression`, `unsupported operator`, …). |
 | A call to a `[Theorem]` | WRT0003 | |
 | `Spec.Implies outside a theorem statement`, `Prove.That outside a theorem statement` | WRT0004 | |
 | A call to a member that is neither `[Verified]` nor modelled | WRT0005 | For example `System.Math.Abs(int)`. |
@@ -301,10 +301,11 @@ reported at the type, and the member gets "depends on a rejected unit".
 
 A theorem's own `[Theorem(...)]` arguments override the three budgets, and from M5b
 they apply to every unit: a definition, its equation lemma or a decrease proof
-that runs out is WRT0006 too. Design-time builds never verify, and a
-multi-targeted project verifies once, in the build of the first entry of
-`TargetFrameworks`. A build of a single framework that is not
-the first (`dotnet build -f`) does not verify, and does not warn.
+that runs out is WRT0006 too. Design-time builds never verify. A
+multi-targeted project verifies in the build of every entry of
+`TargetFrameworks`, so a build of a single framework (`dotnet build -f`)
+verifies that framework, and a diagnostic is reported once for each
+framework's build it occurs in.
 
 ## CLI
 

@@ -12,6 +12,14 @@ public sealed record OwnEquality(int X)
     public override int GetHashCode() => X % 10;
 }
 
+// #132: EqualityComparer<ExplicitEquality>.Default, which an enclosing record's Equals uses, calls this one.
+public sealed record ExplicitEquality(int X) : System.IEquatable<ExplicitEquality>
+{
+    bool System.IEquatable<ExplicitEquality>.Equals(ExplicitEquality? other) => true;
+}
+
+public sealed record HoldsExplicitEquality(ExplicitEquality Inner);
+
 // The generated Equals compares Extra too, which a model built from the primary constructor would miss.
 public sealed record ExtraState(int X)
 {
@@ -70,6 +78,9 @@ public static class Types
 
     [Verified]
     public static bool UsesOwnEquality(OwnEquality a, OwnEquality b) => a == b;
+
+    [Verified]
+    public static bool UsesExplicitEquality(HoldsExplicitEquality a, HoldsExplicitEquality b) => a == b;
 
     [Verified]
     public static bool UsesGraded(Graded a, Graded b) => a == b;

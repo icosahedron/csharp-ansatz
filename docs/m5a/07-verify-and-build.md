@@ -109,7 +109,7 @@ Its tree paths are relative to the verified project, so diagnostics about the re
 
 Extraction matches the referenced compilation to a reference by assembly identity, and then checks a closed class from it exactly as it checks one of its own: the same five steps, with step 4's scan over the class's own declarations, the only place its private constructors can be called.
 A record or open enum from a referenced project is still WRT0002 `type defined outside the compilation`, and so is a closed class whose project wrote no record; the message then says its project must import `Warrant.Build`.
-So is a closed class used by a multi-targeted project: it verifies in its first framework's build only, with that framework's build of the referenced project, while each framework ships with its own build of it, which `#if` or a framework-conditioned `<Compile>` item can make different.
+So is a closed class used by a multi-targeted project: its builds keep the `#if` combination check (below), and under that check no record is used. Each framework's build now verifies with its own build of the referenced project (#131), so the restriction is stricter than it needs to be; lifting it is #157.
 And so is a class whose full name the compilation or another reference also declares (an extern-aliased twin): type units are keyed by documentation-comment ID, which does not name the assembly.
 Each unit that uses such a class carries a `referenced-source` assumption: the referenced assembly is the one built from the source Warrant checked.
 Nothing compares the two directly. The record ties them only as far as the referenced project's build is trusted, which is the trust the verified project's own argument file already needs.
@@ -128,7 +128,7 @@ The `Warrant.Build` package's targets, in outline:
   <WarrantRecordSource Condition="'$(WarrantRecordSource)' == ''">true</WarrantRecordSource>
   <ProvideCommandLineArgs Condition="'$(WarrantEnabled)' == 'true' or '$(WarrantRecordSource)' == 'true'">true</ProvideCommandLineArgs>
   <WarrantCliPath Condition="'$(WarrantCliPath)' == ''">$(MSBuildThisFileDirectory)..\tools\net10.0\any\warrant.dll</WarrantCliPath>
-  <!-- _WarrantFirstTargetFramework and _WarrantMultiTargeted, computed from $(TargetFrameworks) -->
+  <!-- _WarrantMultiTargeted, computed from $(TargetFrameworks) -->
 </PropertyGroup>
 
 <Target Name="_WarrantWriteCscArgs" Condition="...">
@@ -149,8 +149,7 @@ The `Warrant.Build` package's targets, in outline:
 <Target Name="_WarrantSourceRecordMetadata" AfterTargets="GetTargetPathWithTargetPlatformMoniker" Condition="..." />
 
 <Target Name="WarrantVerify" AfterTargets="CoreCompile" DependsOnTargets="_WarrantWriteCscArgs;WarrantRecordSource"
-        Condition="'$(WarrantEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true'
-                   and ('$(TargetFrameworks)' == '' or '$(TargetFramework)' == '$(_WarrantFirstTargetFramework)')">
+        Condition="'$(WarrantEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true'">
   <ItemGroup>
     <_WarrantReferenceSource Include="@(ReferencePath->'%(WarrantSourceRecord)'->Distinct())" />
   </ItemGroup>
@@ -169,8 +168,11 @@ This is `src/Warrant.Build/build/Warrant.Build.targets`, shortened; `Warrant.Bui
 The target has no `Inputs` and `Outputs`, so every build verifies again (KTD22).
 Skipping an unchanged project would be a cache keyed on timestamps, and the CI trust decision for M5a is that every build re-checks every proof (Key Decisions).
 M5b keeps the target without them and adds a content-addressed result cache inside the CLI's run, so an unchanged build still runs the CLI but no tactics ([M5b chapter 4](../m5b/04-cache-and-recheck.md)).
-In a multi-targeted project the target runs in the inner build of the first target framework only, so diagnostics are not repeated, and it asks the CLI to keep M4's `#if` combination check, so a verified method whose meaning differs under `#if NET8_0` is rejected instead of being proved for one framework and shipped unproved for the other.
-A build of one framework that is not the first, such as `dotnet build -f net10.0` for `net8.0;net10.0`, therefore verifies nothing and gives no warning: the inner build cannot tell whether the first framework's build is part of the same invocation. Verify with the first framework, or a build of all of them.
+In a multi-targeted project the target runs in every framework's inner build, with that build's argument file (#131).
+Each framework ships its own assembly, and a framework-conditioned `<Compile>` item, `LangVersion` or reference can make its code differ from the others' with no `#if`; and a build of one framework, such as `dotnet build -f net10.0` or `dotnet publish -f net10.0` for `net8.0;net10.0`, or a project reference, runs no other inner build.
+Until #131 only the first framework's build verified: a theorem true of the first framework's code and false of another's built green, and a build of a framework other than the first verified nothing and said nothing.
+The frameworks share the result cache, so a unit that is the same in each is proved once; a diagnostic is reported by each framework's build it occurs in, and WRT0011 likewise.
+The build still asks the CLI to keep M4's `#if` combination check, so a verified method whose meaning differs under `#if NET8_0` is rejected; with every framework verified that is stricter than needed (#157).
 Design-time builds, which Visual Studio runs constantly in the background, skip it.
 
 The task launches the CLI, which the package carries framework-dependent under `tools/net10.0/any/`, as `dotnet warrant.dll`, using `$(DOTNET_HOST_PATH)` and falling back to `dotnet` on the path.

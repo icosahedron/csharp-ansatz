@@ -123,11 +123,14 @@ public static class CompilationFactory
         var fullBase = Path.GetFullPath(pathBase);
         var args = ParseCscArgs(argsFile, Lines(read(Path.GetFullPath(argsFile))), fullProject);
 
+        // The trees first get the paths Csc gives them, their full paths, because that is what the source generators see
+        // (#54): a generator may key its output on a tree's path. Once the generators have run, every tree is named
+        // relative to the path base, as Warrant names them everywhere else.
         var trees = args.SourceFiles.Select(file =>
         {
-            using var stream = new MemoryStream(read(Path.GetFullPath(file.Path)), writable: false);
+            var path = Path.GetFullPath(file.Path);
+            using var stream = new MemoryStream(read(path), writable: false);
             var text = SourceText.From(stream, args.Encoding, args.ChecksumAlgorithm);
-            var path = Path.GetRelativePath(fullBase, file.Path).Replace('\\', '/');
             return CSharpSyntaxTree.ParseText(text, args.ParseOptions, path);
         }).ToList();
         var references = args.MetadataReferences.Select(r =>
@@ -145,19 +148,31 @@ public static class CompilationFactory
                 .Select(p => AnalyzerConfig.Parse(SourceText.From(Text(read(p))), p))
                 .ToList();
             set = AnalyzerConfigSet.Create(configs);
-            var treeOptions = trees.ToDictionary(
-                t => t.FilePath,
-                t => set.GetOptionsForSourcePath(Path.GetFullPath(Path.Combine(fullBase, t.FilePath))),
-                StringComparer.Ordinal);
+            // Each tree's options under both its names: the full path while the generators run, the relative one after.
+            var treeOptions = new Dictionary<string, AnalyzerConfigOptionsResult>(StringComparer.Ordinal);
+            foreach (var tree in trees)
+            {
+                var result = set.GetOptionsForSourcePath(tree.FilePath);
+                treeOptions[tree.FilePath] = result;
+                treeOptions[Relative(fullBase, tree.FilePath)] = result;
+            }
             options = options.WithSyntaxTreeOptionsProvider(new AnalyzerConfigTreeOptions(set.GlobalConfigOptions, treeOptions));
         }
         var compilation = CSharpCompilation.Create(args.CompilationName, trees, references, options);
 
         var analyzers = args.AnalyzerReferences.Select(r => Path.GetFullPath(Path.Combine(fullProject, r.FilePath))).ToList();
         var additionalFiles = args.AdditionalFiles.Select(f => Path.GetFullPath(Path.Combine(fullProject, f.Path))).ToList();
-        (compilation, generatorProblems) = SourceGenerators.Run(compilation, analyzers, additionalFiles, set, args.ParseOptions, fullBase, read);
-        return compilation;
+        // Csc puts the generated trees under the generated-files directory, or else beside the output assembly.
+        var generatedBase = args.GeneratedFilesOutputDirectory ?? args.OutputDirectory;
+        (compilation, generatorProblems) = SourceGenerators.Run(compilation, analyzers, additionalFiles, set, args.ParseOptions, fullBase, read, generatedBase);
+
+        var renamed = compilation.SyntaxTrees.Select(t => t.WithFilePath(Relative(fullBase, t.FilePath))).ToList();
+        return compilation.RemoveAllSyntaxTrees().AddSyntaxTrees(renamed);
     }
+
+    /// <summary>A path as Warrant names a tree: relative to <paramref name="fullBase"/>, with forward slashes.</summary>
+    private static string Relative(string fullBase, string path) =>
+        (Path.IsPathRooted(path) ? Path.GetRelativePath(fullBase, path) : path).Replace('\\', '/');
 
     /// <summary>A file's text as <see cref="File.ReadAllText(string, Encoding)"/> reads it with UTF-8: a byte order mark decides.</summary>
     internal static string Text(byte[] bytes)

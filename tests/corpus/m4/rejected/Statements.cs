@@ -88,6 +88,24 @@ public static class Statements
     [Verified]
     public static int Strings(string s) => s.Length;
 
+    // #133: a ref local is another name for p, so the write through it changes what p reads.
+    [Verified]
+    public static int RefLocal(int p)
+    {
+        ref int alias = ref p;
+        alias = 5;
+        return p;
+    }
+
+    [Verified]
+    public static int RefReadonlyLocal(int p)
+    {
+        int a = p;
+        ref readonly int alias = ref a;
+        a = 9;
+        return alias;
+    }
+
     [Verified]
     public static decimal Decimals(decimal d) => d;
 

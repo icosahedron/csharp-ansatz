@@ -370,6 +370,7 @@ public class ExtractionTests
     [InlineData("public sealed record R(int X) { private readonly int _y = 1; }", "record with other instance state")]
     [InlineData("public sealed record R(int X) { public int casesOn() => 1; }", "reserved member name")]
     [InlineData("public sealed record R(int X) { public bool Equals(R? other) => true; public override int GetHashCode() => 0; }", "record with its own equality")]
+    [InlineData("public sealed record R(int X) : System.IEquatable<R> { bool System.IEquatable<R>.Equals(R? other) => true; }", "record with its own equality")]
     [InlineData("public record R(int X);", "unsealed record")]
     [InlineData("public sealed record R { public int X { get; init; } }", "record that is not positional")]
     [InlineData("public sealed record R(string X);", "string")]
@@ -771,6 +772,11 @@ public class ExtractionTests
     [InlineData("public static int F(int n) { n = 1; return n; }", "assignment to a parameter")]
     [InlineData("public static int F(int n) { n += 1; return n; }", "assignment to a parameter")]
     [InlineData("public static int F(int n) { n++; return n; }", "assignment to a parameter")]
+    [InlineData("public static int F(int n) { ref int y = ref n; y = 5; return n; }", "ref local")]
+    [InlineData("public static int F(int n) { int a = n; ref readonly int y = ref a; a = 9; return y; }", "ref local")]
+    [InlineData("public static int F(int n) { int a = n; int b = 1; ref int y = ref (n > 0 ? ref a : ref b); return y; }", "ref local")]
+    [InlineData("public static int F(int n) { int a = n; int b = 1; (n > 0 ? ref a : ref b) = 7; return a; }", "assignment to a field or property")]
+    [InlineData("public static int F(int n) { int a = n; int b = 1; int c = n > 0 ? ref a : ref b; return c; }", "ref conditional")]
     public void SoundnessCriticalConstructsAreRejected(string member, string construct)
     {
         var result = Extract("public static class C { [Verified] " + member + " }");

@@ -98,7 +98,7 @@ Writing the `case` label as its own section, or dropping it, says the same thing
 A record is accepted when it is a `sealed` record class, positional, has the equality the compiler generates, and has no instance state besides its positional properties.
 Extraction checks that:
 
-- `Equals(T)`, `GetHashCode`, `EqualityContract` and the `==` operator are all implicitly declared;
+- `Equals(T)`, `GetHashCode`, `EqualityContract` and the `==` operator are all implicitly declared, and the record has no explicit `IEquatable<T>.Equals`, which is what `EqualityComparer<T>.Default` calls when an enclosing record compares a field of this type (#132);
 - each positional property is the compiler's auto-property;
 - the record declares no other instance field, and no other property with a backing field.
 - the copy constructor is the compiler's, because `with` runs it and the model copies the fields;

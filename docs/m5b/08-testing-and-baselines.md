@@ -41,9 +41,9 @@ So:
 
 The suite's definition of done includes "no server process left running".
 
-## Baselines for M8
+## Baselines for M9
 
-M8 has no exit criterion yet; design §12 Q15 says its latency and memory budgets start from what M5b measures.
+M9 (live IDE feedback and performance work, split from M8) has no exit criterion yet; design §12 Q15 says its latency and memory budgets start from what M5b measures.
 `scripts/measure-m5b.sh [MATHLIB_NDJSON]` measures them (KTD30).
 For each M5a sample (`tests/corpus/m5a/accepted`, `refuted` and `rejected`: 20, 3 and 2 units) it runs `warrant verify <sample> --timings`, the CLI the build task runs, in each mode, and reads the CLI's `--timings` lines:
 

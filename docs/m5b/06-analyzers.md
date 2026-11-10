@@ -78,7 +78,7 @@ The analyzer is built against Roslyn 4.8 and tested under 4.8 and 5.9 (`Warrant.
 
 The analyzer sees the active configuration only.
 A multi-targeted project's build keeps M4's check that a verified member translates the same under every `#if` combination (M5a KTD21); that diagnostic appears only in the build.
-And the analyzer never reports proof results: it cannot ask the server (I/O), and a proof that depends on the last keystroke is M8's language server.
+And the analyzer never reports proof results: it cannot ask the server (I/O), and a proof that depends on the last keystroke is M9's language server.
 
 Two things the IDE shows differently from the build:
 WRT0008 comes from a compilation-end action, which Visual Studio runs only with full solution analysis on;

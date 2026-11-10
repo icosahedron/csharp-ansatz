@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Measure M5b's baselines for M8 (docs/m5b/08, "Baselines for M8"; plan KTD30) and print them as Markdown tables.
+# Measure M5b's baselines for M9 (docs/m5b/08, "Baselines for M9"; plan KTD30) and print them as Markdown tables.
 #
 #   scripts/measure-m5b.sh [MATHLIB_NDJSON]
 #

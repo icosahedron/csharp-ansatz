@@ -2,7 +2,7 @@
 warrant-attrs: export the Lean attributes Warrant's Meta layer needs, for the constants of the
 semantics bundle, as the NDJSON sidecar tests/data/warrant-attributes.ndjson.gz (plan KTD9,
 docs/m5a/05). lean4export carries declarations only; simp, congr, instance, reducibility, defeq,
-matcher and class information lives in environment extensions, which this program reads.
+matcher, class and spec information lives in environment extensions, which this program reads.
 
   lake env lean --run Main.lean BUNDLE.ndjson BUNDLE_SHA256 MODULE...
 
@@ -18,7 +18,7 @@ state of a scoped extension (`getState`) misses entries (Ansatz's dump_attrs.lea
 never uses them unless the namespace is open.
 
 Lines, after the header (each kind in this order; fields always in this order):
-  {"kind":"header","format":1,"lean":GITHASH,"bundleSha256":HEX}
+  {"kind":"header","format":2,"lean":GITHASH,"bundleSha256":HEX}
   {"kind":"simp","name":N,"prio":P,"post":B,"inv":B,"module":M,"leanKeys":[K...]}
       one per entry of the default `simp` set, in registration order (module by module); a lemma
       split by Lean into several entries (a conjunction) has several lines. `module` is the module
@@ -37,10 +37,14 @@ Lines, after the header (each kind in this order; fields always in this order):
    "discrNames":[N|null...],"alts":[{"numFields":I,"numOverlaps":I,"unitThunk":B}...],
    "overlaps":[[OVERLAPPING,OVERLAPPED]...]}    Lean's Match.MatcherInfo, sorted by name
   {"kind":"class","name":N,"outParams":[I...]}   sorted by name
+  {"kind":"spec","name":N,"prio":P,"form":"triple"|"equation","module":M}
+      one per `@[spec]` lemma (M6 KTD15), in registration order: a Hoare triple from `mvcgen`'s
+      spec map, or an equation from its simp set (`@[spec]` on an equational lemma). Format 2.
 
 The output is deterministic: the same toolchain, library and bundle give the same bytes.
 -/
 import Lean
+import Lean.Elab.Tactic.Do.Attr
 open Lean Meta
 
 /-- One JSON object with its fields in the given order (`Json.mkObj` sorts them). -/
@@ -215,8 +219,30 @@ def dump (env : Environment) (bundle : NameSet) (out : IO.FS.Stream) : IO Unit :
   let classes ← classes.get
   counts := counts.push ("class", classes.size)
 
+  -- spec: mvcgen's triples, then its equations (M6 KTD15)
+  let specLines ← IO.mkRef (#[] : Array String)
+  let specLine (n : Name) (prio : Nat) (form : String) (mod : Name) :=
+    obj [("kind", "spec"), ("name", nameJ n), ("prio", toJson prio), ("form", Json.str form), ("module", nameJ mod)]
+  forModuleEntries env Lean.Elab.Tactic.Do.SpecAttr.specAttr.ext fun mod e => do
+    match e with
+    | .scoped _ _ => skipped.modify (· + 1)
+    | .global t =>
+      if let .global n := t.proof then
+        if bundle.contains n then
+          specLines.modify (·.push <| specLine n t.priority "triple" mod)
+  forModuleEntries env Lean.Elab.Tactic.Do.SpecAttr.mvcgenSimpExt.ext fun mod e => do
+    match e with
+    | .scoped _ _ => skipped.modify (· + 1)
+    | .global (.thm t) =>
+      if let .decl n _ _ := t.origin then
+        if bundle.contains n then
+          specLines.modify (·.push <| specLine n t.priority "equation" mod)
+    | .global _ => pure ()
+  let specLines ← specLines.get
+  counts := counts.push ("spec", specLines.size)
+
   for l in simpLines ++ congrLines ++ instLines ++ sortByName red ++ sortByName defeq
-      ++ sortByName matchers ++ sortByName classes do
+      ++ sortByName matchers ++ sortByName classes ++ specLines do
     out.putStrLn l
   stderr.putStrLn s!"warrant-attrs: {bundle.size} bundle constants; {counts}; skipped {← skipped.get} scoped entries"
 
@@ -227,7 +253,7 @@ def main (args : List String) : IO UInt32 := do
   initSearchPath (← findSysroot)
   let env ← importModules (mods.toArray.map fun m => { module := m.toName }) {}
   let out ← IO.getStdout
-  out.putStrLn <| obj [("kind", "header"), ("format", toJson (1 : Nat)), ("lean", Json.str Lean.githash),
+  out.putStrLn <| obj [("kind", "header"), ("format", toJson (2 : Nat)), ("lean", Json.str Lean.githash),
     ("bundleSha256", Json.str sha)]
   dump env bundle out
   return 0

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Export the Lean attributes of the semantics bundle's constants (simp, congr, instances,
-# reducibility, defeq, matchers, classes) as the committed sidecar
+# reducibility, defeq, matchers, classes, and mvcgen's @[spec] lemmas, M6 KTD15) as the committed sidecar
 # tests/data/warrant-attributes.ndjson.gz (plan KTD9, docs/m5a/05), with
 # tools/warrant-attrs/Main.lean on the same toolchain and library as export-semantics.sh.
 #
@@ -30,6 +30,6 @@ sha="$(sha256sum "$BUNDLE" | cut -d' ' -f1)"
 cd "$ROOT/lean"
 lake build >/dev/null
 lake env lean --run "$(native "$ROOT/tools/warrant-attrs/Main.lean")" \
-  "$(native "$raw_bundle")" "$sha" Init Warrant > "$raw"
+  "$(native "$raw_bundle")" "$sha" Init Std.Do Warrant > "$raw"
 gzip -n -9 -c "$raw" > "$OUTPUT"
 echo "wrote $OUTPUT ($(($(wc -l < "$raw") - 1)) entries)"

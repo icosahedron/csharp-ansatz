@@ -154,7 +154,7 @@ internal static class ExplainCommand
     /// <summary>
     /// The most recent verifying build: the newest <see cref="BuildFileName"/> under the project's <c>obj</c> directory, or
     /// null if there is none. Each build that verifies rewrites its file, so with several configurations it is the last one
-    /// built; with several target frameworks only the first verifies, so it is never another framework's.
+    /// built; with several target frameworks each verifies (#131), so it is the framework built last.
     /// </summary>
     /// <exception cref="InvalidDataException">The newest file is not one this Warrant can read.</exception>
     public static VerifiedBuild? LatestBuild(string projectDirectory)

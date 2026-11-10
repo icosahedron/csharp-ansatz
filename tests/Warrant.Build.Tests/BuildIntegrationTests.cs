@@ -166,7 +166,7 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
     }
 
     [HostFact(BuildHost.Dotnet)]
-    public void AMultiTargetedSampleVerifiesOnceAndReportsEachDiagnosticOnce()
+    public void AMultiTargetedSampleVerifiesInEveryFrameworksBuild()
     {
         var host = BuildHost.Find(BuildHost.Dotnet).Host!;
         var dir = packages.Sample(
@@ -185,17 +185,81 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
                 "Increments.cs(9,28,9,36): error WRT0001: ⊢ Increment x > x",
             ],
             Samples.Diagnostics(log, dir));
+        // #131: each framework ships its own assembly, so each inner build verifies and reports.
+        Assert.Equal(2, Regex.Count(log, "Warrant: 2 verified units, 0 theorems proved, 1 not proved\\."));
+        Assert.Contains("2 Error(s)", log, StringComparison.Ordinal);
+        foreach (var framework in new[] { "net8.0", "net10.0" })
+        {
+            // Every framework records its source (#32), since a referencing project may use any of them.
+            Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", framework, "warrant.source")));
+            // Each says how it verified, so `warrant explain` compiles with the arguments of the newest (#124).
+            var explain = File.ReadAllLines(Path.Combine(dir, "obj", "Debug", framework, "warrant.explain"));
+            Assert.Equal("warrant-explain 1", explain[0]);
+            Assert.Contains($"args={Path.Combine(dir, "obj", "Debug", framework, "warrant.csc.args")}", explain);
+            Assert.Contains("keep-conditional-check=true", explain);
+        }
+    }
+
+    [HostFact(BuildHost.Dotnet)]
+    public void ABuildOfOneFrameworkOfAMultiTargetedSampleVerifiesIt()
+    {
+        // #131: `dotnet build -f` (and publish, test and run with -f, and a project reference) builds one framework alone.
+        // The second framework's build used to verify nothing and say nothing.
+        var host = BuildHost.Find(BuildHost.Dotnet).Host!;
+        var dir = packages.Sample(
+            "MultiOne",
+            Samples.Project("<TargetFrameworks>net8.0;net10.0</TargetFrameworks>"),
+            new Dictionary<string, string> { ["Increments.cs"] = Samples.NoScriptOnly });
+
+        var (exitCode, log) = host.Build(dir, "-f", "net10.0");
+        Report(host, dir, log);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains(
+            "Increments.cs(9,28,9,36): error WRT0001: Theorem 'Increments.NoScript(int)' could not be proved: unsolved goals. Counterexample: x = 2147483647.",
+            Samples.Diagnostics(log, dir));
         Assert.Single(Regex.Matches(log, "Warrant: 2 verified units, 0 theorems proved, 1 not proved\\."));
-        Assert.Contains("1 Error(s)", log, StringComparison.Ordinal);
-        // Every framework records its source (#32), since a referencing project may use any of them; only the first verifies.
-        Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.source")));
-        Assert.True(File.Exists(Path.Combine(dir, "obj", "Debug", "net10.0", "warrant.source")));
-        // Only the framework that verified says how, so `warrant explain` compiles with its arguments (#124).
-        var explain = File.ReadAllLines(Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.explain"));
-        Assert.Equal("warrant-explain 1", explain[0]);
-        Assert.Contains($"args={Path.Combine(dir, "obj", "Debug", "net8.0", "warrant.csc.args")}", explain);
-        Assert.Contains("keep-conditional-check=true", explain);
-        Assert.False(File.Exists(Path.Combine(dir, "obj", "Debug", "net10.0", "warrant.explain")));
+    }
+
+    [HostFact(BuildHost.Dotnet)]
+    public void AMultiTargetedSampleWhoseVerifiedCodeDiffersByCompileItemFailsForTheFrameworkItIsFalseIn()
+    {
+        // #131: a framework-conditioned Compile item gives each framework different code with no #if, so the #if check
+        // (--keep-conditional-check) sees nothing. The theorem holds for net8.0's F and not for net10.0's.
+        var host = BuildHost.Find(BuildHost.Dotnet).Host!;
+        var dir = packages.Sample(
+            "MultiItems",
+            Samples.Project("<TargetFrameworks>net8.0;net10.0</TargetFrameworks>") + """
+
+                  <ItemGroup>
+                    <Compile Remove="F.net8.cs" Condition="'$(TargetFramework)' != 'net8.0'" />
+                    <Compile Remove="F.net10.cs" Condition="'$(TargetFramework)' != 'net10.0'" />
+                  </ItemGroup>
+                """,
+            new Dictionary<string, string>
+            {
+                ["Claims.cs"] = """
+                    using Warrant;
+
+                    namespace Sample;
+
+                    public static partial class Picks
+                    {
+                        [Theorem] static Proof FIsOne() => Prove.That(F() == 1);
+                    }
+
+                    """,
+                ["F.net8.cs"] = "using Warrant; namespace Sample; public static partial class Picks { [Verified] public static int F() => 1; }\n",
+                ["F.net10.cs"] = "using Warrant; namespace Sample; public static partial class Picks { [Verified] public static int F() => 2; }\n",
+            });
+
+        var (exitCode, log) = host.Build(dir);
+        Report(host, dir, log);
+
+        Assert.Equal(1, exitCode);
+        Assert.Single(Samples.Diagnostics(log, dir), d => d.StartsWith("Claims.cs(", StringComparison.Ordinal) && d.Contains("error WRT0001: Theorem 'Picks.FIsOne()'", StringComparison.Ordinal));
+        Assert.Single(Regex.Matches(log, "Warrant: 2 verified units, 1 theorems proved, 0 not proved\\."));
+        Assert.Single(Regex.Matches(log, "Warrant: 2 verified units, 0 theorems proved, 1 not proved\\."));
     }
 
     [HostFact(BuildHost.Dotnet)]

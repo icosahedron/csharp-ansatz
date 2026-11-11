@@ -69,7 +69,7 @@ From that analysis come KTD11's rejections, all WRT0002, naming the construct an
 |---|---|
 | `recursion with effects` | A recursive call inside a `bind` is out of reach of M5a's decrease obligations. |
 | `contract on a recursive method` | Its recursive call cannot use its own unproved triple. |
-| `theorem calling a raising method` | A theorem is a `Prop`, not a program. The message says to state the property as a `Spec.Ensures`. |
+| `theorem calling a raising method` | A theorem is a `Prop`, not a program. The message says to state the property as a `Spec.Ensures`, or, for a property relating two calls, as the `Spec.Ensures` of a verified method that makes both calls (#181). |
 | the raising operation itself (`division`, `nullable read`, `checked arithmetic`, `decimal arithmetic`, …) in a theorem statement | Lean's total operations would make `a / 0 == 0` provable. Same advice. |
 | `Spec expression calling a raising method` | A `ClrM` program cannot sit inside a `Prop` (#165). |
 

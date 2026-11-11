@@ -350,6 +350,7 @@ public class ContractExtractionTests
         Assert.Contains("C.A(int)", d.Message, StringComparison.Ordinal);
         Assert.Contains("throw in C.B(int)", d.Message, StringComparison.Ordinal);
         Assert.Contains("Spec.Ensures", d.Message, StringComparison.Ordinal);
+        Assert.Contains("for a property relating two calls, on a verified method that makes both calls", d.Message, StringComparison.Ordinal);
         Assert.NotNull(result.Find("M:C.A(System.Int32)"));
     }
 

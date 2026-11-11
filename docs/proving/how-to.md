@@ -17,6 +17,7 @@ methods and tactics, see the [reference](reference.md).
 - [Work with enums and closed sets](#work-with-enums-and-closed-sets)
 - [Deal with overflow](#deal-with-overflow)
 - [Specify a method that throws](#specify-a-method-that-throws)
+- [Relate two calls of a method that can throw](#relate-two-calls-of-a-method-that-can-throw)
 - [Prove things about private methods](#prove-things-about-private-methods)
 - [Specify an expression-bodied member](#specify-an-expression-bodied-member)
 - [Keep logging out of the proof](#keep-logging-out-of-the-proof)
@@ -480,6 +481,63 @@ fails at the division twice: `division by zero` and
 - `try`/`catch` is rejected (WRT0002 `try`), and no milestone schedules it.
 - To say which calls an exception can come from, `Spec.ThrowsOnlyFrom(...)` is
   *proposed* (§12 Q20).
+
+## Relate two calls of a method that can throw
+
+*M6.*
+
+A `[Theorem]` cannot call a method that can raise (one that throws, divides by
+a variable, uses checked arithmetic, reads a nullable value, calls a method
+with `Spec.Requires`, and so on): the build rejects it with WRT0002
+`theorem calling a raising method`, because a theorem is a claim and the
+method is a program. That method's `Spec.Ensures` speaks about one call, so a
+property that relates two calls, such as monotonicity, needs one of two routes.
+
+**A wrapper method.** Write a `[Verified]` method that makes both calls and
+states the relation as its own `Spec.Ensures`. The default procedure proves it
+with no script: at each call it checks the callee's `Spec.Requires` and uses
+its `Spec.Ensures`, without unfolding the callee.
+
+```csharp
+[Verified]
+public static int Scale(int x)
+{
+    Spec.Requires(x <= 1000);
+    Spec.Ensures<int>(r => r == x + x);
+    if (x < 0) throw new ArgumentException("x");
+    return checked(x + x);
+}
+
+[Verified]
+public static bool Monotone(int x, int y)
+{
+    Spec.Requires(0 <= x && x <= y && y <= 1000);
+    Spec.Ensures<bool>(r => r);
+    return Scale(x) <= Scale(y);
+}
+```
+
+Both are proved. The wrapper knows only what the callee's `Spec.Ensures`
+says, so that `Spec.Ensures` must be strong enough to imply the relation:
+`r >= 0` alone would not prove `Monotone`. The report lists `Scale`'s contract
+under the assumptions of `Monotone`. Nothing calls `Monotone`; it exists to be
+proved.
+
+**An exact `Spec.Ensures`.** When the method's `Spec.Ensures` pins its result,
+`r == <pure expression>`, the relation is a theorem about that expression, or
+about a pure `[Verified]` helper that computes it:
+
+```csharp
+[Theorem]
+static Proof DoubleIsMonotone(int x, int y) =>
+    Prove.That(Spec.Implies(0 <= x && x <= y && y <= 1000, x + x <= y + y))
+         .By(Tactic.Simp(), Tactic.Omega());
+```
+
+A limit in both routes: `int` arithmetic in a `Spec.Ensures` or a theorem
+wraps, and `omega` cannot always use the bounds to rule the wrap out. With
+`r == x * 3` in place of `r == x + x`, neither `Monotone` nor the theorem is
+proved, though the bounds keep `x * 3` far from overflow.
 
 ## Prove things about private methods
 

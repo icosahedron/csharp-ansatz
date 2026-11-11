@@ -487,3 +487,41 @@ exception: a `[Closed]` class from a referenced project that imports `Warrant.Bu
 is checked from the source that project recorded, and the assumption report says so. Source generators run as in the compiler, and a call that a generated
 interceptor replaces is rejected ([docs/m5a/07](../m5a/07-verify-and-build.md)). The known gap in what a build
 verifies is that `dotnet build -f` for a framework other than the first does not verify.
+
+## Two calls of a method that can throw (M6)
+
+```csharp
+[Verified]
+public static int Scale(int x)
+{
+    Spec.Requires(x <= 1000);
+    Spec.Ensures<int>(r => r == x + x);
+    if (x < 0)
+    {
+        throw new System.ArgumentException("x");
+    }
+    return checked(x + x);
+}
+
+[Verified]
+public static bool Monotone(int x, int y)
+{
+    Spec.Requires(0 <= x && x <= y && y <= 1000);
+    Spec.Ensures<bool>(r => r);
+    return Scale(x) <= Scale(y);
+}
+
+[Theorem]
+static Proof DoubleIsMonotone(int x, int y) =>
+    Prove.That(Spec.Implies(0 <= x && x <= y && y <= 1000, x + x <= y + y)).By(Tactic.Simp(), Tactic.Omega());
+```
+
+All three are proved; `Scale` and `Monotone` with no script. `Scale` can throw, so a theorem that calls it, such as
+`Prove.That(Spec.Implies(0 <= x && x <= y && y <= 1000, Scale(x) <= Scale(y)))`, is WRT0002
+`theorem calling a raising method`. `Monotone` is the wrapper route: it makes both calls and states the relation as its
+`Spec.Ensures`, and the VC walker uses `Scale`'s proved contract at each call, so with the two results
+rewritten by those `Spec.Ensures` the goal it leaves is `x + x ≤ y + y` under the bounds, which `omega` closes. `DoubleIsMonotone` is the other route:
+`Scale`'s `Spec.Ensures` pins its result, so the relation is a theorem about `x + x`. With `x * 3` in place of `x + x`,
+neither is proved: `int` multiplication wraps, and `omega` (Lean's too, which has no dark shadow) cannot use the bounds
+to rule the wrap out. `tests/Warrant.Engine.Tests/RelationalPropertyTests.cs` runs this example, in a class `S`, and
+pins the `x * 3` limit (`dotnet test tests/Warrant.Engine.Tests --filter RelationalPropertyTests`).

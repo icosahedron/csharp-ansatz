@@ -25,7 +25,7 @@ internal static class TypeDeclarations
             case EnumDefinition e:
                 {
                     var prim = types.Underlying(e.Underlying);
-                    if (prim == VirPrimitive.Bool)
+                    if (prim is not (VirPrimitive.Int32 or VirPrimitive.Int64))
                     {
                         throw new TranslationException(unit.Key, "an enum's underlying type must be int or long.");
                     }

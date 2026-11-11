@@ -129,7 +129,8 @@ internal static class Symbols
         {
             VirPrimitive.Bool => VirType.Bool,
             VirPrimitive.Int32 => VirType.Int32,
-            _ => VirType.Int64,
+            VirPrimitive.Int64 => VirType.Int64,
+            _ => throw new ArgumentOutOfRangeException(nameof(p), p, "Extraction maps only bool, int and long to primitives until M6 U17."),
         };
 
     /// <summary>

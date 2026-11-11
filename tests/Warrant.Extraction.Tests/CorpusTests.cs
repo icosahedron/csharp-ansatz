@@ -159,6 +159,24 @@ public class CorpusTests
         Assert.Equal(M4VirAtVersion1, hash);
     }
 
+    // The M5a corpus's VIR at version 2 (M5a), pinned before VIR version 3 (M6 U6, KTD19) so a change shows here.
+    private const string M5aVirAtVersion2 = "d20be30369777df2ca1c4f9e607bc2303a2e26c8714699e5433da4feba1d5525";
+
+    [Fact]
+    public void EveryM5aUnitsVirIsUnchangedApartFromTheVersion()
+    {
+        var text = new System.Text.StringBuilder();
+        foreach (var name in CorpusSet.M5a.Names)
+        {
+            foreach (var unit in Corpus.Extract(CorpusSet.M5a, name).Units)
+            {
+                text.Append(VirWriter.WriteString(unit.Unit with { Vir = 2, Facts = unit.Unit.Facts with { Roslyn = "5.0.0" } })).Append('\n');
+            }
+        }
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString())));
+        Assert.Equal(M5aVirAtVersion2, hash);
+    }
+
     private static List<string> Strings(JsonElement member, string property) =>
         member.TryGetProperty(property, out var list) ? list.EnumerateArray().Select(e => e.GetString()!).ToList() : [];
 

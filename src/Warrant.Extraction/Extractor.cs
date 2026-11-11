@@ -900,7 +900,8 @@ public static class Extractor
                 VirUnitKind.Function => VirUnit.Function(c.Key, new VirList<VirParam>(c.Params), c.Returns!, c.Body!, assumptions, _context.Facts, deps, c.Self),
                 VirUnitKind.Theorem => VirUnit.Theorem(
                     c.Key, c.Statement!, assumptions, _context.Facts, deps, new VirList<VirParam>(c.Params), c.Script, c.Budget),
-                _ => VirUnit.TypeUnit(c.Key, c.Type!.Definition!, assumptions, _context.Facts, deps),
+                VirUnitKind.Type => VirUnit.TypeUnit(c.Key, c.Type!.Definition!, assumptions, _context.Facts, deps),
+                _ => throw new InvalidOperationException($"Extraction makes no {c.Kind} units until M6 U18."),
             };
             var walker = c.Walker;
             var spans = SpanTable.Build(unit, node => walker?.SyntaxOf(node) is { } s ? Symbols.Span(s) : null);

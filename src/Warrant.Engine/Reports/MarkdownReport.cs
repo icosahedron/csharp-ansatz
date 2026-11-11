@@ -72,6 +72,10 @@ public static class MarkdownReport
 
     private static string Heading(ReportAssumption a) =>
         a.Inherited ? $"from {a.From}"
-        : a.Kind == VirAssumptionKind.NonNull ? "parameters"
-        : "types";
+        : a.Kind switch
+        {
+            VirAssumptionKind.NonNull => "parameters",
+            VirAssumptionKind.Closed or VirAssumptionKind.ClosedEquality or VirAssumptionKind.ReferencedSource => "types",
+            _ => throw new InvalidOperationException($"The {a.Kind} assumption is not reported until M6 U12."),
+        };
 }

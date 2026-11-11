@@ -114,6 +114,10 @@ public static class Translator
         public TranslatedUnit Unit(VirUnit unit, TypeTable types, string display)
         {
             var name = LeanNames.ForKey(unit.Key);
+            if (unit.Dependencies is { Count: > 0 })
+            {
+                throw new TranslationException(unit.Key, "a unit with external dependencies is not translated until M6 U19.");
+            }
             switch (unit.Kind)
             {
                 case VirUnitKind.Function when BodyTranslator.IsRecursive(unit):
@@ -169,6 +173,8 @@ public static class Translator
                         }
                         return new TranslatedUnit(unit.Key, unit.Kind, name, display, decls, null);
                     }
+                case VirUnitKind.Contract:
+                    throw new TranslationException(unit.Key, "a contract unit is not translated until M6 U19.");
                 default:
                     throw new TranslationException(unit.Key, $"unknown unit kind {unit.Kind}.");
             }

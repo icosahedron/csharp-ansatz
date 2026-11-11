@@ -8,6 +8,7 @@ internal static class VirSpelling
         VirUnitKind.Function => "function",
         VirUnitKind.Theorem => "theorem",
         VirUnitKind.Type => "type",
+        VirUnitKind.Contract => "contract",
         _ => throw Bad(kind),
     };
 
@@ -16,6 +17,8 @@ internal static class VirSpelling
         VirPrimitive.Bool => "bool",
         VirPrimitive.Int32 => "int32",
         VirPrimitive.Int64 => "int64",
+        VirPrimitive.Decimal => "decimal",
+        VirPrimitive.Unit => "unit",
         _ => throw Bad(primitive),
     };
 
@@ -38,6 +41,8 @@ internal static class VirSpelling
         BinaryOp.Add => "add",
         BinaryOp.Sub => "sub",
         BinaryOp.Mul => "mul",
+        BinaryOp.Div => "div",
+        BinaryOp.Rem => "rem",
         _ => throw Bad(op),
     };
 
@@ -69,6 +74,7 @@ internal static class VirSpelling
         CompareKind.Bool => "bool",
         CompareKind.Record => "record",
         CompareKind.Closed => "closed",
+        CompareKind.Decimal => "decimal",
         _ => throw Bad(kind),
     };
 
@@ -87,6 +93,17 @@ internal static class VirSpelling
         VirAssumptionKind.Closed => "closed",
         VirAssumptionKind.ClosedEquality => "closed-equality",
         VirAssumptionKind.ReferencedSource => "referenced-source",
+        VirAssumptionKind.ExternalContract => "external-contract",
+        VirAssumptionKind.CalleeContract => "callee-contract",
+        VirAssumptionKind.MayThrow => "may-throw",
+        VirAssumptionKind.CallerPrecondition => "caller-precondition",
+        _ => throw Bad(kind),
+    };
+
+    public static string Of(UnwrapKind kind) => kind switch
+    {
+        UnwrapKind.Value => "value",
+        UnwrapKind.NonNull => "non-null",
         _ => throw Bad(kind),
     };
 

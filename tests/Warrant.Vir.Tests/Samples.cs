@@ -239,9 +239,98 @@ internal static class Samples
         Facts,
         VirList<string>.Empty);
 
+    public const string StoreKey = "T:Payments.IStore";
+    public const string GetKey = "M:Payments.IStore.Get(System.Int32)";
+    public const string SaveKey = "M:Payments.IStore.Save(System.Decimal)";
+    public const string ProcessKey = "M:Payments.Service.Process(System.Nullable{System.Int32},Payouts.Payment)";
+
+    /// <summary>The smallest positive decimal, 1e-28: 28 digits of scale.</summary>
+    public static readonly decimal Tiny = 0.0000000000000000000000000001m;
+
+    /// <summary>The contract unit of <c>IStore.Get</c> (M6): its result is null or at least <paramref name="floor"/>.</summary>
+    public static VirUnit GetContract(int floor = 0)
+    {
+        var result = new LocalExpr(VirType.Nullable(VirType.Int32), 0);
+        return VirUnit.Contract(
+            GetKey,
+            VirList.Of(new VirParam("id", VirType.Int32)),
+            VirType.Task(VirType.Nullable(VirType.Int32)),
+            new BlockStmt(VirList.Of<VirStmt>(
+                new RequiresStmt(new CompareExpr(CompareOp.Gt, CompareKind.Int, P(0), LitExpr.Int32(0))),
+                new EnsuresStmt(0, "r", new LogicalExpr(
+                    LogicalOp.Or,
+                    new IsNullExpr(result),
+                    new CompareExpr(CompareOp.Ge, CompareKind.Int, new UnwrapExpr(VirType.Int32, UnwrapKind.Value, result), LitExpr.Int32(floor)))))),
+            VirList<VirAssumption>.Empty,
+            Facts,
+            VirList<string>.Empty);
+    }
+
+    /// <summary>The contract unit of <c>IStore.Save</c>, a <c>Task</c> member with a result-free <c>Ensures</c> (M6).</summary>
+    public static VirUnit SaveContract() => VirUnit.Contract(
+        SaveKey,
+        VirList.Of(new VirParam("amount", VirType.Decimal)),
+        VirType.Task(VirType.Unit),
+        new BlockStmt(VirList.Of<VirStmt>(new EnsuresStmt(null, null, LitExpr.Bool(true)))),
+        VirList<VirAssumption>.Empty,
+        Facts,
+        VirList<string>.Empty);
+
+    /// <summary>
+    /// A function that uses every M6 node, type, operator and assumption kind, with a dependency whose member keys are
+    /// added to its deps (M6).
+    /// </summary>
+    public static VirUnit Effectful()
+    {
+        var x = new ParamExpr(VirType.Nullable(VirType.Int32), 0);
+        var payment = new ParamExpr(VirType.Nullable(Payment), 1);
+        var i = L(0);
+        var amount = new LocalExpr(VirType.Decimal, 2);
+        var stmts = new List<VirStmt>
+        {
+            new RequiresStmt(new NotExpr(new IsNullExpr(payment))),
+            new EnsuresStmt(5, "r", new CompareExpr(CompareOp.Ge, CompareKind.Int, new LocalExpr(VirType.Int32, 5), LitExpr.Int32(0))),
+            new DeclStmt(0, "i", new CoalesceExpr(VirType.Int32, x, new ThrowExpr(VirType.Int32, "T:System.ArgumentNullException"))),
+            new DeclStmt(1, "v", new UnwrapExpr(VirType.Int32, UnwrapKind.Value, x)),
+            new DeclStmt(2, "amount", new BinaryExpr(
+                VirType.Decimal, BinaryOp.Add, VirOverflow.Checked, DecimalLitExpr.Of(Tiny), DecimalLitExpr.Of(-1.50m))),
+            new DeclStmt(3, "p", new UnwrapExpr(Payment, UnwrapKind.NonNull, payment)),
+            new DeclStmt(4, "none", new NullExpr(VirType.Nullable(Payment))),
+            new AssertStmt(
+                new CompareExpr(CompareOp.Le, CompareKind.Decimal, amount, DecimalLitExpr.Of(79228162514264337593543950335m)),
+                VirList.Of(new TacticNode("omega", VirList<VirTacticArg>.Empty))),
+            new AssertStmt(LitExpr.Bool(true), VirList<TacticNode>.Empty),
+            new EvalStmt(new AwaitExpr(VirType.Unit, new ExternalCallExpr(VirType.Task(VirType.Unit), 0, SaveKey, VirList.Of<VirExpr>(amount)))),
+            new AssignStmt(0, new BinaryExpr(VirType.Int32, BinaryOp.Div, VirOverflow.Wrap, i, LitExpr.Int32(2))),
+            new AssignStmt(0, new BinaryExpr(VirType.Int32, BinaryOp.Rem, VirOverflow.Checked, i, L(1))),
+            new AssignStmt(0, new ConvertExpr(VirType.Int64, VirType.Int32, VirOverflow.Checked, new LocalExpr(VirType.Int64, 6))),
+            new IfStmt(
+                new IsNullExpr(new AwaitExpr(VirType.Nullable(VirType.Int32), new ExternalCallExpr(
+                    VirType.Task(VirType.Nullable(VirType.Int32)), 0, GetKey, VirList.Of<VirExpr>(i)))),
+                new ThrowStmt("T:System.InvalidOperationException"),
+                null),
+            new ReturnStmt(new ModelledCallExpr(VirType.Int32, "M:System.Math.Max(System.Int32,System.Int32)", VirList.Of<VirExpr>(i, LitExpr.Int32(0)))),
+        };
+        return VirUnit.Function(
+            ProcessKey,
+            VirList.Of(new VirParam("x", VirType.Nullable(VirType.Int32)), new VirParam("payment", VirType.Nullable(Payment))),
+            VirType.Task(VirType.Int32),
+            new BlockStmt(new VirList<VirStmt>(stmts)),
+            VirList.Of(
+                new VirAssumption(VirAssumptionKind.NonNull, "store"),
+                new VirAssumption(VirAssumptionKind.ExternalContract, GetKey),
+                new VirAssumption(VirAssumptionKind.CalleeContract, PayoutKey),
+                new VirAssumption(VirAssumptionKind.MayThrow, "T:System.InvalidOperationException"),
+                new VirAssumption(VirAssumptionKind.CallerPrecondition, ProcessKey)),
+            Facts,
+            VirList.Of(PaymentKey),
+            dependencies: VirList.Of(new VirDependency("store", StoreKey, VirList.Of(SaveKey, GetKey))));
+    }
+
     public static IEnumerable<VirUnit> All() =>
     [
         Payout(), Capped(), Everything(), ExpressionBodied(), ImpliesTheorem(),
         RecordType(), EnumType(), ClosedEnumType(), ClosedClassType(), Escapes(), Sum(), Quantified(),
+        GetContract(), SaveContract(), Effectful(),
     ];
 }

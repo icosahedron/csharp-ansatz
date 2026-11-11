@@ -51,7 +51,49 @@ public static class VirTree
     {
         switch (node)
         {
-            case LitExpr or ParamExpr or LocalExpr or SelfExpr or MemberExpr or DiscardPattern:
+            case LitExpr or ParamExpr or LocalExpr or SelfExpr or MemberExpr or DiscardPattern
+                or DecimalLitExpr or NullExpr or ThrowExpr or ThrowStmt:
+                break;
+            case IsNullExpr e:
+                yield return e.Operand;
+                break;
+            case UnwrapExpr e:
+                yield return e.Operand;
+                break;
+            case CoalesceExpr e:
+                yield return e.L;
+                yield return e.R;
+                break;
+            case AwaitExpr e:
+                yield return e.Operand;
+                break;
+            case ExternalCallExpr e:
+                foreach (var a in e.Args)
+                {
+                    yield return a;
+                }
+                break;
+            case ModelledCallExpr e:
+                foreach (var a in e.Args)
+                {
+                    yield return a;
+                }
+                break;
+            case EvalStmt s:
+                yield return s.Value;
+                break;
+            case RequiresStmt s:
+                yield return s.Condition;
+                break;
+            case EnsuresStmt s:
+                yield return s.Condition;
+                break;
+            case AssertStmt s:
+                yield return s.Condition;
+                foreach (var tactic in s.Script)
+                {
+                    yield return tactic;
+                }
                 break;
             case UnaryExpr e:
                 yield return e.Operand;

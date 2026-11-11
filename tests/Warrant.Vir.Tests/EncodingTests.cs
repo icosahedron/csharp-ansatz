@@ -17,12 +17,14 @@ public class EncodingTests
         Assert.Equal(golden, VirWriter.Write(Samples.Payout()));
     }
 
-    [Fact]
-    public void AnM4UnitEncodesAsInVersionOneApartFromTheVersion()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void AnM4UnitEncodesAsInEarlierVersionsApartFromTheVersion(int version)
     {
         var golden = Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "golden", "payout.json")));
-        Assert.StartsWith(J("""{`vir`:2,"""), golden, StringComparison.Ordinal);
-        Assert.Equal(J("""{`vir`:1,""") + golden[J("""{`vir`:2,""").Length..], VirWriter.WriteString(Samples.Payout() with { Vir = 1 }));
+        Assert.StartsWith(J("""{`vir`:3,"""), golden, StringComparison.Ordinal);
+        Assert.Equal(J($$"""{`vir`:{{version}},""") + golden[J("""{`vir`:3,""").Length..], VirWriter.WriteString(Samples.Payout() with { Vir = version }));
     }
 
     [Fact]
@@ -33,7 +35,7 @@ public class EncodingTests
 
         var theorem = VirWriter.WriteString(Samples.Quantified());
         Assert.StartsWith(
-            J("""{`vir`:2,`key`:`M:Payouts.PayoutRules.Quantified(System.Int32)`,`kind`:`theorem`,`params`:[{`name`:`x`,`type`:`int32`}],`statement`:{`forall`:{`type`:`bool`,`local`:0,`name`:`y`,`domain`:`int32`,`body`:{`exists`:{`type`:`bool`,`local`:1,`name`:`b`,`domain`:`bool`,`body`:"""),
+            J("""{`vir`:3,`key`:`M:Payouts.PayoutRules.Quantified(System.Int32)`,`kind`:`theorem`,`params`:[{`name`:`x`,`type`:`int32`}],`statement`:{`forall`:{`type`:`bool`,`local`:0,`name`:`y`,`domain`:`int32`,`body`:{`exists`:{`type`:`bool`,`local`:1,`name`:`b`,`domain`:`bool`,`body`:"""),
             theorem,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -62,7 +64,7 @@ public class EncodingTests
         // Only '"' and '\' get a backslash; control characters (Unicode Cc) become \u00XX;
         // '+', '<', '>', '&', '\'' and non-ASCII characters are written as themselves, in UTF-8.
         var expected = J(
-            """{`vir`:2,`key`:`T:N.R<T>+\`q\`\\`,`kind`:`type`,`definition`:{`record`:[{`name`:`""" +
+            """{`vir`:3,`key`:`T:N.R<T>+\`q\`\\`,`kind`:`type`,`definition`:{`record`:[{`name`:`""" +
             "café名" +
             """`,`type`:`int32`},{`name`:`a\u0000b\u0009c\u000Ad\u001Fe\u007Ff\u009Fg>&'h`,`type`:`int32`},{`name`:`""" +
             "😀" +
@@ -90,13 +92,13 @@ public class EncodingTests
     public void TypeUnitsAndTheoremsHaveTheDocumentedShape()
     {
         Assert.Equal(
-            J("""{`vir`:2,`key`:`T:Payouts.Outcome`,`kind`:`type`,`definition`:{`closed`:[{`name`:`Matched`},{`name`:`Missed`}]},""" + Tail),
+            J("""{`vir`:3,`key`:`T:Payouts.Outcome`,`kind`:`type`,`definition`:{`closed`:[{`name`:`Matched`},{`name`:`Missed`}]},""" + Tail),
             VirWriter.WriteString(Samples.ClosedClassType()));
         Assert.Equal(
-            J("""{`vir`:2,`key`:`T:Payouts.Status`,`kind`:`type`,`definition`:{`enum`:{`underlying`:`int32`,`members`:[{`name`:`Open`,`value`:`0`},{`name`:`Closed`,`value`:`-1`}]}},""" + Tail),
+            J("""{`vir`:3,`key`:`T:Payouts.Status`,`kind`:`type`,`definition`:{`enum`:{`underlying`:`int32`,`members`:[{`name`:`Open`,`value`:`0`},{`name`:`Closed`,`value`:`-1`}]}},""" + Tail),
             VirWriter.WriteString(Samples.EnumType()));
         Assert.Equal(
-            J("""{`vir`:2,`key`:`M:Payouts.PayoutRules.CappedAtTheLimit`,`kind`:`theorem`,`params`:[],`statement`:{`compare`:{`type`:`bool`,`op`:`eq`,`kind`:`int`,`l`:{`call`:{`type`:`int32`,`target`:`M:Payouts.PayoutRules.Payout(System.Int32,System.Int32,System.Int32)`,`args`:[{`lit`:{`type`:`int32`,`value`:`5000`}},{`lit`:{`type`:`int32`,`value`:`500`}},{`lit`:{`type`:`int32`,`value`:`1000`}}]}},`r`:{`lit`:{`type`:`int32`,`value`:`1000`}}}},`assumptions`:[],`facts`:{`overflow`:`wrap`,`language`:`14`,`extractor`:`0.1.0`,`roslyn`:`5.0.0`},`deps`:[`M:Payouts.PayoutRules.Payout(System.Int32,System.Int32,System.Int32)`]}"""),
+            J("""{`vir`:3,`key`:`M:Payouts.PayoutRules.CappedAtTheLimit`,`kind`:`theorem`,`params`:[],`statement`:{`compare`:{`type`:`bool`,`op`:`eq`,`kind`:`int`,`l`:{`call`:{`type`:`int32`,`target`:`M:Payouts.PayoutRules.Payout(System.Int32,System.Int32,System.Int32)`,`args`:[{`lit`:{`type`:`int32`,`value`:`5000`}},{`lit`:{`type`:`int32`,`value`:`500`}},{`lit`:{`type`:`int32`,`value`:`1000`}}]}},`r`:{`lit`:{`type`:`int32`,`value`:`1000`}}}},`assumptions`:[],`facts`:{`overflow`:`wrap`,`language`:`14`,`extractor`:`0.1.0`,`roslyn`:`5.0.0`},`deps`:[`M:Payouts.PayoutRules.Payout(System.Int32,System.Int32,System.Int32)`]}"""),
             VirWriter.WriteString(Samples.Capped()));
     }
 
@@ -105,7 +107,7 @@ public class EncodingTests
     {
         var json = VirWriter.WriteString(Samples.Everything());
 
-        Assert.StartsWith(J("""{`vir`:2,`key`:`M:Payouts.Payment.Everything(System.Int32)`,`kind`:`function`,`self`:`T:Payouts.Payment`,`params`:"""), json, StringComparison.Ordinal);
+        Assert.StartsWith(J("""{`vir`:3,`key`:`M:Payouts.Payment.Everything(System.Int32)`,`kind`:`function`,`self`:`T:Payouts.Payment`,`params`:"""), json, StringComparison.Ordinal);
         Assert.Contains(J("""{`self`:{`type`:{`ref`:`T:Payouts.Payment`}}}"""), json, StringComparison.Ordinal);
         // Deps are sorted ordinally whatever order they were given in.
         Assert.EndsWith(J("""`deps`:[`M:Payouts.Payment.IsLarge`,`T:Payouts.Payment`,`T:Payouts.Status`]}"""), json, StringComparison.Ordinal);

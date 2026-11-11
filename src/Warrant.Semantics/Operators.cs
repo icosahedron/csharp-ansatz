@@ -32,6 +32,7 @@ public static class Literals
         VirPrimitive.Int32 => Init.Int32,
         VirPrimitive.Int64 => Init.Int64,
         VirPrimitive.Bool => Init.Bool,
+        VirPrimitive.Decimal or VirPrimitive.Unit => throw new TranslationException(null, $"{type} is not translated until M6 U9."),
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 
@@ -101,6 +102,7 @@ public static class Operators
             BinaryOp.Add => (Init.HAdd, Init.InstHAdd, is32 ? Init.AddInt32 : Init.AddInt64),
             BinaryOp.Sub => (Init.HSub, Init.InstHSub, is32 ? Init.SubInt32 : Init.SubInt64),
             BinaryOp.Mul => (Init.HMul, Init.InstHMul, is32 ? Init.MulInt32 : Init.MulInt64),
+            BinaryOp.Div or BinaryOp.Rem => throw new TranslationException(null, $"{op} is not translated until M6 U9."),
             _ => throw new ArgumentOutOfRangeException(nameof(op)),
         };
         return Expr.App(head, t, t, t, Expr.App(inst, t, impl), a, b);
@@ -204,7 +206,8 @@ public static class Conditions
         {
             VirPrimitive.Int32 => Init.DecidableEqInt32,
             VirPrimitive.Int64 => Init.DecidableEqInt64,
-            _ => Init.DecidableEqBool,
+            VirPrimitive.Bool => Init.DecidableEqBool,
+            _ => throw new TranslationException(null, $"== on {type} is not translated until M6 U9."),
         };
         return new Condition(Expr.App(Init.Eq, Literals.Type(type), a, b), Expr.App(inst, a, b));
     }

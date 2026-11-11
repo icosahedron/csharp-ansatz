@@ -138,7 +138,8 @@ public static class JsonReport
     {
         VirUnitKind.Function => "function",
         VirUnitKind.Theorem => "theorem",
-        _ => "type",
+        VirUnitKind.Type => "type",
+        _ => throw new ArgumentException($"unit kind {kind} is not reported until M6 U12"),
     };
 
     private static VirUnitKind ParseKind(string s) => s switch

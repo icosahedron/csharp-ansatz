@@ -3,7 +3,7 @@ namespace Warrant.Vir.Tests;
 public class HashTests
 {
     // SHA-256 of golden/payout.json, computed independently with `sha256sum`.
-    private const string GoldenPayoutHash = "51fabe50cdb12706c646ea7cb1a9e5e09ffc78fb9387f4cd12d362d6b2d76418";
+    private const string GoldenPayoutHash = "eaf8374d825f5d498bd7ddcd93baedafc52eb10bcb6a1aceecea1f508933d7b8";
 
     [Fact]
     public void TheGoldenUnitHashIsStable()

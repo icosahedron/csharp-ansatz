@@ -262,12 +262,11 @@ public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFi
     }
 
     /// <summary>
-    /// Without a script the default procedure runs (M6 U11): the walker has no rule for the external call until U20, so the
-    /// call's triple is a leftover, and the VC simp set closes it only when a member's contract hypothesis states it, as here,
-    /// where <c>Size</c> is the call. The kernel checks the proof, as any other.
+    /// Without a script the default procedure runs (M6 U11): at the external call the walker uses the member's contract
+    /// hypothesis (U20). The kernel checks the proof, as any other.
     /// </summary>
     [Fact]
-    public void ADependencyObligationWithoutAScriptIsProvedWhenTheCallsTripleIsTheMembersContract()
+    public void ADependencyObligationWithoutAScriptIsProvedFromTheMembersContract()
     {
         var source = Counter.Replace("[ProofFor(nameof(Size))]", "", StringComparison.Ordinal)
             .Replace("static Proof SizeProof() => Prove.Contract().By(Tactic.Unfold(nameof(Size)), Tactic.Exact(\"counter_Count_spec\"));", "", StringComparison.Ordinal);
@@ -277,7 +276,7 @@ public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFi
     }
 
     [Fact]
-    public void ADependencyObligationWithoutAScriptIsAnUnsupportedVcWithItsOperationsAndHypothesesInTheGoal()
+    public void AnEnsuresTheMembersContractDoesNotGiveFailsWithTheOperationsAndHypothesesInTheGoal()
     {
         var source = Counter.Replace("[ProofFor(nameof(Size))]", "", StringComparison.Ordinal)
             .Replace("static Proof SizeProof() => Prove.Contract().By(Tactic.Unfold(nameof(Size)), Tactic.Exact(\"counter_Count_spec\"));", "", StringComparison.Ordinal)
@@ -285,9 +284,13 @@ public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFi
             .Replace("Spec.Ensures<int>(r => r >= 0);\n        return", "Spec.Ensures<int>(r => r > 0);\n        return", StringComparison.Ordinal);
         Assert.Contains("r => r > 0", source, StringComparison.Ordinal);
         var outcome = Assert.IsType<NotProvedOutcome>(Run(source).Find("M:S.Size"));
-        Assert.StartsWith("a program shape the VC walker has no rule for", outcome.Message, StringComparison.Ordinal);
-        // The world, the operation, then its contract, introduced under the names the statement gives them.
-        Assert.StartsWith("σ : Type\ncounter_Count : Warrant.ClrM σ Int32\ncounter_Count_spec : ", outcome.Goals, StringComparison.Ordinal);
+        // Count's contract gives r >= 0, not r > 0 (M6 U20).
+        Assert.StartsWith("postcondition of the method", outcome.Message, StringComparison.Ordinal);
+        // The world, the operation and its contract, introduced under the names the statement gives them; the goal is the
+        // case of Vc.call after the call, with the member's Ensures at the result as a hypothesis.
+        Assert.StartsWith("case hok\nσ : Type\ncounter_Count : Warrant.ClrM σ Int32\n", outcome.Goals, StringComparison.Ordinal);
+        Assert.Contains("\ncounter_Count_spec : ", outcome.Goals, StringComparison.Ordinal);
+        Assert.EndsWith("\nh : 0 ≤ r\n⊢ 0 < r", outcome.Goals, StringComparison.Ordinal);
     }
 
     [Fact]

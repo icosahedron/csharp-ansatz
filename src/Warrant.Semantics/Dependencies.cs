@@ -128,13 +128,16 @@ internal sealed partial class BodyTranslator
         return _lctx.MkPi([.. args], triple);
     }
 
-    /// <summary>An external call's program, <c>op args</c>, its arguments bound left to right, then <paramref name="k"/>.</summary>
+    /// <summary>
+    /// An external call's program, <c>op args</c>, its arguments bound left to right, then <paramref name="k"/>; a site the
+    /// VC walker reports at (M6 U20, KTD18): the member's precondition and an exception from it are the call's.
+    /// </summary>
     private Expr External(ExternalCallExpr call, VirType type, Env env, Expr result, Next? k) =>
         BoundAll(call.Args, env, result, args =>
         {
             var op = _operations.GetValueOrDefault((call.Dependency, call.Member))
                 ?? throw new TranslationException(null, $"the external call to {call.Member} names dependency {call.Dependency}, which does not list it.");
-            return Emit(Expr.App(op.Op, [.. args]), type, k);
+            return Emit(Site(call, Expr.App(op.Op, [.. args])), type, k);
         });
 
     /// <summary>

@@ -299,7 +299,7 @@ public sealed class ReportTests(EngineFixture engine) : IClassFixture<EngineFixt
             outcomes, new Dictionary<string, EngineUnit>(), new ReportSettings(CheckOverflow: true, Bundle: "b"), _ => null);
         Assert.Equal(all, report.Find(F)!.Assumptions.Select(a => a.Kind).Order().ToArray());
         Assert.Contains(
-            "  Assumed (contracts):\n    - Every implementation of Payments.IStore.Get(int) does what its contract class says\n",
+            "  Assumed (contracts):\n    - Every implementation of Payments.IStore.Get(int) keeps what its contract class states\n",
             MarkdownReport.Render(report),
             StringComparison.Ordinal);
 
@@ -312,6 +312,43 @@ public sealed class ReportTests(EngineFixture engine) : IClassFixture<EngineFixt
         Assert.Equal(json, JsonReport.Render(read));
         Assert.Equal(report.Find(F)!.Assumptions.ToArray(), read.Find(F)!.Assumptions.ToArray());
         Assert.Equal(VirUnitKind.Contract, read.Find("M:Payments.IStore.Get(System.Int32)")!.Kind);
+    }
+
+    /// <summary>
+    /// The milestone's headline (plan M6 U20, design §5.2 and §8.4): ProcessPayment, proved with its store as a hypothesis,
+    /// lists GetPayment's and SavePayment's contracts, that the store and GetPayment's Task are not null, and the exceptions
+    /// either call may propagate. Its block of the Markdown report is the checked-in
+    /// <c>tests/corpus/m6/ProcessPayment.report.txt</c>.
+    /// </summary>
+    [Fact]
+    public void TheReportOfProcessPaymentIsTheCheckedInOne()
+    {
+        const string Key = "M:Corpus.M6.Payments.PaymentService.ProcessPayment(System.Int32)";
+        var report = AssumptionReports.Build(
+            engine.Run("m6/accepted"),
+            engine.Inputs("m6/accepted"),
+            new ReportSettings(CheckOverflow: false, Bundle: "warrant-semantics test", Kernel: "Warrant test"),
+            span => SourceTextIn(CorpusSet.M6.Root, span));
+        var unit = report.Find(Key);
+        Assert.NotNull(unit);
+        Assert.Equal((ReportStatus.Translated, "translated"), (unit.Status, unit.Outcome));
+        var block = ProcessPaymentBlock(MarkdownReport.Render(report));
+        var expected = File.ReadAllText(Path.Combine(CorpusSet.M6.Root, "ProcessPayment.report.txt")).ReplaceLineEndings("\n");
+        Assert.Equal(expected, block);
+    }
+
+    /// <summary>ProcessPayment's block of a Markdown report: its line and its assumption lines, up to the next unit.</summary>
+    internal static string ProcessPaymentBlock(string markdown)
+    {
+        var lines = markdown.Split('\n');
+        int start = Array.FindIndex(lines, l => l.StartsWith("Corpus.M6.Payments.PaymentService.ProcessPayment(int) ", StringComparison.Ordinal));
+        Assert.True(start >= 0, markdown);
+        int end = start + 1;
+        while (end < lines.Length && lines[end].StartsWith(' '))
+        {
+            end++;
+        }
+        return string.Join('\n', lines[start..end]) + "\n";
     }
 
     [Fact]
@@ -362,9 +399,11 @@ public sealed class ReportTests(EngineFixture engine) : IClassFixture<EngineFixt
             SourceText);
     }
 
-    private static string? SourceText(VirSpan span)
+    private static string? SourceText(VirSpan span) => SourceTextIn(EngineCorpus.Root, span);
+
+    private static string? SourceTextIn(string root, VirSpan span)
     {
-        var lines = File.ReadAllLines(Path.Combine(EngineCorpus.Root, span.Path));
+        var lines = File.ReadAllLines(Path.Combine(root, span.Path));
         return span.StartLine == span.EndLine ? lines[span.StartLine - 1][(span.StartColumn - 1)..(span.EndColumn - 1)] : null;
     }
 }

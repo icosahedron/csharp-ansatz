@@ -44,7 +44,7 @@ public sealed record VerifyRequest(
 /// </summary>
 /// <param name="CheckOverflow">Whether the compilation checks arithmetic for overflow.</param>
 /// <param name="Bundle">The semantics bundle's name, as <see cref="Reports.ReportSettings.Bundle"/> has it.</param>
-/// <param name="Claims">Each theorem's claim text, by unit key; a theorem without one has no entry.</param>
+/// <param name="Claims">Each theorem's claim text and each contract member's Spec calls (M6 U20), by unit key; a unit without one has no entry.</param>
 public sealed record VerifyReport(bool CheckOverflow, string Bundle, ImmutableDictionary<string, string> Claims);
 
 /// <summary>A request to verify one unit with a trace of its proof script (M5b KTD24, <c>warrant explain</c>).</summary>

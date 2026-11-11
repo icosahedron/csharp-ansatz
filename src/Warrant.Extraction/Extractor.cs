@@ -290,6 +290,12 @@ public static partial class Extractor
 
         public ISymbol Symbol { get; }
 
+        /// <summary>
+        /// The symbol the unit is shown as, when not <see cref="Symbol"/>: a contract unit is the interface member whose
+        /// contract it states (M6 U20), so reports name <c>IPaymentStore.GetPayment</c>, not the contract class.
+        /// </summary>
+        public ISymbol? DisplaySymbol { get; init; }
+
         public VirUnitKind Kind { get; }
 
         public Walker? Walker { get; set; }
@@ -537,6 +543,7 @@ public static partial class Extractor
             var walker = new Walker(_context, inTheorem: false);
             var candidate = new Candidate(key, (ISymbol?)implementation ?? member, VirUnitKind.Contract)
             {
+                DisplaySymbol = member,
                 Walker = walker,
                 Deps = walker.Deps,
                 Calls = walker.Calls,
@@ -1086,7 +1093,7 @@ public static partial class Extractor
             var walker = c.Walker;
             var spans = SpanTable.Build(unit, node => walker?.SyntaxOf(node) is { } s ? Symbols.Span(s) : null);
             var location = Symbols.FirstLocation(c.Symbol);
-            return new ExtractedUnit(unit, spans, Symbols.Display(c.Symbol), location is null ? null : Symbols.Span(location));
+            return new ExtractedUnit(unit, spans, Symbols.Display(c.DisplaySymbol ?? c.Symbol), location is null ? null : Symbols.Span(location));
         }
 
         /// <summary>

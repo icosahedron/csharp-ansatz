@@ -105,7 +105,9 @@ public static partial class Pipeline
 
         /// <summary>
         /// The assumptions a walk relied on (KTD20, U12's <see cref="MayThrowSubject"/>): each verified callee's contract,
-        /// each explicit throw it did not show unreachable (#92), and each throw a verified callee it calls may raise.
+        /// each explicit throw it did not show unreachable (#92), each throw a verified callee it calls may raise, and an
+        /// exception from each dependency member it calls, at the call (M6 U20). The members' contracts themselves are
+        /// extraction's <c>ExternalContract</c> assumptions (KTD9), listed whether or not the walk reached the call (#223).
         /// </summary>
         private void Record(EngineUnit unit, VcWalker walker)
         {
@@ -113,6 +115,10 @@ public static partial class Pipeline
             foreach (var t in walker.Throws)
             {
                 _contractAssumptions.Add(new UnitAssumption(key, new VirAssumption(VirAssumptionKind.MayThrow, new MayThrowSubject(t.Type, t.Node).Format())));
+            }
+            foreach (var (member, node) in walker.ExternalCalls)
+            {
+                _contractAssumptions.Add(new UnitAssumption(key, new VirAssumption(VirAssumptionKind.MayThrow, new MayThrowSubject(member, node).Format())));
             }
             foreach (var call in walker.Calls)
             {
@@ -168,7 +174,7 @@ public static partial class Pipeline
             {
                 return Default(
                     unit, shell, contract.Binders, BinderNames(contract), null, NewWalker,
-                    (walker, g) => walker.Contract(g, contract.Program, function, contract.Raising), display, assumptions, admitted, budget, meta, printer);
+                    (walker, g) => walker.Contract(g, contract.Program, function, contract.Raising, contract.Operations), display, assumptions, admitted, budget, meta, printer);
             }
             var recorder = options.TacticTrace is null
                 ? null
@@ -183,7 +189,7 @@ public static partial class Pipeline
                     VcGen = goal =>
                     {
                         var walker = walked = NewWalker();
-                        walker.Contract(goal, contract.Program, function, contract.Raising);
+                        walker.Contract(goal, contract.Program, function, contract.Raising, contract.Operations);
                         if (walker.Leftovers.FirstOrDefault(l => l.Failure is not null) is { } failed)
                         {
                             throw new TacticException("vcgen", failed.Goal, $"{VcKinds.Text(failed.Kind)}: {failed.Failure}");

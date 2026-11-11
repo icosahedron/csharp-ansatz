@@ -9,7 +9,7 @@ lean4export NDJSON files used by the reader, writer and (later) kernel tests.
 | `arena/001_basicDef`, `002_badDef`, `141_falseFromUnsafe`, `proj-of-subst-prop`, `rec-of-subst-prop` | 3.1.0 | [leanprover/lean-kernel-arena](https://github.com/leanprover/lean-kernel-arena), via Ansatz `test-data/arena/` | Apache-2.0 |
 | `arena/forged-quot-ind.ndjson`, `arena/inductive-undeclared-universe.ndjson` | 3.1.0 | [leanprover/lean-kernel-arena](https://github.com/leanprover/lean-kernel-arena) tests `bugs/forged-quot-ind` and `other/inductive-undeclared-universe` at commit `236ab46` (SHA-256 as in its `results.json`): regression fixtures for the cross-kernel disagreements in `docs/kernel.md` (Ansatz and nanoda accept them; Warrant must reject) | Apache-2.0 |
 | `arena/sparse-name-index.ndjson` | 3.1.0 | Hand-written by Ansatz (`test-data/arena/`): non-contiguous table indices | Apache-2.0 |
-| `warrant-semantics.ndjson.gz` | 3.1.0 | Exported from this repository's `lean/` by `scripts/export-semantics.sh` with Lean 4.35.0 and lean4export `5a9a355`: the semantics library and its 625 roots (`lean/bundle-roots.txt`) with their dependency closure, including the `Std.Do` triples, weakest preconditions and `@[spec]` lemmas M6's contracts use (M6 U1), the effect monad `ClrM` with its raising integer models (M6 U3), the nullable and `Math` models (M6 U16), the `decimal` model (M6 U4), the constants the monadic translation emits (M6 U9), those of contract triples (M6 U10) and the VC walker's rules (M6 U11, `lean/Warrant/Vc.lean`), exported with `--export-mdata` so `no_index` annotations survive. The M4 tests load it instead of init-medium, which is a Lean 4.33.1 subset without `Int32` or `Int64`. | Apache-2.0 (Lean 4, Warrant) |
+| `warrant-semantics.ndjson.gz` | 3.1.0 | Exported from this repository's `lean/` by `scripts/export-semantics.sh` with Lean 4.35.0 and lean4export `5a9a355`: the semantics library and its 630 roots (`lean/bundle-roots.txt`) with their dependency closure, including the `Std.Do` triples, weakest preconditions and `@[spec]` lemmas M6's contracts use (M6 U1), the effect monad `ClrM` with its raising integer models (M6 U3), the nullable and `Math` models (M6 U16), the `decimal` model (M6 U4), the constants the monadic translation emits (M6 U9), those of contract triples (M6 U10) and the VC walker's rules (M6 U11, `lean/Warrant/Vc.lean`) and simp lemmas (M6 U20), exported with `--export-mdata` so `no_index` annotations survive. The M4 tests load it instead of init-medium, which is a Lean 4.33.1 subset without `Int32` or `Int64`. | Apache-2.0 (Lean 4, Warrant) |
 | `warrant-attributes.ndjson.gz` | sidecar 2 | Exported by `scripts/export-attributes.sh` (`tools/warrant-attrs/Main.lean`) with Lean 4.35.0 from `Init` and `lean/`: the simp, congr, instance, reducibility, defeq, matcher, class and `@[spec]` entries of the bundle's constants (plan KTD9, docs/m5a/05; `spec`, M6 KTD15). Not a lean4export file. | Apache-2.0 (Lean 4, Warrant) |
 
 Several arena files contain declarations a kernel **must reject** (for example
@@ -35,7 +35,7 @@ the raw JSON. These are the values asserted in `ReaderCorpusTests`.
 | `proj-of-subst-prop` | 708 | 18 | 4,030 | 110 | 0/63/26/2/0/19/23/19 = 152 |
 | `rec-of-subst-prop` | 776 | 18 | 4,203 | 127 | 1/76/25/3/0/22/25/22 = 174 |
 | `sparse-name-index` | 1 | 0 | 1 | 1 | 1/0/0/0/0/0/0/0 = 1 |
-| `warrant-semantics` | 21,215 | 83 | 307,436 | 3,810 | 3/1317/2352/1/4/133/164/135 = 4,109 |
+| `warrant-semantics` | 21,224 | 83 | 307,493 | 3,813 | 3/1317/2355/1/4/133/164/135 = 4,112 |
 
 ### The `Std.Do` roots (M6 U1)
 
@@ -142,6 +142,17 @@ everything they mention was already in the closure, so the bundle grew from 4,09
 declaration records), with no new axiom and no new pinned declaration. Ten small theorems are far below the run-to-run
 noise of the start-time measurements above, so they were not measured again.
 
+### External calls in the walker (M6 U20)
+
+M6 U20's roots are the lemmas the VC simp set adds so a dependency's `Spec.Ensures` over a nullable result (design
+§5.2's `r is null || r.Id == id`) meets the walk's case `r = some v`: Init's `Option.isNone_some`,
+`Option.isNone_none`, `Bool.false_eq_true` and `Bool.true_eq_false`, and `Warrant.Nullable.some_eq_none`
+(`lean/Warrant/Nullable.lean`), `Option.some_ne_none` stated as an equation, which needs no `Ne` unfolding to rewrite.
+The two `Bool` lemmas were already in the closure; the other three theorems are new, so the bundle grew from 4,109 to
+4,112 constants (3,810 to 3,813 declaration records), with no new axiom and no new pinned declaration, and the
+sidecar's `simp` and `defeq` counts below grew with them. Three small theorems are far below the run-to-run noise of
+the start-time measurements above, so they were not measured again.
+
 Regenerate `warrant-semantics.ndjson.gz` with `scripts/export-semantics.sh` after changing `lean/`.
 The export is deterministic: an unchanged library gives a byte-identical file.
 
@@ -155,11 +166,11 @@ constant of the bundle. `tools/warrant-attrs/Main.lean` documents each kind's fi
 
 | Kind | Entries |
 |---|---|
-| `simp` (default simp set, with priority, direction, `←` and Lean's keys) | 530 |
+| `simp` (default simp set, with priority, direction, `←` and Lean's keys) | 532 |
 | `congr` | 3 |
 | `instance` (with class, priority and declaration order) | 204 |
 | `reducibility` (every status other than semireducible; M6 U9's `Option.isNone` is implicit-reducible; M6 U11's abbreviation `Warrant.Vc.Post` is reducible) | 736 |
-| `defeq` | 94 |
+| `defeq` | 96 |
 | `matcher` | 400 |
 | `class` (with out-parameter positions) | 77 |
 | `spec` (`mvcgen`'s `@[spec]` lemmas, triple or equation, with priority; format 2): 13 from `Std.Do`, 14 of M6 U3 (`ClrM.throw` and the raising models), 4 of M6 U16 (the raising nullable reads and `Math.Abs`), 2 of M6 U4 (`decimal` `+` and `-`) | 33 |

@@ -8,7 +8,7 @@ namespace Warrant.Semantics.Tests;
 /// Dependency obligations (plan M6 U19, KTD4, KTD9, KTD22, KTD25): a method that calls a dependency is a function of one
 /// operation per (dependency, member) pair, its obligation takes each member's contract as a hypothesis over every world
 /// (design D9), an external call threads the world, <c>await</c> is <c>bind</c>, and a contract-class member's
-/// <c>Spec</c> calls are checked not to be unsatisfiable. Proving these obligations is plan U20's.
+/// <c>Spec</c> calls are checked not to be unsatisfiable. The engine proves these obligations (plan U20, <c>ExternalCallTests</c>).
 /// </summary>
 public sealed class DependencyObligationTests(SemanticsBundleFixture bundle) : IClassFixture<SemanticsBundleFixture>
 {

@@ -65,6 +65,10 @@ theorem coalesce_some {α : Type} (v d : α) : coalesce (some v) d = v := rfl
 
 theorem coalesce_none {α : Type} (d : α) : coalesce none d = d := rfl
 
+/-- A value is never null (M6 U20): the VC simp set's form of `Option.some_ne_none`, an equation, so it needs no `Ne`
+unfolding to be a rewrite rule. -/
+theorem some_eq_none {α : Type} (v : α) : (some v = none) = False := by simp
+
 end Nullable
 
 end Warrant

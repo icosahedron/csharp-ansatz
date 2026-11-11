@@ -381,10 +381,81 @@ A method that calls a dependency is proved for every implementation that keeps t
 binds one operation per member it calls and takes that member's contract as a hypothesis, `∀ σ (counter_Count : ClrM σ
 Int32), ⦃⌜True⌝⦄ counter_Count ⦃⇓r => ⌜r ≥ 0⌝, allowed⦄ → ⦃⌜True⌝⦄ Size counter_Count ⦃⇓r => ⌜r ≥ 0⌝, allowed⦄`. Here
 `Size` is the call itself, so once unfolded the goal is the hypothesis, named after the dependency and the member with
-`_spec` appended. Until M6 U20 gives the walker a rule for an external call, a dependency obligation without such a
-script is proved only when the VC simp set closes the call's triple from these hypotheses as it stands (this `Size` is
-such a case); otherwise it is WRT0001 with a VC the walker has no rule for. `AProofForScriptProvesADependencyObligationFromTheMembersContract` in
-`tests/Warrant.Engine.Tests/ContractTests.cs` runs this example.
+`_spec` appended. The script is not needed: the default procedure proves `Size` too, as the next section shows.
+`AProofForScriptProvesADependencyObligationFromTheMembersContract` in `tests/Warrant.Engine.Tests/ContractTests.cs`
+runs this example.
+
+## Dependencies proved with no script (M6)
+
+At each call to a dependency member, the VC walker uses the member's contract hypothesis at the call's arguments: the
+member's `Spec.Requires` must hold there, its `Spec.Ensures` holds after it, and an exception from it is allowed and
+listed in the report. The proof holds for every implementation of the interface that keeps its contract class.
+
+### A result that holds only through the contract
+
+```csharp
+public interface IStore
+{
+    Task<Payment?> GetPayment(int id);
+    Task SavePayment(Payment p);
+}
+
+[ContractFor(typeof(IStore))]
+internal abstract class StoreContract : IStore
+{
+    public Task<Payment?> GetPayment(int id)
+    {
+        Spec.Ensures<Payment?>(r => r is null || r.Id == id);
+        return default!;
+    }
+
+    public Task SavePayment(Payment p) => default!;
+}
+
+public sealed class S(IStore store)
+{
+    [Verified]
+    public async Task<bool> Found(int id)
+    {
+        Spec.Ensures<bool>(r => r);
+        var p = await store.GetPayment(id);
+        return p is null || p.Id == id;
+    }
+}
+```
+
+Proved with no script. Nothing in `S` says what `GetPayment` returns, so the proof rests on its contract alone: called
+with `id + 1`, the same method is WRT0001 at its `Spec.Ensures` (postcondition of the method). So is a method that
+expects `GetPayment` to find what `SavePayment` stored, since `SavePayment`'s `=> default!` contract promises nothing,
+and one that expects two calls to `GetPayment(id)` to agree: each call may see a different store. The tests are in
+`tests/Warrant.Engine.Tests/ExternalCallTests.cs` (`AnEnsuresThatHoldsOnlyThroughTheMembersContractProves` and the
+three after it).
+
+### The payment example
+
+Design §5.2's `ProcessPayment`, shortened here, is proved with its store as a hypothesis:
+
+```csharp
+[Verified]
+public async Task<Result> ProcessPayment(int paymentId)
+{
+    Spec.Ensures<Result>(r => r != Result.Success || paymentId > 0);
+
+    if (paymentId <= 0) return Result.InvalidId;
+    var payment = await store.GetPayment(paymentId);
+    if (payment is null) return Result.NotFound;
+    if (Validate(payment) != PaymentResult.Valid) return Result.Invalid;
+    await store.SavePayment(payment with { Status = PaymentStatus.Processed });
+    return Result.Success;
+}
+```
+
+Proved with no script, for every implementation of `IPaymentStore` that keeps its contract class. The walker also proves
+that `payment` is not null where `Validate` and `with` use it. Its report lists both members' contracts under "Assumed
+(contracts)", that `store` and the tasks the two calls return are not null, and that either call may throw. The full
+example is `tests/corpus/m6/accepted/Payments.cs`, and its report block is `tests/corpus/m6/ProcessPayment.report.txt`
+(`ProcessPaymentsObligationProvesUnderTheDefaultProcedure` in `ExternalCallTests.cs`,
+`TheReportOfProcessPaymentIsTheCheckedInOne` in `ReportTests.cs`).
 
 ## Facts about particular inputs (M4)
 
@@ -409,8 +480,8 @@ diagnostic it must produce (`tests/corpus/m4/expected.json`).
 
 ## What cannot be proved yet
 
-`string`, loops, `try`, and calls to anything that is not `[Verified]` or modelled are rejected with WRT0002; a
-method that calls a dependency is translated from M6 U19 on; [the reference](reference.md#supported-c) lists the subset and
+`string`, loops, `try`, and calls to anything that is not `[Verified]`, modelled or a contracted dependency are rejected
+with WRT0002; [the reference](reference.md#supported-c) lists the subset and
 the milestone that lifts each limit. A type defined in another assembly cannot appear in verified code, with one
 exception: a `[Closed]` class from a referenced project that imports `Warrant.Build` (even with `WarrantEnabled` false)
 is checked from the source that project recorded, and the assumption report says so. Source generators run as in the compiler, and a call that a generated

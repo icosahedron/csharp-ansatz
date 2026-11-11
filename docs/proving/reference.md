@@ -270,10 +270,11 @@ interface may come from any assembly. Each member called through a dependency
 gets a contract unit from its contract class. A call returning `Task`,
 `Task<T>`, `ValueTask` or `ValueTask<T>` must be the direct operand of `await`.
 Such a method is translated with one operation per member it calls and that
-member's contract as a hypothesis of its obligation; until M6 U20 gives the
-walker a rule for an external call, a `[ProofFor]` script proves it, or the
-default procedure when a member's contract states the call's triple as it
-stands. These are rejected:
+member's contract as a hypothesis of its obligation. The default procedure uses
+that hypothesis at each call (M6 U20): the member's `Spec.Requires` is a VC at
+the call, its `Spec.Ensures` holds after it, and an exception from it is
+allowed and reported. Two calls are unrelated unless the contract relates
+them. These are rejected:
 
 | Construct | Code | Notes |
 |---|---|---|

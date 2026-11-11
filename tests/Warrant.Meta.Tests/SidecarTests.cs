@@ -26,12 +26,12 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
     public void EveryKindHasTheExportedCount()
     {
         // tests/data/README.md; the simp count includes Lean's own duplicate entry for Nat.not_lt_zero.
-        Assert.Equal(530, Sidecar.SimpEntries.Count);
+        Assert.Equal(532, Sidecar.SimpEntries.Count);
         Assert.Equal(2, Sidecar.SimpEntries.Count(e => e.Name == N("Nat.not_lt_zero")));
         Assert.Equal(3, Sidecar.CongrEntries.Count);
         Assert.Equal(204, Sidecar.Instances.Count());
         Assert.Equal(736, Sidecar.ReducibilityStatuses.Count());
-        Assert.Equal(94, Sidecar.DefEqNames.Count());
+        Assert.Equal(96, Sidecar.DefEqNames.Count());
         Assert.Equal(400, Sidecar.Matchers.Count());
         Assert.Equal(77, Sidecar.Classes.Count());
         Assert.Equal(33, Sidecar.SpecEntries.Count);

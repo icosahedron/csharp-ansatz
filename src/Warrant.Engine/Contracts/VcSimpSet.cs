@@ -25,6 +25,10 @@ internal static class VcSimpSet
             "Warrant.ClrExn.allowed_overflow", "Warrant.ClrExn.allowed_divideByZero", "Warrant.ClrExn.allowed_nullReference",
             "Warrant.ClrExn.allowed_invalidOperation", "Warrant.ClrExn.allowed_assertFailed", "Warrant.ClrExn.allowed_thrown",
             "Warrant.ClrExn.allowed_external",
+            // A dependency's Spec.Ensures over a nullable result (M6 U20) meets the walk's case `r = some v`: a null test
+            // and ?? on a constructor, and the impossible case `some v = none`.
+            "Option.isNone_some", "Option.isNone_none", "Warrant.Nullable.some_eq_none", "Bool.false_eq_true", "Bool.true_eq_false",
+            "Warrant.Nullable.coalesce_some", "Warrant.Nullable.coalesce_none",
         }.Select(Name.Parse),
     ];
 

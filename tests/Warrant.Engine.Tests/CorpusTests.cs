@@ -13,8 +13,7 @@ public sealed class CorpusTests(EngineFixture engine) : IClassFixture<EngineFixt
     /// Every M6 corpus member (plan M6 U11, as amended by #167, and U19) gets its expected.json outcome from extraction
     /// through the default procedure: <c>accepted/</c> proves (a proved contract is a translated unit with its
     /// <c>$contract</c>), and <c>refuted/</c> fails with WRT0001 with the expected VC kind at the expected line. A method
-    /// with dependencies (marked <c>"awaits": "U20"</c>) translates and its contract members pass their checks, but its
-    /// obligation is not proved: the walker has no rule for an external call until U20, so it is pinned as unproved.
+    /// with dependencies is proved with its members' contracts as hypotheses (U20).
     /// </summary>
     [Fact]
     public void EveryM6MemberGetsItsExpectedOutcome()

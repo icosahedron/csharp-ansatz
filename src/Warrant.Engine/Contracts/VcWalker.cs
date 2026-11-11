@@ -37,6 +37,9 @@ public enum VcKind
 
     /// <summary>A program shape the walker has no rule for (KTD13): the triple itself is left to simp and omega.</summary>
     Unsupported,
+
+    /// <summary>A dependency member's <c>Spec.Requires</c> at its call (M6 U20, KTD9), as its contract class states it.</summary>
+    DependencyPrecondition,
 }
 
 /// <summary>A verification condition the default procedure did not prove (#90): WRT0001 at its node.</summary>
@@ -63,6 +66,7 @@ public static class VcKinds
         VcKind.Assert => "Spec.Assert",
         VcKind.WellDefinedness => "well-definedness of a Spec expression",
         VcKind.Unsupported => "a program shape the VC walker has no rule for",
+        VcKind.DependencyPrecondition => "precondition of a dependency member at this call",
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 }
@@ -90,8 +94,9 @@ internal sealed record VcLeftover(MVarId Goal, VcKind Kind, int? Node, string? F
 /// <item>A program that can raise is replaced by its body as <see cref="ContractObligation.Program"/> states it, whose sites
 /// name their VIR nodes in metadata (KTD18); a pure unit under proof is unfolded in its postcondition VC instead (#173).</item>
 /// <item><c>bind</c>, <c>pure</c>, <c>throw</c>, <c>ite</c>, <c>dite</c>, a match on a nullable value, a <c>Spec.Assert</c>
-/// check, a verified callee and a model operation each have a rule; a closed enum's recursor is split with <c>Cases</c>
-/// when its discriminant is a variable; anything else is a leftover VC, never a guessed rule.</item>
+/// check, a verified callee, a call to a dependency member (its contract hypothesis at the current world, M6 U20) and a
+/// model operation each have a rule; a closed enum's recursor is split with <c>Cases</c> when its discriminant is a
+/// variable; anything else is a leftover VC, never a guessed rule, reported where the walk stopped (#223).</item>
 /// <item>At an explicit throw, the walker first tries to show the path unreachable (#92); otherwise it is a
 /// <see cref="VcThrow"/>.</item>
 /// </list>
@@ -125,6 +130,15 @@ internal sealed class VcWalker
     private readonly int? _node;
     private readonly Name? _self;
     private readonly SimpContext _light;
+
+    /// <summary>
+    /// The bound operations of the method's dependencies (M6 U19, U20, KTD9), by their free variable once introduced: the
+    /// contract hypothesis that states each one's triple, and the member's key.
+    /// </summary>
+    private readonly Dictionary<FVarId, (FVarExpr Hypothesis, string Member)> _operations = [];
+
+    /// <summary>The last site the walk reached, where a shape it has no rule for is reported when that has no node of its own (#223).</summary>
+    private int? _lastNode;
 
     /// <summary>A walker for one obligation of <paramref name="unit"/>.</summary>
     /// <param name="m">The Meta state the proof is built in.</param>
@@ -165,6 +179,12 @@ internal sealed class VcWalker
     public List<(string Callee, int? Node)> Calls { get; } = [];
 
     /// <summary>
+    /// The calls to dependency members the walk used a contract hypothesis at (M6 U20), with the call's node: each may
+    /// propagate an exception from the member, which the contract allows (KTD12, KTD20).
+    /// </summary>
+    public List<(string Member, int? Node)> ExternalCalls { get; } = [];
+
+    /// <summary>
     /// The model operations' rules: each <c>@[spec]</c> triple of the sidecar by the head constant of its program (KTD15),
     /// the highest priority first.
     /// </summary>
@@ -195,10 +215,12 @@ internal sealed class VcWalker
     /// <summary>
     /// A contract obligation's triple, its binders already introduced: <c>Vc.pre</c> turns <c>Requires</c> into a
     /// hypothesis, a raising unit's program is replaced by its body (tagged when <paramref name="program"/> agrees with the
-    /// definition), and the walk starts.
+    /// definition), and the walk starts. <paramref name="operations"/> is the number of dependency operations the statement
+    /// binds after the world, whose contract hypotheses are its last binders (M6 U19, <see cref="ContractObligation.Operations"/>).
     /// </summary>
-    public void Contract(MVarId goal, Expr? program, Name function, bool raising)
+    public void Contract(MVarId goal, Expr? program, Name function, bool raising, int operations = 0)
     {
+        BindOperations(goal, operations);
         var g = Introduced(Rule(goal, () => _m.ApplyConst(goal, SpecTable.Pre)) ?? throw Failed(goal, "the obligation is not a triple from a precondition"));
         if (raising && _m.Env.Find(function) is DefinitionInfo definition)
         {
@@ -211,6 +233,29 @@ internal sealed class VcWalker
             }
         }
         Walk(g);
+    }
+
+    /// <summary>
+    /// Pairs each introduced operation with its contract hypothesis (KTD9): the statement binds the world, then the
+    /// operations in dependency and member order, then <c>self</c> and the parameters, then one hypothesis per operation
+    /// in the same order; the member keys come in that order from the unit's dependencies.
+    /// </summary>
+    private void BindOperations(MVarId goal, int operations)
+    {
+        if (operations == 0)
+        {
+            return;
+        }
+        var decls = (_m.MCtx.FindDecl(goal)?.LCtx.Decls ?? []).Where(d => !d.IsImplementationDetail).ToList();
+        var members = (_unit.Dependencies ?? VirList<VirDependency>.Empty).SelectMany(d => d.Members).ToList();
+        if (decls.Count < 1 + 2 * operations || members.Count != operations)
+        {
+            throw new InvalidOperationException($"the obligation binds {decls.Count} values, too few for {operations} operations and their contracts");
+        }
+        for (int i = 0; i < operations; i++)
+        {
+            _operations[decls[1 + i].FVarId] = (decls[decls.Count - operations + i].ToExpr(), members[i]);
+        }
     }
 
     /// <summary>A well-definedness obligation's triple (KTD26), its binders already introduced: <c>⦃⌜True⌝⦄ op ⦃…⦄</c>.</summary>
@@ -240,10 +285,11 @@ internal sealed class VcWalker
         var target = _m.InstantiateMVars(_m.GetMVarType(g));
         if (!target.HeadIs(TripleName) || target.GetAppArgs() is not { Length: 7 } args)
         {
-            Leftovers.Add(new(g, VcKind.Unsupported, null));
+            Unsupported(g, null);
             return;
         }
         var (prog, node) = Normalize(args[4]);
+        _lastNode = node ?? _lastNode;
         if (prog != args[4])
         {
             args[4] = prog;
@@ -295,11 +341,17 @@ internal sealed class VcWalker
             case { } n when CalleeContract(node, prog) is { } callee:
                 Call(g, callee, a, node);
                 return;
+            case null when prog.GetAppFn() is FVarExpr op && _operations.TryGetValue(op.Id, out var external):
+                External(g, external.Hypothesis, external.Member, a, node);
+                return;
             default:
-                Leftovers.Add(new(g, VcKind.Unsupported, node));
+                Unsupported(g, node);
                 return;
         }
     }
+
+    /// <summary>A goal no rule covers, a leftover at its node, or where the walk last was when it has none (#223).</summary>
+    private void Unsupported(MVarId g, int? node) => Leftovers.Add(new(g, VcKind.Unsupported, node ?? _lastNode));
 
     /// <summary>
     /// <paramref name="e"/> with the steps the next rule needs taken: a site's metadata read and removed, <c>let</c>s
@@ -365,7 +417,7 @@ internal sealed class VcWalker
     {
         if (goals is null)
         {
-            Leftovers.Add(new(g, VcKind.Unsupported, node));
+            Unsupported(g, node);
             return;
         }
         foreach (var goal in goals)
@@ -404,7 +456,7 @@ internal sealed class VcWalker
     {
         if (Rule(g, () => _m.ApplyConst(g, SpecTable.Assert)) is not [var fact, var rest])
         {
-            Leftovers.Add(new(g, VcKind.Unsupported, node));
+            Unsupported(g, node);
             return;
         }
         if (assert.Script.Count == 0)
@@ -444,7 +496,7 @@ internal sealed class VcWalker
     {
         if (Rule(g, () => _m.ApplyConst(g, SpecTable.Throw)) is not [var h])
         {
-            Leftovers.Add(new(g, VcKind.Unsupported, node));
+            Unsupported(g, node);
             return;
         }
         e = Strip(_m.InstantiateMVars(e));
@@ -462,7 +514,7 @@ internal sealed class VcWalker
         Throws.Add(new(node, e.GetAppArgs() is [StrLitExpr key] ? key.Value : "external"));
         if (_m.SimpTarget(g1, VcSimpSet.Context(_m)) is { } rest)
         {
-            Leftovers.Add(new(rest, VcKind.Unsupported, node));
+            Unsupported(rest, node);
         }
     }
 
@@ -489,28 +541,48 @@ internal sealed class VcWalker
     /// A verified callee whose contract is proved (KTD12): <c>Vc.call</c> with <c>f.$contract σ args</c>; its
     /// <c>Requires</c> is a VC at the call, and the rest is walked with its <c>Ensures</c> as a hypothesis.
     /// </summary>
-    private void Call(MVarId g, Name contract, Expr[] args, int? node)
+    private void Call(MVarId g, Name contract, Expr[] args, int? node) =>
+        Consequence(g, ExprOps.MkApp(Expr.Const(contract), args), contract.ToString(), VcKind.CalleePrecondition, node, () =>
+        {
+            if (NodeAt(node) is CallExpr site)
+            {
+                Calls.Add((site.Target, node));
+            }
+        });
+
+    /// <summary>
+    /// A call to a dependency member (M6 U20, KTD9, design D9): <c>Vc.call</c> with the member's contract hypothesis at the
+    /// call's arguments, which holds at every world, so at the current one (KTD4); its <c>Requires</c> is a VC at the call,
+    /// the rest is walked with its <c>Ensures</c> as a hypothesis, and an exception from it is one the contract allows,
+    /// propagated from the dependency (KTD12, KTD20).
+    /// </summary>
+    private void External(MVarId g, FVarExpr hypothesis, string member, Expr[] args, int? node) =>
+        Consequence(g, ExprOps.MkApp(hypothesis, args), member, VcKind.DependencyPrecondition, node, () => ExternalCalls.Add((member, node)));
+
+    /// <summary>
+    /// <c>Vc.call</c>, the consequence rule, with <paramref name="triple"/>, a proof of the call's triple: its precondition
+    /// is a VC of kind <paramref name="pre"/> at <paramref name="node"/>, <paramref name="used"/> records the contract, the
+    /// rest is walked knowing its postcondition, and an exception it allows is allowed in the caller's contract too.
+    /// </summary>
+    private void Consequence(MVarId g, Expr triple, string what, VcKind pre, int? node, Action used)
     {
         var goals = Rule(g, () =>
         {
             var gs = _m.ApplyConst(g, SpecTable.Call);
-            var triple = gs.First(x => !_m.IsAssigned(x) && _m.InstantiateMVars(_m.GetMVarType(x)).HeadIs(TripleName));
-            if (_m.Apply(triple, ExprOps.MkApp(Expr.Const(contract), args), contract.ToString()).Any(x => !_m.IsAssigned(x)))
+            var hx = gs.First(x => !_m.IsAssigned(x) && _m.InstantiateMVars(_m.GetMVarType(x)).HeadIs(TripleName));
+            if (_m.Apply(hx, triple, what).Any(x => !_m.IsAssigned(x)))
             {
-                throw Failed(triple, $"{contract} does not state this call's triple");
+                throw Failed(hx, $"the contract of {what} does not state this call's triple");
             }
             return gs;
         });
-        if (goals is not [var pre, var ok, var raised])
+        if (goals is not [var precondition, var ok, var raised])
         {
-            Leftovers.Add(new(g, VcKind.Unsupported, node));
+            Unsupported(g, node);
             return;
         }
-        Leftovers.Add(new(pre, VcKind.CalleePrecondition, node));
-        if (NodeAt(node) is CallExpr site)
-        {
-            Calls.Add((site.Target, node));
-        }
+        Leftovers.Add(new(precondition, pre, node));
+        used();
         Leaf(ok, null);
         // An exception the callee may raise is allowed in the caller's contract too: the caller's postcondition has the same
         // exception half (KTD12).
@@ -523,7 +595,7 @@ internal sealed class VcWalker
             }
             catch (MetaException ex) when (ex is not MetaResourceException)
             {
-                Leftovers.Add(new(allowed, VcKind.Unsupported, node));
+                Unsupported(allowed, node);
             }
         }
     }
@@ -579,7 +651,7 @@ internal sealed class VcWalker
             catch (MetaException ex) when (ex is not MetaResourceException)
             {
                 _m.Restore(saved);
-                Leftovers.Add(new(g, VcKind.Unsupported, node));
+                Unsupported(g, node);
                 return;
             }
             foreach (var c1 in cases)
@@ -588,7 +660,7 @@ internal sealed class VcWalker
             }
             return;
         }
-        Leftovers.Add(new(g, VcKind.Unsupported, node));
+        Unsupported(g, node);
     }
 
     /// <summary>

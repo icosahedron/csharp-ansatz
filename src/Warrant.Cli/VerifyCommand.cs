@@ -326,10 +326,10 @@ internal static class VerifyCommand
         }
         var inputs = extracted.Select(u => new EngineUnit(u.Unit, u.DisplayName, u.Spans)).ToList();
         // What the server needs to keep this run's assumption report (KTD25): the claims are source text, which only the
-        // client has.
+        // client has: a theorem's claim, and a contract member's Spec calls, which its external contract line quotes (M6 U20).
         var claims = inputs
-            .Where(u => u.Unit.Kind == VirUnitKind.Theorem)
-            .Select(u => (u.Unit.Key, Text: AssumptionReports.ClaimSpan(u) is { } span ? report.Sources.Text(span) : null))
+            .Where(u => u.Unit.Kind is VirUnitKind.Theorem or VirUnitKind.Contract)
+            .Select(u => (u.Unit.Key, Text: AssumptionReports.ClaimText(u, report.Sources.Text)))
             .Where(c => c.Text is not null)
             .ToImmutableDictionary(c => c.Key, c => c.Text!, StringComparer.Ordinal);
         // M5b KTD1, KTD6: the same request the server takes, verified by the same service in-process. The spans and the

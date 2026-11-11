@@ -715,3 +715,12 @@ Warrant.Vc.optionRec
 Warrant.Vc.call
 # And.intro splits a model operation's precondition into its cases; False.elim closes an unreachable throw (#92).
 And.intro
+
+# External calls in the walker (M6 U20, KTD14): a dependency's Spec.Ensures over a nullable result, such as design
+# §5.2's `r is null || r.Id == id`, is a hypothesis about a value the walk later learns is some v. The VC simp set reads
+# null tests and ?? on a constructor with these, and an impossible case `some v = none` as False.
+Option.isNone_some
+Option.isNone_none
+Warrant.Nullable.some_eq_none
+Bool.false_eq_true
+Bool.true_eq_false

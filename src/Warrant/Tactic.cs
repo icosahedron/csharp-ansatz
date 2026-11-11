@@ -53,6 +53,14 @@ public sealed class Tactic
     /// <returns>The tactic.</returns>
     public static Tactic Omega() => new();
 
+    /// <summary>
+    /// Runs Warrant's verification-condition generator on a contract obligation, leaving the conditions it cannot close
+    /// for the steps after it (milestone M6). For a <see cref="ProofForAttribute"/> script, which starts at the
+    /// obligation itself, and for <see cref="Spec.Assert(bool, Tactic[])"/>.
+    /// </summary>
+    /// <returns>The tactic.</returns>
+    public static Tactic VcGen() => new();
+
     /// <summary>Runs a tactic on every open goal.</summary>
     /// <param name="tactic">The tactic.</param>
     /// <returns>The tactic.</returns>

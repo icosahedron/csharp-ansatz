@@ -23,5 +23,6 @@
   <ItemGroup>
     <Compile Include="..\Warrant.Analyzers.Tests\AnalyzerHarness.cs" Link="AnalyzerHarness.cs" />
     <Compile Include="..\Warrant.Analyzers.Tests\AnalyzerTests.cs" Link="AnalyzerTests.cs" />
+    <Compile Include="..\Warrant.Analyzers.Tests\ContractSurfaceTests.cs" Link="ContractSurfaceTests.cs" />
   </ItemGroup>
 </Project>

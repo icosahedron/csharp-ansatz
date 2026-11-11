@@ -69,4 +69,13 @@ public static class Contracts
     {
         return Quotient(a, 2);
     }
+
+    // Arithmetic in a Spec expression must not overflow (#183): the bounds keep a + b inside int.
+    [Verified]
+    public static int Sum(int a, int b)
+    {
+        Spec.Requires(a > -1000 && a < 1000 && b > -1000 && b < 1000);
+        Spec.Ensures<int>(r => r == a + b);
+        return a + b;
+    }
 }

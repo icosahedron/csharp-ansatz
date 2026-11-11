@@ -107,7 +107,7 @@ the same type in the same method would be missed; no corpus method has one.
 `tests/corpus/m6/` is the exit criterion as files (KTD24), in the M4 corpus's layout: `accepted/`, `refuted/` and
 `rejected/`, and `expected.json` with each member's outcome and each compilation, five of them (`accepted`, `refuted`,
 `refuted-dependencies`, `rejected`, `checked-project`).
-It holds 147 members.
+It holds 153 members (147 at M6's exit; #182 added `Quotient`, `Half`, `QuotientOfAny` and `NoThrowAfterEnsures`, #183 `Sum` and `SumUnbounded`).
 `tests/corpus/m6/README.md` lists every file, what each member is for, and the members that moved from the M4 corpus
 (chapter 4).
 

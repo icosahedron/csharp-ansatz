@@ -428,6 +428,70 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     }
 
     [Fact]
+    public void WrappingArithmeticInEnsuresHasAnOverflowObligation()
+    {
+        // #183: + - * and unary - on int and long in a Spec expression must not overflow, even where C# would wrap.
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Add(int a, int b)
+                {
+                    Spec.Ensures<int>(r => r == a + b);
+                    return a + b;
+                }
+
+                [Verified]
+                public static long Negate(long a)
+                {
+                    Spec.Requires(a > 0 || -a > 0);
+                    return a;
+                }
+            }
+            """);
+        var add = Contract(translation, "M:S.Add(System.Int32,System.Int32)");
+        var wd = Assert.Single(add.WellDefinedness);
+        Assert.Equal(SpecObligationKind.WellDefinedOperation, wd.Kind);
+        Assert.Equal("Cs.S.«Add(System.Int32,System.Int32)».$wd_1", wd.Theorem.Name.ToString());
+        Assert.IsType<BinaryExpr>(wd.Node);
+        // ∀ σ a b r, ⦃⌜True⌝⦄ Warrant.Int32.addChecked σ a b ⦃⇓_ => ⌜True⌝, allowed⦄
+        Assert.Equal(4, wd.Binders);
+        var (program, pre, ok, exceptions) = Triple(Under(wd.Theorem.Type, 4));
+        Assert.Equal(Expr.App(C("Warrant.Int32.addChecked"), Expr.BVar(3), Expr.BVar(2), Expr.BVar(1)), program);
+        Assert.Equal(C("True"), Assertion(pre));
+        Assert.Equal(C("True"), Ensures(ok));
+        AssertOnlyExplicitAndExternalExceptionsAllowed(exceptions);
+        AssertPropositions(env, add);
+
+        // The negation is under the guard ¬(a > 0) of the || that encloses it.
+        var negate = Contract(translation, "M:S.Negate(System.Int64)");
+        wd = Assert.Single(negate.WellDefinedness);
+        Assert.IsType<UnaryExpr>(wd.Node);
+        Assert.Equal(3, wd.Binders);
+        (program, _, _, _) = Triple(Under(wd.Theorem.Type, 3));
+        Assert.Equal(Expr.App(C("Warrant.Int64.negChecked"), Expr.BVar(2), Expr.BVar(1)), program);
+        AssertPropositions(env, negate);
+    }
+
+    [Fact]
+    public void AnUncheckedCastInASpecExpressionHasNoObligation()
+    {
+        // #183 leaves an explicit unchecked narrowing as written: it is a deliberate C# truncation.
+        var (translation, _) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static long Narrow(long l)
+                {
+                    Spec.Requires(unchecked((int)l) > 0);
+                    return l;
+                }
+            }
+            """);
+        Assert.Empty(Contract(translation, "M:S.Narrow(System.Int64)").WellDefinedness);
+    }
+
+    [Fact]
     public void ACallToAPureMethodWithRequiresInASpecExpressionHasItsPreconditionAsAnObligation()
     {
         var (translation, env) = Translate("""

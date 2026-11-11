@@ -283,6 +283,33 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
     }
 
     [Fact]
+    public void ArithmeticInEnsuresThatCanOverflowFailsAtTheEnsuresLineAndProvesWhenBounded()
+    {
+        // #183: arithmetic in a Spec expression does not wrap silently; it must not overflow.
+        var source = Wrap("""
+            [Verified]
+            public static int Unbounded(int a, int b)
+            {
+                Spec.Ensures<int>(r => r == a + b);
+                return a + b;
+            }
+
+            [Verified]
+            public static int Bounded(int a, int b)
+            {
+                Spec.Requires(a < 1000 && a > -1000 && b < 1000 && b > -1000);
+                Spec.Ensures<int>(r => r == a + b);
+                return a + b;
+            }
+            """);
+        var result = Run(source);
+        var unbounded = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Unbounded(System.Int32,System.Int32)"));
+        Assert.All(unbounded.Vcs, v => Assert.Equal(VcKind.WellDefinedness, v.Kind));
+        Assert.Equal("a + b", Text(source, "M:S.Unbounded(System.Int32,System.Int32)", unbounded.TacticNode));
+        Proved(result.Find("M:S.Bounded(System.Int32,System.Int32)"));
+    }
+
+    [Fact]
     public void AnUnsatisfiableRequiresIsReportedAtItsLine()
     {
         var source = Wrap("""

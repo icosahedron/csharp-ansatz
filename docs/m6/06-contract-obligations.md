@@ -141,10 +141,21 @@ A call in a `Spec` expression to a pure method that has a `Spec.Requires` adds t
 obligation under the same guards, so a contract never speaks about a callee outside the callee's own precondition.
 A call to a raising method, or to a dependency, in a `Spec` expression is rejected at extraction (chapter 4).
 
-Arithmetic in a `Spec` expression has C#'s meaning: `int` and `long` wrap.
-`Spec.Ensures<int>(r => r == a + b)` wraps on both sides and says nothing about overflow, and "`a + b` fits in an `int`"
-has no direct form; preconditions bound each operand instead.
-Whether specs get an unbounded integer is the owner's open decision #183 (#160).
+Arithmetic in a `Spec` expression must not overflow (owner decision #183): `+`, `-` and `*` on `int` and `long`, and
+unary `-`, are partial there even where C# would wrap, since an overflowing spec is almost always a wrong one.
+Each adds a well-definedness obligation whose program is the checked model (`Warrant.Int32.addChecked` and so on), under
+the same guards as the other partial operations; the value the spec reads is the wrapped one, which agrees with the
+mathematical one wherever the obligation holds.
+So `Spec.Ensures<int>(r => r == a + b)` fails at its `a + b` with nothing bounding `a` and `b`, and proves with
+`Spec.Requires(a < 1000 && a > -1000 && b < 1000 && b > -1000)`
+(`ArithmeticInEnsuresThatCanOverflowFailsAtTheEnsuresLineAndProvesWhenBounded`; in the corpus, `SumUnbounded` in
+`refuted/Contracts.cs`).
+Specs keep C#'s bounded types: there is no unbounded integer and no widening to `long`.
+An explicit unchecked cast such as `(int)l` is left as written, since a narrowing cast is a deliberate truncation.
+The rule covers `Spec.Requires` and `Spec.Ensures`, in a method and in a contract-class member; `Spec.Assert` is a
+statement in the body and its condition still wraps.
+A callee's `Spec.Requires`, stated at a call site in a caller's `Spec` expression, adds no obligation of its own there:
+the callee's own `$wd` obligations cover it.
 
 ## Unsatisfiable contracts
 

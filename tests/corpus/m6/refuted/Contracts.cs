@@ -1,6 +1,6 @@
 // M6 U14's refuted contracts without dependencies (KTD12, KTD16, KTD25, #98): a precondition that leaves an exception
 // possible, a division by -1, a caller that breaks its callee's precondition, a false Spec.Ensures with and without a
-// [ProofFor] script, a failing Spec.Assert, and a contradictory Spec.Requires.
+// [ProofFor] script, a failing Spec.Assert, a contradictory Spec.Requires, and an overflowing Spec.Ensures (#183).
 using Warrant;
 
 namespace Corpus.M6.Refuted;
@@ -32,6 +32,7 @@ public static class Contracts
     [Verified]
     public static int Twice(int x)
     {
+        Spec.Requires(x > -1000 && x < 1000);
         Spec.Ensures<int>(r => r == x + x + 1);
         return x + x;
     }
@@ -39,6 +40,7 @@ public static class Contracts
     [Verified]
     public static int Kept(int x)
     {
+        Spec.Requires(x < 1000);
         Spec.Ensures<int>(r => r == x + 1);
         return x;
     }
@@ -72,5 +74,13 @@ public static class Contracts
             throw new System.ArgumentException("b");
         }
         return a / b;
+    }
+
+    // Arithmetic in a Spec expression must not overflow (#183): nothing bounds a + b, though the code's own + wraps.
+    [Verified]
+    public static int SumUnbounded(int a, int b)
+    {
+        Spec.Ensures<int>(r => r == a + b);
+        return a + b;
     }
 }

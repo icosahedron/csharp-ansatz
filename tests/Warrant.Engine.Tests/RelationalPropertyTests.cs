@@ -14,7 +14,7 @@ public sealed class RelationalPropertyTests(EngineFixture engine) : IClassFixtur
             [Verified]
             public static int Scale(int x)
             {
-                Spec.Requires(x <= 1000);
+                Spec.Requires(x >= -1000 && x <= 1000);
                 Spec.Ensures<int>(r => r == x + x);
                 if (x < 0)
                 {

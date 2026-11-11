@@ -233,9 +233,13 @@ Pricing.cs(24,44): error WRT0001: The contract of 'Prices.Refund(int)' could not
 - A method needs no contract to have an obligation: one that divides, uses
   `checked` arithmetic, `Math.Abs` or reads a nullable value must prove that
   no implicit exception (a zero divisor, overflow, a null read) can happen.
-- Arithmetic in a contract wraps, as in the code: `r == a + b` says nothing
-  about overflow. Bound each operand in `Spec.Requires` instead. Whether specs
-  get an unbounded integer is open (GitHub #183).
+- Arithmetic in a contract must not overflow (GitHub #183): `+`, `-`, `*` and
+  unary `-` on `int` and `long` in `Spec.Requires` or `Spec.Ensures` fail the
+  proof at that operation unless they provably stay in range, even though the
+  code itself wraps. `Spec.Ensures<int>(r => r == a + b)` alone fails at
+  `a + b`; bound each operand in `Spec.Requires` and it proves
+  ([proofs that work](proofs-that-work.md#arithmetic-in-a-contract)). An
+  explicit `(int)` cast still truncates, and `Spec.Assert` still wraps.
 - `Spec.Implies` is not accepted inside a contract yet (GitHub #213); write
   `!a || b`.
 - The calls are `[Conditional("WARRANT_CONTRACTS")]`: they don't exist in the
@@ -523,7 +527,7 @@ its `Spec.Ensures`, without unfolding the callee.
 [Verified]
 public static int Scale(int x)
 {
-    Spec.Requires(x <= 1000);
+    Spec.Requires(x >= -1000 && x <= 1000);
     Spec.Ensures<int>(r => r == x + x);
     if (x < 0) throw new ArgumentException("x");
     return checked(x + x);

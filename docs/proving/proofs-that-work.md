@@ -284,6 +284,27 @@ public static int Bounded(int a, int b)
 Proved: the bounds keep the sum inside `int`. With only the upper bounds, `checked(a + b)` can still overflow below
 `int.MinValue`, and the build fails at `a + b` (`CheckedAddProvesWithBothBoundsAndFailsAtThePlusWithOnlyTheUpperOnes`).
 
+### Arithmetic in a contract
+
+```csharp
+[Verified]
+public static int Sum(int a, int b)
+{
+    Spec.Requires(a > -1000 && a < 1000 && b > -1000 && b < 1000);
+    Spec.Ensures<int>(r => r == a + b);
+    return a + b;
+}
+```
+
+Proved (`Sum` in `tests/corpus/m6/accepted/Contracts.cs`). `+`, `-`, `*` and unary `-` on `int` and `long` in a
+`Spec.Requires` or `Spec.Ensures` must not overflow, even though the method's own `a + b` wraps (GitHub #183): an
+overflowing spec almost always states something its author did not mean. Each one is a well-definedness condition, proved
+under the `Spec.Requires` before it, and here the bounds keep `a + b` inside `int`. Without the `Spec.Requires` the build
+fails at the `a + b` in `Spec.Ensures` with `well-definedness of a Spec expression` (`SumUnbounded` in
+`tests/corpus/m6/refuted/Contracts.cs`, `ArithmeticInEnsuresThatCanOverflowFailsAtTheEnsuresLineAndProvesWhenBounded`).
+Specs keep C#'s `int` and `long`: there is no unbounded integer, so bound the operands rather than widening them. An
+explicit `(int)` cast still truncates as in C#, and a `Spec.Assert` condition still wraps.
+
 ### A null guard
 
 ```csharp
@@ -527,7 +548,7 @@ verifies is that `dotnet build -f` for a framework other than the first does not
 [Verified]
 public static int Scale(int x)
 {
-    Spec.Requires(x <= 1000);
+    Spec.Requires(x >= -1000 && x <= 1000);
     Spec.Ensures<int>(r => r == x + x);
     if (x < 0)
     {

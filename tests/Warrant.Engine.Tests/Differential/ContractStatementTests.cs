@@ -136,6 +136,7 @@ public sealed class ContractStatementTests(M6DependencyFixture fixture, ITestOut
         "M:Corpus.M6.Contracts.NonNegative(System.Int32)",
         "M:Corpus.M6.Contracts.Quotient(System.Int32,System.Int32)",
         "M:Corpus.M6.Contracts.Same(System.Int32)",
+        "M:Corpus.M6.Contracts.Sum(System.Int32,System.Int32)",
         "M:Corpus.M6.Dependencies.OrderService.Counted(System.Int32)",
         "M:Corpus.M6.Dependencies.OrderService.QuantityOf(System.Int32)",
         "M:Corpus.M6.Dependencies.OrderService.Reserved(System.Int32)",

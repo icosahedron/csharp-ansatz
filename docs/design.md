@@ -445,7 +445,7 @@ public void PayInInstallments(Payment p, int count, decimal installment)   // no
 | `checked(...)` arithmetic | a `ClrM` program that raises `ClrExn.overflow` | Also the default when the project enables `CheckForOverflowUnderflow`. Checked `+ - *`, unary `-` and narrowing on `int` and `long` (M6, [docs/m6/02](m6/02-effect-monad-and-models.md)). |
 | `/` and `%` on `int` and `long` | `Warrant.Int32.div`/`rem` (and `Int64`) in `ClrM`: `divideByZero`, then `overflow` for `MinValue / -1` and `MinValue % -1`, then Lean's truncating operation | M6. By a literal other than 0 and -1 they cannot throw and stay pure. |
 | `Math.Min`, `Math.Max`, `Math.Abs` on `int`, `long`, `decimal` | Warrant library definitions; `Abs` on `int` and `long` raises `overflow` for `MinValue` | M6 (KTD23 of the M6 plan). Other BCL members are not modelled. |
-| `System.Numerics.BigInteger` | `Int` | Not built. Specs have no unbounded integer yet (GitHub #160, #183). |
+| `System.Numerics.BigInteger` | `Int` | Not built (GitHub #160). Specs keep `int` and `long`, and their arithmetic must not overflow (GitHub #183, docs/m6/06). |
 | `Warrant.Nat` / `Warrant.Integer` | `Nat` / `Int` | Runtime structs for code written mathematically. Not built. |
 | `decimal` | `Warrant.Decimal`: sign, 96-bit mantissa, scale 0 to 28 | M6 ([docs/m6/03](m6/03-decimal.md)): literals, comparisons and `==` by value (`1.0m == 1.00m`), `+` and `-` (raising `overflow` in every context), unary `-`. `*`, `/`, `%` and rounding: M7 (§12 Q1). |
 | `float` `double` | not supported | Lean's `Float` is opaque to the kernel. |

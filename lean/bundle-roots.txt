@@ -573,3 +573,30 @@ Warrant.Int64.rem
 Warrant.Int64.rem_spec
 Warrant.Int64.toInt32Checked
 Warrant.Int64.toInt32Checked_spec
+
+# Nullable values and Math on int and long (M6 U16; plan M6 KTD5, KTD23, lean/Warrant/Nullable.lean and Math.lean):
+# a nullable value is an Option (null is none, a T converted to T? is some), the raising reads with their @[spec]
+# lemmas, ?? and GetValueOrDefault with their equations, Math.Min and Math.Max with their equations, and Math.Abs
+# with its @[spec] lemma.
+Option
+Option.some
+Option.none
+Warrant.Nullable.value
+Warrant.Nullable.value_spec
+Warrant.Nullable.nonNull
+Warrant.Nullable.nonNull_spec
+Warrant.Nullable.coalesce
+Warrant.Nullable.coalesce_some
+Warrant.Nullable.coalesce_none
+Warrant.Int32.min
+Warrant.Int32.min_def
+Warrant.Int32.max
+Warrant.Int32.max_def
+Warrant.Int32.abs
+Warrant.Int32.abs_spec
+Warrant.Int64.min
+Warrant.Int64.min_def
+Warrant.Int64.max
+Warrant.Int64.max_def
+Warrant.Int64.abs
+Warrant.Int64.abs_spec

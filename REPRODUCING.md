@@ -354,7 +354,7 @@ scripts/export-semantics.sh /tmp/bundle.ndjson.gz   # or anywhere else
 
 The script uses the same Lean 4.35.0 toolchain and lean4export `5a9a355` as
 step 5 (on Windows, see `scripts/lib/lean-toolchain.sh` for how the toolchain
-is found), builds the library with `lake build`, and exports the 504 roots in
+is found), builds the library with `lake build`, and exports the 526 roots in
 `lean/bundle-roots.txt` with their dependency closure. It exports with
 `--export-mdata`, so the `no_index` markers simp needs survive. It fails if a
 root does not exist or if anything depends on `sorryAx`. The output is
@@ -362,7 +362,7 @@ deterministic: with an unchanged `lean/`, it is byte-identical to the
 committed file. Check the counts independently with:
 
 ```sh
-python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 3,973 constants
+python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 3,993 constants
 ```
 
 The attribute sidecar that tactics read is exported from the same library and

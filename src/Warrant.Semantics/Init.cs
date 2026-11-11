@@ -114,6 +114,22 @@ internal static class Init
     public static readonly Expr Int64Rem = C("Warrant.Int64.rem");
     public static readonly Expr Int64ToInt32Checked = C("Warrant.Int64.toInt32Checked");
 
+    // Nullable values and Math on int and long (M6 U16; plan M6 KTD5, KTD23, lean/Warrant/Nullable.lean and Math.lean):
+    // T? is Option T at level 0, null is none and a T converted to T? is some. The Nullable models take the world and the
+    // value type; coalesce (?? and GetValueOrDefault) takes the value type.
+    public static readonly Expr Option = C("Option", Level.Zero);
+    public static readonly Expr OptionSome = C("Option.some", Level.Zero);
+    public static readonly Expr OptionNone = C("Option.none", Level.Zero);
+    public static readonly Expr NullableValue = C("Warrant.Nullable.value");
+    public static readonly Expr NullableNonNull = C("Warrant.Nullable.nonNull");
+    public static readonly Expr NullableCoalesce = C("Warrant.Nullable.coalesce");
+    public static readonly Expr Int32Min = C("Warrant.Int32.min");
+    public static readonly Expr Int32Max = C("Warrant.Int32.max");
+    public static readonly Expr Int32Abs = C("Warrant.Int32.abs");
+    public static readonly Expr Int64Min = C("Warrant.Int64.min");
+    public static readonly Expr Int64Max = C("Warrant.Int64.max");
+    public static readonly Expr Int64Abs = C("Warrant.Int64.abs");
+
     /// <summary>The binder name of a constant function's or an implication's unused argument.</summary>
     public static readonly Name Unused = Name.From("x");
 

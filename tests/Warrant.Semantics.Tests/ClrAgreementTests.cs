@@ -269,8 +269,14 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
     {
         OverflowException => "overflow",
         DivideByZeroException => "divideByZero",
-        _ => throw new InvalidOperationException($"no ClrExn models {e.GetType()}"),
+        NullReferenceException => "nullReference",
+        InvalidOperationException => "invalidOperation",
+        _ => throw new ArgumentException($"no ClrExn models {e.GetType()}", nameof(e)),
     }));
+
+    /// <summary>The CLR exceptions a <c>Warrant.ClrExn</c> constructor stands for.</summary>
+    private static bool IsModelled(Exception e) =>
+        e is OverflowException or DivideByZeroException or NullReferenceException or InvalidOperationException;
 
     /// <summary>
     /// <c>fun (σ : Type) (s : σ) => (StateT.run (ExceptT.run (program σ)) s).1</c>: the <c>Except</c> component of the
@@ -298,7 +304,7 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
             value = clr();
             ctor = "Except.ok";
         }
-        catch (Exception e) when (e is OverflowException or DivideByZeroException)
+        catch (Exception e) when (IsModelled(e))
         {
             value = ClrExn(e);
             ctor = "Except.error";
@@ -311,9 +317,12 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
         Expr.App(Expr.Const(Name.Parse($"Warrant.{type}.{op}")), [sigma, .. args]);
 
     /// <summary>The model's outcome from every world is the CLR's: its value, or the <c>ClrExn</c> of its exception.</summary>
-    private bool RaisingAgrees(VirPrimitive result, Func<Expr, Expr> program, Func<Expr> clr)
+    private bool RaisingAgrees(VirPrimitive result, Func<Expr, Expr> program, Func<Expr> clr) =>
+        RaisingAgrees(Literals.Type(result), program, clr);
+
+    /// <summary>As above, at any result type.</summary>
+    private bool RaisingAgrees(Expr resultT, Func<Expr, Expr> program, Func<Expr> clr)
     {
-        var resultT = Literals.Type(result);
         var type = Expr.Forall(Name.From("σ"), TypeT, Expr.Forall(Name.From("s"), Expr.BVar(0),
             Expr.App(Expr.Const(Name.Parse("Except"), Level.Zero, Level.Zero), ClrExnT, resultT)));
         return Agrees(RunFromAnyWorld(resultT, program), Outcome(resultT, clr), type);
@@ -412,6 +421,158 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
         var minDiv = RunFromAnyWorld(Literals.Type(VirPrimitive.Int32), s => Model("Int32", "div", s, Literals.Int32(int.MinValue), Literals.Int32(-1)));
         Assert.False(tc.IsDefEq(minDiv, Outcome(Literals.Type(VirPrimitive.Int32), () => Literals.Int32(int.MinValue))), "int.MinValue / -1 does not wrap");
     });
+
+    // ------------------------------------------------------------------ nullable values (M6 U16, KTD5)
+
+    /// <summary><c>Option.some v</c> or <c>Option.none</c> at <paramref name="type"/>: a nullable value (KTD5).</summary>
+    private static Expr Optional(Expr type, Expr? value) => value is null
+        ? Expr.App(Expr.Const(Name.Parse("Option.none"), Level.Zero), type)
+        : Expr.App(Expr.Const(Name.Parse("Option.some"), Level.Zero), type, value);
+
+    private static Expr OptionalInt32(int? x) => Optional(Literals.Type(VirPrimitive.Int32), x is { } v ? Literals.Int32(v) : null);
+
+    private static Expr OptionalInt64(long? x) => Optional(Literals.Type(VirPrimitive.Int64), x is { } v ? Literals.Int64(v) : null);
+
+    /// <summary>A model of <c>lean/Warrant/Nullable.lean</c> at world <paramref name="sigma"/> and value type <paramref name="type"/>.</summary>
+    private static Expr NullableModel(string op, Expr sigma, Expr type, Expr x) =>
+        Expr.App(Expr.Const(Name.Parse($"Warrant.Nullable.{op}")), sigma, type, x);
+
+    private static Expr Coalesce(Expr type, Expr x, Expr d) =>
+        Expr.App(Expr.Const(Name.Parse("Warrant.Nullable.coalesce")), type, x, d);
+
+    /// <summary>A reference type whose null dereference the CLR side performs.</summary>
+    private sealed record Box(long V);
+
+    /// <summary><c>null</c> one time in five, otherwise a boundary-biased value.</summary>
+    private static Arbitrary<int?> NullableInt32s { get; } =
+        Arb.From(Gen.Frequency<int?>((1, Gen.Constant<int?>(null)), (4, Generators.Int32Values.Select(v => (int?)v))));
+
+    private static Arbitrary<long?> NullableInt64s { get; } =
+        Arb.From(Gen.Frequency<long?>((1, Gen.Constant<long?>(null)), (4, Generators.Int64Values.Select(v => (long?)v))));
+
+    private static IEnumerable<int?> NullableInt32Boundaries => Generators.Int32Boundaries.Select(v => (int?)v).Prepend(null);
+
+    private static IEnumerable<long?> NullableInt64Boundaries => Generators.Int64Boundaries.Select(v => (long?)v).Prepend(null);
+
+    [Fact]
+    public void NullableValueAgrees()
+    {
+        var int32 = Literals.Type(VirPrimitive.Int32);
+        var int64 = Literals.Type(VirPrimitive.Int64);
+        bool Ok32(int? x) =>
+            RaisingAgrees(int32, s => NullableModel("value", s, int32, OptionalInt32(x)), () => Literals.Int32(Runtime(x)!.Value)) &&
+            RaisingAgrees(int32, s => NullableModel("value", s, int32, OptionalInt32(x)), () => Literals.Int32((int)Runtime(x)!));
+        bool Ok64(long? x) =>
+            RaisingAgrees(int64, s => NullableModel("value", s, int64, OptionalInt64(x)), () => Literals.Int64(Runtime(x)!.Value)) &&
+            RaisingAgrees(int64, s => NullableModel("value", s, int64, OptionalInt64(x)), () => Literals.Int64((long)Runtime(x)!));
+        KernelThread.Run(() =>
+        {
+            Assert.All(NullableInt32Boundaries, x => Assert.True(Ok32(x), $"({(object?)x ?? "null"}).Value"));
+            Assert.All(NullableInt64Boundaries, x => Assert.True(Ok64(x), $"({(object?)x ?? "null"}L).Value"));
+            Pbt.Check(Prop.ForAll(NullableInt32s, Ok32), Cases);
+            Pbt.Check(Prop.ForAll(NullableInt64s, Ok64), Cases);
+        });
+    }
+
+    /// <summary>The non-null unwrap (KTD5): a null reference used where a non-null one is required, here as a receiver.</summary>
+    [Fact]
+    public void NonNullUnwrapAgrees()
+    {
+        var int64 = Literals.Type(VirPrimitive.Int64);
+        bool Ok(long? x)
+        {
+            var box = Runtime(x is { } v ? new Box(v) : null);
+            return RaisingAgrees(int64, s => NullableModel("nonNull", s, int64, OptionalInt64(x)), () => Literals.Int64(box!.V));
+        }
+        KernelThread.Run(() =>
+        {
+            Assert.All(NullableInt64Boundaries, x => Assert.True(Ok(x), $"box({(object?)x ?? "null"}).V"));
+            Pbt.Check(Prop.ForAll(NullableInt64s, Ok), Cases);
+        });
+    }
+
+    [Fact]
+    public void CoalesceAndGetValueOrDefaultAgree()
+    {
+        var int32 = Literals.Type(VirPrimitive.Int32);
+        var int64 = Literals.Type(VirPrimitive.Int64);
+        bool Ok32((int? X, int D) p) =>
+            AgreesInt32(Coalesce(int32, OptionalInt32(p.X), Literals.Int32(p.D)), Runtime(p.X) ?? p.D) &&
+            AgreesInt32(Coalesce(int32, OptionalInt32(p.X), Literals.Int32(p.D)), Runtime(p.X).GetValueOrDefault(p.D)) &&
+            AgreesInt32(Coalesce(int32, OptionalInt32(p.X), Literals.Int32(0)), Runtime(p.X).GetValueOrDefault());
+        bool Ok64((long? X, long D) p) =>
+            AgreesInt64(Coalesce(int64, OptionalInt64(p.X), Literals.Int64(p.D)), Runtime(p.X) ?? p.D) &&
+            AgreesInt64(Coalesce(int64, OptionalInt64(p.X), Literals.Int64(p.D)), Runtime(p.X).GetValueOrDefault(p.D)) &&
+            AgreesInt64(Coalesce(int64, OptionalInt64(p.X), Literals.Int64(0)), Runtime(p.X).GetValueOrDefault());
+        KernelThread.Run(() =>
+        {
+            Assert.All(from x in NullableInt32Boundaries from d in Generators.Int32Boundaries select (x, d),
+                p => Assert.True(Ok32(p), $"{(object?)p.x ?? "null"} ?? {p.d}"));
+            Assert.All(from x in NullableInt64Boundaries from d in Generators.Int64Boundaries select (x, d),
+                p => Assert.True(Ok64(p), $"{(object?)p.x ?? "null"}L ?? {p.d}L"));
+            Pbt.Check(Prop.ForAll(Arb.From(NullableInt32s.Generator.SelectMany(x => Generators.Int32Values.Select(d => (x, d)))), Ok32), Cases);
+            Pbt.Check(Prop.ForAll(Arb.From(NullableInt64s.Generator.SelectMany(x => Generators.Int64Values.Select(d => (x, d)))), Ok64), Cases);
+        });
+    }
+
+    [Fact]
+    public void ANullValueRaisesInvalidOperationAndANullReceiverNullReference() => KernelThread.Run(() =>
+    {
+        int? none = Runtime<int?>(null);
+        Assert.Throws<InvalidOperationException>(() => none!.Value);
+        Assert.Throws<InvalidOperationException>(() => (int)none!);
+        Assert.Throws<NullReferenceException>(() => Runtime<Box?>(null)!.V);
+
+        var int32 = Literals.Type(VirPrimitive.Int32);
+        var value = RunFromAnyWorld(int32, s => NullableModel("value", s, int32, OptionalInt32(null)));
+        var nonNull = RunFromAnyWorld(int32, s => NullableModel("nonNull", s, int32, OptionalInt32(null)));
+        var tc = new TypeChecker(env);
+        Assert.True(tc.IsDefEq(value, Outcome(int32, () => Literals.Int32(Runtime<int?>(null)!.Value))), "null.Value raises invalidOperation");
+        Assert.False(tc.IsDefEq(value, Outcome(int32, () => Literals.Int32((int)Runtime<Box?>(null)!.V))), "null.Value is not nullReference");
+        Assert.True(tc.IsDefEq(nonNull, Outcome(int32, () => Literals.Int32((int)Runtime<Box?>(null)!.V))), "a null receiver raises nullReference");
+        Assert.False(tc.IsDefEq(nonNull, Outcome(int32, () => Literals.Int32(Runtime<int?>(null)!.Value))), "a null receiver is not invalidOperation");
+    });
+
+    // ------------------------------------------------------------------ Math on int and long (M6 U16, KTD23)
+
+    [Fact]
+    public void MathMinAndMaxAgree()
+    {
+        Expr Call(string type, string op, Expr a, Expr b) => Expr.App(Expr.Const(Name.Parse($"Warrant.{type}.{op}")), a, b);
+        bool Ok32((int A, int B) p) =>
+            AgreesInt32(Call("Int32", "min", Literals.Int32(p.A), Literals.Int32(p.B)), Math.Min(p.A, p.B)) &&
+            AgreesInt32(Call("Int32", "max", Literals.Int32(p.A), Literals.Int32(p.B)), Math.Max(p.A, p.B));
+        bool Ok64((long A, long B) p) =>
+            AgreesInt64(Call("Int64", "min", Literals.Int64(p.A), Literals.Int64(p.B)), Math.Min(p.A, p.B)) &&
+            AgreesInt64(Call("Int64", "max", Literals.Int64(p.A), Literals.Int64(p.B)), Math.Max(p.A, p.B));
+        KernelThread.Run(() =>
+        {
+            Assert.All(Generators.Int32BoundaryPairs(), p => Assert.True(Ok32(p), $"Math.Min/Max({p.Item1}, {p.Item2})"));
+            Assert.All(Generators.Int64BoundaryPairs(), p => Assert.True(Ok64(p), $"Math.Min/Max({p.Item1}L, {p.Item2}L)"));
+            Pbt.Check(Prop.ForAll(Generators.Int32Pairs, Ok32), Cases);
+            Pbt.Check(Prop.ForAll(Generators.Int64Pairs, Ok64), Cases);
+        });
+    }
+
+    [Fact]
+    public void MathAbsAgrees()
+    {
+        bool Ok32(int x) => RaisingAgrees(VirPrimitive.Int32,
+            s => Model("Int32", "abs", s, Literals.Int32(x)), () => Literals.Int32(Math.Abs(Runtime(x))));
+        bool Ok64(long x) => RaisingAgrees(VirPrimitive.Int64,
+            s => Model("Int64", "abs", s, Literals.Int64(x)), () => Literals.Int64(Math.Abs(Runtime(x))));
+        Assert.Throws<OverflowException>(() => unchecked(Math.Abs(Runtime(int.MinValue))));
+        Assert.Throws<OverflowException>(() => unchecked(Math.Abs(Runtime(long.MinValue))));
+        KernelThread.Run(() =>
+        {
+            Assert.True(Ok32(int.MinValue), "Math.Abs(int.MinValue) raises overflow");
+            Assert.True(Ok64(long.MinValue), "Math.Abs(long.MinValue) raises overflow");
+            Assert.All(Generators.Int32Boundaries, x => Assert.True(Ok32(x), $"Math.Abs({x})"));
+            Assert.All(Generators.Int64Boundaries, x => Assert.True(Ok64(x), $"Math.Abs({x}L)"));
+            Pbt.Check(Prop.ForAll(Generators.Int32s, Ok32), Cases);
+            Pbt.Check(Prop.ForAll(Generators.Int64s, Ok64), Cases);
+        });
+    }
 
     // ------------------------------------------------------------------ CLR-side pins (no model half in M4)
 

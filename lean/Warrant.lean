@@ -4,3 +4,5 @@ import Warrant.Clr.Bool
 import Warrant.Simp
 import Warrant.Effect
 import Warrant.Checked
+import Warrant.Nullable
+import Warrant.Math

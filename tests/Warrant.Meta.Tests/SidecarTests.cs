@@ -30,18 +30,18 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal(2, Sidecar.SimpEntries.Count(e => e.Name == N("Nat.not_lt_zero")));
         Assert.Equal(3, Sidecar.CongrEntries.Count);
         Assert.Equal(199, Sidecar.Instances.Count());
-        Assert.Equal(718, Sidecar.ReducibilityStatuses.Count());
-        Assert.Equal(85, Sidecar.DefEqNames.Count());
-        Assert.Equal(396, Sidecar.Matchers.Count());
+        Assert.Equal(719, Sidecar.ReducibilityStatuses.Count());
+        Assert.Equal(91, Sidecar.DefEqNames.Count());
+        Assert.Equal(397, Sidecar.Matchers.Count());
         Assert.Equal(77, Sidecar.Classes.Count());
-        Assert.Equal(27, Sidecar.SpecEntries.Count);
+        Assert.Equal(31, Sidecar.SpecEntries.Count);
     }
 
     [Fact]
     public void TheSpecEntriesAreTriplesForTheEffectMonadAndNameBundleConstants()
     {
         // M6 KTD15: from Std.Do, the structural rules and the operations of StateT and ExceptT; from the semantics library
-        // (M6 U3), ClrM's throw and the raising integer models.
+        // (M6 U3), ClrM's throw and the raising integer models; the raising nullable reads and Math.Abs (M6 U16).
         Assert.Equal(
             [
                 "Std.Do.Spec.pure", "Std.Do.Spec.bind", "Std.Do.Spec.map", "Std.Do.Spec.seq", "Std.Do.Spec.monadLift_ExceptT",
@@ -52,6 +52,7 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
                 "Warrant.Int32.div_spec", "Warrant.Int32.rem_spec",
                 "Warrant.Int64.addChecked_spec", "Warrant.Int64.subChecked_spec", "Warrant.Int64.mulChecked_spec", "Warrant.Int64.negChecked_spec",
                 "Warrant.Int64.div_spec", "Warrant.Int64.rem_spec", "Warrant.Int64.toInt32Checked_spec",
+                "Warrant.Nullable.value_spec", "Warrant.Nullable.nonNull_spec", "Warrant.Int32.abs_spec", "Warrant.Int64.abs_spec",
             ],
             Sidecar.SpecEntries.Select(e => e.Name.ToString()));
         Assert.All(Sidecar.SpecEntries, e =>
@@ -62,6 +63,8 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
             {
                 var n when n.StartsWith("Std.Do.", StringComparison.Ordinal) => "Std.Do.Triple.SpecLemmas",
                 "Warrant.ClrM.throw_spec" => "Warrant.Effect",
+                var n when n.StartsWith("Warrant.Nullable.", StringComparison.Ordinal) => "Warrant.Nullable",
+                var n when n.EndsWith(".abs_spec", StringComparison.Ordinal) => "Warrant.Math",
                 _ => "Warrant.Checked",
             };
             Assert.Equal(N(module), e.Module);
@@ -107,7 +110,7 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
             new Dictionary<ReducibilityStatus, int>
             {
                 [ReducibilityStatus.Reducible] = 292,
-                [ReducibilityStatus.InstanceReducible] = 286,
+                [ReducibilityStatus.InstanceReducible] = 287,
                 [ReducibilityStatus.ImplicitReducible] = 135,
                 [ReducibilityStatus.Irreducible] = 5,
             },
@@ -250,7 +253,7 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal((inst, 1000), (added.Name, added.Priority));
         Assert.True(fork.IsInstance(inst));
         Assert.Equal(baseSidecar.GetInstances(N("DecidableEq")).Count + 1, fork.GetInstances(N("DecidableEq")).Count);
-        Assert.Equal(719, fork.ReducibilityStatuses.Count(kv => kv.Value != ReducibilityStatus.Semireducible));
+        Assert.Equal(720, fork.ReducibilityStatuses.Count(kv => kv.Value != ReducibilityStatus.Semireducible));
         Assert.Same(baseSidecar.Header, fork.Header);
         Assert.Equal(baseSidecar.SimpEntries, fork.SimpEntries);
 

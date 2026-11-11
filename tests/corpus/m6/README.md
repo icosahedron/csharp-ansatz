@@ -5,8 +5,8 @@ It follows the [M4 corpus](../m4/README.md)'s layout: the tests compile these fi
 
 ## Who reads it
 
-Until translation of the effect monad lands (plan U9) and the default procedure proves contract obligations (U11), only extraction reads this corpus.
-`Warrant.Extraction.Tests` (`CorpusTests`, `DiagnoseTests`) and `Warrant.Analyzers.Tests` (`CorpusParityTests`) copy it and check it; the engine, CLI, cross-check and differential tests do not copy it, and `Warrant.Engine.Tests` and `Warrant.Cli.Tests` each pin that it is absent from their output.
+Until the default procedure proves contract obligations (plan U11), extraction reads this corpus, and translation reads the members it can take: `MonadicTranslationTests` in `Warrant.Semantics.Tests` (U9) translates the members with no `decimal`, contract or dependency and admits them.
+`Warrant.Extraction.Tests` (`CorpusTests`, `DiagnoseTests`), `Warrant.Analyzers.Tests` (`CorpusParityTests`) and `Warrant.Semantics.Tests` copy it and check it; the engine, CLI, cross-check and differential tests do not copy it, and `Warrant.Engine.Tests` and `Warrant.Cli.Tests` each pin that it is absent from their output.
 U11 and U13 add those consumers.
 
 ## Outcomes

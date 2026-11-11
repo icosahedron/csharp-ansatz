@@ -32,7 +32,8 @@ public static class Literals
         VirPrimitive.Int32 => Init.Int32,
         VirPrimitive.Int64 => Init.Int64,
         VirPrimitive.Bool => Init.Bool,
-        VirPrimitive.Decimal or VirPrimitive.Unit => throw new TranslationException(null, $"{type} is not translated until M6 U9."),
+        VirPrimitive.Decimal => throw new TranslationException(null, "decimal is not translated until M6 U21."),
+        VirPrimitive.Unit => throw new TranslationException(null, "a method that returns no value is not translated until M6 U19."),
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 
@@ -107,7 +108,12 @@ public static class Literals
 /// </summary>
 public static class Operators
 {
-    /// <summary><c>a + b</c>, <c>a - b</c> or <c>a * b</c>: <c>@HAdd.hAdd T T T (@instHAdd T instAddT) a b</c> and likewise.</summary>
+    /// <summary>
+    /// <c>a + b</c>, <c>a - b</c> or <c>a * b</c>: <c>@HAdd.hAdd T T T (@instHAdd T instAddT) a b</c> and likewise; and
+    /// <c>a / b</c> and <c>a % b</c>, <c>@HDiv.hDiv T T T (@instHDiv T instDivT) a b</c> and <c>@HMod.hMod …</c>, which agree
+    /// with C# only when <c>b</c> is neither 0 nor -1: the translator emits them only for such a constant divisor (M6 KTD11),
+    /// and the raising models <c>Warrant.Int32.div</c> and <c>rem</c> otherwise (M6 U9).
+    /// </summary>
     /// <param name="op">The operator.</param>
     /// <param name="type"><c>Int32</c> or <c>Int64</c>.</param>
     /// <param name="a">The left operand.</param>
@@ -122,7 +128,8 @@ public static class Operators
             BinaryOp.Add => (Init.HAdd, Init.InstHAdd, is32 ? Init.AddInt32 : Init.AddInt64),
             BinaryOp.Sub => (Init.HSub, Init.InstHSub, is32 ? Init.SubInt32 : Init.SubInt64),
             BinaryOp.Mul => (Init.HMul, Init.InstHMul, is32 ? Init.MulInt32 : Init.MulInt64),
-            BinaryOp.Div or BinaryOp.Rem => throw new TranslationException(null, $"{op} is not translated until M6 U9."),
+            BinaryOp.Div => (Init.HDiv, Init.InstHDiv, is32 ? Init.DivInt32 : Init.DivInt64),
+            BinaryOp.Rem => (Init.HMod, Init.InstHMod, is32 ? Init.ModInt32 : Init.ModInt64),
             _ => throw new ArgumentOutOfRangeException(nameof(op)),
         };
         return Expr.App(head, t, t, t, Expr.App(inst, t, impl), a, b);
@@ -227,7 +234,8 @@ public static class Conditions
             VirPrimitive.Int32 => Init.DecidableEqInt32,
             VirPrimitive.Int64 => Init.DecidableEqInt64,
             VirPrimitive.Bool => Init.DecidableEqBool,
-            _ => throw new TranslationException(null, $"== on {type} is not translated until M6 U9."),
+            VirPrimitive.Decimal => throw new TranslationException(null, "== on decimal is not translated until M6 U21."),
+            _ => throw new TranslationException(null, $"== is not defined on {type}."),
         };
         return new Condition(Expr.App(Init.Eq, Literals.Type(type), a, b), Expr.App(inst, a, b));
     }

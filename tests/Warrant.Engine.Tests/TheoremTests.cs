@@ -665,6 +665,58 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     [Fact]
+    public void PureDivisionAndMathMaxAreProvable()
+    {
+        // M6 U9: `/` and `%` by a constant other than 0 and -1, and Math.Min and Math.Max, cannot raise (KTD11), so they stay
+        // pure and theorems can state and prove facts about them (docs/proving/proofs-that-work.md).
+        var result = Script("""
+            public static class S
+            {
+                [Verified] public static int Half(int x) => x / 2;
+                [Verified] public static int AtLeastZero(int x) => System.Math.Max(x, 0);
+
+                [Theorem]
+                static Proof HalfIsAtMost(int x) =>
+                    Prove.That(Spec.Implies(x >= 0, Half(x) <= x))
+                         .By(Tactic.Unfold(nameof(Half)), Tactic.Simp(), Tactic.Omega());
+
+                [Theorem]
+                static Proof HalfOfALong(long a) => Prove.That(Spec.Implies(a >= 0, a / 2 <= a && a % 2 < 2)).By(Tactic.Simp(), Tactic.Omega());
+
+                [Theorem]
+                static Proof NeverNegative(int x) =>
+                    Prove.That(AtLeastZero(x) >= 0)
+                         .By(Tactic.Unfold(nameof(AtLeastZero)), Tactic.Simp(Lean.Const("Warrant.Int32.max_def")), Tactic.Omega());
+            }
+            """);
+        foreach (var key in new[] { "M:S.HalfIsAtMost(System.Int32)", "M:S.HalfOfALong(System.Int64)", "M:S.NeverNegative(System.Int32)" })
+        {
+            var outcome = result.Find(key);
+            Assert.True(outcome is ProvedOutcome { By: ProofKind.Script }, $"{key}: {outcome}");
+        }
+    }
+
+    [Fact]
+    public void AMethodThatCanRaiseIsAdmittedAsAClrMProgram()
+    {
+        // M6 U9: a method that can raise translates into ClrM and the kernel admits it; until M6 U10 states its contract
+        // obligation (KTD12), nothing is proved about it, so its outcome is `translated`, as a pure method without a theorem.
+        var result = Script("""
+            public static class S
+            {
+                [Verified] public static int Ratio(int a, int b) => a / b;
+                [Verified] public static int Twice(int a, int b) => Ratio(a, b) * 2;
+            }
+            """);
+        foreach (var key in new[] { "M:S.Ratio(System.Int32,System.Int32)", "M:S.Twice(System.Int32,System.Int32)" })
+        {
+            var outcome = Assert.IsType<TranslatedOutcome>(result.Find(key));
+            var definition = Assert.IsType<DefinitionDecl>(Assert.Single(outcome.Declarations)).Value;
+            Assert.Contains("Warrant.ClrM", definition.Type.ToString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void AlwaysLargerFailsAtOmegaWithItsConstraintsAndTheCounterexample()
     {
         // The exit criterion's false claim: the goal omega was given (after Unfold, before the prep step) with C# names,

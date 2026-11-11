@@ -155,8 +155,14 @@ public static class Effects
         return null;
     }
 
-    /// <summary>The name of the raising construct a node is, or null when the node cannot raise by itself.</summary>
-    private static string? Construct(VirNode node) => node switch
+    /// <summary>
+    /// The name of the raising construct a node is, or null when the node cannot raise by itself. A call is never one: it
+    /// raises through its callee, which <see cref="EffectAnalysis.IsRaising"/> decides. The monadic translation (M6 U9)
+    /// asks this of every node, so it and effect inference cannot disagree on what raises.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    /// <returns>The construct's name, e.g. <c>division</c>, or null.</returns>
+    public static string? Construct(VirNode node) => node switch
     {
         ThrowStmt or ThrowExpr => "throw",
         BinaryExpr { Op: BinaryOp.Div } b when !SafeDivisor(b.R) => "division",

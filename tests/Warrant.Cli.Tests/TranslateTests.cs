@@ -72,7 +72,7 @@ public sealed partial class TranslateTests
     }
 
     /// <summary>
-    /// The M6 corpus holds members translation cannot take until M6 U9, so the CLI tests must not run it before U11 adds
+    /// The M6 corpus holds members translation cannot take until M6 U10, U19 and U21 (contracts, dependencies, decimal), so the CLI tests must not run it before U11 adds
     /// its proof outcomes (tests/corpus/m6/README.md); this pins that it is not copied here.
     /// </summary>
     [Fact]

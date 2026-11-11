@@ -23,13 +23,17 @@ public static class Translator
         ArgumentNullException.ThrowIfNull(bundle);
         var ordered = DependencyOrder(units.ToList());
         var types = new TypeTable(ordered);
+        // M6 KTD11: the one effect inference decides which units translate into ClrM.
+        var callees = new CalleeEffects(
+            Effects.Analyze(ordered),
+            ordered.Where(Effects.HasRequires).Select(u => u.Key).ToHashSet(StringComparer.Ordinal));
         var run = new Run(bundle);
         var result = new List<TranslatedUnit>();
         foreach (var unit in ordered)
         {
             try
             {
-                result.Add(run.Unit(unit, types, displayNames?.GetValueOrDefault(unit.Key) ?? LeanNames.FallbackDisplay(unit.Key)));
+                result.Add(run.Unit(unit, types, callees, displayNames?.GetValueOrDefault(unit.Key) ?? LeanNames.FallbackDisplay(unit.Key)));
             }
             catch (TranslationException ex) when (ex.Key is null)
             {
@@ -111,19 +115,34 @@ public static class Translator
 
         public Dictionary<Name, string> DisplayNames { get; } = [];
 
-        public TranslatedUnit Unit(VirUnit unit, TypeTable types, string display)
+        public TranslatedUnit Unit(VirUnit unit, TypeTable types, CalleeEffects callees, string display)
         {
             var name = LeanNames.ForKey(unit.Key);
             if (unit.Dependencies is { Count: > 0 })
             {
                 throw new TranslationException(unit.Key, "a unit with external dependencies is not translated until M6 U19.");
             }
+            bool raising = callees.Analysis.IsRaising(unit.Key);
             switch (unit.Kind)
             {
+                case VirUnitKind.Function when raising && (BodyTranslator.IsRecursive(unit) || callees.Analysis.IsRecursive(unit.Key)):
+                    // Extraction rejects this (KTD11): the recursive call would sit inside a bind, out of the decrease obligations' sight.
+                    throw new TranslationException(unit.Key, "a recursive method that can raise an exception is not translated (recursion with effects).");
+                case VirUnitKind.Function when raising:
+                    {
+                        // M6 KTD4, KTD11: a unit that can raise is a ClrM program over an opaque world.
+                        var (type, value) = new BodyTranslator(types, callees).MonadicFunction(unit);
+                        var decl = TypeDeclarations.Definition(name, type, value, Regular);
+                        Declare(unit.Key, name, display, decl.Value.Hints);
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null);
+                    }
+                case VirUnitKind.Theorem when raising:
+                    // Extraction rejects this (KTD11): a theorem is a Prop, and Lean's total operations would make a / 0 == 0 provable.
+                    throw new TranslationException(unit.Key, "a theorem whose statement can raise an exception is not translated.");
                 case VirUnitKind.Function when BodyTranslator.IsRecursive(unit):
                     {
                         // M5a KTD14, KTD15: the decrease theorems, the Nat.fix definition, then the equation lemma.
-                        var (type, value, decreases, proof) = new BodyTranslator(types).Recursive(unit);
+                        var (type, value, decreases, proof) = new BodyTranslator(types, callees).Recursive(unit);
                         var decl = TypeDeclarations.Definition(name, type, value, Regular);
                         Declare(unit.Key, name, display, decl.Value.Hints);
                         foreach (var decrease in decreases)
@@ -131,20 +150,20 @@ public static class Translator
                             Declare(unit.Key, decrease.Theorem.Name, $"{display} (decrease {decrease.Index})", null);
                         }
                         var equationName = LeanNames.EquationLemma(unit.Key);
-                        var equation = new TheoremShell(equationName, new BodyTranslator(types).Equation(unit, name), null, null);
+                        var equation = new TheoremShell(equationName, new BodyTranslator(types, callees).Equation(unit, name), null, null);
                         Declare(unit.Key, equationName, $"{display} (equation)", null);
                         return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null, new RecursiveDefinition(decreases, equation, proof));
                     }
                 case VirUnitKind.Function:
                     {
-                        var (type, value) = new BodyTranslator(types).Function(unit);
+                        var (type, value) = new BodyTranslator(types, callees).Function(unit);
                         var decl = TypeDeclarations.Definition(name, type, value, Regular);
                         Declare(unit.Key, name, display, decl.Value.Hints);
                         return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null);
                     }
                 case VirUnitKind.Theorem:
                     {
-                        var (statement, claim) = new BodyTranslator(types).StatementAndClaim(unit);
+                        var (statement, claim) = new BodyTranslator(types, callees).StatementAndClaim(unit);
                         Declare(unit.Key, name, display, null);
                         return new TranslatedUnit(unit.Key, unit.Kind, name, display, [], new TheoremShell(name, statement, unit.Script, unit.Budget, claim));
                     }

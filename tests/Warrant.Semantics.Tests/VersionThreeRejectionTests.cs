@@ -3,8 +3,9 @@ using Warrant.Vir;
 namespace Warrant.Semantics.Tests;
 
 /// <summary>
-/// VIR version 3's forms (plan M6 U6) are not translated before U9: each is a translation error, never silently accepted
-/// or translated as something else.
+/// VIR version 3's forms (plan M6 U6) that M6 U9 does not translate: each is a translation error, never silently accepted
+/// or translated as something else. Decimal waits for U21, contracts for U10, and async, dependencies and contract units
+/// for U19. The forms U9 translates are in <see cref="MonadicTranslationTests"/>.
 /// </summary>
 public sealed class VersionThreeRejectionTests(SemanticsBundleFixture bundle) : IClassFixture<SemanticsBundleFixture>
 {
@@ -28,29 +29,27 @@ public sealed class VersionThreeRejectionTests(SemanticsBundleFixture bundle) : 
 
     public static TheoryData<string> Cases => new()
     {
-        "division", "remainder", "decimal return", "unit return", "nullable return", "decimal literal", "decimal comparison",
-        "throw", "eval", "requires", "ensures", "assert", "unwrap", "await", "external call", "modelled call",
-        "decimal record field", "decimal enum", "contract unit", "dependencies",
+        "decimal return", "unit return", "decimal literal", "decimal comparison", "decimal Math", "eval", "requires",
+        "ensures", "requires in a raising method", "await", "external call", "decimal record field", "decimal enum",
+        "contract unit", "dependencies",
     };
 
     private static VirUnit[] Units(string name) => name switch
     {
-        "division" => [Fn(new BinaryExpr(VirType.Int32, BinaryOp.Div, VirOverflow.Wrap, X, LitExpr.Int32(2)))],
-        "remainder" => [Fn(new BinaryExpr(VirType.Int32, BinaryOp.Rem, VirOverflow.Wrap, X, LitExpr.Int32(4)))],
         "decimal return" => [Fn(DecimalLitExpr.Of(1.5m), VirType.Decimal)],
         "unit return" => [Fn(Block(), VirType.Unit)],
-        "nullable return" => [Fn(new NullExpr(VirType.Nullable(VirType.Int32)), VirType.Nullable(VirType.Int32))],
         "decimal literal" => [Fn(new CondExpr(VirType.Int32, new CompareExpr(CompareOp.Eq, CompareKind.Int, DecimalLitExpr.Of(1m), DecimalLitExpr.Of(1m)), X, X))],
         "decimal comparison" => [Fn(new CondExpr(VirType.Int32, new CompareExpr(CompareOp.Eq, CompareKind.Decimal, X, X), X, X))],
-        "throw" => [Fn(Block(new ThrowStmt("T:System.ArgumentException")))],
+        "decimal Math" => [Fn(new CondExpr(VirType.Int32, new CompareExpr(CompareOp.Eq, CompareKind.Decimal, DecimalLitExpr.Of(1m),
+            new ModelledCallExpr(VirType.Decimal, "M:System.Math.Abs(System.Decimal)", VirList.Of<VirExpr>(DecimalLitExpr.Of(1m)))), X, X))],
         "eval" => [Fn(Block(new EvalStmt(X), new ReturnStmt(X)))],
         "requires" => [Fn(Block(new RequiresStmt(LitExpr.Bool(true)), new ReturnStmt(X)))],
         "ensures" => [Fn(Block(new EnsuresStmt(null, null, LitExpr.Bool(true)), new ReturnStmt(X)))],
-        "assert" => [Fn(Block(new AssertStmt(LitExpr.Bool(true), VirList<TacticNode>.Empty), new ReturnStmt(X)))],
-        "unwrap" => [Fn(new UnwrapExpr(VirType.Int32, UnwrapKind.Value, new NullExpr(VirType.Nullable(VirType.Int32))))],
+        // A contract on a method that can raise is no more translated than one on a pure method: it would be dropped unread.
+        "requires in a raising method" => [Fn(Block(new RequiresStmt(LitExpr.Bool(true)),
+            new ReturnStmt(new BinaryExpr(VirType.Int32, BinaryOp.Div, VirOverflow.Wrap, LitExpr.Int32(1), X))))],
         "await" => [Fn(new AwaitExpr(VirType.Int32, new CallExpr(VirType.Task(VirType.Int32), "M:C.G", VirList<VirExpr>.Empty)))],
         "external call" => [Fn(new ExternalCallExpr(VirType.Int32, 0, "M:I.Get", VirList<VirExpr>.Empty))],
-        "modelled call" => [Fn(new ModelledCallExpr(VirType.Int32, "M:System.Math.Max(System.Int32,System.Int32)", VirList.Of<VirExpr>(X, X)))],
         "decimal record field" => [Type("T:R", new RecordDefinition(VirList.Of(new VirField("Amount", VirType.Decimal))))],
         "decimal enum" => [Type("T:E", new EnumDefinition(VirType.Decimal, VirList.Of(new VirEnumMember("A", 0))))],
         "contract unit" => [VirUnit.Contract("M:I.Get", VirList<VirParam>.Empty, VirType.Int32, Block(), VirList<VirAssumption>.Empty, Facts, VirList<string>.Empty)],
@@ -69,10 +68,15 @@ public sealed class VersionThreeRejectionTests(SemanticsBundleFixture bundle) : 
     [Fact]
     public void ThePlacesThatDefaultedSaySoExplicitly()
     {
-        Assert.Contains("M6 U19", Assert.Throws<TranslationException>(() => Translator.Translate(Units("dependencies"), bundle.Env)).Message, StringComparison.Ordinal);
-        Assert.Contains("M6 U19", Assert.Throws<TranslationException>(() => Translator.Translate(Units("contract unit"), bundle.Env)).Message, StringComparison.Ordinal);
-        Assert.Contains("M6 U9", Assert.Throws<TranslationException>(() => Translator.Translate(Units("division"), bundle.Env)).Message, StringComparison.Ordinal);
-        Assert.Contains("M6 U9", Assert.Throws<TranslationException>(() => Conditions.Eq(VirPrimitive.Decimal, Literals.Int32(0), Literals.Int32(0))).Message, StringComparison.Ordinal);
-        Assert.Contains("M6 U9", Assert.Throws<TranslationException>(() => Literals.Type(VirPrimitive.Unit)).Message, StringComparison.Ordinal);
+        string Message(string name) => Assert.Throws<TranslationException>(() => Translator.Translate(Units(name), bundle.Env)).Message;
+        Assert.Contains("M6 U19", Message("dependencies"), StringComparison.Ordinal);
+        Assert.Contains("M6 U19", Message("contract unit"), StringComparison.Ordinal);
+        Assert.Contains("M6 U10", Message("requires"), StringComparison.Ordinal);
+        Assert.Contains("M6 U10", Message("ensures"), StringComparison.Ordinal);
+        Assert.Contains("M6 U10", Message("requires in a raising method"), StringComparison.Ordinal);
+        Assert.Contains("M6 U21", Message("decimal return"), StringComparison.Ordinal);
+        Assert.Contains("M6 U21", Message("decimal comparison"), StringComparison.Ordinal);
+        Assert.Contains("M6 U21", Assert.Throws<TranslationException>(() => Conditions.Eq(VirPrimitive.Decimal, Literals.Int32(0), Literals.Int32(0))).Message, StringComparison.Ordinal);
+        Assert.Contains("M6 U19", Assert.Throws<TranslationException>(() => Literals.Type(VirPrimitive.Unit)).Message, StringComparison.Ordinal);
     }
 }

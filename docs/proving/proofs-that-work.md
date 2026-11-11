@@ -165,6 +165,36 @@ error WRT0001: The recursive call 'Bad(n - 1)' could not be shown to decrease 'n
 
 `Bad` steps from `int.MinValue` to `int.MaxValue`, so it need not terminate.
 
+## Division by a constant and `Math.Max` (M6)
+
+```csharp
+[Verified] public static int Half(int x) => x / 2;
+[Verified] public static int AtLeastZero(int x) => Math.Max(x, 0);
+
+[Theorem]
+static Proof HalfIsAtMost(int x) =>
+    Prove.That(Spec.Implies(x >= 0, Half(x) <= x))
+         .By(Tactic.Unfold(nameof(Half)), Tactic.Simp(), Tactic.Omega());
+
+[Theorem]
+static Proof HalfOfALong(long a) =>
+    Prove.That(Spec.Implies(a >= 0, a / 2 <= a && a % 2 < 2)).By(Tactic.Simp(), Tactic.Omega());
+
+[Theorem]
+static Proof NeverNegative(int x) =>
+    Prove.That(AtLeastZero(x) >= 0)
+         .By(Tactic.Unfold(nameof(AtLeastZero)), Tactic.Simp(Lean.Const("Warrant.Int32.max_def")), Tactic.Omega());
+```
+
+`/` and `%` by a constant other than 0 and -1 cannot throw, so they translate as Lean's truncating `/` and `%`, which
+agree with C#'s there, and may appear in a theorem statement; `omega` reads them through Warrant's division lemmas.
+`Math.Min` and `Math.Max` cannot throw either, and `Warrant.Int32.max_def` unfolds `Math.Max` to its `if`. A method that
+divides by a variable, or uses checked arithmetic, `Math.Abs` or a nullable read, can throw: it becomes a program in
+M6's effect monad, and what it may throw is for its contract obligation to prove (from M6 U10 and U11), not for a
+theorem, which cannot call it. These examples are
+not in the corpus: `PureDivisionAndMathMaxAreProvable` in `tests/Warrant.Engine.Tests/TheoremTests.cs` proves all
+three (`dotnet test tests/Warrant.Engine.Tests --filter PureDivisionAndMathMaxAreProvable`).
+
 ## Facts about particular inputs (M4)
 
 Source: `tests/corpus/m4/accepted/`. These 33 theorems have no parameters, and are proved by computation in the
@@ -188,8 +218,9 @@ diagnostic it must produce (`tests/corpus/m4/expected.json`).
 
 ## What cannot be proved yet
 
-Division and remainder, checked arithmetic, `null`, `string`, `decimal`, loops, exceptions, and calls to anything
-that is not `[Verified]` are rejected with WRT0002; [the reference](reference.md#supported-c) lists the subset and
+Division and remainder by anything but a constant other than 0 and -1, checked arithmetic, `null`, `string`, `decimal`,
+loops, exceptions, and calls to anything that is not `[Verified]` or modelled are rejected with WRT0002, or, from M6,
+translated but not yet proved about until M6's contract obligations land; [the reference](reference.md#supported-c) lists the subset and
 the milestone that lifts each limit. A type defined in another assembly cannot appear in verified code, with one
 exception: a `[Closed]` class from a referenced project that imports `Warrant.Build` (even with `WarrantEnabled` false)
 is checked from the source that project recorded, and the assumption report says so. Source generators run as in the compiler, and a call that a generated

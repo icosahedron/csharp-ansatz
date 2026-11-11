@@ -684,17 +684,9 @@ internal sealed partial class Walker
             throw Reject("enum arithmetic", syntax);
         }
         // `/` and `%` throw on a zero divisor and on MinValue / -1 in any context (KTD6), so their node is always `wrap`.
+        // A theorem statement is a Prop: a raising `/` or `%` there is rejected through effect inference (KTD11), and one by
+        // a constant other than 0 and -1 cannot raise, so it is pure and translates as Lean's `/` and `%` (M6 U9).
         var overflow = isChecked && op is not (BinaryOp.Div or BinaryOp.Rem) ? VirOverflow.Checked : VirOverflow.Wrap;
-
-        // A theorem statement is a Prop: a raising `/` or `%` there is rejected through effect inference (KTD11). One that
-        // cannot raise is pure, but pure division is translated only from M6 U9, so until then it is rejected here.
-        if (_inTheorem && op is BinaryOp.Div or BinaryOp.Rem && right is LitExpr { Value: not 0 and not -1 })
-        {
-            throw Reject(
-                op == BinaryOp.Div ? "division" : "remainder",
-                syntax,
-                "a theorem statement may divide by a constant once division is translated, in M6 U9");
-        }
         return Track(new BinaryExpr(type, op, overflow, left, right), syntax);
     }
 

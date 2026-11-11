@@ -318,8 +318,8 @@ public class EffectExtractionTests
     }
 
     [Theory]
-    [InlineData("x / 2 <= x", "division")]
-    [InlineData("x % 2 == 0 || x % 2 != 0", "remainder")]
+    [InlineData("x / x <= 1", "division")]
+    [InlineData("x % -1 == 0", "remainder")]
     [InlineData("checked(x + 1) > x", "checked arithmetic")]
     [InlineData("checked(-x) != x", "checked arithmetic")]
     [InlineData("checked((int)l) == l", "checked narrowing")]

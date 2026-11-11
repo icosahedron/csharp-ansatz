@@ -149,6 +149,36 @@ internal static class Init
     public static readonly Expr DecimalMax = C("Warrant.Decimal.max");
     public static readonly Expr DecimalAbs = C("Warrant.Decimal.abs");
 
+    // The monadic translation (M6 U9; plan M6 KTD4, KTD11), in the shapes Lean 4.35.0 elaborates `pure`, `>>=` and `/` to
+    // in lean/Warrant/Checked.lean: ClrM σ's Monad instance is ExceptT.instMonad over StateT.instMonad over Id.instMonad,
+    // pure and bind go through its Applicative and Bind projections, a null test is Option.isNone, a match on a nullable
+    // value is Option.rec, and Spec.Assert's check returns Unit. Every value and world lives in Type.
+    public static readonly Expr PurePure = C("Pure.pure", Level.Zero, Level.Zero);
+    public static readonly Expr BindBind = C("Bind.bind", Level.Zero, Level.Zero);
+    public static readonly Expr ApplicativeToPure = C("Applicative.toPure", Level.Zero, Level.Zero);
+    public static readonly Expr MonadToApplicative = C("Monad.toApplicative", Level.Zero, Level.Zero);
+    public static readonly Expr MonadToBind = C("Monad.toBind", Level.Zero, Level.Zero);
+    public static readonly Expr ExceptTMonad = C("ExceptT.instMonad", Level.Zero, Level.Zero);
+    public static readonly Expr StateTMonad = C("StateT.instMonad", Level.Zero, Level.Zero);
+    public static readonly Expr StateM = C("StateM", Level.Zero);
+    public static readonly Expr Id = C("Id", Level.Zero);
+    public static readonly Expr IdMonad = C("Id.instMonad", Level.Zero);
+    public static readonly Expr Unit = C("Unit");
+    public static readonly Expr UnitUnit = C("Unit.unit");
+    public static readonly Expr OptionIsNone = C("Option.isNone", Level.Zero);
+    public static readonly Expr OptionRec = C("Option.rec", Level.One, Level.Zero);
+
+    // C#'s / and % by a constant other than 0 and -1, which cannot raise and so stay pure (KTD11): Lean's truncating
+    // Int32/Int64 division and remainder, which agree with C#'s there.
+    public static readonly Expr HDiv = C("HDiv.hDiv", Level.Zero, Level.Zero, Level.Zero);
+    public static readonly Expr HMod = C("HMod.hMod", Level.Zero, Level.Zero, Level.Zero);
+    public static readonly Expr InstHDiv = C("instHDiv", Level.Zero);
+    public static readonly Expr InstHMod = C("instHMod", Level.Zero);
+    public static readonly Expr DivInt32 = C("instDivInt32");
+    public static readonly Expr ModInt32 = C("instModInt32");
+    public static readonly Expr DivInt64 = C("instDivInt64");
+    public static readonly Expr ModInt64 = C("instModInt64");
+
     /// <summary>The binder name of a constant function's or an implication's unused argument.</summary>
     public static readonly Name Unused = Name.From("x");
 

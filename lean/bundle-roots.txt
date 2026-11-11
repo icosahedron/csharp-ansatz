@@ -661,3 +661,29 @@ Warrant.Decimal.fit_self
 Warrant.Decimal.num_of_sign
 Warrant.Decimal.sum_of_fits
 Warrant.Decimal.sub_lt_of_fits
+
+# The monadic translation (M6 U9; plan M6 KTD4, KTD11): pure and >>= in ClrM σ through its Monad instance, as Lean
+# elaborates them in lean/Warrant/Checked.lean; a null test (Option.isNone, the one new constant) and a match on a
+# nullable value (Option.rec); Spec.Assert's Unit; and / and % by a constant other than 0 and -1, which stay pure.
+Pure.pure
+Bind.bind
+Applicative.toPure
+Monad.toApplicative
+Monad.toBind
+ExceptT.instMonad
+StateT.instMonad
+StateM
+Id
+Id.instMonad
+Unit
+Unit.unit
+Option.isNone
+Option.rec
+HDiv.hDiv
+HMod.hMod
+instHDiv
+instHMod
+instDivInt32
+instModInt32
+instDivInt64
+instModInt64

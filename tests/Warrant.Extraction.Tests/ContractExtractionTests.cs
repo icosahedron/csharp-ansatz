@@ -347,20 +347,20 @@ public class ContractExtractionTests
     }
 
     /// <summary>
-    /// Plan deviation: U8's scenario accepts <c>a / 2</c> in a theorem statement, since it cannot raise (KTD11). Pure
-    /// division is not translated until M6 U9 (<c>Operators</c> throws for <c>Div</c>), so until then such a statement is
-    /// still rejected, naming the division and U9.
+    /// U8's scenario: <c>a / 2</c> and <c>a % 2</c> in a theorem statement cannot raise (KTD11), so the statement is
+    /// accepted, and M6 U9 translates them as Lean's <c>/</c> and <c>%</c>.
     /// </summary>
     [Fact]
-    public void ATheoremDividingByAConstantIsRejectedUntilDivisionIsTranslated()
+    public void ATheoremDividingByAConstantIsAccepted()
     {
         var result = Members("""
                 [Theorem] static Proof T(int a) => Prove.That(Spec.Implies(a >= 0, a / 2 <= a));
+                [Theorem] static Proof U(long a) => Prove.That(Spec.Implies(a >= 0, a % 2 < 2));
             """);
 
-        var d = Single(result, "M:C.T(System.Int32)");
-        Assert.Equal("WRT0002 | division", d.Id + " | " + d.Construct);
-        Assert.Contains("U9", d.Message, StringComparison.Ordinal);
+        Assert.Empty(result.Diagnostics);
+        Assert.Contains(VirTree.PreOrder(result.Find("M:C.T(System.Int32)")!.Unit), n => n is BinaryExpr { Op: BinaryOp.Div });
+        Assert.Contains(VirTree.PreOrder(result.Find("M:C.U(System.Int64)")!.Unit), n => n is BinaryExpr { Op: BinaryOp.Rem });
     }
 
     [Fact]

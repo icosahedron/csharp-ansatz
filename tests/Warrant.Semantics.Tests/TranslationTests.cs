@@ -120,6 +120,22 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
         Assert.Equal(sha256, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(export))));
     }
 
+    /// <summary>
+    /// M6's monadic translation (plan M6 U9, R14) leaves every M5a unit as it was: the export of each M5a compilation,
+    /// definitions, theorem statements and, for a recursive method, its decrease and equation statements, hashes to what
+    /// the translator wrote before U9.
+    /// </summary>
+    [Theory]
+    [InlineData("accepted", "d59b0b5d67fbb12a988fe8c81f6a1107e79e374bcc48c25c4b73d22edec1982e")]
+    [InlineData("refuted", "7de69929f7ad2e8fe3c78b6c69a01f082998cf798711c4b14eae40fab52da851")]
+    public void TheM5aCorpusTranslatesByteIdentically(string compilation, string sha256)
+    {
+        var result = Extraction.Extractor.Extract(CorpusSet.M5a.Compile(compilation));
+        var translation = TranslationCorpus.Translate(result, bundle.Env);
+        var export = Export(translation, recursion: true);
+        Assert.Equal(sha256, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(export))));
+    }
+
     [Fact]
     public void EveryEmittedConstantIsABundleRootOrGenerated()
     {
@@ -676,6 +692,30 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
         }
     }
 
+    /// <summary>Every term of a declaration, named, with a definition's hints in the name of its value.</summary>
+    private static IEnumerable<(Name Name, Expr Term)> Terms(KernelDeclaration declaration)
+    {
+        switch (declaration)
+        {
+            case DefinitionDecl d:
+                yield return (d.Value.Name, d.Value.Type);
+                yield return (d.Value.Name.Append($"$value:{d.Value.Hints}"), d.Value.Value);
+                break;
+            case InductiveDecl i:
+                foreach (var t in i.Types)
+                {
+                    yield return (t.Name, t.Type);
+                    foreach (var c in t.Constructors)
+                    {
+                        yield return (c.Name, c.Type);
+                    }
+                }
+                break;
+            default:
+                throw new InvalidOperationException(declaration.GetType().Name);
+        }
+    }
+
     private static IEnumerable<LetExpr> Lets(Expr e)
     {
         var lets = new List<LetExpr>();
@@ -701,17 +741,38 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
     };
 
     /// <summary>The admitted declarations as NDJSON, as the engine will export them.</summary>
-    private string Export(Translation translation)
+    private string Export(Translation translation, bool recursion = false)
     {
-        var env = TranslationCorpus.Admit(bundle, translation);
+        var env = recursion ? bundle.Fork() : TranslationCorpus.Admit(bundle, translation);
         using var stream = new MemoryStream();
         using (var writer = new Lean4ExportWriter(stream, leaveOpen: true))
         {
             foreach (var declaration in translation.Units.SelectMany(u => u.Declarations))
             {
-                writer.Write(AdmittedDeclarations.Of(env, declaration));
+                if (recursion)
+                {
+                    // Not admitted: a recursive definition needs its decrease theorems proved first. Every term is written.
+                    foreach (var (name, term) in Terms(declaration))
+                    {
+                        writer.Write(new ConstantDeclaration(new AxiomInfo(name, [], term, false)));
+                    }
+                }
+                else
+                {
+                    writer.Write(AdmittedDeclarations.Of(env, declaration));
+                }
             }
-            foreach (var shell in translation.Units.Select(u => u.Theorem).OfType<TheoremShell>())
+            var shells = translation.Units.Select(u => u.Theorem).OfType<TheoremShell>().ToList();
+            if (recursion)
+            {
+                foreach (var rec in translation.Units.Select(u => u.Recursion).OfType<RecursiveDefinition>())
+                {
+                    shells.AddRange(rec.Decreases.Select(d => d.Theorem));
+                    shells.Add(rec.Equation);
+                    writer.Write(new ConstantDeclaration(new AxiomInfo(rec.Equation.Name.Append("$proof"), [], rec.EquationProof, false)));
+                }
+            }
+            foreach (var shell in shells)
             {
                 writer.Write(new ConstantDeclaration(new AxiomInfo(shell.Name, [], shell.Type, false)));
                 if (shell.Statement.Instance is { } instance)

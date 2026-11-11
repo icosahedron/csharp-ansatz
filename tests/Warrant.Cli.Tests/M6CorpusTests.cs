@@ -33,6 +33,12 @@ public sealed class M6CorpusTests
             block = block.Replace("(the call at Payments.cs:", "(the call at accepted/Payments.cs:", StringComparison.Ordinal);
             var expected = File.ReadAllText(Path.Combine(Corpus, "ProcessPayment.report.txt")).ReplaceLineEndings("\n");
             Assert.Equal(expected, block);
+
+            // M6 U14: a method that throws on every path, whose report lists the throw.
+            block = Block(markdown, "Corpus.M6.Effects.Closed(int) ");
+            block = Regex.Replace(block, @"\(kernel: [^,]*, bundle: [^)]*\)", "(kernel: Warrant test, bundle: warrant-semantics test)");
+            block = block.Replace("(the throw at Effects.cs:", "(the throw at accepted/Effects.cs:", StringComparison.Ordinal);
+            Assert.Equal(File.ReadAllText(Path.Combine(Corpus, "Closed.report.txt")).ReplaceLineEndings("\n"), block);
         }
         finally
         {
@@ -69,6 +75,23 @@ public sealed class M6CorpusTests
         Assert.Matches($@"(?m)^{effects}\(10,\d+\): error WRT0001: The contract of '[^']*Ratio[^']*' could not be proved: overflow in a checked operation: ", output);
         var nullables = Regex.Escape(Path.Combine(dir, "Nullables.cs"));
         Assert.Matches($@"(?m)^{nullables}\(25,\d+\): error WRT0001: The contract of '[^']*Unchecked[^']*' could not be proved: null passed where a non-null value is required: ", output);
+
+        // M6 U14: each refuted contract at its line, with its kind (tests/corpus/m6/expected.json).
+        var contracts = Regex.Escape(Path.Combine(dir, "Contracts.cs"));
+        Assert.Matches($@"(?m)^{contracts}\(15,\d+\): error WRT0001: The contract of 'Contracts\.Ratio\(int, int\)' could not be proved: overflow in a checked operation: ", output);
+        Assert.Matches($@"(?m)^{contracts}\(20,\d+\): error WRT0001: The contract of 'Contracts\.Neg\(int\)' could not be proved: overflow in a checked operation: ", output);
+        Assert.Matches($@"(?m)^{contracts}\(30,\d+\): error WRT0001: The contract of 'Contracts\.ShareOfNothing\(\)' could not be proved: precondition of a callee at this call: ", output);
+        Assert.Matches($@"(?m)^{contracts}\(35,\d+\): error WRT0001: The contract of 'Contracts\.Twice\(int\)' could not be proved: postcondition of the method: ", output);
+        Assert.Matches($@"(?m)^{contracts}\(52,\d+\): error WRT0001: The contract of 'Contracts\.Asserted\(int, int\)' could not be proved: Spec\.Assert: ", output);
+        Assert.Matches($@"(?m)^{contracts}\(60,\d+\): error WRT0001: The contract of 'Contracts\.Impossible\(int\)' could not be proved: The contract is unsatisfiable: ", output);
+        // A [ProofFor] script that fails is reported at the step that failed, as a theorem's script is.
+        Assert.Matches($@"(?m)^{contracts}\(47,\d+\): error WRT0001: The contract of 'Contracts\.Kept\(int\)' could not be proved: omega could not prove the goal:", output);
+        var dependencies = Regex.Escape(Path.Combine(dir, "Dependencies.cs"));
+        Assert.Matches($@"(?m)^{dependencies}\(35,\d+\): error WRT0001: The contract of 'Lookups\.Neighbour\(int\)' could not be proved: postcondition of the method: ", output);
+        Assert.Matches($@"(?m)^{dependencies}\(43,\d+\): error WRT0001: The contract of 'Lookups\.Saved\(Payment\)' could not be proved: postcondition of the method: ", output);
+        Assert.Matches($@"(?m)^{dependencies}\(52,\d+\): error WRT0001: The contract of 'Lookups\.Twice\(int\)' could not be proved: postcondition of the method: ", output);
+        Assert.Matches($@"(?m)^{dependencies}\(59,\d+\): error WRT0001: The contract of 'Lookups\.TwiceScripted\(int\)' could not be proved: unsolved goals", output);
+        Assert.Matches($@"(?m)^{dependencies}\(82,\d+\): error WRT0001: The contract of 'ICounter\.Count\(\)' could not be proved: The contract is unsatisfiable: ", output);
     }
 
     private static (int Code, string Output) Verify(params string[] args)

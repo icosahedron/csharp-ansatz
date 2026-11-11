@@ -332,16 +332,34 @@ public sealed class ReportTests(EngineFixture engine) : IClassFixture<EngineFixt
         var unit = report.Find(Key);
         Assert.NotNull(unit);
         Assert.Equal((ReportStatus.Translated, "translated"), (unit.Status, unit.Outcome));
-        var block = ProcessPaymentBlock(MarkdownReport.Render(report));
+        var block = Block(MarkdownReport.Render(report), "Corpus.M6.Payments.PaymentService.ProcessPayment(int) ");
         var expected = File.ReadAllText(Path.Combine(CorpusSet.M6.Root, "ProcessPayment.report.txt")).ReplaceLineEndings("\n");
         Assert.Equal(expected, block);
     }
 
-    /// <summary>ProcessPayment's block of a Markdown report: its line and its assumption lines, up to the next unit.</summary>
-    internal static string ProcessPaymentBlock(string markdown)
+    /// <summary>
+    /// A method that throws on every path (plan M6 U14, KTD12, KTD20): its Spec.Ensures holds vacuously, so the report's
+    /// may-throw line for its throw is all that says the method never returns. Its block is the checked-in
+    /// <c>tests/corpus/m6/Closed.report.txt</c>.
+    /// </summary>
+    [Fact]
+    public void TheReportOfAMethodThatThrowsOnEveryPathIsTheCheckedInOne()
+    {
+        var report = AssumptionReports.Build(
+            engine.Run("m6/accepted"),
+            engine.Inputs("m6/accepted"),
+            new ReportSettings(CheckOverflow: false, Bundle: "warrant-semantics test", Kernel: "Warrant test"),
+            span => SourceTextIn(CorpusSet.M6.Root, span));
+        var block = Block(MarkdownReport.Render(report), "Corpus.M6.Effects.Closed(int) ");
+        var expected = File.ReadAllText(Path.Combine(CorpusSet.M6.Root, "Closed.report.txt")).ReplaceLineEndings("\n");
+        Assert.Equal(expected, block);
+    }
+
+    /// <summary>A unit's block of a Markdown report: its line and its assumption lines, up to the next unit.</summary>
+    internal static string Block(string markdown, string head)
     {
         var lines = markdown.Split('\n');
-        int start = Array.FindIndex(lines, l => l.StartsWith("Corpus.M6.Payments.PaymentService.ProcessPayment(int) ", StringComparison.Ordinal));
+        int start = Array.FindIndex(lines, l => l.StartsWith(head, StringComparison.Ordinal));
         Assert.True(start >= 0, markdown);
         int end = start + 1;
         while (end < lines.Length && lines[end].StartsWith(' '))

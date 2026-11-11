@@ -153,6 +153,24 @@ The two `Bool` lemmas were already in the closure; the other three theorems are 
 sidecar's `simp` and `defeq` counts below grew with them. Three small theorems are far below the run-to-run noise of
 the start-time measurements above, so they were not measured again.
 
+### The full M6 bundle (M6 U14)
+
+M6 KTD3's last check: server start with the complete M6 bundle (4,112 constants, after U20) against the M5b baseline.
+Measured on 2026-11-11 on the reference workstation (Windows 11, 32 logical cores), seven alternating cold starts of
+three Release CLIs carrying the M5b bundle (commit bf4b128), U4's (76dab1b) and the full M6 bundle (5318f37), as above
+(`warrant verify tests/corpus/m5a/rejected --server auto --timings`, "started the server and connected in"; GC heap
+from `warrant server status` after the request):
+
+| Bundle | Server start, median (range) | GC heap after the request |
+|---|---|---|
+| M5b, 2,835 constants | 2,807 ms (2,656–3,108) | 33–38 MB |
+| M6 U4, 4,098 constants | 4,063 ms (3,942–4,473) | 43–47 MB |
+| M6 complete, 4,112 constants | 4,053 ms (3,976–4,266) | 45–47 MB |
+
+The complete M6 bundle starts 1.25 s (44%) slower than M5b's and adds about 10 MB of GC heap. It stays under KTD3's
+5 s threshold, by about 0.95 s, and under the same ratio applied to this session's M5b baseline (1.7 × 2,807 ms, about
+4.8 s). The bundle stays a verified load (KTD3, M5b KTD19).
+
 Regenerate `warrant-semantics.ndjson.gz` with `scripts/export-semantics.sh` after changing `lean/`.
 The export is deterministic: an unchanged library gives a byte-identical file.
 

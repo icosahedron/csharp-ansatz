@@ -1,7 +1,8 @@
 {
   "compilations": [
     { "name": "accepted", "files": ["accepted/*.cs"], "checkOverflow": false },
-    { "name": "refuted", "files": ["refuted/*.cs"], "exclude": ["refuted/CheckedProject.cs"], "checkOverflow": false },
+    { "name": "refuted", "files": ["refuted/*.cs"], "exclude": ["refuted/CheckedProject.cs", "refuted/Dependencies.cs"], "checkOverflow": false },
+    { "name": "refuted-dependencies", "files": ["refuted/Dependencies.cs"], "checkOverflow": false },
     { "name": "rejected", "files": ["rejected/*.cs"], "checkOverflow": false },
     { "name": "checked-project", "files": ["refuted/CheckedProject.cs"], "checkOverflow": true }
   ],
@@ -14,6 +15,8 @@
       "M:Corpus.M6.Effects.Biggest(System.Int32,System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Effects.Smallest(System.Int64,System.Int64)": { "outcome": "translated" },
       "M:Corpus.M6.Effects.Guard(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Effects.DivisibleByFour(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Effects.Closed(System.Int32)": { "outcome": "translated" },
 
       "M:Corpus.Rejected.Types.NullableParameter(Corpus.Rejected.Point)": { "outcome": "translated" },
       "M:Corpus.Rejected.Types.ReturnsNull": { "outcome": "translated" },
@@ -46,6 +49,7 @@
       "M:Corpus.M6.Payments.PaymentService.ProcessPayment(System.Int32)": { "outcome": "translated", "assumeNonNull": ["store", "store.GetPayment()", "store.SavePayment()"] },
       "M:Corpus.M6.Payments.IPaymentStore.GetPayment(System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Payments.IPaymentStore.SavePayment(Corpus.M6.Payments.Payment)": { "outcome": "translated", "assumeNonNull": ["p"] },
+      "M:Corpus.M6.Payments.PaymentLookup.Found(System.Int32)": { "outcome": "translated", "assumeNonNull": ["store", "store.GetPayment()"] },
 
       "M:Corpus.M6.Dependencies.OrderService.QuantityOf(System.Int32)": { "outcome": "translated", "assumeNonNull": ["orders", "orders.Find()"] },
       "M:Corpus.M6.Dependencies.OrderService.Counted(System.Int32)": { "outcome": "translated", "assumeNonNull": ["orders"] },
@@ -71,7 +75,26 @@
       "M:Corpus.M6.Refuted.Nullables.IdOf(Corpus.M6.Refuted.Payment)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "NullRead", "at": "Nullables.cs:22", "count": 1 }, "goal": "case h.left\npayment : Option Payment?\nh : payment = Option.none\n⊢ False" },
       "M:Corpus.M6.Refuted.Nullables.Unchecked(Corpus.M6.Refuted.Payment)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "NullPassed", "at": "Nullables.cs:25", "count": 1 }, "goal": "case h.left\npayment : Option Payment?\nh : payment = Option.none\n⊢ False" },
       "M:Corpus.M6.Refuted.Decimals.AddFee(System.Decimal)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Nullables.cs:32", "count": 1 }, "goal": "case h.left\namount : Warrant.Decimal\nh : Warrant.Decimal.sum amount (Warrant.Decimal.lit Bool.false 125 2 (Eq.refl Bool.true) (Eq.refl Bool.true)) = Option.none\n⊢ False" },
-      "M:Corpus.M6.Refuted.Decimals.Difference(System.Decimal,System.Decimal)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Nullables.cs:35", "count": 1 }, "goal": "case h.left\na b : Warrant.Decimal\nh : Warrant.Decimal.sum a (Warrant.Decimal.neg b) = Option.none\n⊢ False" }
+      "M:Corpus.M6.Refuted.Decimals.Difference(System.Decimal,System.Decimal)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Nullables.cs:35", "count": 1 }, "goal": "case h.left\na b : Warrant.Decimal\nh : Warrant.Decimal.sum a (Warrant.Decimal.neg b) = Option.none\n⊢ False" },
+
+      "M:Corpus.M6.Refuted.Contracts.Ratio(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Contracts.cs:15", "count": 1 }, "goal": "case h.right.left\na b : Int32\nh h : ¬b = 0\nh : a = Int32.minValue ∧ b = -1\n⊢ False" },
+      "M:Corpus.M6.Refuted.Contracts.Neg(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Contracts.cs:20", "count": 1 }, "goal": "case h.right.left\nx : Int32\nh : x = Int32.minValue\n⊢ False" },
+      "M:Corpus.M6.Refuted.Contracts.Share(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Contracts.ShareOfNothing": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "CalleePrecondition", "at": "Contracts.cs:30", "count": 1 }, "goal": "case hp\n⊢ False" },
+      "M:Corpus.M6.Refuted.Contracts.Twice(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Postcondition", "at": "Contracts.cs:35", "count": 1 }, "goal": "x : Int32\n⊢ x + x = x + x + 1" },
+      "M:Corpus.M6.Refuted.Contracts.Kept(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "none", "at": "Contracts.cs:47", "count": 0 }, "goal": "x : Int32\n⊢ x = x + 1" },
+      "M:Corpus.M6.Refuted.Contracts.Asserted(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Assert", "at": "Contracts.cs:52", "count": 2 }, "goal": "case hc\na b : Int32\n⊢ ¬b = 0" },
+      "M:Corpus.M6.Refuted.Contracts.Impossible(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "none", "at": "Contracts.cs:60", "count": 0 }, "goal": "" }
+    },
+    "refuted-dependencies": {
+      "M:Corpus.M6.Refuted.Dependencies.Lookups.Neighbour(System.Int32)": { "outcome": "unproved", "assumeNonNull": ["store", "store.GetPayment()"], "code": "WRT0001", "vc": { "kind": "Postcondition", "at": "Dependencies.cs:35", "count": 1 }, "goal": "case hok.he.h.right\nσ : Type\nstore_GetPayment : Int32 → Warrant.ClrM σ (Option Payment?)\nid : Int32\nstore_GetPayment_spec : ∀ (id : Int32), ⦃⌜True⌝⦄ (store_GetPayment id) ⦃Prod.mk (fun r => ⌜Option.isNone r = Bool.true ∨ (Warrant.Nullable.coalesce r (new Payment? 0 0)).Id = id⌝) (Prod.mk (fun e => ⌜Warrant.ClrExn.Allowed e⌝) PUnit.unit)⦄\nr : Option Payment?\nv : Payment?\nh : r = Option.some v\nh : v.Id = id + 1\nh : True\n⊢ v.Id = id" },
+      "M:Corpus.M6.Refuted.Dependencies.Lookups.Saved(Corpus.M6.Refuted.Dependencies.Payment)": { "outcome": "unproved", "assumeNonNull": ["p", "store", "store.GetPayment()", "store.SavePayment()"], "code": "WRT0001", "vc": { "kind": "Postcondition", "at": "Dependencies.cs:43", "count": 1 }, "goal": "case hok.hok\nσ : Type\nstore_GetPayment : Int32 → Warrant.ClrM σ (Option Payment?)\nstore_SavePayment : Payment? → Warrant.ClrM σ Unit\np : Payment?\nstore_GetPayment_spec : ∀ (id : Int32), ⦃⌜True⌝⦄ (store_GetPayment id) ⦃Prod.mk (fun r => ⌜Option.isNone r = Bool.true ∨ (Warrant.Nullable.coalesce r (new Payment? 0 0)).Id = id⌝) (Prod.mk (fun e => ⌜Warrant.ClrExn.Allowed e⌝) PUnit.unit)⦄\nstore_SavePayment_spec : ∀ (p : Payment?), ⦃⌜True⌝⦄ (store_SavePayment p) ⦃Prod.mk (fun r => ⌜True⌝) (Prod.mk (fun e => ⌜Warrant.ClrExn.Allowed e⌝) PUnit.unit)⦄\nr : Unit\nr : Option Payment?\nh : Option.isNone r = Bool.true ∨ (Warrant.Nullable.coalesce r (new Payment? 0 0)).Id = p.Id\n⊢ Option.isNone r = Bool.false" },
+      "M:Corpus.M6.Refuted.Dependencies.Lookups.Twice(System.Int32)": { "outcome": "unproved", "assumeNonNull": ["store", "store.GetPayment()"], "code": "WRT0001", "vc": { "kind": "Postcondition", "at": "Dependencies.cs:52", "count": 1 }, "goal": "case hok.hok\nσ : Type\nstore_GetPayment : Int32 → Warrant.ClrM σ (Option Payment?)\nid : Int32\nstore_GetPayment_spec : ∀ (id : Int32), ⦃⌜True⌝⦄ (store_GetPayment id) ⦃Prod.mk (fun r => ⌜Option.isNone r = Bool.true ∨ (Warrant.Nullable.coalesce r (new Payment? 0 0)).Id = id⌝) (Prod.mk (fun e => ⌜Warrant.ClrExn.Allowed e⌝) PUnit.unit)⦄\nr : Option Payment?\nh : Option.isNone r = Bool.true ∨ (Warrant.Nullable.coalesce r (new Payment? 0 0)).Id = id\nr : Option Payment?\nh : Option.isNone r = Bool.true ∨ (Warrant.Nullable.coalesce r (new Payment? 0 0)).Id = id\n⊢ Option.isNone r = Option.isNone r" },
+      "M:Corpus.M6.Refuted.Dependencies.Lookups.TwiceScripted(System.Int32)": { "outcome": "unproved", "assumeNonNull": ["store", "store.GetPayment()"], "code": "WRT0001", "vc": { "kind": "none", "at": "no line", "count": 0 }, "goal": "case hok.hok.none\nσ : Type\nstore_GetPayment : Int32 → Warrant.ClrM σ (Option Payment?)\nid : Int32\nstore_GetPayment_spec : ∀ (id : Int32), ⦃⌜True⌝⦄ (store_GetPayment id) ⦃Prod.mk (fun r => ⌜Option.isNone r = Bool.true ∨ (Warrant.Nullable.coalesce r (new Payment? 0 0)).Id = id⌝) (Prod.mk (fun e => ⌜Warrant.ClrExn.Allowed e⌝) PUnit.unit)⦄\nr : Option Payment?\nh : Option.isNone r = Bool.true ∨ (Warrant.Nullable.coalesce r (new Payment? 0 0)).Id = id\nh : Option.isNone Option.none = Bool.true ∨ (Warrant.Nullable.coalesce Option.none (new Payment? 0 0)).Id = id\n⊢ Option.isNone r = Option.isNone Option.none\n\ncase hok.hok.some\nσ : Type\nstore_GetPayment : Int32 → Warrant.ClrM σ (Option Payment?)\nid : Int32\nstore_GetPayment_spec : ∀ (id : Int32), ⦃⌜True⌝⦄ (store_GetPayment id) ⦃Prod.mk (fun r => ⌜Option.isNone r = Bool.true ∨ (Warrant.Nullable.coalesce r (new Payment? 0 0)).Id = id⌝) (Prod.mk (fun e => ⌜Warrant.ClrExn.Allowed e⌝) PUnit.unit)⦄\nr : Option Payment?\nh : Option.isNone r = Bool.true ∨ (Warrant.Nullable.coalesce r (new Payment? 0 0)).Id = id\nval : Payment?\nh : Option.isNone (Option.some val) = Bool.true ∨ (Warrant.Nullable.coalesce (Option.some val) (new Payment? 0 0)).Id = id\n⊢ Option.isNone r = Option.isNone (Option.some val)" },
+      "M:Corpus.M6.Refuted.Dependencies.IPaymentStore.GetPayment(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Dependencies.IPaymentStore.SavePayment(Corpus.M6.Refuted.Dependencies.Payment)": { "outcome": "translated", "assumeNonNull": ["p"] },
+      "M:Corpus.M6.Refuted.Dependencies.ICounter.Count": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "none", "at": "Dependencies.cs:82", "count": 0 }, "goal": "" },
+      "M:Corpus.M6.Refuted.Dependencies.Tally.Size": { "outcome": "skipped", "assumeNonNull": ["counter"] }
     },
     "rejected": {
       "M:Corpus.M6.Rejected.Effects.ThrowsOdd(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "exception type that is not a System exception or a plain subclass of one" }] },
@@ -79,6 +102,8 @@
       "M:Corpus.M6.Rejected.Effects.Sign(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0005", "construct": "M:System.Math.Sign(System.Int32)" }] },
       "M:Corpus.M6.Rejected.Effects.RatioAtMost(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "division" }] },
       "M:Corpus.M6.Rejected.Effects.AbsoluteIsNonNegative(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "modelled member M:System.Math.Abs(System.Int32)" }] },
+      "M:Corpus.M6.Rejected.Effects.TryCatch(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "try" }] },
+      "M:Corpus.M6.Rejected.Effects.Gcd(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "recursion with effects" }] },
 
       "M:Corpus.M6.Rejected.Nullables.Use(Corpus.M6.Rejected.Payment)": { "outcome": "translated", "assumeNonNull": ["payment"] },
       "M:Corpus.M6.Rejected.Nullables.Forgiven(Corpus.M6.Rejected.Payment)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "null-forgiving operator" }] },
@@ -132,6 +157,8 @@
       "M:Corpus.M6.Rejected.Dependencies.Store.Early(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "return without a value" }] },
       "M:Corpus.M6.Rejected.Dependencies.Store.Ordered(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "named arguments out of order with a dependency call" }] },
       "M:Corpus.M6.Rejected.Dependencies.Store.Sum(System.Int32,System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Dependencies.Store.Dropped(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Task-returning call that is not awaited" }] },
+      "M:Corpus.M6.Rejected.Dependencies.Store.Stored(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Task-returning call that is not awaited" }] },
       "M:Corpus.M6.Rejected.Dependencies.Assigned.Count(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "assigned primary-constructor parameter" }] },
       "T:Corpus.M6.Rejected.Dependencies.StockAgain": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "second contract class for an interface" }] },
       "T:Corpus.M6.Rejected.Dependencies.ShakyContract": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "contract class that is not abstract" }] },

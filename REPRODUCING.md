@@ -555,14 +555,28 @@ C# fixtures                  -         accept    accept         ok
 M4 corpus                    -         accept    accept         ok
 M5a corpus                   -         accept    accept         ok
 M5a tampered                 -         reject    reject         ok
+M6 corpus                    -         accept    accept         ok
+M6 refuted                   -         reject    accept         ok
+M6 rejected                  -         reject    accept         ok
+M6 checked-project           -         reject    accept         ok
+M6 tampered                  -         reject    reject         ok
 
 all verdicts agree
 ```
 
-The last two rows are M5a's: `warrant verify tests/corpus/m5a/accepted --out`
+The two M5a rows: `warrant verify tests/corpus/m5a/accepted --out`
 must exit 0 and Lean must accept its certificate, and a copy whose last
 theorem's proof is swapped for the one before it must be rejected by both
 kernels. On Windows (Git Bash, 2026-11-07) every row agrees.
+
+The M6 rows (M6 R13): `warrant verify tests/corpus/m6/accepted --out` must exit
+0, its certificate must hold `ProcessPayment`'s contract theorem, and Lean must
+accept it, bundle with its Std closure included. The refuted and rejected
+compilations must fail to verify, and Lean must accept what Warrant admitted
+from them; the overflow-checking file is translated with `--check-overflow`. A
+copy of the accepted certificate with `ProcessPayment`'s proof swapped for the
+one before it must be rejected by both kernels. On Windows (Git Bash,
+2026-11-11) every row agrees.
 
 Lean declines the original `Nat.add_succ` only because its parser reads format
 3.1.0. Warrant's export of it is 3.1.0, and Lean accepts that. With the full

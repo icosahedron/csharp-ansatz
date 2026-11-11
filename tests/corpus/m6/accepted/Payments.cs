@@ -54,3 +54,15 @@ public sealed class PaymentService(IPaymentStore store)
         return Result.Success;
     }
 }
+
+// An Ensures that holds only through GetPayment's contract (M6 U20, #97): nothing here says what the store returns.
+public sealed class PaymentLookup(IPaymentStore store)
+{
+    [Verified]
+    public async Task<bool> Found(int id)
+    {
+        Spec.Ensures<bool>(r => r);
+        var p = await store.GetPayment(id);
+        return p is null || p.Id == id;
+    }
+}

@@ -212,6 +212,20 @@ namespace Corpus.M6.Rejected.Dependencies
 
         [Verified]
         public static int Sum(int a, int b) => a + b;
+
+        [Verified]
+        public async Task Dropped(int id)
+        {
+            _ = stock.Load(id);
+            await stock.Save(id);
+        }
+
+        [Verified]
+        public async Task<int> Stored(int id)
+        {
+            var t = stock.Load(id);
+            return await t;
+        }
     }
 
     public sealed class Assigned(IStock stock)

@@ -1,0 +1,7 @@
+Corpus.M6.Effects.Closed(int)                                             TRANSLATED   (kernel: Warrant test, bundle: warrant-semantics test)
+  Assumed (exceptions):
+    - Corpus.M6.Effects.Closed(int) may throw System.InvalidOperationException (the throw at accepted/Effects.cs:40); its proof says nothing about a call that ends in it
+  Assumed (global):
+    - Arithmetic wraps on overflow, except in a checked region, where it throws (overflow checking is off)
+    - The semantics bundle models C# 14 int, long, bool and decimal, their nullable forms, records, enums, closed classes, throw and the exceptions arithmetic, division and null access raise, and Math.Min, Math.Max and Math.Abs on int, long and decimal; decimal arithmetic throws on overflow in every region
+    - The only axioms are Lean's standard ones: propext, Classical.choice, Quot.sound

@@ -276,6 +276,8 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         ("accepted", "M:Corpus.M6.Effects.Biggest(System.Int32,System.Int32)"),
         ("accepted", "M:Corpus.M6.Effects.Smallest(System.Int64,System.Int64)"),
         ("accepted", "M:Corpus.M6.Effects.Guard(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Effects.DivisibleByFour(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Effects.Closed(System.Int32)"),
         ("accepted", "M:Corpus.Rejected.Types.NullableParameter(Corpus.Rejected.Point)"),
         ("accepted", "M:Corpus.Rejected.Types.ReturnsNull"),
         ("accepted", "M:Corpus.M6.Nullables.OrZero(System.Nullable{System.Int32})"),
@@ -317,6 +319,15 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         ("accepted", "M:Corpus.M6.Contracts.Capped(System.Int32)"),
         ("accepted", "M:Corpus.M6.Contracts.Average(System.Int32,System.Int32)"),
         ("accepted", "M:Corpus.M6.Contracts.Same(System.Int32)"),
+        // Refuted contracts (M6 U14): the model is the body, whether or not the contract holds.
+        ("refuted", "M:Corpus.M6.Refuted.Contracts.Ratio(System.Int32,System.Int32)"),
+        ("refuted", "M:Corpus.M6.Refuted.Contracts.Neg(System.Int32)"),
+        ("refuted", "M:Corpus.M6.Refuted.Contracts.Share(System.Int32)"),
+        ("refuted", "M:Corpus.M6.Refuted.Contracts.ShareOfNothing"),
+        ("refuted", "M:Corpus.M6.Refuted.Contracts.Twice(System.Int32)"),
+        ("refuted", "M:Corpus.M6.Refuted.Contracts.Kept(System.Int32)"),
+        ("refuted", "M:Corpus.M6.Refuted.Contracts.Asserted(System.Int32,System.Int32)"),
+        ("refuted", "M:Corpus.M6.Refuted.Contracts.Impossible(System.Int32)"),
     ];
 
     /// <summary>

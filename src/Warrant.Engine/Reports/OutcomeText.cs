@@ -46,9 +46,10 @@ public static class OutcomeText
     public static string NotProvedMessage(string theorem, NotProvedOutcome outcome)
     {
         ArgumentNullException.ThrowIfNull(outcome);
-        // A method that is not proved is its contract obligation that is not (M6 U10); a recursive method's decrease
-        // failure is worded by the overload that takes the source text.
-        var subject = outcome.UnitKind == VirUnitKind.Function ? $"The contract of '{theorem}'" : $"Theorem '{theorem}'";
+        // A method that is not proved is its contract obligation that is not (M6 U10), and so is a contract-class member
+        // whose Spec calls are not (M6 U19, KTD25); a recursive method's decrease failure is worded by the overload that
+        // takes the source text.
+        var subject = outcome.UnitKind is VirUnitKind.Function or VirUnitKind.Contract ? $"The contract of '{theorem}'" : $"Theorem '{theorem}'";
         var line = $"{subject} could not be proved: {FirstLine(outcome.Message)}";
         // A first line that introduces the next, such as omega's "could not prove the goal:", ends the sentence instead.
         return outcome.Counterexample.IsEmpty ? line : $"{line.TrimEnd('.', ':')}. Counterexample: {Counterexample(outcome.Counterexample)}.";

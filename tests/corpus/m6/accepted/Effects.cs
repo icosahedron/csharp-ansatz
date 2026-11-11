@@ -27,4 +27,16 @@ public static class Effects
         }
         return amount;
     }
+
+    // % by a constant other than 0 and -1 cannot throw, so a leap-year test stays pure (KTD11).
+    [Verified]
+    public static bool DivisibleByFour(int year) => year % 4 == 0;
+
+    // Throws on every path: the Spec.Ensures holds vacuously, and the report lists the throw (KTD12, KTD20).
+    [Verified]
+    public static int Closed(int amount)
+    {
+        Spec.Ensures<int>(r => r > amount);
+        throw new InvalidOperationException("closed");
+    }
 }

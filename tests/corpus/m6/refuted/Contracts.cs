@@ -1,0 +1,63 @@
+// M6 U14's refuted contracts without dependencies (KTD12, KTD16, KTD25, #98): a precondition that leaves an exception
+// possible, a division by -1, a caller that breaks its callee's precondition, a false Spec.Ensures with and without a
+// [ProofFor] script, a failing Spec.Assert, and a contradictory Spec.Requires.
+using Warrant;
+
+namespace Corpus.M6.Refuted;
+
+public static class Contracts
+{
+    // b != 0 rules out a zero divisor but not int.MinValue / -1.
+    [Verified]
+    public static int Ratio(int a, int b)
+    {
+        Spec.Requires(b != 0);
+        return a / b;
+    }
+
+    // x / -1 is x negated, which overflows for int.MinValue even in unchecked code.
+    [Verified]
+    public static int Neg(int x) { return x / -1; }
+
+    [Verified]
+    public static int Share(int x)
+    {
+        Spec.Requires(x != 0);
+        return 100 / x;
+    }
+
+    [Verified]
+    public static int ShareOfNothing() => Share(0);
+
+    [Verified]
+    public static int Twice(int x)
+    {
+        Spec.Ensures<int>(r => r == x + x + 1);
+        return x + x;
+    }
+
+    [Verified]
+    public static int Kept(int x)
+    {
+        Spec.Ensures<int>(r => r == x + 1);
+        return x;
+    }
+
+    [ProofFor(nameof(Kept))]
+    static Proof KeptProof() => Prove.Contract().By(Tactic.VcGen(), Tactic.Omega());
+
+    [Verified]
+    public static int Asserted(int a, int b)
+    {
+        Spec.Assert(b != 0);
+        return a / b;
+    }
+
+    [Verified]
+    public static int Impossible(int x)
+    {
+        Spec.Requires(x > 0);
+        Spec.Requires(x < 0);
+        return x;
+    }
+}

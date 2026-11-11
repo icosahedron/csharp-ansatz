@@ -66,7 +66,7 @@ public class CorpusTests
         var diagnostics = result.DiagnosticsFor(key);
         switch (outcome)
         {
-            case "translated" or "proved" or "false" or "unproved":
+            case "translated" or "proved" or "false" or "unproved" or "skipped":
                 Assert.Empty(diagnostics);
                 Assert.NotNull(unit);
                 // A proof outcome is a theorem's, a recursive method's decrease obligation's, or in the M6 corpus a method's

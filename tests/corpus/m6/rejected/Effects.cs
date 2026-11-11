@@ -37,4 +37,25 @@ public static class Effects
 
     [Theorem]
     static Proof AbsoluteIsNonNegative(int x) => Prove.That(Math.Abs(x) >= 0);
+
+    [Verified]
+    public static int TryCatch(int a, int b)
+    {
+        try
+        {
+            return a / b;
+        }
+        catch (DivideByZeroException)
+        {
+            return 0;
+        }
+    }
+
+    // % by a variable can raise, so the recursion is recursion with effects (KTD11).
+    [Verified]
+    public static int Gcd(int a, int b)
+    {
+        Spec.Decreases(b);
+        return b == 0 ? a : Gcd(b, a % b);
+    }
 }

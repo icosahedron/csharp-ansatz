@@ -28,9 +28,8 @@ public sealed class CorpusSet
     public static CorpusSet M5a { get; } = new("m5a");
 
     /// <summary>
-    /// The M6 corpus (plan M6 KTD24). Until plan U11 the extraction, analyzer, translation and differential tests read it
-    /// (the differential tests from plan U13): the engine's corpus runs, the CLI and the cross-check do not, and pin that
-    /// (tests/corpus/m6/README.md).
+    /// The M6 corpus (plan M6 KTD24), the milestone's exit criterion: extraction, the analyzers, translation, the engine,
+    /// the differential tests, the CLI, the exit tests and <c>scripts/cross-check.sh</c> read it (tests/corpus/m6/README.md).
     /// </summary>
     public static CorpusSet M6 { get; } = new("m6");
 

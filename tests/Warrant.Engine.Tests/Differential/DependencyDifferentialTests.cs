@@ -38,17 +38,36 @@ internal sealed class ContractCorpus : IDisposable
     public void Dispose() => Side.Dispose();
 }
 
-/// <summary>The M6 accepted compilation, with its dependencies, on both sides.</summary>
+/// <summary>
+/// The M6 compilations with dependencies on both sides: the accepted one, and (plan M6 U14) the refuted one whose methods
+/// call dependencies, built when a test first asks for it.
+/// </summary>
 public sealed class M6DependencyFixture : IDisposable
 {
+    /// <summary>The compilations with dependencies.</summary>
+    public static readonly string[] Compilations = ["accepted", "refuted-dependencies"];
+
+    private readonly Lazy<ContractCorpus> _refuted = new(() => new ContractCorpus(CorpusSet.M6.Compile("refuted-dependencies")));
+
     public M6DependencyFixture()
     {
         Corpus = new ContractCorpus(CorpusSet.M6.Compile("accepted"));
     }
 
+    /// <summary>The accepted compilation.</summary>
     internal ContractCorpus Corpus { get; }
 
-    public void Dispose() => Corpus.Dispose();
+    /// <summary>A compilation of <see cref="Compilations"/>.</summary>
+    internal ContractCorpus this[string compilation] => compilation == "accepted" ? Corpus : _refuted.Value;
+
+    public void Dispose()
+    {
+        Corpus.Dispose();
+        if (_refuted.IsValueCreated)
+        {
+            _refuted.Value.Dispose();
+        }
+    }
 }
 
 /// <summary>
@@ -64,59 +83,96 @@ public sealed class DependencyDifferentialTests(M6DependencyFixture fixture, ITe
 
     private const string ProcessPayment = "M:Corpus.M6.Payments.PaymentService.ProcessPayment(System.Int32)";
 
-    /// <summary>The functions compared: those with dependencies, then the ones in their files without (plan U13 left them here).</summary>
-    private static readonly string[] Covered =
+    /// <summary>
+    /// The functions compared, by compilation: those with dependencies, then the ones in their files without (plan U13 left
+    /// them here). A refuted method is compared too, since agreement is about the model, not about whether its contract holds.
+    /// </summary>
+    private static readonly (string Compilation, string Key)[] Covered =
     [
-        ProcessPayment,
-        "M:Corpus.M6.Dependencies.OrderService.QuantityOf(System.Int32)",
-        "M:Corpus.M6.Dependencies.OrderService.Counted(System.Int32)",
-        "M:Corpus.M6.Dependencies.OrderService.Reserved(System.Int32)",
-        "M:Corpus.M6.Payments.PaymentService.Validate(Corpus.M6.Payments.Payment)",
-        "M:Corpus.M6.Dependencies.Steps.Next(System.Int32)",
-        "M:Corpus.M6.Dependencies.Steps.Run(System.Int32)",
+        ("accepted", ProcessPayment),
+        ("accepted", "M:Corpus.M6.Payments.PaymentLookup.Found(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Dependencies.OrderService.QuantityOf(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Dependencies.OrderService.Counted(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Dependencies.OrderService.Reserved(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Payments.PaymentService.Validate(Corpus.M6.Payments.Payment)"),
+        ("accepted", "M:Corpus.M6.Dependencies.Steps.Next(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Dependencies.Steps.Run(System.Int32)"),
+        ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Lookups.Neighbour(System.Int32)"),
+        ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Lookups.Saved(Corpus.M6.Refuted.Dependencies.Payment)"),
+        ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Lookups.Twice(System.Int32)"),
+        ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Lookups.TwiceScripted(System.Int32)"),
     ];
 
-    private static readonly string[] Namespaces = ["M:Corpus.M6.Payments.", "M:Corpus.M6.Dependencies."];
+    /// <summary>The functions with dependencies that are not compared, each with the reason.</summary>
+    private static readonly Dictionary<string, string> Skipped = new(StringComparer.Ordinal)
+    {
+        ["M:Corpus.M6.Refuted.Dependencies.Tally.Size"] =
+            "ICounter.Count's contract is unsatisfiable (KTD25), so the engine admits no definition of Size, which calls it",
+    };
+
+    private static readonly string[] Namespaces = ["M:Corpus.M6.Payments.", "M:Corpus.M6.Dependencies.", "M:Corpus.M6.Refuted.Dependencies."];
 
     private ContractCorpus Corpus => fixture.Corpus;
 
-    public static TheoryData<string> Functions() => [.. Covered];
+    public static TheoryData<string, string> Functions()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (compilation, key) in Covered)
+        {
+            data.Add(compilation, key);
+        }
+        return data;
+    }
 
     /// <summary>
-    /// The compared functions are exactly the function units of the M6 corpus's <c>Payments</c> and <c>Dependencies</c>
-    /// namespaces (which plan U13's test leaves to this one), in every compilation, and each has an admitted definition.
+    /// The compared and skipped functions are exactly the function units of the M6 corpus's <c>Payments</c> and
+    /// <c>Dependencies</c> namespaces (which plan U13's test leaves to this one), in every compilation; each compared one
+    /// has an admitted definition, and each skipped one has none, for the reason given.
     /// </summary>
     [Fact]
     public void EveryM6FunctionInTheDependencyFilesIsCompared()
     {
-        var functions = Corpus.Side.Extraction.Units
-            .Where(u => u.Unit.Kind == VirUnitKind.Function && Namespaces.Any(ns => u.Key.StartsWith(ns, StringComparison.Ordinal)))
-            .Select(u => u.Key);
-        Assert.Equal(Covered.Order(StringComparer.Ordinal), functions.Order(StringComparer.Ordinal));
+        foreach (var compilation in M6DependencyFixture.Compilations)
+        {
+            var functions = fixture[compilation].Side.Extraction.Units
+                .Where(u => u.Unit.Kind == VirUnitKind.Function && Namespaces.Any(ns => u.Key.StartsWith(ns, StringComparison.Ordinal)))
+                .Select(u => u.Key);
+            Assert.Equal(
+                Covered.Where(c => c.Compilation == compilation).Select(c => c.Key)
+                    .Concat(Skipped.Keys.Where(k => fixture[compilation].Side.Extraction.Find(k) is not null))
+                    .Order(StringComparer.Ordinal),
+                functions.Order(StringComparer.Ordinal));
+        }
         foreach (var compilation in M6DifferentialFixture.Compilations.Where(c => c != "accepted"))
         {
             Assert.DoesNotContain(
                 CorpusSet.M6.Expected.GetProperty("members").GetProperty(compilation).EnumerateObject(),
                 m => Namespaces.Any(ns => m.Name.StartsWith(ns, StringComparison.Ordinal)));
         }
-        foreach (var key in Covered)
+        foreach (var (compilation, key) in Covered)
         {
-            Corpus.Side.AssertDefinitionAdmitted(key);
-            output.WriteLine($"{key}: {Corpus.Side.Run.Find(key)!.GetType().Name}, {(Corpus.Side.Unit(key).Unit.Dependencies?.Count ?? 0)} dependencies");
+            var side = fixture[compilation].Side;
+            side.AssertDefinitionAdmitted(key);
+            output.WriteLine($"{key}: {side.Run.Find(key)!.GetType().Name}, {(side.Unit(key).Unit.Dependencies?.Count ?? 0)} dependencies");
+        }
+        foreach (var (key, reason) in Skipped)
+        {
+            Assert.False(fixture["refuted-dependencies"].Side.EngineAdmitted(key), $"{key} is admitted now ({reason}): compare it.");
         }
     }
 
     /// <summary>Every boundary input, against <see cref="TapesPerBoundaryInput"/> random tapes for a function with dependencies.</summary>
     [Theory]
     [MemberData(nameof(Functions))]
-    public void AgreesOnEveryBoundaryCombination(string key)
+    public void AgreesOnEveryBoundaryCombination(string compilation, string key)
     {
-        var unit = Corpus.Side.Unit(key).Unit;
+        var corpus = fixture[compilation];
+        var unit = corpus.Side.Unit(key).Unit;
         var types = ModelCheck.ParameterTypes(unit);
-        var boundaries = Corpus.Side.Inputs.BoundaryInputs(types);
+        var boundaries = corpus.Side.Inputs.BoundaryInputs(types);
         var run = new EffectRun();
         var stats = new TapeStats();
-        var check = Checker(key, stats);
+        var check = Checker(corpus, key, stats);
         var tapes = HasDependencies(unit) ? TapesPerBoundaryInput : 1;
         var watch = Stopwatch.StartNew();
         KernelThread.Run(() =>
@@ -141,15 +197,16 @@ public sealed class DependencyDifferentialTests(M6DependencyFixture fixture, ITe
     /// </summary>
     [Theory]
     [MemberData(nameof(Functions))]
-    public void AgreesOnRandomInputs(string key)
+    public void AgreesOnRandomInputs(string compilation, string key)
     {
-        var unit = Corpus.Side.Unit(key).Unit;
+        var corpus = fixture[compilation];
+        var unit = corpus.Side.Unit(key).Unit;
         var types = ModelCheck.ParameterTypes(unit);
-        var arbitrary = Corpus.Side.Inputs.Arbitrary([.. types, VirType.Int32]);
+        var arbitrary = corpus.Side.Inputs.Arbitrary([.. types, VirType.Int32]);
         var config = Pbt.Config(EffectDifferentialTests.RandomInputsPerFunction);
         var run = new EffectRun();
         var stats = new TapeStats();
-        var check = Checker(key, stats);
+        var check = Checker(corpus, key, stats);
         var watch = Stopwatch.StartNew();
         KernelThread.Run(() => Pbt.Check(
             Prop.ForAll(arbitrary, input =>
@@ -169,20 +226,20 @@ public sealed class DependencyDifferentialTests(M6DependencyFixture fixture, ITe
     private static bool HasDependencies(VirUnit unit) => unit.Dependencies is { Count: > 0 };
 
     /// <summary>One run's check: against a random tape with a function's dependencies, as plan U13 checks one without.</summary>
-    private Func<object?[], int, InputCheck> Checker(string key, TapeStats stats)
+    private static Func<object?[], int, InputCheck> Checker(ContractCorpus corpus, string key, TapeStats stats)
     {
-        var unit = Corpus.Side.Unit(key);
+        var unit = corpus.Side.Unit(key);
         if (!HasDependencies(unit.Unit))
         {
-            var check = Corpus.Side.Checker(unit);
+            var check = corpus.Side.Checker(unit);
             return (args, _) => check(args);
         }
-        Corpus.Side.AssertDefinitionAdmitted(key);
+        corpus.Side.AssertDefinitionAdmitted(key);
         return (args, seed) =>
         {
-            var clr = Corpus.Runner.RunClr(unit.Unit, [args], new RandomReplies(Corpus.Runner, seed));
+            var clr = corpus.Runner.RunClr(unit.Unit, [args], new RandomReplies(corpus.Runner, seed));
             stats.Add(clr);
-            return Corpus.Runner.Check(unit.Unit, [args], clr);
+            return corpus.Runner.Check(unit.Unit, [args], clr);
         };
     }
 
@@ -372,7 +429,7 @@ public sealed class DependencyDifferentialTests(M6DependencyFixture fixture, ITe
     public void MeasureTheCostOfADependencyCheck()
     {
         var table = new StringBuilder("| Function | Runs | Calls per run (mean) | Fuel per run (mean / max) | ms per run (mean) |\n|---|---|---|---|---|\n");
-        foreach (var key in Covered.Where(k => !HasDependencies(Corpus.Side.Unit(k).Unit)))
+        foreach (var key in Covered.Where(c => c.Compilation == "accepted").Select(c => c.Key).Where(k => !HasDependencies(Corpus.Side.Unit(k).Unit)))
         {
             // As plan U13 measures a function without dependencies: one run per boundary input.
             var unit = Corpus.Side.Unit(key);
@@ -390,7 +447,7 @@ public sealed class DependencyDifferentialTests(M6DependencyFixture fixture, ITe
             });
             table.Append(CultureInfo.InvariantCulture, $"| `{unit.DisplayName}` | {inputs.Count} | 0 | {measured.Average():F0} / {measured.Max()} | {watch.Elapsed.TotalMilliseconds / inputs.Count:F2} |\n");
         }
-        foreach (var key in Covered.Where(k => HasDependencies(Corpus.Side.Unit(k).Unit)))
+        foreach (var key in Covered.Where(c => c.Compilation == "accepted").Select(c => c.Key).Where(k => HasDependencies(Corpus.Side.Unit(k).Unit)))
         {
             var unit = Corpus.Side.Unit(key).Unit;
             var boundaries = Corpus.Side.Inputs.BoundaryInputs(ModelCheck.ParameterTypes(unit));

@@ -10,6 +10,8 @@ namespace Warrant.Engine.Tests.Differential;
 /// <list type="bullet">
 /// <item><c>int</c> and <c>long</c>: the boundaries of <see cref="Generators"/>, then its boundary-biased random values;</item>
 /// <item><c>bool</c>: both values;</item>
+/// <item><c>decimal</c> (M6): <see cref="Generators.DecimalBoundaries"/> (scales, negative zero, the 96-bit edge), then
+/// <see cref="Generators.DecimalValues"/>, shrunk by <see cref="Generators.ShrinkDecimal"/>;</item>
 /// <item>an open enum: every named value plus unnamed values, including the underlying type's <c>MinValue</c> and <c>MaxValue</c>;</item>
 /// <item>a closed enum or class: every member and nothing else;</item>
 /// <item>a record: its fields by these rules (every combination of the fields' boundary values);</item>
@@ -30,6 +32,8 @@ internal sealed class Inputs(Values values)
                 return [.. Generators.Int64Boundaries.Cast<object?>()];
             case PrimitiveType { Kind: VirPrimitive.Bool }:
                 return [false, true];
+            case PrimitiveType { Kind: VirPrimitive.Decimal }:
+                return [.. Generators.DecimalBoundaries.Cast<object?>()];
             case NullableType n:
                 return [null, .. Boundaries(n.Value)];
         }
@@ -61,6 +65,8 @@ internal sealed class Inputs(Values values)
                 return Generators.Int64Values.Select(v => (object?)v);
             case PrimitiveType { Kind: VirPrimitive.Bool }:
                 return Gen.Elements<object?>(false, true);
+            case PrimitiveType { Kind: VirPrimitive.Decimal }:
+                return Generators.DecimalValues.Select(v => (object?)v);
             case NullableType n:
                 return Gen.Frequency<object?>((1, Gen.Constant<object?>(null)), (3, Random(n.Value)));
         }
@@ -125,6 +131,8 @@ internal sealed class Inputs(Values values)
                 return Generators.ShrinkInt64((long)value!).Select(v => (object?)v);
             case PrimitiveType { Kind: VirPrimitive.Bool }:
                 return (bool)value! ? [false] : [];
+            case PrimitiveType { Kind: VirPrimitive.Decimal }:
+                return Generators.ShrinkDecimal((decimal)value!).Select(v => (object?)v);
             case NullableType n:
                 return value is null ? [] : [null, .. Shrink(n.Value, value)];
         }

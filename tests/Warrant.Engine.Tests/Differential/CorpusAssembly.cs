@@ -49,6 +49,7 @@ internal sealed class CorpusAssembly : IDisposable
         PrimitiveType { Kind: VirPrimitive.Int32 } => typeof(int),
         PrimitiveType { Kind: VirPrimitive.Int64 } => typeof(long),
         PrimitiveType { Kind: VirPrimitive.Bool } => typeof(bool),
+        PrimitiveType { Kind: VirPrimitive.Decimal } => typeof(decimal),
         RefType r => TypeOf(r.Key),
         // int? is Nullable<int>; a nullable reference is the reference type itself (M6 KTD5).
         NullableType { Value: PrimitiveType } n => typeof(Nullable<>).MakeGenericType(TypeOf(n.Value)),

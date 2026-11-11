@@ -7,13 +7,14 @@ Every accepted corpus function is run on the CLR and in the model on the same in
 - **Inputs** (`Inputs`).
   - `int` and `long`: the seven boundary values of `Generators`, then its boundary-biased random values.
   - `bool`: both values.
+  - `decimal` (M6): the 24 `Generators.DecimalBoundaries` (`MinValue`, `MaxValue` and their neighbours, zero and negative zero at several scales, one at scales 0 to 2, the smallest positive value, the largest mantissa at scale 28, and values around the rounding boundary), then `Generators.DecimalValues`, which spreads sign, scale and mantissa width. A `decimal` is the term `Warrant.Decimal.lit negative mantissa scale (Eq.refl true) (Eq.refl true)`, as Semantics writes a literal, so the kernel's check compares representations: a result equal in value at another scale (`-1.0m` against `-1.00m`), or zero of the other sign, is a disagreement, though C#'s `==` would call them equal (`ADecimalResultIsComparedByRepresentation`).
   - Open enums: every named value plus unnamed values (`MinValue`, `MaxValue`, -1 and one past the largest named value).
   - Closed enums and classes: every member.
   - Records: every combination of their fields' values.
   - Nullable types (M6): `null` and the value type's values. One random value in four is `null`, and a failing value shrinks to `null` first.
 
   Every combination of boundary values is tried, because no corpus function has more than three parameters (`AgreesOnEveryBoundaryCombination`, deterministic). Separately, each function's agreement is an FsCheck property over random inputs (`AgreesOnRandomInputs`; see "Properties" below).
-- **Properties** (M5a KTD26, `Warrant.TestSupport/Pbt.cs`). `AgreesOnRandomInputs` checks `Prop.ForAll(inputs, args => model(args) = clr(args))` with `RandomInputsPerFunction` (1,000) cases per function. A failing input is shrunk: `int` and `long` toward 0 and the boundary values, `bool` to `false`, enums and closed values toward their first member, records field by field, and a function's arguments one at a time. The failure message shows the original and shrunk input, the disagreement, and a line `Replay with WARRANT_PBT_SEED=seed,gamma`. The same helper runs the CLR-agreement properties in `Warrant.Semantics.Tests`.
+- **Properties** (M5a KTD26, `Warrant.TestSupport/Pbt.cs`). `AgreesOnRandomInputs` checks `Prop.ForAll(inputs, args => model(args) = clr(args))` with `RandomInputsPerFunction` (1,000) cases per function. A failing input is shrunk: `int` and `long` toward 0 and the boundary values, `bool` to `false`, `decimal` toward 0, 1 and -1 and to smaller mantissas (`Generators.ShrinkDecimal`), enums and closed values toward their first member, records field by field, and a function's arguments one at a time. The failure message shows the original and shrunk input, the disagreement, and a line `Replay with WARRANT_PBT_SEED=seed,gamma`. The same helper runs the CLR-agreement properties in `Warrant.Semantics.Tests`.
 
   | Variable | Effect |
   |---|---|
@@ -73,7 +74,8 @@ Measured again on 2026-11-03, with the random inputs as properties and 37 functi
 - **Raising functions** (`∀ {σ : Type} params, ClrM σ R`, plan U9) are run from an arbitrary world, and only the `Except` part is compared (#110): the kernel admits `@Eq.{2} (∀ σ : Type, σ → Except ClrExn R) (fun σ s => (StateT.run (ExceptT.run (f σ args)) s).1) (fun σ s => outcome)` by `Eq.refl`, where `outcome` is `Except.ok r` for the CLR's result `r`, or `Except.error e` for an `e` that stands for the CLR's exception.
 - **Exceptions** (`ClrExceptions`, #78). Each `ClrExn` constructor maps to the CLR type it must match exactly: `overflow` to `OverflowException`, `divideByZero` to `DivideByZeroException`, `invalidOperation` to `InvalidOperationException`, `nullReference` to `NullReferenceException`, and `thrown k` to the type whose documentation-comment ID is `k`. A CLR exception therefore matches its implicit constructor, if it has one, or `thrown` of its own key: the CLR cannot tell `x.Value` on `null` from `throw new InvalidOperationException()`. `external` is plan U22's mock sentinel. `EveryClrExnConstructorIsMapped` fails if the bundle's `ClrExn` gains a constructor.
 - **`Spec.Assert`** (#186). `assertFailed` has no CLR counterpart: `Spec.Assert` is `[Conditional]` and does nothing at run time. An input on which the model fails an assertion is skipped and counted, and a function fails unless at least a quarter of its inputs, and at least one, were evaluated (`EffectRun.MinimumEvaluatedShare`, #144). No corpus function compared today has a `Spec.Assert`, so none is skipped; `AnInputThatFailsASpecAssertIsSkippedAndCounted` and `AFunctionWithTooFewEvaluatedInputsFails` check the rule on inline functions.
-- **Skipped functions.** Functions whose translation is not on the branch yet are listed with the unit that brings them: the five members of `Contracts` (U10) and the `decimal` ones, including those taking `Corpus.M6.Payment`, which has a `decimal` field (U21). `EveryM6FunctionWithoutDependenciesIsComparedOrSkippedForAReason` pins the two lists against `expected.json` and fails as soon as a skipped function translates. The functions in `Payments.cs` and `Dependencies.cs` are plan U22's.
+- **`decimal`** (U21). The `decimal` functions, and those taking `Corpus.M6.Payment`, which has a `decimal` field, are compared like the others, with results compared by representation (see "Inputs" above). A `Payment`'s boundary values are every combination of its `int` and `decimal` fields' (7 × 24 = 168), so `SameAmount` and `SamePayment`, with two, check 28,224 boundary inputs each.
+- **Skipped functions.** Functions whose translation is not on the branch yet are listed with the unit that brings them: the five members of `Contracts` (U10). `EveryM6FunctionWithoutDependenciesIsComparedOrSkippedForAReason` pins the two lists against `expected.json` and fails as soon as a skipped function translates. The functions in `Payments.cs` and `Dependencies.cs` are plan U22's.
 
 ### Measured cost
 
@@ -81,32 +83,46 @@ Measured on 2026-11-11 on the development machine (Windows 11, .NET 10.0.14, Deb
 
 | Function | Raising | Boundary inputs | Fuel per check (mean / max) | ms per check (mean) |
 |---|---|---|---|---|
-| `Corpus.Rejected.Arithmetic.Halve(int)` | no | 7 | 930 / 1080 | 1.90 |
-| `Corpus.Rejected.Arithmetic.Remainder(int)` | no | 7 | 880 / 1035 | 0.49 |
-| `Corpus.Rejected.Statements.Throws(int)` | yes | 7 | 1002 / 1200 | 0.87 |
-| `Corpus.M6.Effects.Biggest(int, int)` | no | 49 | 904 / 1210 | 0.51 |
-| `Corpus.M6.Effects.Smallest(long, long)` | no | 49 | 904 / 1210 | 0.48 |
-| `Corpus.M6.Effects.Guard(int)` | yes | 7 | 1096 / 1276 | 0.84 |
-| `Corpus.Rejected.Types.NullableParameter(Corpus.Rejected.Point?)` | no | 50 | 188 / 201 | 0.12 |
-| `Corpus.Rejected.Types.ReturnsNull()` | no | 1 | 47 / 47 | 0.71 |
-| `Corpus.M6.Nullables.OrZero(int?)` | no | 8 | 116 / 122 | 0.13 |
-| `Corpus.M6.Nullables.OrDefault(long?)` | no | 8 | 116 / 122 | 0.20 |
-| `Corpus.M6.Nullables.Wrap(int)` | no | 7 | 73 / 78 | 0.10 |
-| `Corpus.M6.Nullables.ValueWhenKnown(int?)` | yes | 8 | 394 / 403 | 0.50 |
-| `Corpus.Rejected.Arithmetic.CheckedAdd(int, int)` | yes | 49 | 1719 / 2300 | 1.07 |
-| `Corpus.Rejected.Statements.CallsUnverified(int)` | yes | 7 | 1336 / 1699 | 0.96 |
-| `Corpus.M6.Refuted.Effects.Ratio(int, int)` | yes | 49 | 1544 / 2052 | 0.92 |
-| `Corpus.M6.Refuted.Effects.Magnitude(long)` | yes | 7 | 1336 / 1699 | 0.98 |
-| `Corpus.M6.Refuted.Nullables.Read(int?)` | yes | 8 | 300 / 310 | 0.42 |
-| `Corpus.M6.Refuted.Nullables.Cast(long?)` | yes | 8 | 300 / 310 | 0.44 |
-| `Corpus.M6.Refuted.Nullables.Use(Corpus.M6.Refuted.Payment)` | no | 7 | 93 / 98 | 0.12 |
-| `Corpus.M6.Refuted.Nullables.IdOf(Corpus.M6.Refuted.Payment?)` | yes | 8 | 453 / 467 | 0.61 |
-| `Corpus.M6.Refuted.Nullables.Unchecked(Corpus.M6.Refuted.Payment?)` | yes | 8 | 480 / 498 | 0.61 |
-| `Corpus.Rejected.CheckedProject.Checked.Add(int, int)` | yes | 49 | 1719 / 2300 | 1.04 |
-| `Corpus.Rejected.CheckedProject.Checked.Negate(int)` | yes | 7 | 1382 / 1557 | 0.95 |
-| `Corpus.Rejected.CheckedProject.Checked.Narrow(long)` | yes | 7 | 1371 / 1985 | 1.18 |
+| `Corpus.Rejected.Arithmetic.Halve(int)` | no | 7 | 930 / 1080 | 1.83 |
+| `Corpus.Rejected.Arithmetic.Remainder(int)` | no | 7 | 880 / 1035 | 0.60 |
+| `Corpus.Rejected.Statements.Throws(int)` | yes | 7 | 1002 / 1200 | 0.96 |
+| `Corpus.M6.Effects.Biggest(int, int)` | no | 49 | 904 / 1210 | 0.58 |
+| `Corpus.M6.Effects.Smallest(long, long)` | no | 49 | 904 / 1210 | 0.51 |
+| `Corpus.M6.Effects.Guard(int)` | yes | 7 | 1096 / 1276 | 0.91 |
+| `Corpus.Rejected.Types.NullableParameter(Corpus.Rejected.Point?)` | no | 50 | 188 / 201 | 0.13 |
+| `Corpus.Rejected.Types.ReturnsNull()` | no | 1 | 47 / 47 | 0.77 |
+| `Corpus.M6.Nullables.OrZero(int?)` | no | 8 | 116 / 122 | 0.14 |
+| `Corpus.M6.Nullables.OrDefault(long?)` | no | 8 | 116 / 122 | 0.17 |
+| `Corpus.M6.Nullables.Wrap(int)` | no | 7 | 73 / 78 | 0.14 |
+| `Corpus.M6.Nullables.ValueWhenKnown(int?)` | yes | 8 | 394 / 403 | 0.53 |
+| `Corpus.Rejected.Statements.Decimals(decimal)` | no | 24 | 228 / 228 | 0.13 |
+| `Corpus.M6.Decimals.AtLeastOne(decimal)` | no | 24 | 904 / 952 | 0.51 |
+| `Corpus.M6.Decimals.SameAmount(Corpus.M6.Payment, Corpus.M6.Payment)` | no | 28224 | 888 / 1044 | 0.46 |
+| `Corpus.M6.Decimals.SamePayment(Corpus.M6.Payment, Corpus.M6.Payment)` | no | 28224 | 808 / 1412 | 0.37 |
+| `Corpus.M6.Decimals.Negate(decimal)` | no | 24 | 412 / 414 | 0.28 |
+| `Corpus.M6.Decimals.Largest(decimal, decimal)` | no | 576 | 981 / 1137 | 0.52 |
+| `Corpus.M6.Decimals.Smallest(decimal, decimal)` | no | 576 | 1082 / 1236 | 0.55 |
+| `Corpus.M6.Decimals.Size(decimal)` | no | 24 | 386 / 395 | 0.18 |
+| `Corpus.M6.Nullables.IsMissing(Corpus.M6.Payment?)` | no | 169 | 266 / 272 | 0.14 |
+| `Corpus.M6.Nullables.Use(Corpus.M6.Payment)` | no | 168 | 269 / 274 | 0.11 |
+| `Corpus.M6.Nullables.Guarded(Corpus.M6.Payment?)` | yes | 169 | 740 / 747 | 0.71 |
+| `Corpus.M6.Nullables.IdOrZero(Corpus.M6.Payment?)` | yes | 169 | 729 / 736 | 0.71 |
+| `Corpus.M6.Refuted.Decimals.AddFee(decimal)` | yes | 24 | 2221 / 2615 | 1.45 |
+| `Corpus.M6.Refuted.Decimals.Difference(decimal, decimal)` | yes | 576 | 2541 / 9742 | 1.72 |
+| `Corpus.Rejected.Arithmetic.CheckedAdd(int, int)` | yes | 49 | 1719 / 2300 | 1.15 |
+| `Corpus.Rejected.Statements.CallsUnverified(int)` | yes | 7 | 1336 / 1699 | 0.89 |
+| `Corpus.M6.Refuted.Effects.Ratio(int, int)` | yes | 49 | 1544 / 2052 | 0.98 |
+| `Corpus.M6.Refuted.Effects.Magnitude(long)` | yes | 7 | 1336 / 1699 | 1.09 |
+| `Corpus.M6.Refuted.Nullables.Read(int?)` | yes | 8 | 300 / 310 | 0.41 |
+| `Corpus.M6.Refuted.Nullables.Cast(long?)` | yes | 8 | 300 / 310 | 0.42 |
+| `Corpus.M6.Refuted.Nullables.Use(Corpus.M6.Refuted.Payment)` | no | 7 | 93 / 98 | 0.20 |
+| `Corpus.M6.Refuted.Nullables.IdOf(Corpus.M6.Refuted.Payment?)` | yes | 8 | 453 / 467 | 0.88 |
+| `Corpus.M6.Refuted.Nullables.Unchecked(Corpus.M6.Refuted.Payment?)` | yes | 8 | 480 / 498 | 0.69 |
+| `Corpus.Rejected.CheckedProject.Checked.Add(int, int)` | yes | 49 | 1719 / 2300 | 1.57 |
+| `Corpus.Rejected.CheckedProject.Checked.Negate(int)` | yes | 7 | 1382 / 1557 | 1.48 |
+| `Corpus.Rejected.CheckedProject.Checked.Narrow(long)` | yes | 7 | 1371 / 1985 | 1.38 |
 
-In all, 422 boundary checks used 1,009 fuel each on average and at most 2,300, well under `KernelLimits.Corpus`. A raising check costs about twice an M4 one, because the run unfolds the monad's `bind` and `StateT.run`. With 24 functions the M6 tests check 422 boundary inputs and 24,000 random ones, every one evaluated (none skipped); each random-input property takes 0.03 to 1.5 s, about 17 s together. The default run of every differential test, M4, M5a and M6, took 1.2 minutes on the same machine, the recursive tests (about 35 s) included, so the count of 1,000 stays.
+In all, 59,393 boundary checks used 865 fuel each on average and at most 9,742 (on `Difference`), well under `KernelLimits.Corpus`. A raising check costs about twice an M4 one, because the run unfolds the monad's `bind` and `StateT.run`; a raising `decimal` sum or difference about twice that again. With 38 functions the M6 tests check 59,393 boundary inputs and 38,000 random ones, every one evaluated (none skipped). The boundary inputs are dominated by `SameAmount` and `SamePayment` (28,224 each, about 11 to 14 s each alone); each random-input property takes 0.03 to 3.5 s, about 36 s together. The default run of every differential test, M4, M5a and M6, took 1.7 minutes on the same machine, the recursive tests included, so the count of 1,000 stays.
 
 ## Recursive units
 

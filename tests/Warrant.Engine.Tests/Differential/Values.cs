@@ -8,7 +8,8 @@ namespace Warrant.Engine.Tests.Differential;
 
 /// <summary>
 /// .NET values as CIC terms (docs/m4/07): an <c>int</c>, <c>long</c> or <c>bool</c> is its literal; an open enum is the
-/// literal of its underlying value, typed at the enum by the theorem; a closed enum or closed-class value is the member
+/// literal of its underlying value, typed at the enum by the theorem; a <c>decimal</c> (M6) is <c>Warrant.Decimal.lit</c>
+/// of its sign, mantissa and scale, so the kernel's check compares representations, not values; a closed enum or closed-class value is the member
 /// constant (a closed-class instance found by reference identity among the static instances); a record is <c>$mk</c>
 /// applied to its fields; a nullable value (M6) is <c>Option.none</c> or <c>Option.some</c> of its value.
 /// </summary>
@@ -60,6 +61,9 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
                 return Literals.Int64((long)value);
             case PrimitiveType { Kind: VirPrimitive.Bool }:
                 return Literals.Bool((bool)value);
+            case PrimitiveType { Kind: VirPrimitive.Decimal }:
+                // Sign, mantissa and scale, as Semantics writes a literal (M6 KTD7): 1.0m and 1.00m are different terms.
+                return Literals.Decimal(DecimalLitExpr.Of((decimal)value));
         }
         var key = ((RefType)type).Key;
         switch (definitions[key])
@@ -90,6 +94,8 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
         {
             case PrimitiveType { Kind: VirPrimitive.Bool }:
                 return (bool)value ? "true" : "false";
+            case PrimitiveType { Kind: VirPrimitive.Decimal }:
+                return DisplayDecimal((decimal)value);
             case PrimitiveType:
                 return Convert.ToString(value, CultureInfo.InvariantCulture)!;
             case NullableType n:
@@ -132,6 +138,10 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
     /// </summary>
     public string ReadBackDisplay(KernelEnvironment env, VirType type, Expr term, KernelLimits limits)
     {
+        if (type is PrimitiveType { Kind: VirPrimitive.Decimal })
+        {
+            return ReadBackDecimal(env, term, limits) is { } d ? DisplayDecimal(d) : "unknown";
+        }
         if (type is PrimitiveType p)
         {
             return ReadBack.Value(env, term, Literals.Type(p.Kind), limits).ToString()!;
@@ -184,6 +194,56 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
             default:
                 throw new InvalidOperationException($"unknown definition for {key}");
         }
+    }
+
+    private static readonly Name DecimalName = Name.Parse("Warrant.Decimal");
+
+    /// <summary>
+    /// The model's <c>Warrant.Decimal</c> value of <paramref name="term"/>, keeping its sign (negative zero included),
+    /// mantissa and scale: its <c>negative</c>, <c>mantissa</c> and <c>scale</c> fields reduced to <c>Bool</c> and
+    /// numerals; null when they do not reduce or are out of range. Must run on a kernel thread.
+    /// </summary>
+    public static decimal? ReadBackDecimal(KernelEnvironment env, Expr term, KernelLimits limits)
+    {
+        try
+        {
+            var checker = new TypeChecker(env, limits: limits);
+            var negative = checker.Whnf(Expr.Proj(DecimalName, 0, term)) switch
+            {
+                ConstExpr { Name: var b } when b == Name.Parse("Bool.true") => (bool?)true,
+                ConstExpr { Name: var b } when b == Name.Parse("Bool.false") => false,
+                _ => null,
+            };
+            var mantissa = Natural(checker.Whnf(Expr.Proj(DecimalName, 1, term)));
+            var scale = Natural(checker.Whnf(Expr.Proj(DecimalName, 2, term)));
+            if (negative is null || mantissa is null || scale is null || scale > DecimalLitExpr.MaxScale)
+            {
+                return null;
+            }
+            var literal = new DecimalLitExpr(negative.Value, mantissa.Value, (int)scale.Value);
+            return literal.IsValid ? literal.ToDecimal() : null;
+        }
+        catch (KernelException)
+        {
+            return null;
+        }
+    }
+
+    private static System.Numerics.BigInteger? Natural(Expr whnf) => whnf switch
+    {
+        NatLitExpr n => n.Value,
+        ConstExpr { Name: var z } when z == Name.Parse("Nat.zero") => System.Numerics.BigInteger.Zero,
+        _ => null,
+    };
+
+    /// <summary>
+    /// A <c>decimal</c> as C# would write it, with its scale (<c>1.00m</c>) and the sign of a negative zero (<c>-0.0m</c>),
+    /// so that a disagreement in representation shows.
+    /// </summary>
+    public static string DisplayDecimal(decimal value)
+    {
+        var text = value.ToString(CultureInfo.InvariantCulture);
+        return (decimal.IsNegative(value) && !text.StartsWith('-') ? "-" + text : text) + "m";
     }
 
     private string ClosedMember(string key, ClosedDefinition closed, object value)

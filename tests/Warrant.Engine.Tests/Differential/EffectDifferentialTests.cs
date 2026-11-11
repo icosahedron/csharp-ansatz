@@ -182,6 +182,22 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         ("accepted", "M:Corpus.M6.Nullables.OrDefault(System.Nullable{System.Int64})"),
         ("accepted", "M:Corpus.M6.Nullables.Wrap(System.Int32)"),
         ("accepted", "M:Corpus.M6.Nullables.ValueWhenKnown(System.Nullable{System.Int32})"),
+        // decimal (M6 U21), compared by representation: sign, mantissa and scale.
+        ("accepted", "M:Corpus.Rejected.Statements.Decimals(System.Decimal)"),
+        ("accepted", "M:Corpus.M6.Decimals.AtLeastOne(System.Decimal)"),
+        ("accepted", "M:Corpus.M6.Decimals.SameAmount(Corpus.M6.Payment,Corpus.M6.Payment)"),
+        ("accepted", "M:Corpus.M6.Decimals.SamePayment(Corpus.M6.Payment,Corpus.M6.Payment)"),
+        ("accepted", "M:Corpus.M6.Decimals.Negate(System.Decimal)"),
+        ("accepted", "M:Corpus.M6.Decimals.Largest(System.Decimal,System.Decimal)"),
+        ("accepted", "M:Corpus.M6.Decimals.Smallest(System.Decimal,System.Decimal)"),
+        ("accepted", "M:Corpus.M6.Decimals.Size(System.Decimal)"),
+        // Corpus.M6.Payment has a decimal field.
+        ("accepted", "M:Corpus.M6.Nullables.IsMissing(Corpus.M6.Payment)"),
+        ("accepted", "M:Corpus.M6.Nullables.Use(Corpus.M6.Payment)"),
+        ("accepted", "M:Corpus.M6.Nullables.Guarded(Corpus.M6.Payment)"),
+        ("accepted", "M:Corpus.M6.Nullables.IdOrZero(Corpus.M6.Payment)"),
+        ("refuted", "M:Corpus.M6.Refuted.Decimals.AddFee(System.Decimal)"),
+        ("refuted", "M:Corpus.M6.Refuted.Decimals.Difference(System.Decimal,System.Decimal)"),
         ("refuted", "M:Corpus.Rejected.Arithmetic.CheckedAdd(System.Int32,System.Int32)"),
         ("refuted", "M:Corpus.Rejected.Statements.CallsUnverified(System.Int32)"),
         ("refuted", "M:Corpus.M6.Refuted.Effects.Ratio(System.Int32,System.Int32)"),
@@ -198,8 +214,6 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
 
     private const string ContractsUntilU10 = "Spec.Requires or Spec.Ensures: not translated until M6 U10";
 
-    private const string DecimalUntilU21 = "decimal: not translated until M6 U21";
-
     /// <summary>
     /// The functions without dependencies that are not compared yet, each because translation does not take it on this
     /// branch. <see cref="EveryM6FunctionWithoutDependenciesIsComparedOrSkippedForAReason"/> fails as soon as one translates,
@@ -212,21 +226,6 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         ["M:Corpus.M6.Contracts.Capped(System.Int32)"] = ContractsUntilU10,
         ["M:Corpus.M6.Contracts.Average(System.Int32,System.Int32)"] = ContractsUntilU10,
         ["M:Corpus.M6.Contracts.Same(System.Int32)"] = ContractsUntilU10,
-        ["M:Corpus.Rejected.Statements.Decimals(System.Decimal)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Decimals.AtLeastOne(System.Decimal)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Decimals.SameAmount(Corpus.M6.Payment,Corpus.M6.Payment)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Decimals.SamePayment(Corpus.M6.Payment,Corpus.M6.Payment)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Decimals.Negate(System.Decimal)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Decimals.Largest(System.Decimal,System.Decimal)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Decimals.Smallest(System.Decimal,System.Decimal)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Decimals.Size(System.Decimal)"] = DecimalUntilU21,
-        // Corpus.M6.Payment has a decimal field.
-        ["M:Corpus.M6.Nullables.IsMissing(Corpus.M6.Payment)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Nullables.Use(Corpus.M6.Payment)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Nullables.Guarded(Corpus.M6.Payment)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Nullables.IdOrZero(Corpus.M6.Payment)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Refuted.Decimals.AddFee(System.Decimal)"] = DecimalUntilU21,
-        ["M:Corpus.M6.Refuted.Decimals.Difference(System.Decimal,System.Decimal)"] = DecimalUntilU21,
     };
 
     /// <summary>The namespaces of the functions with dependencies (and their async helpers), which plan U22 compares with mocks.</summary>
@@ -283,12 +282,12 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
             Assert.False(outcome is TranslatedOutcome, $"{key} translates now: compare it (move it from Skipped to Covered).");
             if (outcome is FailedOutcome failed)
             {
-                var unit = reason == ContractsUntilU10 ? "U10" : "U21";
-                Assert.Contains($"until M6 {unit}", failed.Reason, StringComparison.Ordinal);
+                Assert.Equal(ContractsUntilU10, reason);
+                Assert.Contains("until M6 U10", failed.Reason, StringComparison.Ordinal);
             }
             else
             {
-                // A function whose callee or type failed to translate (Capped calls AtMost; the Payment record has a decimal).
+                // A function whose callee failed to translate (Capped calls AtMost).
                 Assert.IsType<SkippedOutcome>(outcome);
             }
         }
@@ -407,6 +406,41 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
             Assert.Same(InputCheck.Agrees, side.Model.CheckRaising("Ratio(1, 0)", VirType.Int32, side.Model.Run(ratio, [1, 0]), null, new DivideByZeroException()));
             Assert.Same(InputCheck.Agrees, side.Model.CheckRaising("Read(null)", VirType.Int32, side.Model.Run(read, [null]), null, new InvalidOperationException()));
             Assert.Same(InputCheck.Agrees, side.Model.CheckRaising("Ratio(7, 2)", VirType.Int32, side.Model.Run(ratio, [7, 2]), 3, null));
+        });
+    }
+
+    /// <summary>
+    /// A <c>decimal</c> result is compared by representation (sign, mantissa and scale), not by C#'s <c>==</c>, which ignores
+    /// scale: a result equal in value at another scale, or zero of the other sign, is a disagreement, reported with both
+    /// representations; pure and raising functions alike.
+    /// </summary>
+    [Fact]
+    public void ADecimalResultIsComparedByRepresentation()
+    {
+        var accepted = corpus["accepted"];
+        var negate = accepted.Unit("M:Corpus.M6.Decimals.Negate(System.Decimal)").Unit;
+        var refuted = corpus["refuted"];
+        var addFee = refuted.Unit("M:Corpus.M6.Refuted.Decimals.AddFee(System.Decimal)").Unit;
+        var negativeZero = Generators.Negate(0m);
+        Assert.Equal(-1.0m, -1.00m);
+        Assert.Equal(0m, negativeZero);
+        KernelThread.Run(() =>
+        {
+            Assert.False(accepted.Model.IsRaising(negate));
+            string? Negate(decimal input, decimal clr) =>
+                accepted.Model.Disagreement($"Negate({Values.DisplayDecimal(input)})", VirType.Decimal, accepted.Model.Application(negate, [input]), clr);
+            Assert.Null(Negate(1.0m, -1.0m));
+            Assert.Null(Negate(0m, negativeZero));
+            Assert.Contains("Negate(1.0m): the CLR returned -1.00m but the model computes -1.0m", Negate(1.0m, -1.00m), StringComparison.Ordinal);
+            Assert.Contains("Negate(0m): the CLR returned 0m but the model computes -0m", Negate(0m, 0m), StringComparison.Ordinal);
+
+            Assert.True(refuted.Model.IsRaising(addFee));
+            var run = refuted.Model.Run(addFee, [1.0m]);
+            Assert.Same(InputCheck.Agrees, refuted.Model.CheckRaising("AddFee(1.0m)", VirType.Decimal, run, 2.25m, null));
+            Assert.Contains(
+                "AddFee(1.0m): the CLR returned 2.250m but the model computes ok 2.25m",
+                refuted.Model.CheckRaising("AddFee(1.0m)", VirType.Decimal, run, 2.250m, null).Disagreement,
+                StringComparison.Ordinal);
         });
     }
 

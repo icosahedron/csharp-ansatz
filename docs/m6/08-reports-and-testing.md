@@ -176,6 +176,7 @@ The private-codebase criterion (its blocked candidates that need only R1 to R4 t
 ## Start time
 
 U14 measured server start with the complete M6 bundle against M5b's in one session, as KTD3 requires: 4,053 ms against
-2,807 ms on the reference workstation, under the 5 s threshold (chapter 1, `tests/data/README.md`).
+2,807 ms on the reference workstation, under the threshold: 5 s when measured, 10 s since the owner raised it on
+2026-11-11 (#178; chapter 1, `tests/data/README.md`).
 Warm, cached and rechecked requests are measured by `scripts/measure-m5b.sh` as in M5b; M6 did not set new baselines
 for them.

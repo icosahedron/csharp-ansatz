@@ -40,7 +40,9 @@ the raw JSON. These are the values asserted in `ReaderCorpusTests`.
 ### The `Std.Do` roots (M6 U1)
 
 M6's `Std.Do` section of `lean/bundle-roots.txt` grew the bundle from 2,835 to 3,210 constants (2,599 to 2,927
-declaration records), with no new axiom. M6 KTD3 keeps the bundle a verified load while server start stays under 5 s.
+declaration records), with no new axiom. M6 KTD3 keeps the bundle a verified load while server start stays under 10 s
+on the reference workstation. The threshold was 5 s when the measurements below were made; the owner raised it to 10 s
+on 2026-11-11 (#178), so the margins below are against 5 s.
 Measured on 2026-11-09 with `scripts/measure-m5b.sh` and seven alternating cold starts of each bundle
 (`warrant verify tests/corpus/m5a/rejected --server auto --timings`, "started the server and connected in"), on Linux
 with 4 logical cores and the .NET 10.0.403 SDK:
@@ -67,7 +69,7 @@ logical cores), seven alternating cold starts of the U1 and U2 CLIs built in Rel
 | M6 U1, 3,210 constants | 3,147 ms (2,979–3,259) | 34–35 MB |
 | M6 U2, 3,920 constants | 4,152 ms (3,881–4,686) | 41–48 MB |
 
-The new roots cost about 1.0 s (32%) of start time. That is under M6 KTD3's 5 s threshold, with 0.85 s left for U3,
+The new roots cost about 1.0 s (32%) of start time. That is under M6 KTD3's threshold, then 5 s, with 0.85 s left for U3,
 U16 and U4.
 
 ### The effect core (M6 U3)
@@ -84,7 +86,7 @@ workstation, seven alternating cold starts of the U2 and U3 CLIs built in Releas
 | M6 U3, 3,973 constants | 4,217 ms (3,943–4,591) | 44–50 MB |
 
 The difference is within the run-to-run noise (an earlier pair of runs in the same session gave 4,461 and 4,289 ms).
-U3 stays under M6 KTD3's 5 s threshold; U2's bundle measured 0.15 s slower here than on 2026-11-10, so the headroom
+U3 stays under M6 KTD3's threshold, then 5 s; U2's bundle measured 0.15 s slower here than on 2026-11-10, so the headroom
 for U16 and U4 is about 0.7 s against this session's figures.
 
 ### Nullable values and `Math` (M6 U16)
@@ -100,7 +102,7 @@ the U3 and U16 bundles and sidecars, as above:
 | M6 U3, 3,973 constants | 4,095 ms (3,891–5,946) | 44–49 MB |
 | M6 U16, 3,993 constants | 3,936 ms (3,821–4,684) | 42–46 MB |
 
-The difference is within the run-to-run noise; U16 stays under M6 KTD3's 5 s threshold.
+The difference is within the run-to-run noise; U16 stays under M6 KTD3's threshold, then 5 s.
 
 ### The `decimal` model (M6 U4)
 
@@ -116,7 +118,7 @@ workstation, seven alternating cold starts of Release CLIs carrying the U16 and 
 | M6 U16, 3,993 constants | 4,286 ms (4,037–4,680) | 42–48 MB |
 | M6 U4, 4,098 constants | 4,548 ms (4,309–4,689) | 44–47 MB |
 
-U4 stays under M6 KTD3's 5 s threshold, about 0.45 s below it against this session's figures (U16's bundle measured
+U4 stays under M6 KTD3's threshold, then 5 s, about 0.45 s below it against this session's figures (U16's bundle measured
 0.35 s slower here than in the session above, so the machine's run-to-run noise is of the same size as the margin).
 
 ### The monadic translation (M6 U9)
@@ -168,7 +170,8 @@ from `warrant server status` after the request):
 | M6 complete, 4,112 constants | 4,053 ms (3,976–4,266) | 45–47 MB |
 
 The complete M6 bundle starts 1.25 s (44%) slower than M5b's and adds about 10 MB of GC heap. It stays under KTD3's
-5 s threshold, by about 0.95 s, and under the same ratio applied to this session's M5b baseline (1.7 × 2,807 ms, about
+threshold: by about 0.95 s against the 5 s in force when it was measured, and by about 5.95 s against the 10 s the owner
+set on 2026-11-11 (#178). It also stays under the same ratio applied to this session's M5b baseline (1.7 × 2,807 ms, about
 4.8 s). The bundle stays a verified load (KTD3, M5b KTD19).
 
 Regenerate `warrant-semantics.ndjson.gz` with `scripts/export-semantics.sh` after changing `lean/`.

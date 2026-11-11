@@ -194,7 +194,7 @@ and the design is explained chapter by chapter in [docs/m6/](docs/m6/README.md).
    the models and the walker use joined the bundle, which stays a verified
    load: each unit that grew it measured server start against the plan's 5 s
    threshold, and the complete bundle starts in 4.05 s on the reference
-   workstation.
+   workstation. The owner raised the threshold to 10 s on 2026-11-11 (#178).
 2. **Prove the route before building on it.** A go/no-go checkpoint proved
    three hand-built contract triples, one with a dependency, with Warrant's
    own `apply`, simp and `omega` before any contract was extracted.

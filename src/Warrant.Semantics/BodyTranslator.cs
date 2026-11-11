@@ -117,7 +117,14 @@ internal sealed partial class BodyTranslator
     {
         if (Effects.Construct(e) is { } construct)
         {
-            throw new TranslationException(null, $"the {construct} can raise an exception, so it is translated only in a method that can raise.");
+            // In a Spec expression, a partial operation is its total value with a well-definedness obligation (M6 KTD26).
+            return _spec is not null
+                ? SpecPartial(e, env, construct)
+                : throw new TranslationException(null, $"the {construct} can raise an exception, so it is translated only in a method that can raise.");
+        }
+        if (_spec is not null && SpecGuarded(e, env) is { } guarded)
+        {
+            return guarded;
         }
         switch (e)
         {
@@ -291,6 +298,11 @@ internal sealed partial class BodyTranslator
     /// <summary>A <c>bool</c> expression as a condition (docs/m4/05): a proposition and its fixed <c>Decidable</c> instance.</summary>
     private Condition Cond(VirExpr e, Env env) => e switch
     {
+        // In a Spec expression, the right operand of && and || and the conclusion of Spec.Implies are evaluated only
+        // under the left one's outcome, which guards their well-definedness obligations (M6 KTD26).
+        LogicalExpr { Op: LogicalOp.And } l when _spec is not null => SpecCond(l.L, env, (x, y) => Conditions.And(x, y), x => x.Prop, l.R),
+        LogicalExpr { Op: LogicalOp.Or } l when _spec is not null => SpecCond(l.L, env, (x, y) => Conditions.Or(x, y), x => Expr.App(Init.Not, x.Prop), l.R),
+        ImpliesExpr i when _spec is not null => SpecCond(i.A, env, (x, y) => Conditions.Implies(x, y), x => x.Prop, i.B),
         CompareExpr c => Compare(c, env),
         LogicalExpr { Op: LogicalOp.And or LogicalOp.AndEager } l => Conditions.And(Cond(l.L, env), Cond(l.R, env)),
         LogicalExpr { Op: LogicalOp.Or or LogicalOp.OrEager } l => Conditions.Or(Cond(l.L, env), Cond(l.R, env)),

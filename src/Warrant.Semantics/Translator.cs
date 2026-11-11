@@ -26,7 +26,8 @@ public static class Translator
         // M6 KTD11: the one effect inference decides which units translate into ClrM.
         var callees = new CalleeEffects(
             Effects.Analyze(ordered),
-            ordered.Where(Effects.HasRequires).Select(u => u.Key).ToHashSet(StringComparer.Ordinal));
+            ordered.Where(Effects.HasRequires).Select(u => u.Key).ToHashSet(StringComparer.Ordinal),
+            ordered.ToDictionary(u => u.Key, StringComparer.Ordinal));
         var run = new Run(bundle);
         var result = new List<TranslatedUnit>();
         foreach (var unit in ordered)
@@ -123,18 +124,23 @@ public static class Translator
                 throw new TranslationException(unit.Key, "a unit with external dependencies is not translated until M6 U19.");
             }
             bool raising = callees.Analysis.IsRaising(unit.Key);
+            bool recursive = BodyTranslator.IsRecursive(unit) || callees.Analysis.IsRecursive(unit.Key);
             switch (unit.Kind)
             {
-                case VirUnitKind.Function when raising && (BodyTranslator.IsRecursive(unit) || callees.Analysis.IsRecursive(unit.Key)):
+                case VirUnitKind.Function when raising && recursive:
                     // Extraction rejects this (KTD11): the recursive call would sit inside a bind, out of the decrease obligations' sight.
                     throw new TranslationException(unit.Key, "a recursive method that can raise an exception is not translated (recursion with effects).");
+                case VirUnitKind.Function when recursive && HasContract(unit):
+                    // Extraction rejects this (KTD11): the recursive call could not use the method's own unproved triple.
+                    throw new TranslationException(unit.Key, "a recursive method with Spec.Requires or Spec.Ensures is not translated (contract on a recursive method).");
                 case VirUnitKind.Function when raising:
                     {
-                        // M6 KTD4, KTD11: a unit that can raise is a ClrM program over an opaque world.
-                        var (type, value) = new BodyTranslator(types, callees).MonadicFunction(unit);
+                        // M6 KTD4, KTD11: a unit that can raise is a ClrM program over an opaque world, and KTD12: it has a
+                        // contract obligation.
+                        var (type, value) = new BodyTranslator(types, callees) { Contracted = true }.MonadicFunction(unit);
                         var decl = TypeDeclarations.Definition(name, type, value, Regular);
                         Declare(unit.Key, name, display, decl.Value.Hints);
-                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null);
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null) { Contract = Contract(unit, name, display, types, callees, raising: true) };
                     }
                 case VirUnitKind.Theorem when raising:
                     // Extraction rejects this (KTD11): a theorem is a Prop, and Lean's total operations would make a / 0 == 0 provable.
@@ -156,10 +162,11 @@ public static class Translator
                     }
                 case VirUnitKind.Function:
                     {
-                        var (type, value) = new BodyTranslator(types, callees).Function(unit);
+                        var (type, value) = new BodyTranslator(types, callees) { Contracted = true }.Function(unit);
                         var decl = TypeDeclarations.Definition(name, type, value, Regular);
                         Declare(unit.Key, name, display, decl.Value.Hints);
-                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null);
+                        // M6 KTD12: a pure unit has an obligation only when it has a contract; M4's and M5a's have none.
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null) { Contract = Contract(unit, name, display, types, callees, raising: false) };
                     }
                 case VirUnitKind.Theorem:
                     {
@@ -197,6 +204,35 @@ public static class Translator
                 default:
                     throw new TranslationException(unit.Key, $"unknown unit kind {unit.Kind}.");
             }
+        }
+
+        private static bool HasContract(VirUnit unit) =>
+            unit.Body is BlockStmt block && block.Stmts.Any(s => s is RequiresStmt or EnsuresStmt);
+
+        /// <summary>
+        /// A function unit's contract obligation (M6 KTD12), with its names recorded; null for a pure unit without a
+        /// contract.
+        /// </summary>
+        private ContractObligation? Contract(VirUnit unit, Name name, string display, TypeTable types, CalleeEffects callees, bool raising)
+        {
+            var contract = new BodyTranslator(types, callees).Contract(unit, name, raising);
+            if (contract is null)
+            {
+                // A script with nothing to prove would be dropped unread (M6 KTD16).
+                return unit.Script is null
+                    ? null
+                    : throw new TranslationException(unit.Key, "it has a [ProofFor] script, but no contract obligation to prove: it has no Spec.Requires or Spec.Ensures and cannot raise.");
+            }
+            foreach (var wd in contract.WellDefinedness)
+            {
+                Declare(unit.Key, wd.Theorem.Name, $"{display} (well-definedness {wd.Index})", null);
+            }
+            Declare(unit.Key, contract.Theorem.Name, $"{display} (contract)", null);
+            if (contract.Spec is { } spec)
+            {
+                Declare(unit.Key, spec.Name, $"{display} (contract spec)", null);
+            }
+            return contract;
         }
 
         /// <summary>Lean's height rule: one more than the largest <c>regular</c> height among the definitions the value mentions.</summary>

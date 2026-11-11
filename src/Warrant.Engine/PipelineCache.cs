@@ -114,9 +114,10 @@ public static partial class Pipeline
         private bool Admits(string key) => Recheck || _needed.Contains(key);
 
         /// <summary>
-        /// A cached recursive definition, translated afresh and admitted with the decrease proofs and equation lemma of its
-        /// certificate, each checked by the kernel (KTD15, KTD16). One the kernel rejects is proved again, or under recheck
-        /// fails the unit; a unit that ran is stored again.
+        /// A cached recursive definition, or a function with a contract obligation (M6 U10), translated afresh and admitted
+        /// with the decrease proofs and equation lemma, or the contract's proofs, of its certificate, each checked by the
+        /// kernel (KTD15, KTD16). One the kernel rejects is proved again, or under recheck fails the unit; a unit that ran
+        /// is stored again.
         /// </summary>
         private void AdmitFromCertificate(TranslatedUnit unit, UnitOutcome hit)
         {
@@ -227,6 +228,18 @@ public static partial class Pipeline
                     _owners.TryAdd(decrease.Theorem.Name, unit.Key);
                 }
                 _owners.TryAdd(recursion.Equation.Name, unit.Key);
+            }
+            if (unit.Contract is { } contract)
+            {
+                foreach (var wd in contract.WellDefinedness)
+                {
+                    _owners.TryAdd(wd.Theorem.Name, unit.Key);
+                }
+                _owners.TryAdd(contract.Theorem.Name, unit.Key);
+                if (contract.Spec is { } spec)
+                {
+                    _owners.TryAdd(spec.Name, unit.Key);
+                }
             }
         }
     }

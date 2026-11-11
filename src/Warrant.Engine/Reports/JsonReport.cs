@@ -171,6 +171,7 @@ public static class JsonReport
         VirAssumptionKind.Closed => "closed",
         VirAssumptionKind.ClosedEquality => "closed-equality",
         VirAssumptionKind.ReferencedSource => "referenced-source",
+        VirAssumptionKind.CallerPrecondition => "caller-precondition",
         _ => throw new ArgumentException($"unknown assumption kind {kind}"),
     };
 
@@ -180,6 +181,7 @@ public static class JsonReport
         "closed" => VirAssumptionKind.Closed,
         "closed-equality" => VirAssumptionKind.ClosedEquality,
         "referenced-source" => VirAssumptionKind.ReferencedSource,
+        "caller-precondition" => VirAssumptionKind.CallerPrecondition,
         _ => throw new ArgumentException($"unknown assumption kind '{s}'"),
     };
 }

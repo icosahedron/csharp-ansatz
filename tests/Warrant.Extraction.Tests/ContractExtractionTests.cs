@@ -58,6 +58,35 @@ public class ContractExtractionTests
             body.Stmts);
     }
 
+    /// <summary>
+    /// M6 U10, KTD20 (#89): a method's own <c>Spec.Requires</c> is an assumption of the method, since nothing checks it at
+    /// run time or at a call from unverified code; a method with only <c>Spec.Ensures</c> assumes nothing of its callers.
+    /// </summary>
+    [Fact]
+    public void AMethodsOwnRequiresIsACallerPreconditionAssumption()
+    {
+        var result = Members("""
+                [Verified]
+                public static int Halve(int x)
+                {
+                    Spec.Requires(x >= 0);
+                    return x / 2;
+                }
+
+                [Verified]
+                public static int Same(int x)
+                {
+                    Spec.Ensures<int>(r => r == x);
+                    return x;
+                }
+            """);
+
+        Assert.Equal(
+            [new VirAssumption(VirAssumptionKind.CallerPrecondition, "M:C.Halve(System.Int32)")],
+            Unit(result, "M:C.Halve(System.Int32)").Assumptions);
+        Assert.Empty(Unit(result, "M:C.Same(System.Int32)").Assumptions);
+    }
+
     [Fact]
     public void ADecreasesRequiresEnsuresPrefixIsReadInOrderAndAnAssertMayStandAnywhere()
     {

@@ -179,6 +179,27 @@ internal static class Init
     public static readonly Expr DivInt64 = C("instDivInt64");
     public static readonly Expr ModInt64 = C("instModInt64");
 
+    // Contract obligations (M6 U10; plan M6 KTD12, lean/Warrant/Effect.lean): Std.Do triples over ClrM σ, whose post-shape is
+    // .except ClrExn (.arg σ .pure), with the WP instance instance resolution finds for ClrM σ (ExceptT.instWP over
+    // State.instWP), one-state assertions ⌜p⌝ as SPred.pure at PostShape.args, and the postcondition as the pair Prod.mk
+    // of the normal return's assertion and the exception conditions, whose exception half is ClrExn.Allowed. Every
+    // level is 0 except PUnit.unit's (the end of the exception conditions, at level 1) and True/False's (none).
+    public static readonly Expr Triple = C("Std.Do.Triple", Level.Zero, Level.Zero);
+    public static readonly Expr ExceptTInstWP = C("Std.Do.ExceptT.instWP", Level.Zero, Level.Zero);
+    public static readonly Expr StateInstWP = C("Std.Do.State.instWP", Level.Zero);
+    public static readonly Expr PostShapeExcept = C("Std.Do.PostShape.except", Level.Zero);
+    public static readonly Expr PostShapeArg = C("Std.Do.PostShape.arg", Level.Zero);
+    public static readonly Expr PostShapePure = C("Std.Do.PostShape.pure", Level.Zero);
+    public static readonly Expr PostShapeArgs = C("Std.Do.PostShape.args", Level.Zero);
+    public static readonly Expr SPredPure = C("Std.Do.SPred.pure", Level.Zero);
+    public static readonly Expr Assertion = C("Std.Do.Assertion", Level.Zero);
+    public static readonly Expr ExceptConds = C("Std.Do.ExceptConds", Level.Zero);
+    public static readonly Expr ProdMk = C("Prod.mk", Level.Zero, Level.Zero);
+    public static readonly Expr PUnitUnit = C("PUnit.unit", Level.One);
+    public static readonly Expr ClrExnAllowed = C("Warrant.ClrExn.Allowed");
+    public static readonly Expr PropTrue = C("True");
+    public static readonly Expr PropFalse = C("False");
+
     /// <summary>The binder name of a constant function's or an implication's unused argument.</summary>
     public static readonly Name Unused = Name.From("x");
 

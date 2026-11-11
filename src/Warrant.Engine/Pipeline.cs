@@ -299,6 +299,7 @@ public static partial class Pipeline
         {
             var translation = Translate();
             Names = NamesOf(translation);
+            RecordContracts(translation);
             if (Cached.Count > 0)
             {
                 _needed = NeededBy(translation);
@@ -320,7 +321,7 @@ public static partial class Pipeline
                         Elapsed.Add(unit.Key, TimeSpan.Zero);
                         continue;
                     }
-                    if (hit is TranslatedOutcome && unit.Recursion is not null && Admits(unit.Key))
+                    if (hit is TranslatedOutcome && (unit.Recursion is not null || unit.Contract is not null) && Admits(unit.Key))
                     {
                         AdmitFromCertificate(unit, hit);
                         continue;
@@ -692,7 +693,7 @@ public static partial class Pipeline
                 {
                     var name = units.TryGetValue(dep, out var depUnit) ? Display(depUnit) : outcome.DisplayName;
                     return new SkippedOutcome(
-                        unit.Unit.Key, unit.Unit.Kind, Display(unit), Assumptions(unit), dep, $"it depends on {name}, which was not admitted.");
+                        unit.Unit.Key, unit.Unit.Kind, Display(unit), Assumptions(unit), dep, SkipReason(dep, name, outcome));
                 }
             }
             return null;

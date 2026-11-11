@@ -106,6 +106,11 @@ public static partial class Pipeline
                     return new FailedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, ex.Message);
                 }
             }
+            if (translated.Contract is { } contract)
+            {
+                // M6 KTD12: the definition, then its contract obligation, as a recursive method's decrease proofs.
+                return AdmitContract(unit, translated, contract, assumptions, admitted, definitionBudget);
+            }
             return new TranslatedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, [.. admitted]);
         }
 
@@ -356,66 +361,15 @@ public static partial class Pipeline
         {
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
-            var tactics = runner.State;
-
-            UnitOutcome NotProved(string message, IEnumerable<MVarId> goals, TacticNode? at) => new NotProvedOutcome(
-                key, kind, display, assumptions, message, printer.PpGoals(meta.MCtx, goals), at is null ? null : VirTree.IdOf(unit.Unit, at),
-                Counterexample.Search(Env, unit.Unit, shell, run.Definitions, options.CancellationToken));
-
-            Expr proof;
-            try
+            var parameters = unit.Unit.Params ?? VirList<VirParam>.Empty;
+            var (proof, failure) = Search(
+                unit, shell, shell.Script ?? VirList<TacticNode>.Empty, [.. parameters.Select(p => Name.From(p.Name))], display, assumptions, budget, meta, printer, runner,
+                () => Counterexample.Search(Env, unit.Unit, shell, run.Definitions, options.CancellationToken));
+            if (failure is not null)
             {
-                var goal = meta.MkFreshExprSyntheticOpaqueMVar(shell.Type);
-                tactics.Goals = [goal.Id];
-                var parameters = unit.Unit.Params ?? VirList<VirParam>.Empty;
-                if (parameters.Count > 0)
-                {
-                    tactics.LiftMetaTactic1(g => meta.IntroN(g, parameters.Count, [.. parameters.Select(p => Name.From(p.Name))]).Goal);
-                }
-                foreach (var node in shell.Script ?? VirList<TacticNode>.Empty)
-                {
-                    runner.Run(node);
-                }
-                if (tactics.GetUnsolvedGoals() is { IsEmpty: false } unsolved)
-                {
-                    return NotProved("unsolved goals", unsolved, null);
-                }
-                proof = meta.InstantiateMVars(goal);
-                TacticFuelUsed = meta.Budget.FuelUsed;
+                return failure;
             }
-            catch (TacticUnavailableException ex)
-            {
-                return NotProved(ex.Message, tactics.GetUnsolvedGoals(), runner.FailedAt);
-            }
-            catch (Exception ex) when (ex is MetaResourceException or KernelResourceException)
-            {
-                return budget.Undecided(key, kind, display, assumptions, ex, "running the proof script");
-            }
-            catch (InsufficientExecutionStackException)
-            {
-                return new UndecidedOutcome(key, kind, display, assumptions, "the proof script ran out of stack.");
-            }
-            catch (MetaException ex) when (runner.FailedAt is { } failedAt)
-            {
-                var goals = ex is TacticException { Goal: { } g } && meta.MCtx.FindDecl(g) is not null ? [g] : tactics.GetUnsolvedGoals();
-                return NotProved(ex.Message, goals, failedAt);
-            }
-#pragma warning disable CA1031 // KTD19: an unexpected failure in Meta ends this theorem as Warrant's bug, not the whole run.
-            catch (Exception ex) when (ex is not OperationCanceledException)
-#pragma warning restore CA1031
-            {
-                return new InternalErrorOutcome(key, kind, display, assumptions, $"Meta failed unexpectedly: {ex.GetType().Name}: {ex.Message}");
-            }
-
-            if (options.TamperWithProof is { } tamper)
-            {
-                proof = tamper(proof);
-            }
-            if (proof.HasExprMVar || proof.HasLevelMVar || proof.HasFVar)
-            {
-                return new InternalErrorOutcome(key, kind, display, assumptions, "the proof script closed every goal, but the proof term still has a hole or a free variable.");
-            }
-            var declaration = shell.WithProof(proof);
+            var declaration = shell.WithProof(proof!);
             try
             {
                 Kernel.Kernel.Add(Env, declaration, budget.Kernel);
@@ -433,6 +387,78 @@ public static partial class Pipeline
                 return new FailedOutcome(key, kind, display, assumptions, $"the kernel admitted {shell.Name} with a type other than its statement.");
             }
             return new ProvedOutcome(key, kind, display, assumptions, ProofKind.Script, declaration);
+        }
+
+        /// <summary>
+        /// A proof script's search (docs/m5a/04, "The loop"; KTD19): the goal <c>?g : statement</c>, its first binders
+        /// introduced under <paramref name="names"/>, then <paramref name="script"/>; the instantiated <c>?g</c> when no goal
+        /// is left, with no hole or free variable, else the unit's outcome. Each way it can fail is caught as what it is.
+        /// </summary>
+        private (Expr? Proof, UnitOutcome? Failure) Search(
+            EngineUnit unit, TheoremShell shell, VirList<TacticNode> script, List<Name> names, string display, ImmutableArray<UnitAssumption> assumptions,
+            TheoremBudget budget, MetaM meta, GoalPrinter printer, TacticRunner runner, Func<ImmutableArray<CounterexampleValue>> counterexample)
+        {
+            var key = unit.Unit.Key;
+            var kind = unit.Unit.Kind;
+            var tactics = runner.State;
+
+            (Expr?, UnitOutcome?) NotProved(string message, IEnumerable<MVarId> goals, TacticNode? at) => (null, new NotProvedOutcome(
+                key, kind, display, assumptions, message, printer.PpGoals(meta.MCtx, goals), at is null ? null : VirTree.IdOf(unit.Unit, at),
+                counterexample()));
+
+            Expr proof;
+            try
+            {
+                var goal = meta.MkFreshExprSyntheticOpaqueMVar(shell.Type);
+                tactics.Goals = [goal.Id];
+                if (names.Count > 0)
+                {
+                    tactics.LiftMetaTactic1(g => meta.IntroN(g, names.Count, names).Goal);
+                }
+                foreach (var node in script)
+                {
+                    runner.Run(node);
+                }
+                if (tactics.GetUnsolvedGoals() is { IsEmpty: false } unsolved)
+                {
+                    return NotProved("unsolved goals", unsolved, null);
+                }
+                proof = meta.InstantiateMVars(goal);
+                TacticFuelUsed = Math.Max(TacticFuelUsed, meta.Budget.FuelUsed);
+            }
+            catch (TacticUnavailableException ex)
+            {
+                return NotProved(ex.Message, tactics.GetUnsolvedGoals(), runner.FailedAt);
+            }
+            catch (Exception ex) when (ex is MetaResourceException or KernelResourceException)
+            {
+                return (null, budget.Undecided(key, kind, display, assumptions, ex, "running the proof script"));
+            }
+            catch (InsufficientExecutionStackException)
+            {
+                return (null, new UndecidedOutcome(key, kind, display, assumptions, "the proof script ran out of stack."));
+            }
+            catch (MetaException ex) when (runner.FailedAt is { } failedAt)
+            {
+                var goals = ex is TacticException { Goal: { } g } && meta.MCtx.FindDecl(g) is not null ? [g] : tactics.GetUnsolvedGoals();
+                return NotProved(ex.Message, goals, failedAt);
+            }
+#pragma warning disable CA1031 // KTD19: an unexpected failure in Meta ends this theorem as Warrant's bug, not the whole run.
+            catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+            {
+                return (null, new InternalErrorOutcome(key, kind, display, assumptions, $"Meta failed unexpectedly: {ex.GetType().Name}: {ex.Message}"));
+            }
+
+            if (options.TamperWithProof is { } tamper)
+            {
+                proof = tamper(proof);
+            }
+            if (proof.HasExprMVar || proof.HasLevelMVar || proof.HasFVar)
+            {
+                return (null, new InternalErrorOutcome(key, kind, display, assumptions, "the proof script closed every goal, but the proof term still has a hole or a free variable."));
+            }
+            return (proof, null);
         }
 
         /// <summary>

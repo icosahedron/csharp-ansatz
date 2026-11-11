@@ -418,6 +418,62 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
     }
 
     [Fact]
+    public void AContractObligationIsCachedAsADecreaseProofIsAndAChangedEnsuresMissesIt()
+    {
+        // M6 U10: a method's contract obligation is admitted after its definition and cached with it, as a recursive
+        // method's decrease proofs are; its Spec.Ensures is in the unit's VIR, so editing it changes the unit's key.
+        const string source = """
+            public static class S
+            {
+                [Verified]
+                public static int NonNegative(int x)
+                {
+                    Spec.Ensures<int>(r => r >= 0);
+                    return x < 0 ? 0 : x;
+                }
+
+                [ProofFor(nameof(NonNegative))]
+                static Proof NonNegativeProof() =>
+                    Prove.Contract().By(
+                        Tactic.Apply(Lean.Const("Std.Do.Triple.pure")),
+                        Tactic.Unfold(nameof(NonNegative)),
+                        Tactic.Simp(Lean.Const("Std.Do.SPred.entails_1"), Lean.Const("Std.Do.SPred.apply_pure_cons"), Lean.Const("Std.Do.SPred.down_pure_nil")),
+                        Tactic.Omega());
+
+                [Theorem]
+                static Proof NeverNegative(int x) =>
+                    Prove.That(NonNegative(x) >= 0).By(Tactic.Apply(Lean.Const("Cs.S.«NonNegative(System.Int32)».$contract_spec")));
+            }
+            """;
+        const string nonNegative = "M:S.NonNegative(System.Int32)";
+        const string neverNegative = "M:S.NeverNegative(System.Int32)";
+        var units = Units(source);
+        var cold = NewService().Verify(Request(units));
+        Assert.Equal(OutcomeKind.Proved, Result(cold, neverNegative).Outcome.Kind);
+
+        var entry = new FileResultCache().Read(Dir, KeyOf(units, nonNegative))!;
+        Assert.Collection(
+            Assert.IsType<TranslatedOutcome>(entry.Outcome).Declarations,
+            d => Assert.Equal("Cs.S.«NonNegative(System.Int32)»", Assert.IsType<DefinitionDecl>(d).Value.Name.ToString()),
+            d => Assert.Equal("Cs.S.«NonNegative(System.Int32)».$contract", Assert.IsType<TheoremDecl>(d).Value.Name.ToString()),
+            d => Assert.Equal("Cs.S.«NonNegative(System.Int32)».$contract_spec", Assert.IsType<TheoremDecl>(d).Value.Name.ToString()));
+
+        // A theorem that misses next to the cached method uses its spec lemma, admitted from the method's certificate.
+        const string renamed = "M:S.StillNeverNegative(System.Int32)";
+        var lemma = NewService().Verify(Request(Units(source.Replace("static Proof NeverNegative(", "static Proof StillNeverNegative(", StringComparison.Ordinal))));
+        Assert.True(Result(lemma, nonNegative).FromCache);
+        Assert.False(Result(lemma, renamed).FromCache);
+        Assert.Equal(OutcomeKind.Proved, Result(lemma, renamed).Outcome.Kind);
+
+        var weaker = Units(source.Replace("r => r >= 0", "r => r >= -1", StringComparison.Ordinal));
+        Assert.NotEqual(KeyOf(units, nonNegative), KeyOf(weaker, nonNegative));
+        var changed = NewService().Verify(Request(weaker));
+        Assert.False(Result(changed, nonNegative).FromCache);
+        Assert.Equal(OutcomeKind.Translated, Result(changed, nonNegative).Outcome.Kind);
+        Assert.Equal(Texts(cold).Count, Texts(changed).Count);
+    }
+
+    [Fact]
     public void ATheoremThatMissesNextToTheCachedLemmaItNamesIsProvedAsInAColdRun()
     {
         const string source = """

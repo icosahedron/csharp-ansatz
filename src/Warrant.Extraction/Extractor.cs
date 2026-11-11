@@ -1114,6 +1114,12 @@ public static partial class Extractor
             {
                 DependencyAssumptions(walker, result);
             }
+            // M6 KTD20 (#89): the method's own Spec.Requires, which a verified caller proves at its call, but which nothing
+            // checks at run time or at a call from code Warrant does not verify.
+            if (c.Kind == VirUnitKind.Function && c.Body is BlockStmt body && body.Stmts.Any(s => s is RequiresStmt))
+            {
+                result.Add(new VirAssumption(VirAssumptionKind.CallerPrecondition, c.Key));
+            }
 
             var closed = new List<string>(c.Deps.Where(d => _candidates.TryGetValue(d, out var dep) && dep.Type is not null && Symbols.IsClosed((ITypeSymbol)dep.Symbol)));
             if (c.Type is not null && Symbols.IsClosed(c.Type.Symbol))

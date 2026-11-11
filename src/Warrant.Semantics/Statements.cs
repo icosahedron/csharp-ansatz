@@ -36,8 +36,9 @@ internal sealed partial class BodyTranslator
             // `throw new E(…)` raises `thrown "T:E"` (M6 KTD4); control does not reach the rest.
             ThrowStmt t when _sigma is not null => Monadic.Throw(_sigma, Monadic.ValueType(k.ResultType), Monadic.Thrown(t.Exception)),
             AssertStmt a when _sigma is not null => Assert(a, env, rest),
-            // U10 states the contract obligation; translating the body alone would drop the contract unread.
-            RequiresStmt or EnsuresStmt => throw new TranslationException(null, "a method with Spec.Requires or Spec.Ensures is not translated until M6 U10, which states its contract."),
+            // Claims, never run: the contract obligation states them (M6 KTD12, Contracts.cs).
+            RequiresStmt or EnsuresStmt when Contracted => rest.Invoke(env),
+            RequiresStmt or EnsuresStmt => throw new TranslationException(null, "a contract would be dropped unread: the unit's obligation is not being stated."),
             var other => throw new TranslationException(null, $"unsupported statement {other.GetType().Name}."),
         };
     }

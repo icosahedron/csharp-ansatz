@@ -190,8 +190,8 @@ static Proof NeverNegative(int x) =>
 agree with C#'s there, and may appear in a theorem statement; `omega` reads them through Warrant's division lemmas.
 `Math.Min` and `Math.Max` cannot throw either, and `Warrant.Int32.max_def` unfolds `Math.Max` to its `if`. A method that
 divides by a variable, or uses checked arithmetic, `Math.Abs` or a nullable read, can throw: it becomes a program in
-M6's effect monad, and what it may throw is for its contract obligation to prove (from M6 U10 and U11), not for a
-theorem, which cannot call it. These examples are
+M6's effect monad, and what it may throw is for its contract obligation to prove (M6 U10 states it, U11's default
+procedure proves it), not for a theorem, which cannot call it. These examples are
 not in the corpus: `PureDivisionAndMathMaxAreProvable` in `tests/Warrant.Engine.Tests/TheoremTests.cs` proves all
 three (`dotnet test tests/Warrant.Engine.Tests --filter PureDivisionAndMathMaxAreProvable`).
 
@@ -225,6 +225,38 @@ that mentions one (`a > 0m`) is not proved, and nothing splits the `if` that `Ma
 the effect monad, for its contract obligation (from M6 U10 and U11). These examples are not in the corpus:
 `DecimalEqualityAndOrderAreProvable` in `tests/Warrant.Engine.Tests/TheoremTests.cs` proves all four
 (`dotnet test tests/Warrant.Engine.Tests --filter DecimalEqualityAndOrderAreProvable`).
+
+## A contract proved by a script (M6)
+
+```csharp
+[Verified]
+public static int NonNegative(int x)
+{
+    Spec.Ensures<int>(r => r >= 0);
+    return x < 0 ? 0 : x;
+}
+
+[ProofFor(nameof(NonNegative))]
+static Proof NonNegativeProof() =>
+    Prove.Contract().By(
+        Tactic.Apply(Lean.Const("Std.Do.Triple.pure")),
+        Tactic.Unfold(nameof(NonNegative)),
+        Tactic.Simp(Lean.Const("Std.Do.SPred.entails_1"), Lean.Const("Std.Do.SPred.apply_pure_cons"), Lean.Const("Std.Do.SPred.down_pure_nil")),
+        Tactic.Omega());
+
+[Theorem]
+static Proof NeverNegative(int x) =>
+    Prove.That(NonNegative(x) >= 0).By(Tactic.Apply(Lean.Const("Cs.S.«NonNegative(System.Int32)».$contract_spec")));
+```
+
+A method's `Spec.Requires` and `Spec.Ensures` are one obligation, a `Std.Do` triple
+`NonNegative.$contract : ∀ σ x, ⦃⌜True⌝⦄ pure (NonNegative x) ⦃⇓r => ⌜r ≥ 0⌝, allowed⦄`, which the `[ProofFor]` script
+proves from the triple: `Triple.pure` leaves `⌜True⌝ ⊢ₛ ⌜NonNegative x ≥ 0⌝`, and the three `SPred` lemmas turn it into a
+plain goal for `omega`. Once proved, a pure method's contract is also the lemma `NonNegative.$contract_spec : ∀ x,
+NonNegative x ≥ 0`, which a theorem can apply without unfolding the method. Until M6 U11's default procedure, an
+obligation without such a script, or with one that starts with `Tactic.VcGen()`, is reported as not proved, and so is
+every method that can throw. `AProofForScriptProvesAPureMethodsContractAndItsSpecLemmaIsAvailableToCallers` in
+`tests/Warrant.Engine.Tests/ContractTests.cs` runs this example, in a class `S`.
 
 ## Facts about particular inputs (M4)
 

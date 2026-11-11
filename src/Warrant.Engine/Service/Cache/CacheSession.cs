@@ -1,5 +1,6 @@
 using System.Text;
 using Warrant.Engine.Service.Cache;
+using Warrant.Kernel;
 using Warrant.Semantics;
 using Warrant.Vir;
 
@@ -189,14 +190,23 @@ public sealed partial class VerificationService
         }
 
         /// <summary>
-        /// The entry for a finished unit, or null when its outcome is not cached: only theorems and recursive definitions
-        /// are, and of their outcomes only proofs, false claims, unproved ones and fuel exhaustion (KTD14).
+        /// The entry for a finished unit, or null when its outcome is not cached: only theorems, recursive definitions and
+        /// definitions with a contract obligation (M6 U10) are, and of their outcomes only proofs, false claims, unproved
+        /// ones and fuel exhaustion (KTD14).
         /// </summary>
+        /// <summary>
+        /// Whether a definition's outcome came from a proof search of its contract obligation: its proof admitted with
+        /// it, or the obligation not proved or undecided.
+        /// </summary>
+        private static bool HasObligation(UnitOutcome outcome) =>
+            outcome.UnitKind == VirUnitKind.Function
+            && (outcome is NotProvedOutcome or UndecidedOutcome || outcome.Declarations.Any(d => d is TheoremDecl));
+
         private CacheEntry? Entry(Pipeline.UnitFinish finish)
         {
             var outcome = finish.Outcome;
             var unit = _units[outcome.Key].Unit;
-            if (unit.Kind != VirUnitKind.Theorem && !Translator.IsRecursive(unit))
+            if (unit.Kind != VirUnitKind.Theorem && !Translator.IsRecursive(unit) && !HasObligation(outcome))
             {
                 return null;
             }

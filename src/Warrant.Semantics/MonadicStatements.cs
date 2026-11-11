@@ -11,7 +11,8 @@ namespace Warrant.Semantics;
 /// </summary>
 /// <param name="Analysis">The effect analysis of the units being translated.</param>
 /// <param name="Requires">The keys of the functions whose body has a <c>Spec.Requires</c>.</param>
-internal sealed record CalleeEffects(EffectAnalysis Analysis, IReadOnlySet<string> Requires);
+/// <param name="Units">The units being translated, by key: a <c>Spec</c> expression states a callee's precondition (KTD26).</param>
+internal sealed record CalleeEffects(EffectAnalysis Analysis, IReadOnlySet<string> Requires, IReadOnlyDictionary<string, VirUnit> Units);
 
 /// <summary>
 /// The terms of the effect monad <c>Warrant.ClrM σ α := ExceptT ClrExn (StateM σ) α</c> (plan M6 KTD4), in the shapes Lean

@@ -37,6 +37,12 @@ public static class EmittedConstants
         .. DefaultSimpSet.CuratedLemmas,
         .. DefaultSimpSet.WarrantLemmas,
 
+        // A pure method's f.$contract_spec, derived from f.$contract at the world Unit (M6 U10): f.$contract Unit params () h,
+        // with True.intro for a method without Spec.Requires.
+        Name.Parse("Unit"),
+        Name.Parse("Unit.unit"),
+        Name.Parse("True.intro"),
+
         // Tactic.Omega(): the omega-prep set (KTD13) and every constant omega's proofs are built from (KTD12).
         .. OmegaPrepSet.Names,
         .. OmegaNames.All,

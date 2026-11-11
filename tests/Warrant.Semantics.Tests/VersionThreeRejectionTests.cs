@@ -3,10 +3,10 @@ using Warrant.Vir;
 namespace Warrant.Semantics.Tests;
 
 /// <summary>
-/// VIR version 3's forms (plan M6 U6) that M6 U9 and U21 do not translate: each is a translation error, never silently
-/// accepted or translated as something else. Contracts wait for U10, and async, dependencies and contract units for U19;
-/// an enum's underlying type is never decimal. The forms U9 translates are in <see cref="MonadicTranslationTests"/>, and
-/// U21's decimal forms in <see cref="DecimalTranslationTests"/>.
+/// VIR version 3's forms (plan M6 U6) that M6 U9, U10 and U21 do not translate: each is a translation error, never
+/// silently accepted or translated as something else. Async, dependencies and contract units wait for U19; an enum's
+/// underlying type is never decimal. The forms U9 translates are in <see cref="MonadicTranslationTests"/>, U10's
+/// contracts in <see cref="ContractObligationTests"/>, and U21's decimal forms in <see cref="DecimalTranslationTests"/>.
 /// </summary>
 public sealed class VersionThreeRejectionTests(SemanticsBundleFixture bundle) : IClassFixture<SemanticsBundleFixture>
 {
@@ -30,19 +30,13 @@ public sealed class VersionThreeRejectionTests(SemanticsBundleFixture bundle) : 
 
     public static TheoryData<string> Cases => new()
     {
-        "unit return", "eval", "requires", "ensures", "requires in a raising method", "await", "external call",
-        "decimal enum", "contract unit", "dependencies",
+        "unit return", "eval", "await", "external call", "decimal enum", "contract unit", "dependencies",
     };
 
     private static VirUnit[] Units(string name) => name switch
     {
         "unit return" => [Fn(Block(), VirType.Unit)],
         "eval" => [Fn(Block(new EvalStmt(X), new ReturnStmt(X)))],
-        "requires" => [Fn(Block(new RequiresStmt(LitExpr.Bool(true)), new ReturnStmt(X)))],
-        "ensures" => [Fn(Block(new EnsuresStmt(null, null, LitExpr.Bool(true)), new ReturnStmt(X)))],
-        // A contract on a method that can raise is no more translated than one on a pure method: it would be dropped unread.
-        "requires in a raising method" => [Fn(Block(new RequiresStmt(LitExpr.Bool(true)),
-            new ReturnStmt(new BinaryExpr(VirType.Int32, BinaryOp.Div, VirOverflow.Wrap, LitExpr.Int32(1), X))))],
         "await" => [Fn(new AwaitExpr(VirType.Int32, new CallExpr(VirType.Task(VirType.Int32), "M:C.G", VirList<VirExpr>.Empty)))],
         "external call" => [Fn(new ExternalCallExpr(VirType.Int32, 0, "M:I.Get", VirList<VirExpr>.Empty))],
         "decimal enum" => [Type("T:E", new EnumDefinition(VirType.Decimal, VirList.Of(new VirEnumMember("A", 0))))],
@@ -65,9 +59,6 @@ public sealed class VersionThreeRejectionTests(SemanticsBundleFixture bundle) : 
         string Message(string name) => Assert.Throws<TranslationException>(() => Translator.Translate(Units(name), bundle.Env)).Message;
         Assert.Contains("M6 U19", Message("dependencies"), StringComparison.Ordinal);
         Assert.Contains("M6 U19", Message("contract unit"), StringComparison.Ordinal);
-        Assert.Contains("M6 U10", Message("requires"), StringComparison.Ordinal);
-        Assert.Contains("M6 U10", Message("ensures"), StringComparison.Ordinal);
-        Assert.Contains("M6 U10", Message("requires in a raising method"), StringComparison.Ordinal);
         Assert.Contains("M6 U19", Assert.Throws<TranslationException>(() => Literals.Type(VirPrimitive.Unit)).Message, StringComparison.Ordinal);
     }
 }

@@ -108,6 +108,37 @@ public sealed class ReportTests(EngineFixture engine) : IClassFixture<EngineFixt
         Assert.Equal(unit.Assumptions.ToArray(), read.Find(unit.Key)!.Assumptions.ToArray());
     }
 
+    [Fact]
+    public void AMethodsOwnRequiresIsReportedAsACallerPreconditionInTextAndJson()
+    {
+        // M6 U10 (#89): the data and its text; M6 U12 words the report's contract sections.
+        var inputs = EngineCorpus.Inputs(EngineCorpus.Inline("""
+            public static class S
+            {
+                [Verified]
+                public static int Halve(int x)
+                {
+                    Spec.Requires(x >= 0);
+                    return x / 2;
+                }
+            }
+            """));
+        var report = AssumptionReports.Build(
+            Pipeline.Run(inputs, engine.Bundle, engine.Options), inputs, new ReportSettings(CheckOverflow: false, Bundle: "warrant-semantics test"));
+        var unit = report.Find("M:S.Halve(System.Int32)");
+        Assert.NotNull(unit);
+        var requires = Assert.Single(unit.Assumptions);
+        Assert.Equal(VirAssumptionKind.CallerPrecondition, requires.Kind);
+        const string Text = "S.Halve(int)'s Spec.Requires holds at every call: verified callers prove it, but nothing checks it at run time or at a call from code Warrant does not verify";
+        Assert.Equal(Text, requires.Text);
+        Assert.Contains($"Assumed (contracts):\n    - {Text}\n", MarkdownReport.Render(report), StringComparison.Ordinal);
+        var json = JsonReport.Render(report);
+        Assert.Contains("\"caller-precondition\"", json, StringComparison.Ordinal);
+        var read = JsonReport.Read(json);
+        Assert.Equal(json, JsonReport.Render(read));
+        Assert.Equal(unit.Assumptions.ToArray(), read.Find(unit.Key)!.Assumptions.ToArray());
+    }
+
     /// <summary>A unit using a closed class from a referenced assembly, extracted with that assembly's source.</summary>
     private AssumptionReport ReferencedReport()
     {

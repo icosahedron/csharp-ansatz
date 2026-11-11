@@ -280,6 +280,9 @@ public static class AssumptionReports
             VirAssumptionKind.ClosedEquality => $"{shown}'s equality agrees with identity on its named members",
             VirAssumptionKind.ReferencedSource =>
                 $"{shown} comes from a referenced assembly built from the source Warrant checked, as that project's build recorded it",
+            // M6 KTD20 (#89); M6 U12 words the report's contract sections.
+            VirAssumptionKind.CallerPrecondition =>
+                $"{shown}'s Spec.Requires holds at every call: verified callers prove it, but nothing checks it at run time or at a call from code Warrant does not verify",
             _ => throw new InvalidOperationException($"Unknown assumption kind {kind}."),
         };
         var inherited = !string.Equals(assumption.UnitKey, unitKey, StringComparison.Ordinal);

@@ -139,6 +139,12 @@ public sealed class TranslatedUnit
     /// equation lemma, to admit after them; null for other units.
     /// </summary>
     public RecursiveDefinition? Recursion { get; }
+
+    /// <summary>
+    /// For a function that has a contract, can raise, or calls a method with <c>Spec.Requires</c> (M6 KTD12), its contract
+    /// obligation, to prove and admit after <see cref="Declarations"/>; null for other units.
+    /// </summary>
+    public ContractObligation? Contract { get; init; }
 }
 
 /// <summary>The translation of a set of units (docs/m4/05): declarations in dependency order, and a display-name table.</summary>

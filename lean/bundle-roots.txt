@@ -687,3 +687,16 @@ instDivInt32
 instModInt32
 instDivInt64
 instModInt64
+
+# Contract obligations (M6 U10; plan M6 KTD12): the Std.Do triple over ClrM σ, its post-shape, its WP instance (the one
+# instance resolution finds: ExceptT.instWP over State.instWP, both above), the one-state assertion ⌜p⌝ and the
+# postcondition's exception conditions, which end in PUnit.unit. All are in the closure already.
+Std.Do.Triple
+Std.Do.PostShape.except
+Std.Do.PostShape.arg
+Std.Do.PostShape.pure
+Std.Do.PostShape.args
+Std.Do.SPred.pure
+Std.Do.Assertion
+Std.Do.ExceptConds
+PUnit.unit

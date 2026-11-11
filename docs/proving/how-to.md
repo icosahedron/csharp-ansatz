@@ -1,7 +1,7 @@
 # How-to guides
 
-> Target syntax for M6 and later; see the [status note](README.md). Each guide
-> names the milestone it needs, and the M4 and M5a guides run today; their
+> Target syntax for M7 and later; see the [status note](README.md). Each guide
+> names the milestone it needs, and the M4 to M6 guides run today; their
 > outputs are copied from `warrant verify`. *Proposed* means the feature is not
 > in the design yet (§12).
 
@@ -102,8 +102,8 @@ The location is the tactic that failed, here `Tactic.Omega()`.
   prover had: the theorem's parameters and any hypotheses. Below it is what it
   still had to show; a `Spec.Implies` condition that no `Tactic.Intro` moved
   above the line appears as `… →`. If a fact you expected is missing, the proof
-  never learned it: add it to the `Spec.Implies` (or, from M6, to a
-  `Spec.Requires` or a contract).
+  never learned it: add it to the `Spec.Implies` (or, for a contract (M6), to
+  the method's `Spec.Requires` or a dependency's contract class).
 - **No counterexample, goal looks true.** The tactics weren't strong enough.
   See the next guide.
 
@@ -158,8 +158,9 @@ Try these in order:
 4. **Use a Lean library lemma.** A declaration in the semantics bundle is
    available by name, for example
    `Tactic.Simp(Lean.Const("Int32.lt_iff_toInt_lt"))`. That is the semantics
-   library and the part of Init it depends on, not all of Init; M5b's store
-   can hold the rest, but proofs see it only from M6, when Std comes in.
+   library and the part of Init it depends on (and, from M6, the part of
+   `Std.Do` contracts use), not all of Init. M5b's store can hold the rest,
+   but proofs do not see the store, and no milestone schedules that yet.
 5. **Raise a budget.** If the theorem fails with WRT0006, it ran out of fuel
    or time. Give it more with `[Theorem(TacticFuel = …, TimeoutSeconds = …)]`
    or the project's `WarrantTacticFuel`, `WarrantKernelFuel` and
@@ -175,39 +176,96 @@ is verbose. A finite-domain `decide` tactic is *proposed* (§12 Q20).
 
 *M6.*
 
-Put `Spec` calls at the top of the method body:
+Put `Spec` calls at the top of a block body: any `Spec.Decreases` first, then
+`Spec.Requires`, then `Spec.Ensures`. In a file `Pricing.cs` that starts with
+`using System;`, `using Warrant;` and `namespace Pricing;`:
 
 ```csharp
-[Verified]
-public static int Installment(int total, int count)
+public static class Prices
 {
-    Spec.Requires(total >= 0 && count > 0);
-    Spec.Ensures<int>(r => r >= 0 && r * count <= total);
-    return total / count;
+    [Verified]
+    public static int Discounted(int price, int discount)
+    {
+        Spec.Requires(price >= 0 && discount >= 0);
+        Spec.Ensures<int>(r => r >= 0 && r <= price);
+        return discount >= price ? 0 : price - discount;
+    }
+
+    [Verified]
+    public static int Sale(int price)
+    {
+        Spec.Requires(price >= 0);
+        return Discounted(price, 10);
+    }
+
+    [Verified]
+    public static int Refund(int price) => Discounted(price, 10);
 }
 ```
 
-- `Spec.Requires` is assumed inside the method and **checked at every verified
-  call site**. A caller that can't show `count > 0` gets a build error at the
-  call.
+`Discounted` and `Sale` are proved with no script. `Refund` is not, because
+nothing tells it that `price` is not negative:
+
+```text
+Pricing.cs(24,44): error WRT0001: The contract of 'Prices.Refund(int)' could not be proved: precondition of a callee at this call: omega could not prove the goal:
+  case hp
+  price : Int32
+  ⊢ 0 ≤ price
+```
+
+- `Spec.Requires` is assumed inside the method and **proved at every verified
+  call site**. A caller that can't show `price >= 0` gets a build error at the
+  call, as above.
 - `Spec.Ensures<T>(r => ...)` must hold on every normal return; `r` is the
-  return value. For `void` methods use `Spec.Ensures(() => ...)`. For `async`
-  methods, `T` is the awaited type.
+  return value. For `void`, `Task` and `ValueTask` methods use
+  `Spec.Ensures(() => ...)`. For `async` methods, `T` is the awaited type.
+- A caller learns about a callee only through its `Spec.Ensures`: `Sale` knows
+  its result is between 0 and `price` without looking at `Discounted`'s body.
+- The default procedure proves the contract with no script: it follows the
+  method's code, then runs simp and `omega` on what is left. Each condition it
+  cannot prove is a separate WRT0001 at the line that produced it, starting
+  with its kind (`division by zero`, `postcondition of the method`, …). When
+  it gives up on a true contract, add a `Spec.Assert(fact, tactics)` before
+  the step that needs the fact, or write a `[ProofFor(nameof(M))]` method
+  whose body is `Prove.Contract().By(...)`
+  ([proofs that work](proofs-that-work.md#a-contract-proved-by-a-script-m6)).
+- A method needs no contract to have an obligation: one that divides, uses
+  `checked` arithmetic, `Math.Abs` or reads a nullable value must prove that
+  no implicit exception (a zero divisor, overflow, a null read) can happen.
+- Arithmetic in a contract wraps, as in the code: `r == a + b` says nothing
+  about overflow. Bound each operand in `Spec.Requires` instead. Whether specs
+  get an unbounded integer is open (GitHub #183).
+- `Spec.Implies` is not accepted inside a contract yet (GitHub #213); write
+  `!a || b`.
 - The calls are `[Conditional("WARRANT_CONTRACTS")]`: they don't exist in the
-  compiled IL and cost nothing at run time.
+  compiled IL and cost nothing at run time. So **nothing checks
+  `Spec.Requires` at run time**, and code Warrant doesn't verify can call the
+  method with anything. The report lists each `Spec.Requires` for that reason.
+  To protect a method that unverified code can call, check the input with a
+  guard that throws (next guides).
 
 ## Verify a method that calls a database or service
 
 *M6.*
 
 1. Find the interface the method calls through (a repository, a client, a port).
-2. Write a contract class for it: an abstract class that implements the
-   interface, marked `[ContractFor(typeof(I))]`, with a `Spec.Ensures` in each
-   method you need to assume something about. Return `default!`.
+2. Write a contract class for it in the same project: a `file` or `internal`
+   abstract class that implements exactly that interface, marked
+   `[ContractFor(typeof(I))]`, with `Spec.Requires` and `Spec.Ensures` in each
+   method you need to assume something about, then `return default!;`. The
+   interface itself may come from any assembly.
 3. Methods you assume nothing about can just `=> default!`. The verifier then
    allows them to return anything and throw anything.
 
 ```csharp
+public sealed record Claim(int Id, int Amount);
+
+public interface IClaimStore
+{
+    Task<Claim?> Find(int claimId);
+    Task Save(Claim claim);
+}
+
 [ContractFor(typeof(IClaimStore))]
 file abstract class ClaimStoreContract : IClaimStore
 {
@@ -221,16 +279,43 @@ file abstract class ClaimStoreContract : IClaimStore
 }
 ```
 
-4. Inject the dependency through a constructor. A dependency stored in a
-   `readonly` field becomes a parameter of the theorem Warrant generates.
-   Primary-constructor parameters that are never assigned are *proposed* to
-   count too (§12 Q20).
-5. Build, then read the "Assumed (contracts)" section of the report. Every line
-   is something you're asking reviewers to take on trust. Keep contracts as weak
-   as the proof allows.
+4. Inject the dependency through a constructor: a `readonly` field of the
+   method's own class, or a primary-constructor parameter that nothing
+   assigns. Call its members directly; `await` a call that returns a `Task`
+   or `ValueTask` where you make it.
+
+```csharp
+public sealed class Claims(IClaimStore store)
+{
+    [Verified]
+    public async Task<int> IdOf(int claimId)
+    {
+        Spec.Ensures<int>(r => r == 0 || r == claimId);
+        var claim = await store.Find(claimId);
+        if (claim is null) return 0;
+        return claim.Id;
+    }
+}
+```
+
+   This is proved with no script, for every implementation of `IClaimStore`
+   that keeps the contract. Each call may see a different store: two calls to
+   `Find(claimId)` are not known to agree unless the contract says so.
+5. Run `warrant verify --report <dir>` and read the "Assumed (contracts)",
+   "Assumed (parameters)" and "Assumed (exceptions)" sections of `report.md`.
+   Every line is something you're asking reviewers to take on trust: the
+   contract, that `store` and the task `Find` returns are not null, and that
+   `Find` may throw, in which case the proof says nothing about the call. Keep
+   contracts as weak as the proof allows.
 
 Contracts are **never** global axioms. A wrong contract can't be used to prove
 something unrelated; it only weakens the proofs that use it.
+
+Not yet: a `CancellationToken` parameter and a bare `return;` in a `Task`
+method are rejected (GitHub #215), and a field of a nullable result read after
+a null test (`claim.Amount` above, rather than `claim.Id`) is sometimes not
+related to what the walk learned about it, so a true `Spec.Ensures` about it
+fails (GitHub #226).
 
 ## Work with enums and closed sets
 
@@ -317,32 +402,84 @@ because each framework ships with its own build of that project.
 counterexample near `int.MaxValue` or `int.MinValue`, choose one:
 
 - **Rule it out.** Add the bound the business logic already guarantees:
-  `Spec.Requires(amount <= 1_000_000_000)`. Each caller now has to show it.
+  `Spec.Requires(amount <= 1_000_000_000)` (M6). Each verified caller now has
+  to show it.
 - **Use a wider type** for the intermediate value (`long`), if that's what the
   code should have done anyway.
-- **Use `checked`.** Then overflow throws `OverflowException` instead of
-  wrapping, and the proof has to show the exception can't happen, or the spec
-  has to allow it.
+- **Use `checked`** (M6). Then overflow throws `OverflowException` instead of
+  wrapping, and the method's contract obligation has to show it can't happen:
+  a contract cannot allow an implicit exception. With
+  `Spec.Requires(a >= 0 && a <= 1_000_000 && b >= 0 && b <= 1_000_000)`,
+  `return checked(a + b);` is proved; without the bounds, the build fails at
+  `a + b` with `overflow in a checked operation`. If the code should throw on
+  overflow, throw explicitly (next guide).
 
 In a project with `<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>`,
 all arithmetic is checked, and Warrant follows the project setting.
 
-`decimal` (M6) doesn't wrap: `a - b` throws when the result is out of range.
-Proofs about `decimal` subtraction therefore usually need a bound on the inputs.
+`decimal` (M6) doesn't wrap: `a + b` and `a - b` throw `OverflowException`
+when the result is out of range, even in `unchecked` code. A method that adds
+`decimal`s therefore needs bounds on its inputs in `Spec.Requires`. `simp`
+does not yet compute the value of a `decimal` literal, so `omega` cannot use
+a bound such as `a < 1000m` (GitHub #217).
 
 ## Specify a method that throws
 
 *M6.*
 
-Exceptions are part of the model. A `throw`, a null dereference, a division by
-zero and checked overflow are all exits that the verifier tracks.
+Exceptions are part of the model, and the verifier treats two kinds
+differently:
 
-- To prove a method never throws, show that every throwing path is unreachable
-  from its `Spec.Requires`.
-- `Spec.Ensures` constrains **normal** returns only.
+- **Implicit exceptions** (a division by zero, `int.MinValue / -1`, checked
+  overflow, `Math.Abs(int.MinValue)`, `x.Value` on null, a null dereference)
+  are never allowed. The proof must show each one can't happen under the
+  method's `Spec.Requires`, or the build fails at that operation.
+- **Explicit throws** (`throw new T(...)`, with constant or parameter
+  arguments and `T` a `System` exception or a plain subclass of one) and
+  exceptions from a dependency are allowed. `Spec.Ensures` constrains
+  **normal** returns only, and the report lists each throw the verifier
+  could not show unreachable under "Assumed (exceptions)".
+
+`Spec.Requires` is not checked at run time (see
+[Add preconditions and postconditions](#add-preconditions-and-postconditions)).
+To protect a method that unverified code can call, check the input with a
+guard that throws, which the proof covers. As the first member of
+`public static class Installments`, in a file `Installments.cs` with the same
+first lines as `Pricing.cs` above:
+
+```csharp
+[Verified]
+public static int PerItem(int total, int count)
+{
+    if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count));
+    return total / count;
+}
+```
+
+This is proved: after the guard, `count` is positive, so the division can't
+divide by zero or overflow. The report says what the proof leaves out:
+
+```text
+  Assumed (exceptions):
+    - Pricing.Installments.PerItem(int, int) may throw System.ArgumentOutOfRangeException (the throw at Installments.cs:11); its proof says nothing about a call that ends in it
+```
+
+The same method with `Spec.Requires(count > 0)` in place of the guard is also
+proved, but then a caller Warrant doesn't verify can still pass 0, and the
+division throws `DivideByZeroException` at run time. With neither, the build
+fails at the division twice: `division by zero` and
+`overflow in a checked operation` (`int.MinValue / -1`).
+
+- A throw the verifier can show unreachable under `Spec.Requires` is not
+  listed. To prove a method never throws, make every throwing path
+  unreachable and check that "Assumed (exceptions)" is empty; the build does
+  not fail on a reachable explicit throw (whether it should be able to is
+  open, GitHub #182).
+- A method that throws on every path proves any `Spec.Ensures`, since it
+  never returns normally; the report lists the throw.
+- `try`/`catch` is rejected (WRT0002 `try`), and no milestone schedules it.
 - To say which calls an exception can come from, `Spec.ThrowsOnlyFrom(...)` is
-  *proposed* (§12 Q20). Until then, put the code that may throw behind a
-  contract, and keep the rest of the method throw-free.
+  *proposed* (§12 Q20).
 
 ## Prove things about private methods
 
@@ -369,8 +506,9 @@ internal static class ReassignmentAlerts
 }
 ```
 
-This is proved. (The real code this comes from compares `Guid?` values; `Guid`
-and nullable types wait for §12 Q20 and M6.)
+This is proved. (The real code this comes from compares `Guid?` values.
+Nullable values are accepted from M6; `Guid` waits for §12 Q20, which no
+milestone schedules.)
 
 `[Theorem]` methods are never emitted into your call graph. You can leave them
 in production code.
@@ -379,38 +517,45 @@ in production code.
 
 *M6.*
 
-`Spec.Ensures` is a statement, so it needs a block body. Rewrite
+`Spec.Ensures` is a statement, so it needs a block body; in an
+expression-bodied member it is WRT0002 (design §12 Q17). Rewrite
 
 ```csharp
-public bool NeedsReview => Amount > Threshold || IsFlagged;
+[Verified]
+public static int Capped(int amount, int limit) => amount > limit ? limit : amount;
 ```
 
 as
 
 ```csharp
-public bool NeedsReview
+[Verified]
+public static int Capped(int amount, int limit)
 {
-    get
-    {
-        Spec.Ensures<bool>(r => Spec.Implies(IsFlagged, r));
-        return Amount > Threshold || IsFlagged;
-    }
+    Spec.Ensures<int>(r => r <= limit);
+    return amount > limit ? limit : amount;
 }
 ```
 
-Or leave the member alone and state the property as a `[Theorem]` about it,
-which needs no change to the member. Other options are under discussion
-(§12 Q17).
+This is proved with no script. Or leave the member alone and state the
+property as a `[Theorem]` about it, which needs no change to the member, as
+long as the member cannot throw (a theorem cannot call one that can). A code
+fix that does the rewrite is deferred.
+
+A `bool` postcondition that needs a case split on a `bool` parameter, such as
+`r => !flagged || r`, is not proved yet (GitHub #227); `r => r == (…)`, stating
+the result exactly, is.
 
 ## Keep logging out of the proof
 
-*M6, proposed (§12 Q20).*
+*Proposed (§12 Q20); not in M6, and it needs M7's strings.*
 
 Logging calls in a verified method are calls to code without a contract, and
 interpolated messages pull strings into the proof. The proposed fix is a
-standard contract that says logging has no effect on verified state. It is
-listed in the assumption report like any other contract. Until it exists, write
-a contract class for your logging interface whose methods are all `=> default!`.
+standard contract that says logging has no effect on verified state, listed in
+the assumption report like any other contract. Until then a verified method
+cannot log: a contract class for your logging interface is accepted, but a
+verified call to a member whose signature has a `string` is rejected
+(WRT0002), so keep logging in the unverified caller.
 
 ## Write a loop invariant
 
@@ -487,7 +632,9 @@ describes the fall-through path, because early exits are where these bugs live.
 
 `Warrant.Build` fails the build when a required proof fails, so a normal
 `dotnet build` in CI is enough. Check the build log for the summary line,
-`Warrant: n verified units, n theorems proved, n not proved.`; a project that
+`Warrant: n verified units, n theorems proved, n not proved.` (it counts
+theorems only, so a failing contract shows as an error and a failed build, not
+in "not proved", GitHub #225); a project that
 references `Warrant` without `Warrant.Build`, or turns `WarrantEnabled` off,
 gets warning WRT0011 instead.
 

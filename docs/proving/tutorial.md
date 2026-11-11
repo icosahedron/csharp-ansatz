@@ -1,8 +1,15 @@
 # Tutorial: your first proofs
 
 > Part 1 runs today (M5a): every output in it was copied from `warrant verify`
-> run on the code it shows. Part 2 is target syntax and needs M6; see the
-> [status note](README.md).
+> run on the code it shows. Part 2 is still target syntax: M6 built contracts
+> and contract classes, but Part 2 has not been run, and it differs from what
+> M6 does in places. `Spec.Implies` is not accepted inside `Spec.Ensures`
+> (GitHub #213; write `!a || b`), the build writes no report (run
+> `warrant verify --report`), the report's layout is the one in the
+> [reference](reference.md#assumption-report), and a failing contract shows
+> its goal, not a counterexample. See the
+> [how-to guides](how-to.md#verify-a-method-that-calls-a-database-or-service)
+> for an example that runs, and the [status note](README.md).
 
 In this tutorial you will take a small insurance payout calculation, prove three
 things about it, watch Warrant refuse a fourth claim that looks obviously true,

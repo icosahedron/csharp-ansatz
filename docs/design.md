@@ -434,21 +434,24 @@ public void PayInInstallments(Payment p, int count, decimal installment)   // no
 | `bool` | `Bool` (Prop in statement positions) | |
 | `sbyte` `short` `int` `long` | `Int8` `Int16` `Int32` `Int64` | Core Lean types (`Init/Data/SInt`), two's complement. Wrap-around in `unchecked` code. |
 | `byte` `ushort` `uint` `ulong` | `UInt8` … `UInt64` | |
-| `checked(...)` arithmetic | `Except OverflowException` | Also the default when the project enables `CheckForOverflowUnderflow`. |
-| `System.Numerics.BigInteger` | `Int` | |
-| `Warrant.Nat` / `Warrant.Integer` | `Nat` / `Int` | Runtime structs for code written mathematically. |
-| `decimal` | Warrant model (96-bit mantissa, scale) | **Open question.** Central for business code (§12). |
+| `checked(...)` arithmetic | a `ClrM` program that raises `ClrExn.overflow` | Also the default when the project enables `CheckForOverflowUnderflow`. Checked `+ - *`, unary `-` and narrowing on `int` and `long` (M6, [docs/m6/02](m6/02-effect-monad-and-models.md)). |
+| `/` and `%` on `int` and `long` | `Warrant.Int32.div`/`rem` (and `Int64`) in `ClrM`: `divideByZero`, then `overflow` for `MinValue / -1` and `MinValue % -1`, then Lean's truncating operation | M6. By a literal other than 0 and -1 they cannot throw and stay pure. |
+| `Math.Min`, `Math.Max`, `Math.Abs` on `int`, `long`, `decimal` | Warrant library definitions; `Abs` on `int` and `long` raises `overflow` for `MinValue` | M6 (KTD23 of the M6 plan). Other BCL members are not modelled. |
+| `System.Numerics.BigInteger` | `Int` | Not built. Specs have no unbounded integer yet (GitHub #160, #183). |
+| `Warrant.Nat` / `Warrant.Integer` | `Nat` / `Int` | Runtime structs for code written mathematically. Not built. |
+| `decimal` | `Warrant.Decimal`: sign, 96-bit mantissa, scale 0 to 28 | M6 ([docs/m6/03](m6/03-decimal.md)): literals, comparisons and `==` by value (`1.0m == 1.00m`), `+` and `-` (raising `overflow` in every context), unary `-`. `*`, `/`, `%` and rounding: M7 (§12 Q1). |
 | `float` `double` | not supported | Lean's `Float` is opaque to the kernel. |
 | `string` `char` | Warrant model over UTF-16 code units | Lean's `String` is a sequence of Unicode scalar values, so `Length` would differ for surrogate pairs. |
-| `T?` (reference, nullable) / `Nullable<T>` | `Option T` | Non-nullable reference annotations are assumptions, listed in the report, not facts. |
-| `record` / `readonly record struct` | single-constructor `inductive`, read by primitive projection | `with` becomes a constructor application. `==` is a generated field-by-field `$eq : R → R → Bool`, not `DecidableEq`, so it can follow the generated `Equals` where that differs from structural equality (`decimal` fields, M6). M4 accepts sealed positional record classes with compiler-generated equality and no other instance state. |
+| `T?` (reference, nullable) / `Nullable<T>` | `Option T` | M6 for `int?`, `long?`, `bool?`, `decimal?` and nullable references to records and closed classes. `Value` raises `invalidOperation` on null; a `T?` used where a `T` is required is a checked unwrap that raises `nullReference`. Non-nullable reference annotations are assumptions, listed in the report, not facts (§12 Q11). Lifted arithmetic and comparisons are rejected. |
+| `record` / `readonly record struct` | single-constructor `inductive`, read by primitive projection | `with` becomes a constructor application. `==` is a generated field-by-field `$eq : R → R → Bool`, not `DecidableEq`, so it can follow the generated `Equals` where that differs from structural equality: a `decimal` field compares by value (M6). A nullable field does not translate yet (GitHub #218). M4 accepts sealed positional record classes with compiler-generated equality and no other instance state. |
 | `enum` | underlying integer + named constants | C# enums are open (any value can be cast), so they aren't modelled as closed inductive types unless marked `[Closed]` (D12). An open enum is an `abbrev` of its underlying type. A `[Closed]` enum is an `inductive` with one constructor per member; its members must have distinct values. |
 | `[Closed]` sealed class with static instances | `inductive` with one constructor per instance | The "smart enum" pattern, recognised by shape (D13). `==` compares a generated `$index`, the constructor's position. Instances may be get-only auto-properties or `static readonly` fields. |
 | Generics | universe-polymorphic parameters | Constraints become type-class instances later. |
 | `IReadOnlyList<T>`, `ImmutableArray<T>` | `List T` / `Array T` models | |
-| Exceptions | `Except` branch of the monad | |
+| Exceptions | the `ClrExn` branch of `ClrM σ α := ExceptT ClrExn (StateM σ) α` | M6: `overflow`, `divideByZero`, `nullReference`, `invalidOperation`, `assertFailed`, `thrown` (an explicit `throw new T(...)`, by `T`'s key) and `external` (from a dependency). `try`/`catch` is not modelled and is rejected. |
+| An interface with a `[ContractFor]` class, through a `readonly` field or a never-assigned primary-constructor parameter | one operation `args → ClrM σ R` per member called, a parameter of the obligation, with the member's contract as a hypothesis (§6.3) | M6. The world `σ` is opaque, so two calls are related only by their contracts. Other field access: M7. |
 | Mutable classes and fields | heap model (§6.2) | Not in the first effectful milestone. |
-| `async`/`await` | sequencing in the monad | Supported only when awaiting external or verified calls. |
+| `async`/`await` | sequencing in the monad: `Task<T>`, `ValueTask<T>` to `ClrM σ T`; `Task`, `ValueTask`, `void` to `ClrM σ Unit` | M6, only when awaiting external or verified calls, with every task-returning call the direct operand of `await`. A `CancellationToken` parameter is not accepted yet (GitHub #215). |
 
 ### 6.2 The Warrant Lean library (D10)
 
@@ -834,7 +837,7 @@ in the engine can make a true claim fail but never a false one pass.
 | M4 | VIR, extraction of the pure subset (`int`/`long`/`bool`, enums, records, `if`/`switch`; theorems are parameterless `[Theorem]` methods returning `Prove.That(bool)`; recursion is rejected until M5a, and `/`, `%` and checked arithmetic are rejected with a diagnostic until M6, and non-null record parameters are recorded as assumptions), semantics library v0 with CLR-agreement tests (§10.6), translation, differential testing | A fixed corpus (`tests/corpus/m4/`) translates, including a `Validate`-shaped method over records and enums (`int` in place of `decimal`), and every rejected construct has a corpus method that is rejected with the diagnostic. Differential tests pass; null-record inputs check that .NET throws and that the non-null assumption is recorded. CLR-agreement tests pass for every modelled operation. Theorems without free parameters are closed by `rfl`/`decide` proof terms the translator emits. The translated corpus, exported with its Init + semantics closure, passes a new translated-output step in `scripts/cross-check.sh`. |
 | M5a | `Warrant.Meta` and tactics v1 (`intro`, `exact`, `apply`, `cases`, `induction`, `unfold`, `simp`, `omega`, `all_goals`, `try`), quantified theorems and `Prove.That(...).By(...)`, well-founded recursion with `Spec.Decreases` (structural recursion is unreachable for M5a's types, §4.2), translator-generated equation lemmas for recursive definitions, a development-time export of simp, instance and reducibility attributes for Init and the semantics library next to the NDJSON bundle (untrusted tactic input; Std is added in M6), `Int32`/`Int64` → `Int` bridging lemmas and an omega-prep simp set (§6.2), in-process `warrant verify` (§3.2), a thin MSBuild task that runs `warrant verify` as a child process (the net10.0 engine cannot load in .NET Framework MSBuild) | First end-to-end result: `Increment(x) > x` fails the build with its goal and the counterexample `x = 2147483647` shown under `dotnet build`, Visual Studio 2026's MSBuild and Visual Studio 2022's MSBuild; `ValidImpliesPositive` (`int`) passes with `Unfold` then `Simp`; a well-founded method whose decrease needs `omega`, and a quantified theorem over a translated `int` method closed by `simp` then `omega`, pass. Differential tests pass for a well-founded unit, both by kernel evaluation and by rewriting with its equation lemma. The certificate of a verified C# theorem passes the translated-output step of `scripts/cross-check.sh`. ✅ as described in [docs/m5a/](m5a/README.md); how Visual Studio's Error List shows a multi-line goal is still to be checked by hand |
 | M5b | Server, content-addressed cache, store v1 (trusted and verified import), CLI verbs, analyzers | The M5a result through the server. A second build is served from the cache without running tactics, `WarrantRecheck=true` re-checks cached certificates with the kernel alone, and the Init + semantics store passes `warrant check-store` in verified mode. `cancel` aborts a running verify, a unit over its fuel or wall-clock budget reports a timeout, and analyzer output is identical across runs. Baseline per-unit verification latency and server memory are recorded for M9. Store v1 is laid out against the Mathlib run's figure: 12.6 GB peak with every constant in memory. ✅ as described in [docs/m5b/](m5b/README.md): each item is a test in `M5bExitTests` (9 of 9 pass, the Init + semantics store with `WARRANT_INIT_EXPORT`; analyzer determinism is `Warrant.Analyzers.Tests`' 20 concurrent runs), and the build matrix (`dotnet build`, Visual Studio 2026's and 2022's MSBuild) adds a second build from the cache, a recheck build and `dotnet clean`. Baselines on a 32-core Windows 11 workstation (.NET SDK 10.0.403, 2026-11-07; [docs/m5b/08](m5b/08-testing-and-baselines.md#baselines-for-m9)), for the M5a accepted sample's 20 units: starting the server, which loads and checks the bundle, and connecting take 2.9 s; a warm request 630 ms (46 ms per unit on average, 176 ms at most); a second request served from the cache 39 ms; a recheck 239 ms; in-process, the request takes 548 ms of a 4.4 s run that also loads the bundle. The server holds a 37 MB managed heap (110 MB working set) after start and 65 MB (150 MB) after the corpus. A trusted Mathlib store imports in 139 s into 1.45 GB, opens in 69 ms and serves 1,000 random lookups in 114 ms with a 21 MB managed heap and an 88 MB working set. |
-| M6 | Contracts: `Spec.Requires`/`Ensures`, contract classes, effect monad (exceptions, null, overflow, `/` and `%`), VC generation with `@[spec]` lemmas in the attribute sidecar, assumption reports, a minimal `decimal` model (96-bit mantissa and scale, comparisons, add/subtract without overflow; `==` is numeric equality, so `1.0m == 1.00m`, also inside records). Readonly fields whose type has a contract become theorem parameters (other field access waits for M7). First step: the Std closure the library imports is kernel-checked and cross-checked | Pure parts of the payment example verified, and `ProcessPayment` verified with the store as a hypothesis. Differential tests with contract-satisfying mocked externals pass, every new model operation (including the minimal `decimal`) passes CLR-agreement tests, generators include zero divisors, `MinValue / -1` and equal `decimal`s with different scales, and `ProcessPayment`'s certificate passes `scripts/cross-check.sh`. |
+| M6 | Contracts: `Spec.Requires`/`Ensures`, contract classes, effect monad (exceptions, null, overflow, `/` and `%`), VC generation with `@[spec]` lemmas in the attribute sidecar, assumption reports, a minimal `decimal` model (96-bit mantissa and scale, comparisons, add/subtract without overflow; `==` is numeric equality, so `1.0m == 1.00m`, also inside records). Readonly fields whose type has a contract become theorem parameters (other field access waits for M7). First step: the Std closure the library imports is kernel-checked and cross-checked | Pure parts of the payment example verified, and `ProcessPayment` verified with the store as a hypothesis. Differential tests with contract-satisfying mocked externals pass, every new model operation (including the minimal `decimal`) passes CLR-agreement tests, generators include zero divisors, `MinValue / -1` and equal `decimal`s with different scales, and `ProcessPayment`'s certificate passes `scripts/cross-check.sh`. ✅ as described in [docs/m6/](m6/README.md) (plan [2026-11-08-1445](plans/2026-11-08-1445-feat-m6-contracts-effects-plan.md), branch `feat/m6` at c54de2e): `dotnet test --filter M6Exit` runs one fact per criterion, 4 of 4 pass (`M6ExitTests` in `Warrant.Cli.Tests`, `Warrant.Engine.Tests` and `Warrant.Semantics.Tests`; [docs/m6/08](m6/08-reports-and-testing.md#the-exit-criterion-as-tests)). `ProcessPayment` (`tests/corpus/m6/accepted/Payments.cs`) is proved by the default procedure with no script, and its report block is `tests/corpus/m6/ProcessPayment.report.txt`. `scripts/cross-check.sh` ends with "all verdicts agree" with its five M6 rows, Lean's kernel accepting the accepted corpus's certificate with `ProcessPayment`'s contract theorem and the bundle's `Std.Do` closure, and both kernels rejecting a tampered copy (Windows, Git Bash, 2026-11-11). The M6 corpus (145 members in five compilations, `refuted-dependencies` among them) gets its expected outcome in the engine, extraction, analyzer and CLI tests; the build matrix (`dotnet build`, Visual Studio 2026's and 2022's MSBuild) passes 65 of 65 with a contract-bearing project and its refuted twin. Server start with the full M6 bundle (4,112 constants) is 4,053 ms median on the reference workstation against M5b's 2,807 ms in the same session, under the plan's 5 s threshold, so the bundle stays a verified load (`tests/data/README.md`). The plan's private-codebase criterion is a hand check outside this repository and is not part of this evidence. Known gaps, none of which lets a false claim pass: GitHub #215 to #218, #220, #225 to #227; open owner decisions: #180 to #183, #213, #219, #221, #224. |
 | M7 | Regions, loops with invariants, heap model for mutable objects, full `decimal` arithmetic and rounding, strings | The payment example verified without restructuring into records (the target code in §5.3). CLR-agreement tests pass for the `decimal`, string and heap models. |
 | M8 | `grind`, typed Mathlib handles (after the Mathlib run) | Not defined yet (§12 Q15). Define one before starting. |
 | M9 | Live IDE feedback (language server / extension), performance work | Not defined yet (§12 Q15). Define one before starting. |
@@ -859,7 +862,14 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
 1. **`decimal`.** What precision and rounding model should we use? The first
    operations (comparisons and add/subtract without overflow) are scheduled
    in M6, because the payment example needs them; full arithmetic and
-   rounding come in M7.
+   rounding come in M7. *Decided for M6 (M6 KTD7):* the CLR's own
+   representation, a sign, a 96-bit mantissa and a scale from 0 to 28.
+   Equality and order compare values. `+` and `-` compute the exact sum,
+   round it once, half to even, at the largest scale whose mantissa fits in
+   96 bits, and raise `overflow` only when even scale 0's does not fit, in
+   every context. The definitions are trusted and tested against the CLR by
+   representation; the lemmas are proved ([docs/m6/03](m6/03-decimal.md)).
+   Multiplication, division and explicit rounding are still M7.
 2. **Strings.** Is a full UTF-16 model needed early, or can strings be opaque
    (equality only) at first?
 3. **Enums.** *Decided (D12):* open by default (integer-backed), with an
@@ -869,7 +879,10 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
    before M7 starts.
 5. **Specifications about external effects.** For example, "`SavePayment` was
    called exactly once with a processed payment." This needs a trace of
-   external calls in the monad and a spec vocabulary over it.
+   external calls in the monad and a spec vocabulary over it. *Not in M6:*
+   M6's monad threads an opaque world, not a trace, and a dependency's
+   contract speaks about one call; its exit criterion needs no call count.
+   Revisit when a real contract needs one.
 6. **Heap model** for mutable classes: dynamic frames, separation logic, or
    ownership (records only until M7)? Decide before M7 starts.
 7. **IDE feedback.** A language server, a VS Code / Rider / Visual Studio
@@ -884,8 +897,15 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
    TacticFuel = …, TimeoutSeconds = …)]`. Since M5b every unit runs under
    them, definitions, equation lemmas and decrease proofs included, through
    the server and in-process alike, and the counterexample search is bounded
-   by fuel alone, so it finds the same values under any load. The pipeline for
-   contracts waits for M6.
+   by fuel alone, so it finds the same values under any load. *Pipeline for
+   contracts decided in M6 (M6 KTD13, KTD14):* a structural VC walker over the
+   program shapes the translator emits, then a VC simp set kept apart from
+   `Tactic.Simp()`'s default set, then `omega`, under the same budgets; the
+   vacuity check of a `Spec.Requires` gets 200,000 steps of tactic fuel. A
+   `[ProofFor]` script replaces it for one method
+   ([docs/m6/07](m6/07-vc-generation.md)). `grind` joins it in M8. A
+   theorem without `.By` is still proved only by `rfl` or `decide`; no default
+   pipeline runs there.
 9. **CI trust policy.** Always recheck certificates, or trust signed caches?
    *Decided for M5a (D15):* every build re-checks every proof with the
    kernel, so the MSBuild task has no `Inputs`/`Outputs` and M5a has no cache.
@@ -906,7 +926,12 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
     supported. Each later upgrade means re-diffing `src/kernel/` and re-running
     `scripts/cross-check.sh` with a fresh Init export.
 11. **Nullable annotations.** Treat them as assumptions (current proposal) or
-    verify them?
+    verify them? *Decided for M6 (M6 KTD20):* non-nullable reference
+    annotations remain assumptions, listed in the report, including that each
+    dependency and each non-nullable reference a dependency returns is not
+    null. A value declared `T?` is not an assumption: where it is used as a
+    `T`, the proof must show it is not null, whatever the compiler's flow
+    analysis says (M6 KTD5).
 12. **Name.** *Decided (D3):* Warrant, chosen before M4 publishes the user API
     package, since a rename later breaks every user's attributes and namespaces.
 13. **Target framework.** *Decided (D8):* net10.0 for the server and core,
@@ -916,7 +941,10 @@ and is the closest prior art for a non-C++ port. Port with attribution (NOTICE).
     integers, but no milestone schedules them. Schedule them (M6 already
     extends the semantics library) or record them as non-goals? Without them
     most existing business code stays outside the subset. Decide before M6
-    starts.
+    starts. *Still open after M6:* M6 scheduled none of them, and the owner
+    has not decided; it is the M6 plan's first open question and has no
+    ticket yet. Generic types and members, and integer types other than `int`
+    and `long`, are still rejected.
 15. **M8 and M9 exit criteria.** M8 is `grind` and typed Mathlib handles; M9
     is live IDE feedback and performance work, split from M8 on 2026-11-10.
     What latency and memory budget makes live IDE feedback good enough? M5b's
@@ -951,7 +979,10 @@ or two per milestone from M4 to M7.
     body. Options: accept the rewrite (a code fix can do it); let a companion
     `[ProofFor(nameof(M))]` method carry the contract; or read a leading
     `Spec.Ensures` from a `Spec.Contract(() => ...)` wrapper. Decide before M6
-    adds `Spec.Ensures`.
+    adds `Spec.Ensures`. *Decided for M6 (M6 KTD8):* block bodies only. A
+    `Spec` call in an expression-bodied member is WRT0002 saying to use a
+    block body; the code fix that rewrites it is deferred. A `[ProofFor]`
+    method supplies a script, not a contract.
 18. **Collections and case-insensitive strings come before contracts in
     practice.** The most valuable specs in the reviewed code (queue matching,
     adjuster eligibility) call `IReadOnlyList<T>.Contains`, LINQ `Any`/`Where`,
@@ -959,13 +990,19 @@ or two per milestone from M4 to M7.
     at least opaque strings with equality and a case-insensitive comparison
     (Q2), M6 can verify `ProcessPayment` but not the code that motivated this
     review. This argues for scheduling Q14 and a minimal string model in M6.
+    *M6 did not:* its exit criterion needs neither, so it added no collections
+    and no strings. The point stands and is recorded for M7 planning, which
+    has strings in its row (§11) and, until Q14 is decided, no collections.
 19. **A source dependency for specifications.** The §5 surface needs the
     `Warrant` package referenced by the code being verified. Teams that
     can't take that dependency yet (one existing in-house translator chose
     `//@` comments for exactly this reason) need a route that doesn't touch the
     project file: a spec sidecar file keyed by method signature, holding the
     same C# expressions. Decide whether sidecars are supported, and in which
-    milestone, before M6.
+    milestone, before M6. *Still open after M6:* M6 puts contracts in source
+    only, and the owner has not decided whether sidecars come in a named
+    milestone; it is the M6 plan's second open question and has no ticket
+    yet.
 20. **Smaller gaps found in the same review.**
     - `Guid` (and `Guid?`) has no model. An opaque type with decidable equality
       is enough for every use seen.
@@ -988,6 +1025,14 @@ or two per milestone from M4 to M7.
       (`Spec.ThrowsOnlyFrom`), how often an external was called (Q5),
       frame conditions (`Spec.Modifies`), and a ghost iteration counter for
       `foreach` invariants (§5.3 shows only `for`).
+
+    *What M6 did with these:* never-assigned primary-constructor parameters
+    count as dependencies, as proposed (M6 KTD9), and `Math.Abs` on `decimal`
+    is modelled. `Guid`, a standard logging contract (it needs string
+    interpolation, M7), `decide` and `split` tactics, a `static readonly`
+    array as a constant table, `Spec.ThrowsOnlyFrom`, `Spec.Modifies` and a
+    call count are not built and not scheduled; logging calls and `Guid`
+    values in a verified method are still rejected.
 
 ---
 

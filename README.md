@@ -2,13 +2,18 @@
 
 **Machine-checked proofs about ordinary C# code.**
 
-> Status: **milestones 0 to 5b of 8 are done.** `dotnet build` proves theorems about
+> Status: **milestones 0 to 6 are done.** `dotnet build` proves theorems about
 > pure C# methods for every input and fails on a theorem it cannot prove, with the goal and
-> a counterexample. A per-user verification server and a result cache make an unchanged
-> rebuild run no tactics, and `WarrantRecheck=true` has the kernel re-check every cached
-> proof. A C# port of the Lean 4 kernel checks every proof, Lean's entire Init library and
-> all of Mathlib, and Lean's own kernel re-checks what it admits. Contracts for code that
-> calls databases and services come next (M6). Start with the [design document](docs/design.md).
+> a counterexample. From M6 it also proves `Spec.Requires`/`Spec.Ensures` contracts with no
+> script, on methods that throw, divide, use checked arithmetic, nullable values and
+> `decimal`, and call databases and services through interfaces whose assumed behaviour a
+> contract class states; each failing condition is an error at its line, and the
+> assumption report lists every contract a proof relied on. A per-user verification server
+> and a result cache make an unchanged rebuild run no tactics, and `WarrantRecheck=true` has
+> the kernel re-check every cached proof. A C# port of the Lean 4 kernel checks every proof,
+> Lean's entire Init library and all of Mathlib, and Lean's own kernel re-checks what it
+> admits. Loops, mutable objects and strings come next (M7). Start with the
+> [design document](docs/design.md).
 
 Warrant translates selected C# methods into the Calculus of Inductive
 Constructions, the type theory of [Lean 4](https://lean-lang.org/). Proofs
@@ -115,7 +120,7 @@ reproduce every result, including exporting and checking Lean's full Init librar
 
 - [Design](docs/design.md): architecture, semantics, trusted base, milestones, open questions
 - [Writing proofs](docs/proving/README.md): the developer guide
-- Milestone chapters: [M4](docs/m4/README.md) (translating C#), [M5a](docs/m5a/README.md) (tactics and the build), [M5b](docs/m5b/README.md) (server, cache, store, analyzers)
+- Milestone chapters: [M4](docs/m4/README.md) (translating C#), [M5a](docs/m5a/README.md) (tactics and the build), [M5b](docs/m5b/README.md) (server, cache, store, analyzers), [M6](docs/m6/README.md) (contracts and effects)
 - [Kernel](docs/kernel.md): how the port maps to Lean's C++, deliberate differences, results
 - [Checking Mathlib](docs/mathlib.md): all of Mathlib v4.35.0 through Warrant's kernel and Lean's, with time and memory
 - [Reproducing](REPRODUCING.md): how the work was done and how to duplicate it

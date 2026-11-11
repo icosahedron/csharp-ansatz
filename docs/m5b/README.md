@@ -23,7 +23,7 @@ M5b also adds what the long-lived process makes possible or what the design sche
 | [5. Store v1](05-store.md) | An on-disk, memory-mapped home for imported Lean libraries, trusted and verified import, and the kernel's lazy base. |
 | [6. Analyzers](06-analyzers.md) | Extraction's diagnostics in the IDE, determinism, and why builds leave them to the CLI. |
 | [7. `explain`, `export`, `report` and the CLI verbs](07-explain-and-cli.md) | The tactic trace, the remaining protocol methods, and `warrant server`, `import` and `check-store`. |
-| [8. Testing and baselines](08-testing-and-baselines.md) | Parity between the two paths, the exit criterion as tests, and the latency and memory figures M8 starts from. |
+| [8. Testing and baselines](08-testing-and-baselines.md) | Parity between the two paths, the exit criterion as tests, and the latency and memory figures M9 starts from. |
 
 ## The running example
 
@@ -62,7 +62,8 @@ flowchart TB
 
 ## What M5b deliberately leaves out
 
-- Live proof feedback in the IDE, a language server, `grind` and typed Mathlib handles (M8).
+- `grind` and typed Mathlib handles (M8).
+- Live proof feedback in the IDE and a language server (M9).
 - Using the store as the verification environment: the bundle stays the environment until M6 needs more of Lean's library (chapter 5).
 - A cache shared across projects, signed cache entries, and eviction beyond `dotnet clean` (chapter 4).
 - Hardening the server against the same user's processes at another elevation level (GitHub issue #43, chapter 1).

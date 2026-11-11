@@ -183,7 +183,7 @@ and the design is explained chapter by chapter in [docs/m5b/](docs/m5b/README.md
    the Init + semantics store passes `check-store` with the kernel.
 6. **Write the exit criterion as tests.** Each item of design §11's M5b row
    is a test in `M5bExitTests`, and `scripts/measure-m5b.sh` records the
-   baselines M8 starts from.
+   baselines M9 starts from.
 
 ### Notes on the environment
 
@@ -633,7 +633,7 @@ times, the peak memory and the slowest declarations from one run are in
 [docs/mathlib.md](docs/mathlib.md). Windows does not report a process's
 peak memory once it exits, so that run sampled it while the check ran.
 
-### 11. Baselines for M8
+### 11. Baselines for M9
 
 ```sh
 scripts/measure-m5b.sh                         # the latency and server memory tables
@@ -646,7 +646,7 @@ with `--recheck` and in-process, on a server of its own that it shuts down at
 the end. Given the Mathlib export of step 10, it also imports it into a
 trusted store in `MEASURE_DIR` (allow about 1.5 GB) and opens it with
 `warrant sample-store`. It prints Markdown tables; the run recorded in
-[docs/m5b/08](docs/m5b/08-testing-and-baselines.md#baselines-for-m8) and
+[docs/m5b/08](docs/m5b/08-testing-and-baselines.md#baselines-for-m9) and
 design §11 was made on a 32-core Windows workstation, from Git Bash; its
 Mathlib import took 139 s.
 

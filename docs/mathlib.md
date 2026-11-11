@@ -150,7 +150,7 @@ The M5b plan chose lazy loading, and store v1 does it
 (2026-11-07), a trusted `warrant import` writes a 1.45 GB store in 139 s;
 opening it takes 69 ms, and after 1,000 random lookups the process holds a
 21 MB managed heap and an 88 MB working set
-([docs/m5b/08](m5b/08-testing-and-baselines.md#baselines-for-m8)). The server
+([docs/m5b/08](m5b/08-testing-and-baselines.md#baselines-for-m9)). The server
 still verifies against the semantics bundle alone; the store becomes the
 verification environment in M6.
 

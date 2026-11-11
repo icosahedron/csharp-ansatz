@@ -13,7 +13,8 @@ namespace Warrant.Engine.Tests.Differential;
 /// <see cref="InvalidOperationException"/>: the CLR cannot tell them apart, and each of the two model errors is accepted.</item>
 /// <item><c>assertFailed</c>: no CLR counterpart. <c>Spec.Assert</c> is <c>[Conditional]</c> and does nothing at run time,
 /// so an input on which the model fails an assertion is skipped and counted (#186).</item>
-/// <item><c>external</c>: the sentinel a mocked dependency throws, plan U22's; no M6 function without dependencies raises it.</item>
+/// <item><c>external</c>: <see cref="MockException"/>, the sentinel a mocked dependency throws (plan U22), and nothing else;
+/// the sentinel matches nothing but <c>external</c>.</item>
 /// </list>
 /// </summary>
 internal static class ClrExceptions
@@ -33,7 +34,7 @@ internal static class ClrExceptions
     /// <summary>The constructor of a failed <c>Spec.Assert</c>, which has no CLR counterpart (#186).</summary>
     public const string AssertFailed = "assertFailed";
 
-    /// <summary>The constructor of an exception a dependency throws (plan U22).</summary>
+    /// <summary>The constructor of an exception a dependency throws (plan U22): <see cref="MockException"/>.</summary>
     public const string External = "external";
 
     /// <summary><c>Warrant.ClrExn</c>.</summary>
@@ -55,6 +56,11 @@ internal static class ClrExceptions
     public static IReadOnlyList<Expr> ModelErrors(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
+        if (exception is MockException)
+        {
+            // A mocked dependency threw: only external stands for it (plan U22).
+            return [Constructor(External)];
+        }
         var type = exception.GetType();
         var errors = Implicit.Where(m => m.Value == type).Select(m => Constructor(m.Key)).ToList();
         errors.Add(ThrownOf(Key(type)));

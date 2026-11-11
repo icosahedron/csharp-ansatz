@@ -16,7 +16,8 @@ namespace Warrant.Engine.Tests.Differential;
 
 /// <summary>
 /// One compilation on both sides, for functions that can raise (plan M6 U13): the compilation extraction read, emitted and
-/// loaded; and the engine's run over its units, frozen. The model is a function's kernel-admitted definition, whether or
+/// loaded; and the engine's run over its units, as the build runs it (the default procedure with the attribute sidecar),
+/// frozen. The model is a function's kernel-admitted definition, whether or
 /// not its contract obligation (M6 U10) is proved: the engine admits the definition before the obligation and keeps it
 /// when the obligation is not proved (<see cref="NotProvedOutcome"/>), and a caller of such a function, which the engine
 /// skips, is admitted here (<see cref="AdmittedByTheHarness"/>).
@@ -25,16 +26,21 @@ internal sealed class EffectCorpus : IDisposable
 {
     private readonly Dictionary<string, string> _admittedByTheHarness = new(StringComparer.Ordinal);
 
-    public EffectCorpus(CSharpCompilation compilation)
+    /// <param name="compilation">The compilation extraction reads.</param>
+    /// <param name="clr">
+    /// The compilation loaded for the CLR side, when not <paramref name="compilation"/> itself: plan U22's copy with
+    /// members added (<see cref="ContractCompilation"/>), whose existing members are unchanged.
+    /// </param>
+    public EffectCorpus(CSharpCompilation compilation, CSharpCompilation? clr = null)
     {
         Extraction = EngineCorpus.Extract(compilation);
         var inputs = EngineCorpus.Inputs(Extraction);
-        Run = Pipeline.Run(inputs, EngineFixture.SharedBundle.Value, KernelLimits.Corpus);
+        Run = Pipeline.Run(inputs, EngineFixture.SharedBundle.Value, EngineOptions.Default with { Kernel = KernelLimits.Corpus, Attributes = EngineFixture.SharedSidecar.Value });
         Run.Environment.Freeze();
         Environment = Run.Environment.Fork();
         KernelThread.Run(() => AdmitCallersOfUnprovedContracts(inputs));
         Environment.Freeze();
-        Assembly = CorpusAssembly.Load(compilation);
+        Assembly = CorpusAssembly.Load(clr ?? compilation);
         var definitions = Extraction.Units.Where(u => u.Unit.Definition is not null).ToDictionary(u => u.Key, u => u.Unit.Definition!, StringComparer.Ordinal);
         var values = new Values(Assembly, definitions);
         Inputs = new Inputs(values);
@@ -143,7 +149,7 @@ internal sealed class EffectCorpus : IDisposable
         AssertDefinitionAdmitted(unit.Key);
         var method = Assembly.MethodOf(unit.Unit);
         var types = ModelCheck.ParameterTypes(unit.Unit);
-        var returns = unit.Unit.Returns!;
+        var returns = ModelCheck.Returned(unit.Unit);
         var raising = Model.IsRaising(unit.Unit);
         return args =>
         {
@@ -152,7 +158,10 @@ internal sealed class EffectCorpus : IDisposable
             Exception? thrown = null;
             try
             {
-                result = CorpusAssembly.Invoke(method, args);
+                // An async function is awaited (plan U22): the model is its awaited value's.
+                result = method.IsStatic
+                    ? CorpusAssembly.InvokeAndAwait(method, null, args)
+                    : CorpusAssembly.InvokeAndAwait(method, args[0], args.Skip(1).ToList());
             }
 #pragma warning disable CA1031 // Compared with the model's error, or reported for a pure function.
             catch (Exception ex)
@@ -319,16 +328,13 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
     /// <summary>
     /// The compared functions the engine skips because a function they call has a contract obligation that is not proved
     /// (M6 U10), whose definition the harness admits itself (<see cref="EffectCorpus.AdmittedByTheHarness"/>), each with
-    /// that callee. Capped calls AtMost, whose obligation waits for the default procedure (M6 U11); when U11 proves it, the
-    /// engine admits Capped and <see cref="EveryM6FunctionWithoutDependenciesIsComparedOrSkippedForAReason"/> fails until
-    /// Capped is removed from here.
+    /// that callee. Empty: the default procedure (M6 U11) proves every accepted obligation, AtMost's included, so the engine
+    /// admits Capped; <see cref="EveryM6FunctionWithoutDependenciesIsComparedOrSkippedForAReason"/> fails if the harness
+    /// admits a compared function again.
     /// </summary>
-    private static readonly Dictionary<string, string> AdmittedByTheHarness = new(StringComparer.Ordinal)
-    {
-        ["M:Corpus.M6.Contracts.Capped(System.Int32)"] = "M:Corpus.M6.Contracts.AtMost(System.Int32,System.Int32)",
-    };
+    private static readonly Dictionary<string, string> AdmittedByTheHarness = new(StringComparer.Ordinal);
 
-    /// <summary>The namespaces of the functions with dependencies (and their async helpers), which plan U22 compares with mocks.</summary>
+    /// <summary>The namespaces of the functions with dependencies (and their async helpers), which <see cref="DependencyDifferentialTests"/> compares (plan U22).</summary>
     private static readonly string[] WithDependencies = ["Corpus.M6.Payments.", "Corpus.M6.Dependencies."];
 
     public static TheoryData<string, string> Functions()
@@ -565,7 +571,7 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
 
     /// <summary>
     /// Every <c>ClrExn</c> constructor is accounted for (KTD21): four map to a CLR type, <c>thrown</c> to the type it
-    /// names, <c>assertFailed</c> is skipped (#186), and <c>external</c> is plan U22's sentinel.
+    /// names, <c>assertFailed</c> is skipped (#186), and <c>external</c> is the mocks' sentinel, <see cref="MockException"/> (plan U22).
     /// </summary>
     [Fact]
     public void EveryClrExnConstructorIsMapped()
@@ -748,13 +754,15 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
     }
 
     /// <summary>The fuel of the agreeing check of one input: the CLR's result, or the first model error its exception matches.</summary>
-    private static long Measure(EffectCorpus side, VirUnit unit, System.Reflection.MethodInfo method, object?[] input)
+    internal static long Measure(EffectCorpus side, VirUnit unit, System.Reflection.MethodInfo method, object?[] input)
     {
         object? result = null;
         Exception? thrown = null;
         try
         {
-            result = CorpusAssembly.Invoke(method, input);
+            result = method.IsStatic
+                ? CorpusAssembly.InvokeAndAwait(method, null, input)
+                : CorpusAssembly.InvokeAndAwait(method, input[0], input[1..]);
         }
 #pragma warning disable CA1031 // Measured as the model error it matches.
         catch (Exception ex)
@@ -762,14 +770,15 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         {
             thrown = ex;
         }
+        var returns = ModelCheck.Returned(unit);
         if (!side.Model.IsRaising(unit))
         {
-            return side.Model.Measure(unit.Returns!, side.Model.Application(unit, input), result).Fuel;
+            return side.Model.Measure(returns, side.Model.Application(unit, input), result).Fuel;
         }
-        var r = Values.CicType(unit.Returns!);
+        var r = Values.CicType(returns);
         var run = side.Model.Run(unit, input);
         var outcome = thrown is null
-            ? ModelCheck.Ok(r, side.Model.Values.Term(unit.Returns!, result))
+            ? ModelCheck.Ok(r, side.Model.Values.Term(returns, result))
             : ClrExceptions.ModelErrors(thrown).Select(e => ModelCheck.Error(r, e)).First(o => side.Model.RunsTo(r, run, o));
         return side.Model.Measure(ModelCheck.RunTheorem(r, run, outcome)).Fuel;
     }

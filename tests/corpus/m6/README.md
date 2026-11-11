@@ -7,7 +7,7 @@ It follows the [M4 corpus](../m4/README.md)'s layout: the tests compile these fi
 
 Extraction reads this corpus, and so does translation: `MonadicTranslationTests` in `Warrant.Semantics.Tests` (U9) translates the members with no `decimal`, contract or dependency and admits them, and `DependencyObligationTests` (U19) translates every compilation in full and admits it.
 `Warrant.Extraction.Tests` (`CorpusTests`, `DiagnoseTests`), `Warrant.Analyzers.Tests` (`CorpusParityTests`) and `Warrant.Semantics.Tests` copy it and check it.
-`Warrant.Engine.Tests` runs every member through the default procedure (U11, U19, U20, `CorpusTests.EveryM6MemberGetsItsExpectedOutcome`), and copies the corpus for the differential tests (U13, `Differential/EffectDifferentialTests`).
+`Warrant.Engine.Tests` runs every member through the default procedure (U11, U19, U20, `CorpusTests.EveryM6MemberGetsItsExpectedOutcome`), and copies the corpus for the differential tests (U13, `Differential/EffectDifferentialTests`; U22, `Differential/DependencyDifferentialTests` for the dependency files under mocked dependencies, and `Differential/ContractStatementTests` for every proved contract on the CLR).
 `Warrant.Cli.Tests` (`M6CorpusTests`) runs `warrant verify` on `accepted/` and `refuted/`, the files with dependencies included.
 The methods that call a dependency (`ProcessPayment`, `QuantityOf`, `Counted`, `Reserved`) are proved from U20 on: at each call the walker uses the member's contract hypothesis (design D9), so `ProcessPayment` is proved with its store as a hypothesis. Its block of the assumption report is `ProcessPayment.report.txt`, which `ReportTests` (engine) and `M6CorpusTests` (CLI) compare with the report they build. The cross-check row comes with U14.
 

@@ -42,6 +42,11 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
     /// <exception cref="ModelGapException">The value has no counterpart in the model: null of a non-nullable type, or an unnamed closed value.</exception>
     public Expr Term(VirType type, object? value)
     {
+        if (type is PrimitiveType { Kind: VirPrimitive.Unit })
+        {
+            // What a void, Task or ValueTask method returns (M6 KTD22): the CLR gives nothing back.
+            return Expr.Const(Name.Parse("Unit.unit"));
+        }
         if (type is NullableType nullable)
         {
             var valueType = CicType(nullable.Value);
@@ -86,6 +91,10 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
     /// <summary>A .NET value as C# would write it, for messages.</summary>
     public string Display(VirType type, object? value)
     {
+        if (type is PrimitiveType { Kind: VirPrimitive.Unit })
+        {
+            return "()";
+        }
         if (value is null)
         {
             return "null";

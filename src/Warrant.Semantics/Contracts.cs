@@ -466,7 +466,8 @@ internal sealed partial class BodyTranslator
 
     /// <summary>
     /// The conjunction of a callee's <c>Spec.Requires</c> at <paramref name="args"/>, as its own contract states it, by a
-    /// translator of its own whose parameters are the arguments. The callee's own <c>Spec</c> obligations are its own.
+    /// translator of its own whose parameters are the arguments, sharing this one's local context and name generator.
+    /// The callee's own <c>Spec</c> obligations are its own.
     /// </summary>
     private Expr CalleeRequires(VirUnit callee, IReadOnlyList<Expr> args)
     {
@@ -474,7 +475,9 @@ internal sealed partial class BodyTranslator
         {
             throw new TranslationException(null, $"the Spec.Requires of {callee.Key} calls {callee.Key} again, so its precondition has no meaning.");
         }
-        var nested = new BodyTranslator(_types, _callees) { _quantified = true, _specCallers = _specCallers.Add(callee.Key) };
+        // In this translator's context and with its name generator, so a variable the callee's Requires binds can never
+        // share an id with a free variable of the arguments and capture it when abstracted.
+        var nested = new BodyTranslator(_types, _callees, _lctx, _ngen) { _quantified = true, _specCallers = _specCallers.Add(callee.Key) };
         int i = 0;
         if (callee.Self is not null)
         {

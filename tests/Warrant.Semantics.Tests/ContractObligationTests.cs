@@ -348,6 +348,58 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
         AssertPropositions(env, contract);
     }
 
+    /// <summary>
+    /// A callee's <c>Spec.Requires</c> binds its own variables in the caller's context (M6 U19): with a name generator of
+    /// its own, the second variable a nested <c>Spec.ForAll</c> binds would get the id of the caller's first parameter (the
+    /// world is the first), and the argument <c>x</c> would be captured by <c>j</c>. Extraction rejects <c>Spec.ForAll</c>
+    /// outside a theorem statement (WRT0004), so the VIR is built here: translation must not rely on that.
+    /// </summary>
+    [Fact]
+    public void ACalleesForAllInItsRequiresDoesNotCaptureTheCallersArguments()
+    {
+        var extraction = TranslationCorpus.Inline("""
+            public static class S
+            {
+                [Verified]
+                public static int Positive(int x)
+                {
+                    Spec.Requires(x > 0);
+                    return x;
+                }
+
+                [Verified]
+                public static int Uses(int x)
+                {
+                    Spec.Requires(x > 5);
+                    Spec.Ensures<int>(r => r == Positive(x));
+                    return x;
+                }
+            }
+            """);
+        // Positive's Spec.Requires(x > 0) becomes Spec.Requires(Spec.ForAll<int>(i => Spec.ForAll<int>(j => x > 0))).
+        var units = extraction.Units.Select(u =>
+        {
+            if (u.Key != "M:S.Positive(System.Int32)")
+            {
+                return u.Unit;
+            }
+            var body = Assert.IsType<BlockStmt>(u.Unit.Body);
+            var stmts = body.Stmts.Select(s => s is RequiresStmt req
+                ? new RequiresStmt(new ForAllExpr(1000, "i", VirType.Int32, new ForAllExpr(1001, "j", VirType.Int32, req.Condition)))
+                : s);
+            return u.Unit with { Body = new BlockStmt(new VirList<VirStmt>(stmts)) };
+        });
+        var translation = Translator.Translate(units, bundle.Env, extraction.Units.ToDictionary(u => u.Key, u => u.DisplayName, StringComparer.Ordinal));
+        var env = TranslationCorpus.Admit(bundle, translation);
+        var contract = Contract(translation, "M:S.Uses(System.Int32)");
+        var wd = Assert.Single(contract.WellDefinedness);
+        Assert.Equal(SpecObligationKind.CalleePrecondition, wd.Kind);
+        // ∀ x r, x > 5 → ∀ i j, x > 0: the argument is the caller's x, four binders out, never j.
+        Assert.Equal(3, wd.Binders);
+        Assert.Equal(Gt(Expr.BVar(4), I(0)), Under(wd.Theorem.Type, 5));
+        AssertPropositions(env, contract);
+    }
+
     // ---- Vacuity (KTD25) ----
 
     [Fact]

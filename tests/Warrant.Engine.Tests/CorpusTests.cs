@@ -10,14 +10,20 @@ namespace Warrant.Engine.Tests;
 public sealed class CorpusTests(EngineFixture engine) : IClassFixture<EngineFixture>
 {
     /// <summary>
-    /// The M6 corpus holds members translation cannot take until M6 U10, U19 and U21 (contracts, dependencies, decimal), so the engine and differential tests must not
-    /// read it before U11 and U13 add its proof outcomes (tests/corpus/m6/README.md). They enumerate the M4 and M5a sets
-    /// by name; this pins that the M6 one is not even copied here.
+    /// The M6 corpus holds members translation cannot take until M6 U10, U19 and U21 (contracts, dependencies, decimal), so
+    /// the engine's corpus tests must not read it before U11 adds its proof outcomes (tests/corpus/m6/README.md). It is
+    /// copied here for the differential tests (plan U13), which compare only the functions that translate; this pins that
+    /// the engine's corpus runs, which enumerate the M4 and M5a sets by name, refuse it.
     /// </summary>
     [Fact]
-    public void TheM6CorpusIsNotReadHereYet()
+    public void TheEngineCorpusRunsDoNotReadTheM6CorpusYet()
     {
-        Assert.False(Directory.Exists(CorpusSet.M6.Root), CorpusSet.M6.Root);
+        Assert.True(Directory.Exists(CorpusSet.M6.Root), CorpusSet.M6.Root);
+        foreach (var compilation in CorpusSet.M6.Names)
+        {
+            var refused = Assert.Throws<ArgumentException>(() => engine.Run($"m6/{compilation}"));
+            Assert.Contains("come with plan M6 U11", refused.Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

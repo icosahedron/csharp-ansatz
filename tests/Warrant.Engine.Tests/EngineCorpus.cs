@@ -45,6 +45,11 @@ public sealed class EngineFixture
         {
             if (!_runs.TryGetValue(compilation, out var run))
             {
+                if (compilation.StartsWith("m6/", StringComparison.Ordinal))
+                {
+                    // Only the differential tests read the M6 corpus until U11 gives its members proof outcomes.
+                    throw new ArgumentException($"{compilation}: the engine's M6 corpus runs come with plan M6 U11.", nameof(compilation));
+                }
                 var set = compilation.StartsWith("m5a/", StringComparison.Ordinal) ? CorpusSet.M5a : CorpusSet.M4;
                 var name = set == CorpusSet.M5a ? compilation["m5a/".Length..] : compilation;
                 var inputs = EngineCorpus.Inputs(EngineCorpus.Extract(set.Compile(name)));

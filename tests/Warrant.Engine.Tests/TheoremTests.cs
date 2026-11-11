@@ -636,6 +636,35 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     [Fact]
+    public void AGuardAgainstMinValueIsReadByOmega()
+    {
+        // #41: the compiler folds int.MinValue (long.MinValue) to -2147483648 (-9223372036854775808), which reaches omega as
+        // the negation of a literal 2^31 (2^63); the guard used to stay an unknown atom, and both theorems failed.
+        var result = Script("""
+            public static class S
+            {
+                [Verified] public static int Abs(int x) => x < 0 ? -x : x;
+                [Verified] public static long AbsLong(long x) => x < 0 ? -x : x;
+
+                [Theorem]
+                static Proof AbsIsNonNegativeAboveMin(int x) =>
+                    Prove.That(Spec.Implies(x > int.MinValue, Abs(x) >= 0))
+                         .By(Tactic.Unfold(nameof(Abs)), Tactic.Simp(), Tactic.Omega());
+
+                [Theorem]
+                static Proof AbsLongIsNonNegativeAboveMin(long x) =>
+                    Prove.That(Spec.Implies(x > long.MinValue, AbsLong(x) >= 0))
+                         .By(Tactic.Unfold(nameof(AbsLong)), Tactic.Simp(), Tactic.Omega());
+            }
+            """);
+        foreach (var key in new[] { "M:S.AbsIsNonNegativeAboveMin(System.Int32)", "M:S.AbsLongIsNonNegativeAboveMin(System.Int64)" })
+        {
+            var outcome = result.Find(key);
+            Assert.True(outcome is ProvedOutcome { By: ProofKind.Script }, $"{key}: {outcome}");
+        }
+    }
+
+    [Fact]
     public void AlwaysLargerFailsAtOmegaWithItsConstraintsAndTheCounterexample()
     {
         // The exit criterion's false claim: the goal omega was given (after Unfold, before the prep step) with C# names,

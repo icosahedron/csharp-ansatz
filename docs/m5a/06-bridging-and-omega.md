@@ -45,14 +45,30 @@ gt_iff_lt, ge_iff_le, ne_eq
 Int32.lt_iff_toInt_lt, Int32.le_iff_toInt_le, ← Int32.toInt_inj
 Int32.toInt_add, toInt_sub, toInt_mul, toInt_neg
 Int32.toInt_zero, toInt_one, toInt_minValue, toInt_maxValue
-Warrant.Int32.toInt_ofNat_lit, Warrant.Int32.toInt_neg_ofNat_lit       (chapter 5)
+Warrant.Int32.toInt_ofNat_lit, Warrant.Int32.toInt_neg_ofNat_lit       (chapter 5; priority 1001)
+Warrant.Int32.toInt_div, Warrant.Int32.toInt_mod                        (M6 U2)
 apply_ite Int32.toInt
 the Int64 versions of all of the above
 Int32.toInt_toInt64, Int64.toInt_toInt32
 Int.bmod_def
+Int.ediv_neg, Int.emod_neg                                              (M6 U2)
 ```
 
 The list lives in one C# table (`OmegaPrepSet`), and each name is a bundle root (KTD29).
+The literal lemmas are tried before `toInt_neg`, which matches the same terms: otherwise `int.MinValue`, which the compiler folds to `-(2147483648 : Int32)`, becomes `-(2147483648 : Int32).toInt` wrapped by `bmod`, and no literal lemma evaluates `(2147483648 : Int32).toInt`, so `omega` sees an unknown atom (#41).
+
+M6 U2 adds division and remainder (M6 KTD6).
+C#'s `/` and `%` truncate toward zero, as Lean's `Int32` operations do, and Init states their values with `Int.tdiv` and `Int.tmod`, which `omega` does not read.
+`lean/Warrant/Checked.lean` restates them, without side conditions, with `Int.ediv`/`Int.emod` and `if`s that `omega` splits:
+
+```lean
+(a / b).toInt = if a.toInt = -2147483648 ∧ b.toInt = -1 then -2147483648
+                else if 0 ≤ a.toInt then a.toInt / b.toInt else -(-a.toInt / b.toInt)
+(a % b).toInt = if 0 ≤ a.toInt then a.toInt % b.toInt else -(-a.toInt % b.toInt)
+```
+
+The first branch is Lean's wrap-around of `MinValue / -1`, which the CLR throws on instead; a division by zero is `0` (remainder: the dividend), which the CLR also throws on.
+`omega` reads a division or remainder only by a literal, and `Int.ediv_neg` and `Int.emod_neg` move a negative literal divisor's sign out, because the literal lemmas write `-5` as `-↑5`, which `omega` does not take as a literal divisor.
 So are `Lean.Omega.LinearCombo.coordinate_eval_0` to `coordinate_eval_9`, which `omega`'s proof uses for its first ten atoms.
 This is Lean's `bv_omega` pattern (`simp only [bitvec_to_nat] at *; omega`), which converts `BitVec` to `Nat`; Lean has no `Int32` equivalent, so Warrant writes one.
 

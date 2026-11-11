@@ -386,6 +386,20 @@ Int64.toInt_ofNat
 Int64.toInt_ofNat_of_lt
 Int64.le_toInt
 Int64.toInt_lt
+# Division and remainder (M6 U2, M6 KTD6, lean/Warrant/Checked.lean): Init's `Int.tdiv`/`Int.tmod` statements,
+# which the bridges are proved from, and the bridges, which state them with `Int.ediv`/`Int.emod` and `if`s.
+# Int.emod_neg (with Int.ediv_neg, an omega root above) moves a negative literal divisor's sign out, where omega reads it.
+Int.emod_neg
+Int32.toInt_div_of_ne_left
+Int32.toInt_div_of_ne_right
+Int32.toInt_mod
+Int64.toInt_div_of_ne_left
+Int64.toInt_div_of_ne_right
+Int64.toInt_mod
+Warrant.Int32.toInt_div
+Warrant.Int32.toInt_mod
+Warrant.Int64.toInt_div
+Warrant.Int64.toInt_mod
 
 # Well-founded recursion (M5a U15, KTD14): `WellFounded.Nat.fix` with a measure through
 # `Int.toNat` of `Int32.toInt`/`Int64.toInt`, parameters packed in `PSigma`, `dite` on recursive branches.

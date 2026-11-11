@@ -258,6 +258,78 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
             IntTerms.NLt(ToNat(Op(t, "HSub.hSub", "instHSub", "instSub", v[0], Lit(t, 1))), ToNat(v[0])))));
     }
 
+    private static Expr Neg(string t, Expr a) => Expr.App(C("Neg.neg", Level.Zero), C(t), C(t + ".instNeg"), a);
+
+    private static Expr Div(string t, Expr a, Expr b) => Op(t, "HDiv.hDiv", "instHDiv", "instDiv", a, b);
+
+    private static Expr Mod(string t, Expr a, Expr b) => Op(t, "HMod.hMod", "instHMod", "instMod", a, b);
+
+    /// <summary>A literal of <paramref name="t"/> as M4 translates it: <c>-(n : t)</c> when negative.</summary>
+    private static Expr SLit(string t, BigInteger n) => n.Sign < 0 ? Neg(t, Lit(t, -n)) : Lit(t, n);
+
+    /// <summary><c>t.minValue</c>'s magnitude: 2^31 or 2^63.</summary>
+    private static BigInteger MinMagnitude(string t) => BigInteger.Pow(2, t == "Int32" ? 31 : 63);
+
+    [Theory]
+    [MemberData(nameof(CSharpIntegers))]
+    public void TheFoldedMinValueLiteralIsANumeral(string t)
+    {
+        // #41: ∀ x, -2147483648 < x → 0 ≤ if x < 0 then -x else x, the goal of AbsIsNonNegativeAboveMin after Unfold and
+        // Simp. The compiler folds int.MinValue to the literal -(2147483648 : Int32), which omega must read as -2^31.
+        var zero = Lit(t, 0);
+        PrepProves(IntTerms.ForallN(C(t), ["x"], v => IntTerms.Arrow(
+            Cmp(t, "LT.lt", "instLT", SLit(t, -MinMagnitude(t)), v[0]),
+            Cmp(t, "LE.le", "instLE", zero, Expr.App(C("ite", Level.One), C(t), Cmp(t, "LT.lt", "instLT", v[0], zero),
+                Expr.App(C(t + ".decLt"), v[0], zero), Neg(t, v[0]), v[0])))));
+    }
+
+    [Theory]
+    [MemberData(nameof(CSharpIntegers))]
+    public void HalfOfANonNegativeValueIsAtMostTheValue(string t)
+    {
+        // ∀ x, 0 ≤ x → x / 2 ≤ x, over Lean's truncating Int32 (Int64) division.
+        PrepProves(IntTerms.ForallN(C(t), ["x"], v => IntTerms.Arrow(
+            Cmp(t, "LE.le", "instLE", Lit(t, 0), v[0]), Cmp(t, "LE.le", "instLE", Div(t, v[0], Lit(t, 2)), v[0]))));
+    }
+
+    [Theory]
+    [MemberData(nameof(CSharpIntegers))]
+    public void ARemainderByThreeIsBetweenMinusTwoAndTwo(string t)
+    {
+        // ∀ x, -2 ≤ x % 3 ∧ x % 3 ≤ 2: the remainder takes the dividend's sign.
+        PrepProves(IntTerms.ForallN(C(t), ["x"], v => Expr.App(C("And"),
+            Cmp(t, "LE.le", "instLE", SLit(t, -2), Mod(t, v[0], Lit(t, 3))),
+            Cmp(t, "LE.le", "instLE", Mod(t, v[0], Lit(t, 3)), Lit(t, 2)))));
+    }
+
+    [Theory]
+    [MemberData(nameof(CSharpIntegers))]
+    public void DivisionTruncatesTowardZero(string t)
+    {
+        // ∀ x, x = -7 → x / 2 = -3 ∧ x % 2 = -1: C#'s -7 / 2 and -7 % 2, with a negative dividend.
+        PrepProves(IntTerms.ForallN(C(t), ["x"], v => IntTerms.Arrow(
+            IntTerms.Eq(C(t), v[0], SLit(t, -7)),
+            Expr.App(C("And"),
+                IntTerms.Eq(C(t), Div(t, v[0], Lit(t, 2)), SLit(t, -3)),
+                IntTerms.Eq(C(t), Mod(t, v[0], Lit(t, 2)), SLit(t, -1))))));
+    }
+
+    [Theory]
+    [MemberData(nameof(CSharpIntegers))]
+    public void DividingByMinusOneNegatesOnlyAboveTheMinimum(string t)
+    {
+        // (x / -1).toInt = -x.toInt is false at x = minValue, where Lean's division wraps; with x ≠ minValue it holds.
+        Expr Claim(Expr x) => IntTerms.Eq(IntT, Expr.App(C(t + ".toInt"), Div(t, x, SLit(t, -1))),
+            Expr.App(C("Neg.neg", Level.Zero), IntT, C("Int.instNegInt"), Expr.App(C(t + ".toInt"), x)));
+        var m = fixture.NewMeta();
+        var goal = m.MkFreshExprSyntheticOpaqueMVar(IntTerms.ForallN(C(t), ["x"], v => Claim(v[0])));
+        var ex = Assert.Throws<TacticException>(() => m.OmegaTactic(goal.Id));
+        // In the failing case x = minValue the equalities eliminate every atom, so omega reports no usable constraints.
+        Assert.StartsWith("omega could not prove the goal:\n", ex.Message, StringComparison.Ordinal);
+        PrepProves(IntTerms.ForallN(C(t), ["x"], v => IntTerms.Arrow(
+            Expr.App(C("Not"), IntTerms.Eq(C(t), v[0], C(t + ".minValue"))), Claim(v[0]))));
+    }
+
     [Theory]
     [MemberData(nameof(CSharpIntegers))]
     public void IncrementFailsAgainstTheGoalAsGiven(string t)

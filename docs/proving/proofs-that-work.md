@@ -74,6 +74,23 @@ error WRT0001: Theorem 'Increments.AlwaysLarger(int)' could not be proved: omega
   ⊢ x + 1 > x
 ```
 
+### A guard against `int.MinValue`
+
+```csharp
+[Verified]
+public static int Abs(int x) => x < 0 ? -x : x;
+
+[Theorem]
+static Proof AbsIsNonNegativeAboveMin(int x) =>
+    Prove.That(Spec.Implies(x > int.MinValue, Abs(x) >= 0))
+         .By(Tactic.Unfold(nameof(Abs)), Tactic.Simp(), Tactic.Omega());
+```
+
+`-int.MinValue` wraps to `int.MinValue`, so the guard is needed. The compiler folds `int.MinValue` to the literal
+`-2147483648`, and `omega` reads it as that number; the same proof works for `long` and `long.MinValue`. This example
+is not in the corpus: `AGuardAgainstMinValueIsReadByOmega` in `tests/Warrant.Engine.Tests/TheoremTests.cs` proves
+both (`dotnet test tests/Warrant.Engine.Tests --filter AGuardAgainstMinValueIsReadByOmega`).
+
 ### A fact about a record
 
 ```csharp

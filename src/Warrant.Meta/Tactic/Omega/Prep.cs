@@ -8,13 +8,25 @@ namespace Warrant.Meta
     /// <summary>
     /// The omega-prep simp set (plan KTD13, docs/m5a/06 "The omega-prep set"): the lemmas that move a goal over
     /// <c>Int32</c> and <c>Int64</c> to <c>Int</c>, with wrap-around as <c>Int.bmod</c> and <c>Int.bmod</c> as an
-    /// <c>if</c>, which <c>omega</c> splits. It is Lean's <c>bv_omega</c> pattern, <c>simp only [bitvec_to_nat] at *</c>,
-    /// for the C# integer types. Every name is a bundle root (KTD29).
+    /// <c>if</c>, which <c>omega</c> splits; truncating <c>/</c> and <c>%</c> as <c>Int.ediv</c>/<c>Int.emod</c> under
+    /// <c>if</c>s on the dividend's sign (M6 KTD6, lean/Warrant/Checked.lean). It is Lean's <c>bv_omega</c> pattern,
+    /// <c>simp only [bitvec_to_nat] at *</c>, for the C# integer types. Every name is a bundle root (KTD29).
     /// </summary>
     public static class OmegaPrepSet
     {
-        /// <summary>One lemma of the set: <c>← Name</c> with <paramref name="Inverse"/>, <c>Name f</c> with <paramref name="AppliedTo"/>.</summary>
-        private sealed record Entry(Name Name, bool Inverse = false, Name? AppliedTo = null);
+        /// <summary>
+        /// One lemma of the set: <c>← Name</c> with <paramref name="Inverse"/>, <c>Name f</c> with <paramref name="AppliedTo"/>,
+        /// <c>Name:prio</c> with <paramref name="Priority"/>.
+        /// </summary>
+        private sealed record Entry(Name Name, bool Inverse = false, Name? AppliedTo = null, int Priority = MetaM.DefaultSimpPriority);
+
+        /// <summary>
+        /// The literal lemmas' priority, above the default (#41): <c>(-(n : Int32)).toInt</c> matches both
+        /// <c>Warrant.Int32.toInt_neg_ofNat_lit</c> and <c>Int32.toInt_neg</c> under the same keys, and at equal priority
+        /// the earlier-added <c>toInt_neg</c> wins. For <c>int.MinValue</c>, <c>-(2147483648 : Int32)</c>, that leaves
+        /// <c>(2147483648 : Int32).toInt</c>, which no literal lemma evaluates, as an atom omega cannot use.
+        /// </summary>
+        private const int LiteralPriority = MetaM.DefaultSimpPriority + 1;
 
         private static readonly ImmutableArray<Entry> Entries =
         [
@@ -23,12 +35,16 @@ namespace Warrant.Meta
             [
                 E($"{t}.lt_iff_toInt_lt"), E($"{t}.le_iff_toInt_le"), new(Name.Parse($"{t}.toInt_inj"), Inverse: true),
                 E($"{t}.toInt_add"), E($"{t}.toInt_sub"), E($"{t}.toInt_mul"), E($"{t}.toInt_neg"),
+                E($"Warrant.{t}.toInt_div"), E($"Warrant.{t}.toInt_mod"),
                 E($"{t}.toInt_zero"), E($"{t}.toInt_one"), E($"{t}.toInt_minValue"), E($"{t}.toInt_maxValue"),
-                E($"Warrant.{t}.toInt_ofNat_lit"), E($"Warrant.{t}.toInt_neg_ofNat_lit"),
+                new(Name.Parse($"Warrant.{t}.toInt_ofNat_lit"), Priority: LiteralPriority),
+                new(Name.Parse($"Warrant.{t}.toInt_neg_ofNat_lit"), Priority: LiteralPriority),
                 new(Name.Parse("apply_ite"), AppliedTo: Name.Parse($"{t}.toInt")),
             ]),
             E("Int32.toInt_toInt64"), E("Int64.toInt_toInt32"),
             E("Int.bmod_def"),
+            // A negative divisor's sign moves out: the literal lemmas give `-↑n`, which omega's `groundInt?` does not read.
+            E("Int.ediv_neg"), E("Int.emod_neg"),
         ];
 
         /// <summary>Every constant the set names, <c>apply_ite</c>'s functions included, for the bundle check (KTD29).</summary>
@@ -78,7 +94,7 @@ namespace Warrant.Meta
                         }
                         else
                         {
-                            set.AddRange(builder.MkSimpTheoremsFromConst(entry.Name, inverse: entry.Inverse));
+                            set.AddRange(builder.MkSimpTheoremsFromConst(entry.Name, inverse: entry.Inverse, priority: entry.Priority));
                         }
                     }
                     return set;

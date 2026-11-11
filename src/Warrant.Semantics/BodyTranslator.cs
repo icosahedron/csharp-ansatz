@@ -332,7 +332,8 @@ internal sealed partial class BodyTranslator
             case CompareKind.Int or CompareKind.Enum or CompareKind.Decimal:
                 {
                     var t = _types.Underlying(c.L.Type);
-                    if ((c.Kind == CompareKind.Decimal) != (t == VirPrimitive.Decimal) || c.R.Type != c.L.Type)
+                    bool isDecimal = c.Kind == CompareKind.Decimal;
+                    if (isDecimal != (t == VirPrimitive.Decimal) || (isDecimal && c.R.Type != VirType.Decimal))
                     {
                         throw new TranslationException(null, $"a {c.Kind} comparison of {c.L.Type} and {c.R.Type}.");
                     }

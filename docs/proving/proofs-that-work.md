@@ -31,8 +31,8 @@ Three independent kernels then check the same certificate (`warrant verify --out
 Ansatz needs a 7-line local patch for Lean 4.35 certificates (`tools/ansatz/nat-deceq-shortcut.patch`).
 
 What a proof assumes is printed by `warrant verify --report <dir>`. Every unit here assumes that arithmetic wraps on
-overflow (as it does with overflow checking off), that the semantics bundle models C# 14's `int`, `long` and
-`bool`, and that the only axioms are Lean's standard three: `propext`, `Classical.choice` and `Quot.sound`. A recursive unit also assumes that each recursive call returns without exhausting the stack.
+overflow outside a `checked` region (as it does with overflow checking off), that the semantics bundle models the
+C# 14 types and operations it lists (`int`, `long`, `bool` and, from M6, `decimal`, nullable values and exceptions), and that the only axioms are Lean's standard three: `propext`, `Classical.choice` and `Quot.sound`. A recursive unit also assumes that each recursive call returns without exhausting the stack.
 
 ## Theorems for every input (M5a)
 

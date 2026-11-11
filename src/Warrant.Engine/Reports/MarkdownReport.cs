@@ -76,7 +76,8 @@ public static class MarkdownReport
         {
             VirAssumptionKind.NonNull => "parameters",
             VirAssumptionKind.Closed or VirAssumptionKind.ClosedEquality or VirAssumptionKind.ReferencedSource => "types",
-            VirAssumptionKind.CallerPrecondition => "contracts",
-            _ => throw new InvalidOperationException($"The {a.Kind} assumption is not reported until M6 U12."),
+            VirAssumptionKind.CallerPrecondition or VirAssumptionKind.CalleeContract or VirAssumptionKind.ExternalContract => "contracts",
+            VirAssumptionKind.MayThrow => "exceptions",
+            _ => throw new InvalidOperationException($"Unknown assumption kind {a.Kind}."),
         };
 }

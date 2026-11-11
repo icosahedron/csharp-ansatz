@@ -139,7 +139,8 @@ public static class JsonReport
         VirUnitKind.Function => "function",
         VirUnitKind.Theorem => "theorem",
         VirUnitKind.Type => "type",
-        _ => throw new ArgumentException($"unit kind {kind} is not reported until M6 U12"),
+        VirUnitKind.Contract => "contract",
+        _ => throw new ArgumentException($"unknown unit kind {kind}"),
     };
 
     private static VirUnitKind ParseKind(string s) => s switch
@@ -147,6 +148,7 @@ public static class JsonReport
         "function" => VirUnitKind.Function,
         "theorem" => VirUnitKind.Theorem,
         "type" => VirUnitKind.Type,
+        "contract" => VirUnitKind.Contract,
         _ => throw new ArgumentException($"unknown unit kind '{s}'"),
     };
 
@@ -171,6 +173,9 @@ public static class JsonReport
         VirAssumptionKind.Closed => "closed",
         VirAssumptionKind.ClosedEquality => "closed-equality",
         VirAssumptionKind.ReferencedSource => "referenced-source",
+        VirAssumptionKind.ExternalContract => "external-contract",
+        VirAssumptionKind.CalleeContract => "callee-contract",
+        VirAssumptionKind.MayThrow => "may-throw",
         VirAssumptionKind.CallerPrecondition => "caller-precondition",
         _ => throw new ArgumentException($"unknown assumption kind {kind}"),
     };
@@ -181,6 +186,9 @@ public static class JsonReport
         "closed" => VirAssumptionKind.Closed,
         "closed-equality" => VirAssumptionKind.ClosedEquality,
         "referenced-source" => VirAssumptionKind.ReferencedSource,
+        "external-contract" => VirAssumptionKind.ExternalContract,
+        "callee-contract" => VirAssumptionKind.CalleeContract,
+        "may-throw" => VirAssumptionKind.MayThrow,
         "caller-precondition" => VirAssumptionKind.CallerPrecondition,
         _ => throw new ArgumentException($"unknown assumption kind '{s}'"),
     };

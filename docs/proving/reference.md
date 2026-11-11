@@ -394,10 +394,16 @@ the CLR's stack is outside the proof. For example (from
 Corpus.Recursion.Sum(int)                             TRANSLATED   (kernel: Warrant 1.0, bundle: warrant-semantics sha256:cc74b3a23fc7)
   Assumed (global):
     - Each recursive call returns without exhausting the stack
-    - Arithmetic wraps on overflow (overflow checking is off)
-    - The semantics bundle models C# 14 int, long and bool
+    - Arithmetic wraps on overflow, except in a checked region, where it throws (overflow checking is off)
+    - The semantics bundle models C# 14 int, long, bool and decimal, their nullable forms, records, enums, closed classes, throw and the exceptions arithmetic, division and null access raise, and Math.Min, Math.Max and Math.Abs on int, long and decimal; decimal arithmetic throws on overflow in every region
     - The only axioms are Lean's standard ones: propext, Classical.choice, Quot.sound
 ```
+
+From M6 (U12), a method with contracts also lists `Assumed (contracts)`: its own `Spec.Requires`, which is assumed on
+entry and not checked at run time or at call sites Warrant does not verify, and each verified callee's proved contract.
+`Assumed (exceptions)` lists each explicit `throw` the contract allows and each one that propagates through a verified
+callee, with its source line, because the proof says nothing about a call that ends in one. In `report.json` these are
+the `caller-precondition`, `callee-contract`, `external-contract` and `may-throw` kinds.
 
 The target layout, with contracts (M6):
 

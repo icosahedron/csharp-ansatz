@@ -68,7 +68,10 @@ public sealed record UnitReport(
 
 /// <summary>One assumption, rendered for people.</summary>
 /// <param name="Kind">What is assumed.</param>
-/// <param name="Subject">A parameter path for a non-null assumption, the type's display name otherwise.</param>
+/// <param name="Subject">
+/// A parameter path for a non-null assumption, the thrown type's or dependency member's display name for a may-throw
+/// assumption, and otherwise the display name of the type, member or method it names.
+/// </param>
 /// <param name="From">The display name of the unit whose VIR records it.</param>
 /// <param name="Inherited">Whether it comes from a unit this one depends on rather than from the unit itself.</param>
 /// <param name="Text">The sentence the report prints, e.g. <c>p is not null</c>.</param>
@@ -84,7 +87,10 @@ public sealed record ReportSettings(bool CheckOverflow, string Bundle, string? K
 public static class AssumptionReports
 {
     /// <summary>What the bundle models, a global assumption of every unit.</summary>
-    public const string BundleModels = "The semantics bundle models C# 14 int, long and bool";
+    public const string BundleModels =
+        "The semantics bundle models C# 14 int, long, bool and decimal, their nullable forms, records, enums, closed classes, "
+        + "throw and the exceptions arithmetic, division and null access raise, and Math.Min, Math.Max and Math.Abs on int, long and decimal; "
+        + "decimal arithmetic throws on overflow in every region";
 
     /// <summary>
     /// The axioms every proof may rest on, a global assumption of every unit: the bundle loads only if these are its only
@@ -92,11 +98,17 @@ public static class AssumptionReports
     /// </summary>
     public static readonly string Axioms = "The only axioms are Lean's standard ones: " + string.Join(", ", SemanticsBundle.StandardAxioms);
 
-    /// <summary>The overflow assumption when overflow checking is off.</summary>
-    public const string Wraps = "Arithmetic wraps on overflow (overflow checking is off)";
+    /// <summary>
+    /// The overflow assumption when overflow checking is off. A <c>checked</c> region still throws (M6 KTD6), so the line
+    /// names both (#147).
+    /// </summary>
+    public const string Wraps = "Arithmetic wraps on overflow, except in a checked region, where it throws (overflow checking is off)";
 
-    /// <summary>The overflow assumption when overflow checking is on.</summary>
-    public const string Throws = "Arithmetic throws on overflow (overflow checking is on)";
+    /// <summary>
+    /// The overflow assumption when overflow checking is on. An <c>unchecked</c> region still wraps, and a theorem's
+    /// arithmetic is proved with wrapping only there, so the line names both (#147).
+    /// </summary>
+    public const string Throws = "Arithmetic throws on overflow, except in an unchecked region, where it wraps (overflow checking is on)";
 
     /// <summary>
     /// The model has no stack (M5a KTD31): a recursive method's proofs are about the calls that return, and a call that
@@ -156,6 +168,10 @@ public static class AssumptionReports
         ArgumentNullException.ThrowIfNull(claim);
         var names = outcomes.ToDictionary(u => u.Key, u => u.DisplayName, StringComparer.Ordinal);
         string Name(string key) => names.TryGetValue(key, out var n) ? n : LeanNames.FallbackDisplay(key);
+        string? Site(string key, int? node) =>
+            node is { } id && units.TryGetValue(key, out var unit) && unit.Spans is { } spans && spans.TryGetSpan(id, out var span) && span is not null
+                ? string.Create(CultureInfo.InvariantCulture, $"{span.Path}:{span.StartLine}")
+                : null;
 
         var reports = ImmutableArray.CreateBuilder<UnitReport>(outcomes.Count);
         foreach (var dto in outcomes)
@@ -167,7 +183,7 @@ public static class AssumptionReports
                 : Describe(dto.ToOutcome([]));
             ImmutableArray<UnitAssumption> assumptions = [.. dto.Assumptions.Select(a => new UnitAssumption(a.UnitKey, new VirAssumption(a.Kind, a.Subject)))];
             var rendered = assumptions
-                .Select(a => Render(a, dto.Key, Name))
+                .Select(a => Render(a, dto.Key, Name, Site))
                 .OrderBy(a => a.Inherited)
                 .ToImmutableArray();
             reports.Add(new UnitReport(dto.Key, dto.UnitKind, dto.DisplayName, status, name, by, text, detail, rendered)
@@ -269,10 +285,22 @@ public static class AssumptionReports
         _ => throw new InvalidOperationException($"Unknown outcome {outcome?.GetType().Name}."),
     };
 
-    private static ReportAssumption Render(UnitAssumption assumption, string unitKey, Func<string, string> name)
+    /// <summary>Renders one assumption (M4 R16; M6 KTD20 for the contract and exception kinds).</summary>
+    /// <param name="assumption">The assumption and the unit that records it.</param>
+    /// <param name="unitKey">The key of the unit whose report this is.</param>
+    /// <param name="name">A key's display name.</param>
+    /// <param name="site">A node's <c>path:line</c> in a unit, or null when the report cannot place it.</param>
+    private static ReportAssumption Render(UnitAssumption assumption, string unitKey, Func<string, string> name, Func<string, int?, string?> site)
     {
         var (kind, subject) = (assumption.Assumption.Kind, assumption.Assumption.Subject);
-        var shown = kind == VirAssumptionKind.NonNull ? subject : name(subject);
+        var owner = name(assumption.UnitKey);
+        var thrown = kind == VirAssumptionKind.MayThrow ? MayThrowSubject.Parse(subject) : null;
+        var shown = kind switch
+        {
+            VirAssumptionKind.NonNull => subject,
+            VirAssumptionKind.MayThrow => name(thrown!.Thrown),
+            _ => name(subject),
+        };
         var text = kind switch
         {
             VirAssumptionKind.NonNull => $"{shown} is not null",
@@ -280,13 +308,35 @@ public static class AssumptionReports
             VirAssumptionKind.ClosedEquality => $"{shown}'s equality agrees with identity on its named members",
             VirAssumptionKind.ReferencedSource =>
                 $"{shown} comes from a referenced assembly built from the source Warrant checked, as that project's build recorded it",
-            // M6 KTD20 (#89); M6 U12 words the report's contract sections.
+            // M6 KTD20 (#89): nothing checks a Requires at run time, and an unverified caller is not checked against it.
             VirAssumptionKind.CallerPrecondition =>
-                $"{shown}'s Spec.Requires holds at every call: verified callers prove it, but nothing checks it at run time or at a call from code Warrant does not verify",
+                $"{shown}'s Spec.Requires is assumed on entry: verified callers prove it at each call, but it is not checked at run time or at call sites Warrant does not verify",
+            // M6 KTD20: a verified callee's proved triple, used at its call sites.
+            VirAssumptionKind.CalleeContract =>
+                $"{shown} returns only values its Spec.Ensures allows, as Warrant proved under its own assumptions; this method proves its Spec.Requires at each call",
+            // M6 KTD20: U20 words what the contract says; until then the report names the member.
+            VirAssumptionKind.ExternalContract => $"Every implementation of {shown} does what its contract class says",
+            VirAssumptionKind.MayThrow => MayThrowText(owner, thrown!, assumption.UnitKey, name, site),
             _ => throw new InvalidOperationException($"Unknown assumption kind {kind}."),
         };
         var inherited = !string.Equals(assumption.UnitKey, unitKey, StringComparison.Ordinal);
-        return new ReportAssumption(kind, shown, name(assumption.UnitKey), inherited, text);
+        return new ReportAssumption(kind, shown, owner, inherited, text);
+    }
+
+    /// <summary>
+    /// A may-throw line (M6 KTD20, #70): what the method may throw, through which verified callee's call, and where the
+    /// <c>throw</c> or the dependency call is. A path that ends in it satisfies the contract vacuously, so the proof says
+    /// nothing about it.
+    /// </summary>
+    private static string MayThrowText(string owner, MayThrowSubject s, string ownerKey, Func<string, string> name, Func<string, int?, string?> site)
+    {
+        bool external = s.Thrown.StartsWith("M:", StringComparison.Ordinal);
+        var what = external ? $"an exception from {name(s.Thrown)}" : name(s.Thrown);
+        var via = s.Via is { } callee
+            ? $" through its call to {name(callee)}" + (site(ownerKey, s.CallNode) is { } call ? $" at {call}" : "")
+            : "";
+        var at = site(s.In ?? ownerKey, s.Node) is { } where ? $" (the {(external ? "call" : "throw")} at {where})" : "";
+        return $"{owner} may throw {what}{via}{at}; its proof says nothing about a call that ends in it";
     }
 
     private static string KernelName()

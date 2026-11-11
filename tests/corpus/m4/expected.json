@@ -176,7 +176,7 @@
       "T:Corpus.Rejected.Left": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "cyclic record types" }] },
       "T:Corpus.Rejected.Right": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "cyclic record types" }] },
       "T:Corpus.Rejected.Reserved": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "reserved member name" }] },
-      "M:Corpus.Rejected.Counter.Next": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "instance member of a class" }] },
+      "P:Corpus.Rejected.Tally.Current": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "instance member of a class" }] },
       "M:Corpus.Rejected.Types.UsesUnsealed(Corpus.Rejected.Unsealed)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.UsesOwnEquality(Corpus.Rejected.OwnEquality,Corpus.Rejected.OwnEquality)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.UsesExtraState(Corpus.Rejected.ExtraState)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },

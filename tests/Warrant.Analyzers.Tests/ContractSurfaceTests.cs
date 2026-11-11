@@ -95,8 +95,148 @@ public sealed class ContractSurfaceTests
         var (lines, exceptions) = await AnalyzerHarness.Run(compilation);
 
         Assert.Empty(exceptions);
-        // The contract class is not read until M6 U18, and the async method is not verified.
+        // The contract class has the contract shape (M6 U18), and the async method is not verified.
         Assert.Empty(lines);
+    }
+
+    /// <summary>
+    /// One member or class per diagnostic of U18 (KTD9, KTD10, KTD22), and the payment example of design §5.2, which the
+    /// analyzer accepts as the build does. C# 12, so Roslyn 4.8 reads it.
+    /// </summary>
+    private const string Dependencies = """
+        #nullable enable
+        using System.Threading.Tasks;
+        using Warrant;
+
+        namespace Sample;
+
+        public enum Result { Success, InvalidId, NotFound }
+
+        public sealed record Payment(int Id, decimal Amount);
+
+        public interface IPaymentStore
+        {
+            Task<Payment?> GetPayment(int id);
+            Task SavePayment(Payment p);
+            int Size { get; }
+        }
+
+        public interface IClock { int Now(); }
+        public interface IBox<T> { int Get(); }
+        public interface IShaky { int Get(); }
+
+        [ContractFor(typeof(IPaymentStore))]
+        file abstract class PaymentStoreContract : IPaymentStore
+        {
+            public Task<Payment?> GetPayment(int id)
+            {
+                Spec.Ensures<Payment?>(r => r is null || r.Id == id);
+                return default!;
+            }
+
+            public Task SavePayment(Payment p) => default!;
+
+            public abstract int Size { get; }
+        }
+
+        [ContractFor(typeof(IPaymentStore))]
+        internal abstract class Twin : IPaymentStore
+        {
+            public abstract Task<Payment?> GetPayment(int id);
+            public abstract Task SavePayment(Payment p);
+            public abstract int Size { get; }
+        }
+
+        [ContractFor(typeof(IShaky))]
+        internal class ShakyContract : IShaky { public int Get() => default!; }
+
+        public abstract class Base { protected readonly IPaymentStore inherited = null!; }
+
+        public sealed class PaymentService(IPaymentStore store, IClock clock, IBox<int> box, IShaky shaky) : Base
+        {
+            private IPaymentStore mutable = store;
+            private readonly int limit = 3;
+
+            [Verified]
+            public async Task<Result> ProcessPayment(int paymentId)
+            {
+                Spec.Ensures<Result>(r => r != Result.Success || paymentId > 0);
+                if (paymentId <= 0) return Result.InvalidId;
+                var payment = await store.GetPayment(paymentId);
+                if (payment is null) return Result.NotFound;
+                await store.SavePayment(payment with { Amount = 0m });
+                return Result.Success;
+            }
+
+            [Verified] public int Mutable() => mutable.Size;
+            [Verified] public int Inherited(int id) => inherited.GetPayment(id) == null ? 0 : 1;
+            [Verified] public int Clock() => clock.Now();
+            [Verified] public int Box() => box.Get();
+            [Verified] public int Shaky() => shaky.Get();
+            [Verified] public int Limit(int x) => x + limit;
+            [Verified] public int Tested(int x) => store == null ? 0 : x;
+            [Verified] public int Sized() => store.Size;
+            [Verified] public async Task Discarded(Payment p) { _ = store.SavePayment(p); await store.SavePayment(p); }
+            [Verified] public async Task<int> Configured(int id) => await store.GetPayment(id).ConfigureAwait(false) is null ? 0 : 1;
+            [Verified] public async Task<int> Delayed(int id) { await Task.Delay(1); return id; }
+            [Verified] public async void Fire(Payment p) => await store.SavePayment(p);
+            [Verified] public async Task Early(Payment p) { if (p.Id < 0) return; await store.SavePayment(p); }
+
+            [Verified]
+            public int InClaim(int x)
+            {
+                Spec.Ensures<int>(r => store.GetPayment(x) != null);
+                return x;
+            }
+        }
+
+        public sealed class Reassigned(IPaymentStore store)
+        {
+            public void Reset() => store = null!;
+
+            [Verified] public async Task<int> Find(int id) => await store.GetPayment(id) is null ? 0 : 1;
+        }
+        """;
+
+    [Fact]
+    public async Task TheAnalyzerReportsEachDependencyAndContractClassDiagnosticAsTheBuildDoes()
+    {
+        var compilation = AnalyzerHarness.Compile(("Dependencies.cs", Dependencies));
+        Assert.Empty(compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        var extraction = Extractor.Extract(compilation, new ExtractionOptions { BuildDefines = true });
+        var expected = extraction.Diagnostics
+            .Select(d => AnalyzerHarness.Line(
+                d.Location!.Path, d.Location.StartLine, d.Location.StartColumn, d.Location.EndLine, d.Location.EndColumn,
+                d.Severity == ExtractionSeverity.Warning ? "warning" : "error", d.Id, d.Message))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        var (lines, exceptions) = await AnalyzerHarness.Run(compilation);
+
+        Assert.Empty(exceptions);
+        Assert.Equal(expected, lines.Order(StringComparer.Ordinal).ToList());
+        Assert.NotNull(extraction.Find("M:Sample.PaymentService.ProcessPayment(System.Int32)"));
+        Assert.Equal(
+            [
+                "WRT0002 | second contract class for an interface",
+                "WRT0002 | contract class that is not abstract",
+                "WRT0002 | mutable dependency field",
+                "WRT0002 | inherited dependency",
+                "WRT0002 | dependency without a contract class",
+                "WRT0002 | generic interface dependency",
+                "WRT0002 | dependency whose contract class is rejected",
+                "WRT0002 | member access on this",
+                "WRT0002 | dependency used other than to call a member",
+                "WRT0002 | property of a dependency",
+                "WRT0002 | Task-returning call that is not awaited",
+                "WRT0002 | ConfigureAwait",
+                "WRT0002 | Task combinator",
+                "WRT0002 | async void method",
+                "WRT0002 | return without a value",
+                "WRT0002 | dependency call in a Spec expression",
+                "WRT0002 | assigned primary-constructor parameter",
+            ],
+            extraction.Diagnostics.Select(d => d.Id + " | " + d.Construct));
     }
 
     /// <summary>One member per contract diagnostic of U8 (KTD8, KTD11, KTD16), in C# 12 so Roslyn 4.8 reads it.</summary>

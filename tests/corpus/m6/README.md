@@ -26,7 +26,7 @@ The directory a member sits in is the outcome it is expected to have then: `acce
 
 ## Members moved from the M4 corpus
 
-These members were rejected in the M4 corpus for a construct M6 supports. U7 and U17 moved them here unchanged, keys included, so the M4 corpus keeps its meaning (R14); the M4 README's flip list records each move.
+These members were rejected in the M4 corpus for a construct M6 supports. U7, U17 and U18 moved them here unchanged, keys included, so the M4 corpus keeps its meaning (R14); the M4 README's flip list records each move.
 
 | Member | M4 outcome | M6 outcome now |
 |---|---|---|
@@ -41,6 +41,7 @@ These members were rejected in the M4 corpus for a construct M6 supports. U7 and
 | `Corpus.Rejected.Types.NullableParameter` | WRT0002 `nullable type` | `translated` (accepted) |
 | `Corpus.Rejected.Types.ReturnsNull` | WRT0002 `nullable type` | `translated` (accepted) |
 | `Corpus.Rejected.Statements.Decimals` | WRT0002 `decimal` | `translated` (accepted) |
+| `Corpus.Rejected.Counter.Next` | WRT0002 `instance member of a class` | WRT0002 `member access on this` (rejected): U18 accepts a class's instance methods, and this one reads a field that is not a dependency |
 
 ## Files
 
@@ -59,4 +60,7 @@ These members were rejected in the M4 corpus for a construct M6 supports. U7 and
 | `rejected/Nullables.cs` | `Forgiven`, `LiftedLess`, `LiftedEquals`, `LiftedAdd`, `ReadIsPositive`, `Product`, `AddingOneIsLarger` | `!` (`null-forgiving operator`), `lifted comparison` and `lifted arithmetic` on `int?` (#76), `decimal operator other than + and -`, and a theorem statement with `nullable read` or `decimal arithmetic` (KTD11). |
 | `rejected/Effects.cs` | `ThrowsOdd`, `TryFinally`, `Sign`, `RatioAtMost`, `AbsoluteIsNonNegative` | An exception whose constructor divides, `try`/`finally`, a `Math` member that is not modelled (WRT0005), and a theorem statement that divides or calls a throwing modelled member (KTD11). |
 | `accepted/Contracts.cs` | `NonNegative`, `AtMost`, `Capped`, `Average`, `Same` | Contracts without dependencies (U8): leading `Spec.Requires` and `Spec.Ensures`, a call to a method with `Spec.Requires` (which makes the caller raising, KTD11), `Spec.Assert` with a script, and a `[ProofFor]` method whose script starts with `Tactic.VcGen()`. |
+| `accepted/Payments.cs` | `PaymentService.ProcessPayment`, `Validate`, the contract units of `IPaymentStore.GetPayment` and `SavePayment` | Design §5.2's payment example (U18): `store` is a never-assigned primary-constructor parameter of an interface whose `file` contract class states `GetPayment`'s `Ensures` and assumes nothing of `SavePayment` (`=> default!`). `ProcessPayment` has `store` as its one dependency with both members, the contract units as dependencies, and assumes `store` and both returned tasks are not null. |
+| `accepted/Dependencies.cs` | `OrderService.QuantityOf`, `Counted`, `Reserved`, `Steps.Next`, `Run`, the contract units of `IOrders`' members and `IDisposable.Dispose` | U18: a readonly-field dependency whose interface inherits `IDisposable`, a `Task<Order?>` result that is nullable once awaited (#171), a `void` and a synchronous member, an `abstract` contract member, a `ValueTask`, a member with an unmodelled type (`Describe`, `string`) that nothing calls, and a verified async method awaiting another. |
+| `rejected/Dependencies.cs` | `Counter.Next`, the `Store` and `Assigned` members, and the contract classes `StockAgain`, `ShakyContract`, `TwiceContract`, `PublicContract`, `WideContract`, `ExtraContract`, `ItemContract`, `LaxContract` | One U18 rejection each: dependencies that break KTD9's rules, other uses of the class's state, tasks that are not the direct operand of `await` (KTD22), and each step of the contract shape (KTD10). `Store.Sum` translates. |
 | `rejected/Contracts.cs` | `EnsuresLate`, `RequiresAfterEnsures`, `DecreasesAfterRequires`, `Countdown`, `Descend`, `Widened`, `NoResult`, `NotALambda`, `Scaled`, `NextIsPositive`, the `[ProofFor]` methods `MissingProof`, `KeptAgain`, `BareProof`, `GivenProof`, `TwinProof`, `PlainProof` | One U8 rejection each: the order and place of the leading `Spec` statements, the type `Spec.Ensures` binds (KTD8), a contract on a recursive method, recursion with effects, a `Spec` expression and a theorem that call a raising method (KTD11, #164, #165), and each way a `[ProofFor]` method supplies no script (KTD16). The methods they name or call (`Scale`, `Checked`, `Next`, `Kept`, `Bare`, `Given`, `Twin`) translate. |

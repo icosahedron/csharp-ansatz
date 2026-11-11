@@ -23,6 +23,7 @@ public sealed class Diagnoser
     private readonly Lazy<Dictionary<string, ISymbol>> _attributed;
     private readonly Lazy<CompilationScan> _scan;
     private readonly Lazy<ProofIndex> _proofs;
+    private readonly Lazy<ContractIndex> _contracts;
 
     /// <summary>Creates the diagnoser for a compilation.</summary>
     /// <param name="compilation">The compilation.</param>
@@ -38,6 +39,8 @@ public sealed class Diagnoser
             LazyThreadSafetyMode.ExecutionAndPublication);
         _proofs = new Lazy<ProofIndex>(
             () => ProofIndex.Build(compilation, _types.Value, CancellationToken.None), LazyThreadSafetyMode.ExecutionAndPublication);
+        _contracts = new Lazy<ContractIndex>(
+            () => ContractIndex.Build(compilation, _types.Value, CancellationToken.None), LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     /// <summary>The compilation's <c>[Verified]</c> members, <c>[Theorem]</c>s and <c>[ProofFor]</c> methods, by key.</summary>
@@ -80,7 +83,8 @@ public sealed class Diagnoser
             return [];
         }
         var key = Symbols.Key(member);
-        var diagnostics = new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true, proofs: _proofs).ExecuteFor(member, _attributed.Value);
+        var diagnostics = new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true, proofs: _proofs, contracts: _contracts)
+            .ExecuteFor(member, _attributed.Value);
         var types = new HashSet<string>(diagnostics.Select(d => d.MemberKey).Where(k => k is not null && !_attributed.Value.ContainsKey(k))!, StringComparer.Ordinal);
         return diagnostics.Where(d => d.MemberKey == key || (d.MemberKey is not null && types.Contains(d.MemberKey))).ToList();
     }
@@ -100,9 +104,37 @@ public sealed class Diagnoser
             return [];
         }
         var key = Symbols.Key(type);
-        return new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true, proofs: _proofs).ExecuteFor(type, _attributed.Value)
+        return new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true, proofs: _proofs, contracts: _contracts)
+            .ExecuteFor(type, _attributed.Value)
             .Where(d => d.MemberKey == key)
             .ToList();
+    }
+
+    /// <summary>The compilation's <c>[ContractFor]</c> classes, by key (M6 KTD10).</summary>
+    public IEnumerable<INamedTypeSymbol> ContractClasses() => _contracts.Value.Classes;
+
+    /// <summary>Whether a type is one <see cref="ContractClass"/> diagnoses: one marked <c>[ContractFor]</c>.</summary>
+    public static bool IsContractClass(INamedTypeSymbol type) => ContractIndex.IsContractClass(type);
+
+    /// <summary>
+    /// The diagnostics about a <c>[ContractFor]</c> class's shape, which a full extraction reports whether or not a verified
+    /// method calls through its interface (M6 KTD10).
+    /// </summary>
+    /// <param name="type">The type.</param>
+    /// <param name="cancellationToken">Cancels the check.</param>
+    /// <returns>The diagnostics.</returns>
+    public IReadOnlyList<ExtractionDiagnostic> ContractClass(INamedTypeSymbol type, CancellationToken cancellationToken = default)
+    {
+        if (type is null)
+        {
+            throw new ArgumentNullException(nameof(type));
+        }
+        if (!ContractIndex.IsContractClass(type))
+        {
+            return [];
+        }
+        return new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true, proofs: _proofs, contracts: _contracts)
+            .ExecuteForContractClass(type);
     }
 
     /// <summary>WRT0008, a property of the whole compilation: every way an unnamed value can reach a <c>[Closed]</c> enum.</summary>

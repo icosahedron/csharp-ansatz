@@ -33,6 +33,9 @@ internal sealed class ExtractionContext
     /// <summary>Whether a closed class from another assembly is accepted without its source or a type unit (the analyzer).</summary>
     public bool DeferReferenced { get; }
 
+    /// <summary>The compilation's <c>[ContractFor]</c> classes (M6 KTD9), shared by the runs on one compilation; set by the run.</summary>
+    public Lazy<ContractIndex>? Contracts { get; set; }
+
     public SemanticModel Model(SyntaxTree tree)
     {
         if (!_models.TryGetValue(tree, out var model))

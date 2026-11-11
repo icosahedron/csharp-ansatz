@@ -22,10 +22,16 @@ public static partial class Extractor
                 .Where(c => c.Kind != VirUnitKind.Type && c.Rejection is null)
                 .OrderBy(c => c.Key, StringComparer.Ordinal)
                 .ToList();
-            var analysis = Effects.Analyze(accepted.Select(Provisional));
+            var analysis = Effects.Analyze(accepted.Where(c => c.Kind != VirUnitKind.Contract).Select(Provisional));
             foreach (var c in accepted)
             {
-                c.Rejection = c.Kind == VirUnitKind.Theorem ? RaisingTheorem(c, analysis) : RaisingFunction(c, analysis);
+                c.Rejection = c.Kind switch
+                {
+                    VirUnitKind.Theorem => RaisingTheorem(c, analysis),
+                    // A contract unit is its Spec calls alone, so only its claims can call something that raises (U18).
+                    VirUnitKind.Contract => RaisingClaim(c, analysis),
+                    _ => RaisingFunction(c, analysis),
+                };
             }
         }
 
@@ -86,7 +92,13 @@ public static partial class Extractor
                     $"{name}: a recursive method cannot raise an exception in M6, and this one can ({Describe(cause, own)}{(own ? "" : $", through {Display(cause.Callee!)}")}): its recursive call would sit inside the effect monad, where the decrease obligations cannot see it.");
             }
 
-            // A Spec expression is a Prop, so it may not call a program that can raise (KTD26 as amended, #165).
+            return RaisingClaim(c, analysis);
+        }
+
+        /// <summary>A Spec expression is a Prop, so it may not call a program that can raise (KTD26 as amended, #165).</summary>
+        private Rejection? RaisingClaim(Candidate c, EffectAnalysis analysis)
+        {
+            var name = Symbols.Display(c.Symbol);
             foreach (var claim in Claims(c))
             {
                 foreach (var call in Descendants(claim).OfType<CallExpr>())

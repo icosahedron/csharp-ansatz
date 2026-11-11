@@ -51,9 +51,17 @@ internal sealed partial class Walker
                 at.GetLocation(),
                 "Spec.Requires is out of order: the leading Spec statements are Spec.Decreases, then Spec.Requires, then Spec.Ensures."));
         }
-        return rank == 1
-            ? Track(new RequiresStmt(Expr(call.Arguments[0].Value)), at)
-            : Ensures(call, at);
+        _claims++;
+        try
+        {
+            return rank == 1
+                ? Track(new RequiresStmt(Expr(call.Arguments[0].Value)), at)
+                : Ensures(call, at);
+        }
+        finally
+        {
+            _claims--;
+        }
     }
 
     /// <summary>
@@ -152,7 +160,16 @@ internal sealed partial class Walker
     /// <summary><c>Spec.Assert(c, script...)</c>: a check node at its position, with the tactics that prove it (KTD16).</summary>
     private AssertStmt Assert(IInvocationOperation call, SyntaxNode at)
     {
-        var condition = Expr(call.Arguments[0].Value);
+        VirExpr condition;
+        _claims++;
+        try
+        {
+            condition = Expr(call.Arguments[0].Value);
+        }
+        finally
+        {
+            _claims--;
+        }
         var script = AssertScript(call.Arguments.Where(a => a.Parameter?.Ordinal > 0));
         return Track(new AssertStmt(condition, script), at);
     }

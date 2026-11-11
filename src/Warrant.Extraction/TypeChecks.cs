@@ -31,7 +31,7 @@ internal sealed class TypeBuild
 /// <summary>
 /// The checks on records, enums and closed types (docs/m4/03, "Records" and "Closed types"), and their definitions.
 /// </summary>
-internal static class TypeChecks
+internal static partial class TypeChecks
 {
     public static TypeBuild Build(ExtractionContext context, Lazy<CompilationScan> scan, INamedTypeSymbol type)
     {

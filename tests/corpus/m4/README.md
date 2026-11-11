@@ -60,7 +60,9 @@ Each move, with the milestone unit that made it and where the member went:
 | `M:Corpus.Rejected.Types.NullableParameter(Corpus.Rejected.Point)` | WRT0002 `nullable type` | M6 U17 | `tests/corpus/m6/accepted/Types.cs` |
 | `M:Corpus.Rejected.Types.ReturnsNull` | WRT0002 `nullable type` | M6 U17 | `tests/corpus/m6/accepted/Types.cs` |
 | `M:Corpus.Rejected.Statements.Decimals(System.Decimal)` | WRT0002 `decimal` | M6 U17 | `tests/corpus/m6/accepted/Statements.cs` |
+| `M:Corpus.Rejected.Counter.Next` | WRT0002 `instance member of a class` | M6 U18 | `tests/corpus/m6/rejected/Dependencies.cs` |
 
 Their keys are unchanged, and the M6 corpus README gives each one's M6 outcome.
 `CallsUnmodelled` (`Math.Sign`) replaces `CallsUnverified`, so the corpus still has a WRT0005 member.
+`Tally.Current`, an instance property of a class, replaces `Counter.Next`, so the corpus still has an `instance member of a class`: M6 accepts a class's verified instance methods, which may call dependencies, and `Counter.Next` is now rejected for reading a field (`member access on this`).
 `ComparesWithNull` stays: its parameter is not declared nullable, so it is assumed non-null and comparing it with `null` is still rejected as `null`.

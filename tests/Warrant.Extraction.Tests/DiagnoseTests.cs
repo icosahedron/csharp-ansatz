@@ -58,6 +58,7 @@ public sealed class DiagnoseTests
 
         var reported = diagnoser.Members().SelectMany(m => diagnoser.Member(m))
             .Concat(diagnoser.ClosedTypes().SelectMany(t => diagnoser.ClosedType(t)))
+            .Concat(diagnoser.ContractClasses().SelectMany(t => diagnoser.ContractClass(t)))
             .Concat(diagnoser.UnnamedClosedValues())
             .ToHashSet();
 

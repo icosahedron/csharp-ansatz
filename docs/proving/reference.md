@@ -202,7 +202,7 @@ diagnostic message uses.
 | `preprocessor conditional` | WRT0002 | A member that translates differently depending on which `#if` symbols the build defines, for example one with an `#if DEBUG` in its body, or one that calls an overload declared under `#if`. Extraction compares every combination of the symbols the conditions test (at most six), skipping combinations that do not compile. Code an `#if` does not affect is translated as usual. M5a takes the real defines from `Csc`. |
 | `cyclic record types` | WRT0002 | Without `null`, no value of such a type can be built. |
 | `reserved member name` | WRT0002 | A member of a record or closed type named `rec`, `recOn`, `casesOn`, `noConfusion`, `noConfusionType`, `below`, `brecOn`, `ctorIdx` or `injEq`. |
-| `instance member of a class` | WRT0002 | Only records may have verified instance members. |
+| `instance member of a class` | WRT0002 | Only records may have verified instance members, and, from M6, a class's instance methods, which may call dependencies (see the M6 dependency rejections). A property of a class, an instance member of a struct or of a `[Closed]` class is still rejected. |
 | `generic type`, `generic member` | WRT0002 | §12 Q14. |
 | `depends on a rejected unit` | WRT0002 | A member that uses a rejected type or calls a rejected member. |
 | `case guard`, `switch arm guard`, `lambda`, `user-defined operator`, `user-defined conversion`, `indexer`, `property setter`, `ref parameter`, `ref return`, `ref local`, `ref conditional`, `params argument`, `object initializer`, `object creation`, `constructor other than the primary constructor`, `with on a type that is not a record`, `with on a property that is not positional`, `assignment to a parameter`, `assignment to a field or property`, `local without an initializer`, `expression statement`, `jump statement`, `increment of a non-integer`, `enum arithmetic`, `closed enum constant that names no member`, `pattern that is not a constant`, `type defined outside the compilation`, `enum with an underlying type other than int or long`, `positional property that is not the compiler's auto-property`, `member without a body`, `theorem that is not static`, `theorem that is not Prove.That` | WRT0002 | Less common constructs, each named in its message. Anything else gets a name that starts with `unsupported` (`unsupported expression`, `unsupported operator`, …). |
@@ -241,7 +241,7 @@ M6 extraction reads `Spec.Requires`, `Spec.Ensures` and `Spec.Assert` in a
 method, which becomes `M`'s script. `Tactic.VcGen()` is a step of a
 `[ProofFor]` or `Spec.Assert` script only; in a theorem's script it is still
 `unsupported script argument`. Proving a contract needs M6's translation.
-`[ContractFor]` classes are not read yet. These are rejected:
+These are rejected:
 
 | Construct | Code | Notes |
 |---|---|---|
@@ -258,6 +258,31 @@ method, which becomes `M`'s script. `Tactic.VcGen()` is a step of a
 | `[ProofFor] naming no method`, `[ProofFor] of an overloaded method`, `[ProofFor] of a member that is not verified` | WRT0002 | `[ProofFor(nameof(M))]` names one `[Verified]` member of its own class, without overloads. |
 | `[ProofFor] method that is not static and parameterless`, `[ProofFor] body that is not Prove.Contract().By(...)` | WRT0002 | |
 | `second [ProofFor] for a method` | WRT0002 | The message names the first, whose script is kept. |
+
+### The M6 dependency rejections
+
+M6 extraction also reads `[ContractFor(typeof(I))]` classes, the dependencies
+of a class's `[Verified]` instance methods, and `async` methods. A dependency
+is an instance `readonly` field declared in the method's own class, or a
+primary-constructor parameter of that class that nothing assigns, of an
+interface type whose `[ContractFor]` class is in the same project; the
+interface may come from any assembly. Each member called through a dependency
+gets a contract unit from its contract class. A call returning `Task`,
+`Task<T>`, `ValueTask` or `ValueTask<T>` must be the direct operand of `await`.
+Proving such a method needs M6's translation. These are rejected:
+
+| Construct | Code | Notes |
+|---|---|---|
+| `member access on this`, `dependency used other than to call a member`, `property of a dependency` | WRT0002 | Any other use of the class's state: a field or property that is not a dependency, a call to another instance method, `this`, or a dependency used as a value. |
+| `mutable dependency field`, `assigned primary-constructor parameter`, `static dependency`, `inherited dependency`, `generic interface dependency` | WRT0002 | A dependency that breaks the rules above. A primary-constructor parameter is assigned if anything in the class, lambdas included, assigns it or passes it by `ref` or `out`. |
+| `dependency without a contract class`, `dependency whose contract class is rejected` | WRT0002 | The interface has no `[ContractFor]` class in this project, or its class has not the contract shape. |
+| `dependency call in a Spec expression` | WRT0002 | A `Spec` condition is a claim, so it cannot call a dependency. |
+| `interface member with two contract classes`, `interface member without a contract member` | WRT0002 | Reported for the member's contract unit when a verified method calls it: an inherited member, such as `Dispose`, that two contract classes state, or an interface member with a default body that its contract class does not state. |
+| `Task-returning call that is not awaited`, `ConfigureAwait`, `Task combinator`, `await of something other than a call`, `async void method` | WRT0002 | A task that is discarded, stored or returned, `Task.Delay`, `Task.WhenAll` and other members of `Task` and `ValueTask`. |
+| `return without a value` | WRT0002 | A `void`, `Task` or `ValueTask` method ends by reaching the end of its body. |
+| `named arguments out of order with a dependency call` | WRT0002 | Arguments that await or call a dependency must be written in parameter order. |
+| `call to an instance method of a class` | WRT0002 | A class's verified instance method has no receiver in the model, only its dependencies, so nothing else can call it. |
+| `[ContractFor] of a type that is not an interface`, `contract class that is not file or internal`, `contract class that is not abstract`, `generic contract class`, `contract class that does not implement exactly its interface`, `contract class member that is not a member of its interface`, `contract member whose nullability differs from its interface`, `contract member body other than Spec calls and return default!`, `second contract class for an interface` | WRT0002 | The contract shape, reported for the class whether or not it is used. A member's body is `Spec.Requires` and `Spec.Ensures` calls then `return default!;`, those calls alone for a `void` member, `=> default!`, or none (`abstract`). The second class for an interface names the first. A member whose signature has an unmodelled type is accepted until a verified call uses it. |
 
 ## Type mapping
 

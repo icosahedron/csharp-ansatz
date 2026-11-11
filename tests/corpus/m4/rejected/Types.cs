@@ -61,14 +61,15 @@ public sealed record Right(Left Other);
 // casesOn is a name Lean gives an inductive's auxiliary construction (plan KTD6).
 public sealed record Reserved(int casesOn);
 
-public sealed class Counter
+// An instance property of a class: M6 accepts a class's instance methods that call dependencies, not its properties.
+public sealed class Tally
 {
     private readonly int _start;
 
-    public Counter(int start) => _start = start;
+    public Tally(int start) => _start = start;
 
     [Verified]
-    public int Next() => _start + 1;
+    public int Current => _start;
 }
 
 public static class Types

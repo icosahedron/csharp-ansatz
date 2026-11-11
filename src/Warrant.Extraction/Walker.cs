@@ -59,8 +59,14 @@ internal sealed partial class Walker
 
     public void AddParameter(IParameterSymbol parameter, int index) => _parameters.Add(parameter, index);
 
-    /// <summary>Sets the member's declared return type, which a returned value must fit (KTD5).</summary>
-    public void SetReturns(ITypeSymbol type, bool annotated) => _returns = (type, annotated);
+    /// <summary>
+    /// Sets the member's declared return type, which a returned value must fit (KTD5). An <c>async</c> method returns the
+    /// value its <c>Task&lt;T&gt;</c> or <c>ValueTask&lt;T&gt;</c> carries, so that is the type its returns fit (KTD22).
+    /// </summary>
+    public void SetReturns(ITypeSymbol type, bool annotated, bool isAsync = false) =>
+        _returns = isAsync && IsTask(type) is { TypeArguments.Length: 1 } task
+            ? (task.TypeArguments[0], task.TypeArgumentNullableAnnotations[0] == NullableAnnotation.Annotated)
+            : (type, annotated);
 
     /// <summary>A returned value: an expression body's, or a <c>return</c> statement's, fitted to the declared return type.</summary>
     public VirExpr Returned(IOperation value)
@@ -217,6 +223,9 @@ internal sealed partial class Walker
                 return [ExpressionStatement(e)];
             case IReturnOperation { ReturnedValue: { } value } r:
                 return [Track(new ReturnStmt(Returned(value)), r.Syntax)];
+            case IReturnOperation r:
+                // VIR's return carries a value; a method without one ends by reaching its end (M6 U18).
+                throw Reject("return without a value", r.Syntax, "a method that returns no value ends by reaching the end of its body");
             case IConditionalOperation c:
                 {
                     var cond = Expr(c.Condition);
@@ -267,6 +276,12 @@ internal sealed partial class Walker
                 // `var` declares a reference-typed local nullable whatever its initializer, so such a local takes its
                 // initializer's type; an explicitly typed one takes its declared type, which the initializer must fit (KTD5).
                 bool isVar = declaration.Syntax is VariableDeclarationSyntax { Type.IsVar: true };
+
+                // A stored task (KTD22): its call is rejected as not awaited, which says what to write, before its type is.
+                if (IsTask(declarator.Symbol.Type) is not null)
+                {
+                    Expr(init);
+                }
                 var declared = MapType(
                     declarator.Symbol.Type, !isVar && declarator.Symbol.NullableAnnotation == NullableAnnotation.Annotated, declarator.Syntax);
                 var value = Expr(init);
@@ -309,6 +324,10 @@ internal sealed partial class Walker
         var syntax = statement.Syntax;
         switch (statement.Operation)
         {
+            case IAwaitOperation or IInvocationOperation:
+                return Track(new EvalStmt(Discarded(statement.Operation)), syntax);
+            case ISimpleAssignmentOperation { Target: IDiscardOperation } discard:
+                return Track(new EvalStmt(Discarded(discard.Value)), syntax);
             case ISimpleAssignmentOperation a:
                 {
                     if (a.IsRef)
@@ -367,6 +386,16 @@ internal sealed partial class Walker
             default:
                 throw Reject("expression statement", syntax);
         }
+    }
+
+    /// <summary>
+    /// An expression whose value is discarded, run for its effects (M6 KTD22): a call to a verified method or a dependency
+    /// member, or an awaited one. Anything else as a statement is rejected.
+    /// </summary>
+    public VirExpr Discarded(IOperation operation)
+    {
+        var value = Expr(operation);
+        return value is CallExpr or ExternalCallExpr or AwaitExpr ? value : throw Reject("expression statement", operation.Syntax);
     }
 
     private SwitchStmt SwitchStatement(ISwitchOperation s)
@@ -456,6 +485,12 @@ internal sealed partial class Walker
                 }
             case IParameterReferenceOperation p when _bound.TryGetValue(p.Parameter, out int bound):
                 return Track(new LocalExpr(MapType(p.Parameter.Type, Annotated(p.Parameter), syntax), bound), syntax);
+            case IParameterReferenceOperation p when IsPrimaryConstructorParameter(p.Parameter):
+                throw NotACall(p, "dependency used other than to call a member");
+            case IInstanceReferenceOperation { Type: { } self } when Symbols.Shape(self) != TypeShape.Record:
+                throw MemberAccessOnThis(self, syntax);
+            case IAwaitOperation a:
+                return Await(a);
             case IInstanceReferenceOperation i:
                 return Track(new SelfExpr(MapType(i.Type, annotated: false, syntax)), syntax);
             case IBinaryOperation b:
@@ -955,11 +990,21 @@ internal sealed partial class Walker
         {
             throw Reject("unsupported call", at);
         }
-        // Arguments are pure, so putting them in parameter order changes nothing.
+        // An awaited or external call changes the world, so it must run in the order written (M6 KTD4, U18).
+        if (Reordered(arguments, byOrdinal))
+        {
+            throw Unsupported(
+                "named arguments out of order with a dependency call",
+                at,
+                "An argument awaits or calls a dependency, and the named arguments are not in parameter order: write them in parameter order, so they run in the order the model runs them.");
+        }
+        // Other arguments cannot change the world, so putting them in parameter order changes nothing.
         return new VirList<VirExpr>(byOrdinal.Select(a => a!));
     }
 
-    private VirExpr Invocation(IInvocationOperation call)
+    /// <param name="call">The call.</param>
+    /// <param name="awaited">Whether the call is the direct operand of <c>await</c>, the one place a task may be made (KTD22).</param>
+    private VirExpr Invocation(IInvocationOperation call, bool awaited = false)
     {
         var syntax = call.Syntax;
         var target = call.TargetMethod;
@@ -1001,6 +1046,18 @@ internal sealed partial class Walker
             throw new RejectedException(new Rejection(
                 DiagnosticIds.CallsTheorem, Symbols.Key(target), syntax.GetLocation(), $"A [Theorem] cannot be called: {Symbols.Display(target)}."));
         }
+        if (IsTaskMember(target))
+        {
+            throw TaskMember(target, syntax);
+        }
+        if (call.Instance is { } receiver && IsState(receiver))
+        {
+            return Awaited(External(call, receiver), awaited, syntax);
+        }
+        if (call.Instance is IInstanceReferenceOperation { Type: { } self } && Symbols.Shape(self) != TypeShape.Record)
+        {
+            throw MemberAccessOnThis(target, syntax);
+        }
         if (!InSource(target) && ModelledMembers.Contains(Symbols.Key(target)))
         {
             return Modelled(call);
@@ -1024,6 +1081,11 @@ internal sealed partial class Walker
         {
             throw Reject("generic member", syntax);
         }
+        if (!target.IsStatic && target.ContainingType.TypeKind == TypeKind.Class && Symbols.Shape(target.ContainingType) == TypeShape.Other)
+        {
+            // A class's verified instance method has no receiver in its unit: only its dependencies, which the caller has none of.
+            throw Reject("call to an instance method of a class", syntax, Symbols.Display(target));
+        }
         var key = Symbols.Key(target);
         var parts = new List<VirExpr>();
         if (!target.IsStatic)
@@ -1031,10 +1093,10 @@ internal sealed partial class Walker
             parts.Add(Dereferenced(call.Instance ?? throw Reject("unsupported call", syntax)));
         }
         parts.AddRange(Arguments(target, call.Arguments, syntax));
-        var type = MapType(target.ReturnType, target.ReturnNullableAnnotation == NullableAnnotation.Annotated, syntax);
+        var type = MapReturn(target.ReturnType, target.ReturnNullableAnnotation == NullableAnnotation.Annotated, syntax);
         Deps.Add(key);
         Calls.Add(key);
-        return Track(new CallExpr(type, key, new VirList<VirExpr>(parts)), syntax);
+        return Awaited(Track(new CallExpr(type, key, new VirList<VirExpr>(parts)), syntax), awaited, syntax);
     }
 
     /// <summary>
@@ -1201,6 +1263,18 @@ internal sealed partial class Walker
         {
             throw Reject("indexer", syntax);
         }
+        if (prop.Instance is { } state && IsState(state))
+        {
+            throw NotACall(state, "property of a dependency");
+        }
+        if (prop.Instance is IInstanceReferenceOperation { Type: { } self } && Symbols.Shape(self) != TypeShape.Record)
+        {
+            throw MemberAccessOnThis(property, syntax);
+        }
+        if (IsTaskMember(property))
+        {
+            throw TaskMember(property, syntax);
+        }
         if (owner.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T && !property.IsStatic
             && property.Name is "HasValue" or "Value")
         {
@@ -1262,6 +1336,10 @@ internal sealed partial class Walker
             {
                 throw Reject("closed class instance member", syntax, Symbols.Display(field));
             }
+        }
+        if (IsState(f))
+        {
+            throw NotACall(f, "dependency used other than to call a member");
         }
         throw NotVerified(field, syntax);
     }

@@ -561,7 +561,7 @@ public class ContractExtractionTests
     }
 
     [Fact]
-    public void AContractClassIsStillIgnoredUntilU18()
+    public void AWellShapedContractClassThatNoVerifiedMethodUsesGivesNoUnitAndNoDiagnostic()
     {
         var result = Extract("""
             public interface IStore { int Get(int id); }

@@ -94,7 +94,9 @@
       "M:Corpus.M6.Refuted.Dependencies.IPaymentStore.GetPayment(System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Refuted.Dependencies.IPaymentStore.SavePayment(Corpus.M6.Refuted.Dependencies.Payment)": { "outcome": "translated", "assumeNonNull": ["p"] },
       "M:Corpus.M6.Refuted.Dependencies.ICounter.Count": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "none", "at": "Dependencies.cs:82", "count": 0 }, "goal": "" },
-      "M:Corpus.M6.Refuted.Dependencies.Tally.Size": { "outcome": "skipped", "assumeNonNull": ["counter"] }
+      "M:Corpus.M6.Refuted.Dependencies.Tally.Size": { "outcome": "skipped", "assumeNonNull": ["counter"] },
+      "M:Corpus.M6.Refuted.Dependencies.Steps.Next(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Dependencies.Steps.Run(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "CalleePrecondition", "at": "Dependencies.cs:107", "count": 1 }, "goal": "case hp\nx : Int32\nh : x < 200\n⊢ x < 100" }
     },
     "rejected": {
       "M:Corpus.M6.Rejected.Effects.ThrowsOdd(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "exception type that is not a System exception or a plain subclass of one" }] },

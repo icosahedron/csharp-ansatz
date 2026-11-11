@@ -92,6 +92,8 @@ public sealed class M6CorpusTests
         Assert.Matches($@"(?m)^{dependencies}\(52,\d+\): error WRT0001: The contract of 'Lookups\.Twice\(int\)' could not be proved: postcondition of the method: ", output);
         Assert.Matches($@"(?m)^{dependencies}\(59,\d+\): error WRT0001: The contract of 'Lookups\.TwiceScripted\(int\)' could not be proved: unsolved goals", output);
         Assert.Matches($@"(?m)^{dependencies}\(82,\d+\): error WRT0001: The contract of 'ICounter\.Count\(\)' could not be proved: The contract is unsatisfiable: ", output);
+        // #228: an awaited call to a verified method is checked against its Spec.Requires like any other call.
+        Assert.Matches($@"(?m)^{dependencies}\(107,\d+\): error WRT0001: The contract of 'Steps\.Run\(int\)' could not be proved: precondition of a callee at this call: ", output);
     }
 
     private static (int Code, string Output) Verify(params string[] args)

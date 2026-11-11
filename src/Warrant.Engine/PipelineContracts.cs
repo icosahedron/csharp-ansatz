@@ -109,18 +109,23 @@ public static partial class Pipeline
         /// exception from each dependency member it calls, at the call (M6 U20). The members' contracts themselves are
         /// extraction's <c>ExternalContract</c> assumptions (KTD9), listed whether or not the walk reached the call (#223).
         /// </summary>
-        private void Record(EngineUnit unit, VcWalker walker)
+        private void Record(EngineUnit unit, VcWalker walker) =>
+            Record(unit, walker.Throws.Select(t => (t.Type, t.Node)), walker.ExternalCalls, walker.Calls);
+
+        private void Record(
+            EngineUnit unit, IEnumerable<(string Type, int? Node)> throws, IEnumerable<(string Member, int? Node)> externalCalls,
+            IEnumerable<(string Callee, int? Node)> calls)
         {
             var key = unit.Unit.Key;
-            foreach (var t in walker.Throws)
+            foreach (var (type, node) in throws)
             {
-                _contractAssumptions.Add(new UnitAssumption(key, new VirAssumption(VirAssumptionKind.MayThrow, new MayThrowSubject(t.Type, t.Node).Format())));
+                _contractAssumptions.Add(new UnitAssumption(key, new VirAssumption(VirAssumptionKind.MayThrow, new MayThrowSubject(type, node).Format())));
             }
-            foreach (var (member, node) in walker.ExternalCalls)
+            foreach (var (member, node) in externalCalls)
             {
                 _contractAssumptions.Add(new UnitAssumption(key, new VirAssumption(VirAssumptionKind.MayThrow, new MayThrowSubject(member, node).Format())));
             }
-            foreach (var call in walker.Calls)
+            foreach (var call in calls)
             {
                 _contractAssumptions.Add(new UnitAssumption(key, new VirAssumption(VirAssumptionKind.CalleeContract, call.Callee)));
                 if (!run.Outcomes.TryGetValue(call.Callee, out var callee))
@@ -169,7 +174,8 @@ public static partial class Pipeline
             var printer = new GoalPrinter(Env, run.Names);
             var ensures = (unit.Unit.Body as BlockStmt)?.Stmts.OfType<EnsuresStmt>().FirstOrDefault();
             var ensuresNode = ensures is null ? null : VirTree.IdOf(unit.Unit, ensures);
-            VcWalker NewWalker() => new(meta, Attributes, unit.Unit, VcKind.Postcondition, ensuresNode, contract.Raising ? null : function);
+            VcWalker WalkerIn(MetaM m) => new(m, Attributes, unit.Unit, VcKind.Postcondition, ensuresNode, contract.Raising ? null : function);
+            VcWalker NewWalker() => WalkerIn(meta);
             if (contract.Script is not { } script)
             {
                 return Default(
@@ -180,7 +186,7 @@ public static partial class Pipeline
                 ? null
                 : new TacticRecorder(goals => printer.PpGoals(meta.MCtx, goals), node => VirTree.IdOf(unit.Unit, node));
             (Expr? Proof, UnitOutcome? Failure) found;
-            VcWalker? walked = null;
+            var walked = new List<VcWalker>();
             try
             {
                 // Tactic.VcGen() runs the walker from the triple and leaves its VCs, readied but not simplified (KTD16).
@@ -188,7 +194,8 @@ public static partial class Pipeline
                 {
                     VcGen = goal =>
                     {
-                        var walker = walked = NewWalker();
+                        var walker = NewWalker();
+                        walked.Add(walker);
                         walker.Contract(goal, contract.Program, function, contract.Raising, contract.Operations);
                         if (walker.Leftovers.FirstOrDefault(l => l.Failure is not null) is { } failed)
                         {
@@ -210,12 +217,70 @@ public static partial class Pipeline
             {
                 return failure;
             }
-            if (walked is not null)
+            // The report must not depend on how the script was written (#229): the trusted statement allows every explicit
+            // and external exception, so what the proof relied on is listed from every walk the script ran, or, when it ran
+            // none, from a walk made only for the list, its proof discarded.
+            foreach (var walker in walked)
             {
-                Record(unit, walked);
+                Record(unit, walker);
+            }
+            if (walked.Count == 0)
+            {
+                RecordWithoutAProof(unit, contract, function, budget, WalkerIn);
             }
             return AdmitProof(unit, shell, VcWalker.Strip(found.Proof!), $"the kernel rejected the proof Warrant built for the contract obligation {shell.Name}", display, assumptions, admitted, budget)
                 ?? (ProofTerms.IsAdmittedAs(Env, shell) ? null : new FailedOutcome(key, kind, display, assumptions, $"the kernel admitted {shell.Name} with a type other than its statement."));
+        }
+
+        /// <summary>
+        /// What a contract proved by a script that never ran <c>Tactic.VcGen()</c> relied on (#229): the walk the default
+        /// procedure would make, on a goal of its own whose proof is discarded, recorded as <see cref="Record(EngineUnit, VcWalker)"/>
+        /// records any. When that walk cannot be completed (it raises, or meets a shape it has no rule for), every explicit
+        /// throw, every call to a dependency member and every verified callee with an admitted contract in the method's VIR is
+        /// listed instead: more than the proof may need, never less.
+        /// </summary>
+        private void RecordWithoutAProof(EngineUnit unit, ContractObligation contract, Name function, TheoremBudget budget, Func<MetaM, VcWalker> newWalker)
+        {
+            try
+            {
+                var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = run.Names };
+                var walker = newWalker(meta);
+                var root = meta.MkFreshExprSyntheticOpaqueMVar(contract.Theorem.Type);
+                walker.Contract(meta.IntroN(root.Id, contract.Binders, BinderNames(contract)).Goal, contract.Program, function, contract.Raising, contract.Operations);
+                TacticFuelUsed = Math.Max(TacticFuelUsed, meta.Budget.FuelUsed);
+                if (!walker.Leftovers.Any(l => l.Kind == VcKind.Unsupported))
+                {
+                    Record(unit, walker);
+                    return;
+                }
+            }
+#pragma warning disable CA1031 // The walk only lists assumptions; any failure falls back to the list from the VIR below.
+            catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+            {
+            }
+            var throws = new List<(string Type, int? Node)>();
+            var external = new List<(string Member, int? Node)>();
+            var calls = new List<(string Callee, int? Node)>();
+            foreach (var node in VirTree.PreOrder(unit.Unit))
+            {
+                switch (node)
+                {
+                    case ThrowStmt t:
+                        throws.Add((t.Exception, VirTree.IdOf(unit.Unit, node)));
+                        break;
+                    case ThrowExpr t:
+                        throws.Add((t.Exception, VirTree.IdOf(unit.Unit, node)));
+                        break;
+                    case ExternalCallExpr x:
+                        external.Add((x.Member, VirTree.IdOf(unit.Unit, node)));
+                        break;
+                    case CallExpr c when c.Target != unit.Unit.Key && Env.Find(LeanNames.Contract(c.Target)) is not null:
+                        calls.Add((c.Target, VirTree.IdOf(unit.Unit, node)));
+                        break;
+                }
+            }
+            Record(unit, throws, external, calls);
         }
 
         /// <summary>

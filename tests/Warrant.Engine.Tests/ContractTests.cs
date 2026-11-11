@@ -127,6 +127,70 @@ public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFi
         Assert.EndsWith("whose contract is not proved.", caller.Reason, StringComparison.Ordinal);
     }
 
+    // ---- The report does not depend on how the script was written (#229) ----
+
+    private const string Closed = """
+        public static class S
+        {
+            [Verified]
+            public static int Closed(int x)
+            {
+                throw new System.InvalidOperationException();
+            }
+
+            // No Tactic.VcGen(): the throw is allowed (KTD12) straight from Warrant.Vc.throw.
+            [ProofFor(nameof(Closed))]
+            static Proof ClosedProof() =>
+                Prove.Contract().By(
+                    Tactic.Apply(Lean.Const("Warrant.Vc.pre")),
+                    Tactic.Intro("h"),
+                    Tactic.Unfold(nameof(Closed)),
+                    Tactic.Apply(Lean.Const("Warrant.Vc.throw")),
+                    Tactic.Intro("s"),
+                    Tactic.Simp(Lean.Const("Std.Do.SPred.apply_pure_cons"), Lean.Const("Std.Do.SPred.down_pure_nil"), Lean.Const("Warrant.ClrExn.allowed_thrown")));
+        }
+        """;
+
+    private static string MayThrow(UnitOutcome outcome) =>
+        string.Join(", ", outcome.Assumptions.Where(a => a.Assumption.Kind == VirAssumptionKind.MayThrow).Select(a => Engine.Reports.MayThrowSubject.Parse(a.Assumption.Subject).Thrown));
+
+    [Fact]
+    public void AScriptWithoutVcGenStillReportsTheMethodsThrow()
+    {
+        var outcome = Assert.IsType<TranslatedOutcome>(Run(Closed).Find("M:S.Closed(System.Int32)"));
+        Assert.Contains("$contract", Names(outcome), StringComparison.Ordinal);
+        // The kernel admitted the statement, which allows the throw (KTD12); the report lists it as the default procedure's would.
+        var mayThrow = Assert.Single(outcome.Assumptions, a => a.Assumption.Kind == VirAssumptionKind.MayThrow);
+        var subject = Engine.Reports.MayThrowSubject.Parse(mayThrow.Assumption.Subject);
+        Assert.Equal("T:System.InvalidOperationException", subject.Thrown);
+        Assert.Equal("throw new System.InvalidOperationException();", Text(Closed, "M:S.Closed(System.Int32)", subject.Node).Trim());
+    }
+
+    [Fact]
+    public void AScriptThatRunsVcGenTwiceReportsWhatEitherWalkReliedOn()
+    {
+        // The second VcGen fails on the first walk's leftover (no triple) and Try moves on: the first walk's throw is still
+        // reported, not only what the last walker the script made found.
+        const string source = """
+            public static class S
+            {
+                [Verified]
+                public static int Guarded(int x)
+                {
+                    Spec.Ensures<int>(r => r <= 0);
+                    if (x > 0) throw new System.InvalidOperationException();
+                    return x;
+                }
+
+                [ProofFor(nameof(Guarded))]
+                static Proof GuardedProof() =>
+                    Prove.Contract().By(Tactic.VcGen(), Tactic.AllGoals(Tactic.Try(Tactic.VcGen())), Tactic.AllGoals(Tactic.Omega()));
+            }
+            """;
+        var outcome = Assert.IsType<TranslatedOutcome>(Run(source).Find("M:S.Guarded(System.Int32)"));
+        Assert.Equal("T:System.InvalidOperationException", MayThrow(outcome));
+    }
+
     // ---- KTD25 and KTD26 ----
 
     [Fact]

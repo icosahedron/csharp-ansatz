@@ -69,7 +69,8 @@ from the first call to the second (a kernel-evaluated test with a counting mock 
 
 `async` is sequencing (KTD22): a `Task<T>` or `ValueTask<T>` result is a `ClrM σ T` program, and a `void`, `Task` or
 `ValueTask` one a `ClrM σ Unit` program; `await` binds the awaited call's program, whether it is a dependency call, a
-raising verified method or a pure one.
+raising verified method or a pure one, and the VC walker checks a verified callee's `Spec.Requires` there as at any
+other call (#228).
 A discarded call (`F(x);`) is bound and its value dropped.
 
 Translation refuses to translate a call to a method that has dependencies of its own; extraction already rejects it.

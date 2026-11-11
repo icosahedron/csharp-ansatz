@@ -314,6 +314,35 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     }
 
     [Fact]
+    public void ACheckedNarrowingInRequiresHasAWellDefinednessObligation()
+    {
+        // Review #230: the obligation's program is built over its own world, not the translator's (which a contract has none of).
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static long Narrow(long l)
+                {
+                    Spec.Requires(checked((int)l) > 0);
+                    return l;
+                }
+            }
+            """);
+        var contract = Contract(translation, "M:S.Narrow(System.Int64)");
+        var wd = Assert.Single(contract.WellDefinedness);
+        Assert.Equal(SpecObligationKind.WellDefinedOperation, wd.Kind);
+        Assert.IsType<ConvertExpr>(wd.Node);
+        Assert.Equal(2, wd.Binders);
+        // ∀ σ l, ⦃⌜True⌝⦄ Warrant.Int64.toInt32Checked σ l ⦃⇓_ => ⌜True⌝, allowed⦄
+        var (program, pre, ok, exceptions) = Triple(Under(wd.Theorem.Type, 2));
+        Assert.Equal(Expr.App(C("Warrant.Int64.toInt32Checked"), Expr.BVar(1), Expr.BVar(0)), program);
+        Assert.Equal(C("True"), Assertion(pre));
+        Assert.Equal(C("True"), Ensures(ok));
+        AssertOnlyExplicitAndExternalExceptionsAllowed(exceptions);
+        AssertPropositions(env, contract);
+    }
+
+    [Fact]
     public void ACallToAPureMethodWithRequiresInASpecExpressionHasItsPreconditionAsAnObligation()
     {
         var (translation, env) = Translate("""

@@ -307,7 +307,7 @@ internal sealed partial class BodyTranslator
             case ConvertExpr c:
                 return Bound(c.Operand, env, Then(a => Effects.Construct(c) is null
                     ? Finish(Convert(c, a), c.Type, k)
-                    : Emit(Site(c, CheckedNarrowing(c, a)), c.Type, k)));
+                    : Emit(Site(c, CheckedNarrowing(_sigma!, c, a)), c.Type, k)));
             case CondExpr c:
                 if (IsPure(c.Then) && IsPure(c.Else))
                 {
@@ -451,10 +451,10 @@ internal sealed partial class BodyTranslator
         return Nullables.Match(value, M(c.Type), r, some, l);
     }
 
-    /// <summary>A checked narrowing (KTD6): <c>Warrant.Int64.toInt32Checked σ a</c>.</summary>
-    private Expr CheckedNarrowing(ConvertExpr c, Expr a) =>
+    /// <summary>A checked narrowing (KTD6) at the world <paramref name="sigma"/>: <c>Warrant.Int64.toInt32Checked σ a</c>.</summary>
+    private Expr CheckedNarrowing(Expr sigma, ConvertExpr c, Expr a) =>
         _types.Underlying(c.From) == VirPrimitive.Int64 && _types.Underlying(c.To) == VirPrimitive.Int32
-            ? Expr.App(Init.Int64ToInt32Checked, _sigma!, a)
+            ? Expr.App(Init.Int64ToInt32Checked, sigma, a)
             : throw new TranslationException(null, $"there is no checked conversion from {c.From} to {c.To}.");
 
     private static Expr NegChecked(VirPrimitive type) => type switch

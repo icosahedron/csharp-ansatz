@@ -143,7 +143,9 @@ internal sealed partial class BodyTranslator
     /// <summary>
     /// <c>await e</c> (KTD22): <c>e</c>'s program bound, its value the awaited one. <c>e</c> is an
     /// external call, or a call to a verified method: that method's program, <c>g σ args</c> when it can raise and
-    /// <c>pure (g args)</c> otherwise, so the VC walker sees every awaited call as a bind.
+    /// <c>pure (g args)</c> otherwise, so the VC walker sees every awaited call as a bind. As for a call that is not awaited,
+    /// a call to a method that can raise or has <c>Spec.Requires</c> is a site the VC walker proves the callee's
+    /// precondition at (KTD11, KTD12, #228).
     /// </summary>
     private Expr Await(AwaitExpr a, Env env, Expr result, Next? k)
     {
@@ -156,10 +158,12 @@ internal sealed partial class BodyTranslator
                 return BoundAll(c.Args, env, result, args =>
                 {
                     var f = Expr.Const(LeanNames.ForKey(c.Target));
-                    var program = IsRaisingCallee(c.Target)
-                        ? Expr.App(f, [_sigma!, .. args])
-                        : Monadic.Pure(_sigma!, _types.Cic(a.Type), Expr.App(f, [.. args]));
-                    return Emit(program, a.Type, k);
+                    if (IsRaisingCallee(c.Target))
+                    {
+                        return Emit(Site(c, Expr.App(f, [_sigma!, .. args])), a.Type, k);
+                    }
+                    var program = Monadic.Pure(_sigma!, _types.Cic(a.Type), Expr.App(f, [.. args]));
+                    return Emit(HasRequires(c.Target) ? Site(c, program) : program, a.Type, k);
                 });
             default:
                 throw new TranslationException(null, "await of something other than a call that returns a Task or ValueTask.");

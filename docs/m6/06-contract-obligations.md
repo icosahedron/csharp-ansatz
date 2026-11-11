@@ -136,6 +136,8 @@ does not find is not caught.
 `[ProofFor(nameof(M))]` replaces the default procedure for `M`'s whole obligation with its script (KTD16).
 The script starts at the triple, after the obligation's binders are introduced under the names the statement gives them;
 `Tactic.VcGen()` runs the walker first and leaves its VCs to the rest of the script (chapter 7).
+A script need not run it (`Tactic.Apply(Lean.Const("Warrant.Vc.pre"))` and the other `Warrant.Vc` rules work by hand);
+the assumption report lists the same exceptions and callee contracts either way (chapter 8, #229).
 A script that fails is reported where it fails, as a theorem's is: `Kept` in `refuted/Contracts.cs` at its
 `Tactic.Omega()`, and `TwiceScripted` in `refuted/Dependencies.cs`, which ends with goals left, at no line (the CLI
 places it at the method). The plan expected the `Ensures` line; whether to map a script's last unsolved goal back to it

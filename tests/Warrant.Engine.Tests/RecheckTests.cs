@@ -414,6 +414,49 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Equal(Texts(Pipeline.Run(edited, engine.Bundle, tiny).Units.Select(OutcomeDto.From)), Texts(warm));
     }
 
+    [Fact]
+    public void ACachedContractAdmittedNextToAWellDefinednessProofThatFellBackKeepsItsMayThrow()
+    {
+        // #231: Guarded's $wd_1 proof is rejected and proved again, but its $contract comes from the certificate, so no walk
+        // runs for it: the exceptions and callee contracts its cached outcome lists must still be reported, as a cold run does.
+        const string source = """
+            public static class S
+            {
+                [Verified]
+                public static int Guarded(int a, int b)
+                {
+                    Spec.Requires(b != 0 && b != -1 && a / b > 0);
+                    if (a > 100) throw new System.InvalidOperationException();
+                    return a / b;
+                }
+
+                [Verified]
+                public static int Caller(int a)
+                {
+                    Spec.Requires(a > 0);
+                    return Guarded(a, 1);
+                }
+            }
+            """;
+        const string guarded = "M:S.Guarded(System.Int32,System.Int32)";
+        const string caller = "M:S.Caller(System.Int32)";
+        var units = Units(source);
+        NewService().Verify(Request(units));
+        Tamper(units, guarded, ProofReplacedByStatement(Certificate(units, guarded), "$wd_1"));
+        var edited = Units(source.Replace("Spec.Requires(a > 0);", "Spec.Requires(0 < a);", StringComparison.Ordinal));
+        Assert.Equal(KeyOf(units, guarded), KeyOf(edited, guarded));
+
+        var warm = NewService().Verify(Request(edited));
+
+        Assert.False(Result(warm, caller).FromCache);
+        // Its $wd_1 was proved again, so it ran rather than coming from the cache.
+        Assert.False(Result(warm, guarded).FromCache);
+        var cold = Pipeline.Run(edited, engine.Bundle, engine.Options);
+        Assert.Contains(cold.Find(guarded)!.Assumptions, a => a.Assumption.Kind == VirAssumptionKind.MayThrow);
+        Assert.Contains(cold.Find(caller)!.Assumptions, a => a.Assumption.Kind == VirAssumptionKind.MayThrow);
+        Assert.Equal(Texts(cold.Units.Select(OutcomeDto.From)), Texts(warm));
+    }
+
     /// <summary>Rewrites a unit's entry to say its proof needed the given kernel fuel, with a hash of its new body.</summary>
     private void WithKernelFuel(IReadOnlyList<EngineUnit> units, string unitKey, long fuel)
     {

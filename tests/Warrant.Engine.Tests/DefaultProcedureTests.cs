@@ -346,6 +346,59 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
     }
 
     [Fact]
+    public void AnAwaitedCallIsCheckedAgainstTheCalleesRequiresWhetherOrNotTheCalleeRaises()
+    {
+        // #228: an awaited call to a verified method is a call site like any other. Step cannot raise; Share can (100 / x).
+        var source = "using System.Threading.Tasks;\n" + Wrap("""
+            [Verified]
+            public static async Task<int> Step(int x)
+            {
+                Spec.Requires(x < 100);
+                return x + 1;
+            }
+
+            [Verified]
+            public static async Task<int> Share(int x)
+            {
+                Spec.Requires(x > 0);
+                return 100 / x;
+            }
+
+            [Verified]
+            public static async Task<int> StepTooFar(int x)
+            {
+                Spec.Requires(x < 200);
+                return await Step(x);
+            }
+
+            [Verified]
+            public static async Task<int> ShareOfAny(int x)
+            {
+                return await Share(x);
+            }
+
+            [Verified]
+            public static async Task<int> Both(int x)
+            {
+                Spec.Requires(x > 0 && x < 100);
+                var a = await Step(x);
+                return await Share(x);
+            }
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.Step(System.Int32)"));
+        Proved(result.Find("M:S.Share(System.Int32)"));
+        Assert.Equal((VcKind.CalleePrecondition, "Step(x)"), Failure(source, "M:S.StepTooFar(System.Int32)", result.Find("M:S.StepTooFar(System.Int32)")));
+        // The raising callee goes through the walker's call rule, not an unsupported shape.
+        Assert.Equal((VcKind.CalleePrecondition, "Share(x)"), Failure(source, "M:S.ShareOfAny(System.Int32)", result.Find("M:S.ShareOfAny(System.Int32)")));
+        var both = result.Find("M:S.Both(System.Int32)");
+        Proved(both);
+        Assert.Equal(
+            ["M:S.Share(System.Int32)", "M:S.Step(System.Int32)"],
+            both!.Assumptions.Where(a => a.Assumption.Kind == VirAssumptionKind.CalleeContract).Select(a => a.Assumption.Subject).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void AMethodWithThreeFailingVcsReportsAllThreeEachWithItsKind()
     {
         var source = Wrap("""

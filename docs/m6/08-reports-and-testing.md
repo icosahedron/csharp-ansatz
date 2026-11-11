@@ -27,6 +27,11 @@ M6 adds four kinds (KTD20), rendered by `src/Warrant.Engine/Reports/` under two 
   the contract allows), and each call to a verified callee that may throw, naming the call and the callee's throw site
   (#70). A throw proved unreachable is not listed (#92). Its subject carries VIR node IDs, not lines
   (`MayThrowSubject`), so a cached outcome renders at the current lines.
+  The list does not depend on how the contract was proved (#229): for a `[ProofFor]` script it comes from every walk the
+  script's `Tactic.VcGen()` steps ran, and for a script that ran none from the walk the default procedure would make,
+  its proof discarded; if that walk cannot finish, every explicit `throw`, dependency call and verified callee with a
+  contract in the method is listed instead. A unit whose `$contract` is admitted from its cached certificate keeps the
+  cached list, even when another of its proofs is built again (#231).
 - The existing `NonNull` kind covers each dependency a method calls through, each non-nullable reference a dependency
   returns, the `Task` included, under "Assumed (parameters)": `store is not null`, `store.GetPayment() is not null`.
   Nullable-reference annotations remain assumptions (design §12 Q11, decided by KTD20); a value declared `T?` is
@@ -101,7 +106,7 @@ the same type in the same method would be missed; no corpus method has one.
 `tests/corpus/m6/` is the exit criterion as files (KTD24), in the M4 corpus's layout: `accepted/`, `refuted/` and
 `rejected/`, and `expected.json` with each member's outcome and each compilation, five of them (`accepted`, `refuted`,
 `refuted-dependencies`, `rejected`, `checked-project`).
-It holds 145 members.
+It holds 147 members.
 `tests/corpus/m6/README.md` lists every file, what each member is for, and the members that moved from the M4 corpus
 (chapter 4).
 
@@ -113,8 +118,8 @@ It holds 145 members.
   the goal: implicit exceptions nothing rules out, `Ratio` with only `Requires(b != 0)`, `x / -1`, a caller that passes 0
   to a method that requires a non-zero argument, false `Ensures` with and without a `[ProofFor]` script, a failing
   `Spec.Assert`, a contradictory `Requires`; and in `refuted-dependencies`, `GetPayment(id + 1)`, reliance on
-  `SavePayment`'s empty contract, two calls to `GetPayment(id)` expected to agree (with and without a script), and an
-  unsatisfiable contract member.
+  `SavePayment`'s empty contract, two calls to `GetPayment(id)` expected to agree (with and without a script), an
+  unsatisfiable contract member, and an awaited call that breaks its callee's `Requires` (`Steps.Run`, #228).
 - `rejected/` has one member per construct M6 still rejects, among them `try`/`catch`, a `%`-based recursive `Gcd`, a
   theorem that calls a raising method or divides by a variable, `_ = M();` and `var t = M(); await t;`, and each step of
   the contract-class shape.

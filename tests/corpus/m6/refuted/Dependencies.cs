@@ -1,7 +1,7 @@
 // M6 U14's refuted contracts with dependencies (KTD4, KTD9, KTD25, #96, #97), a compilation of its own: an Ensures that
 // holds only through GetPayment's contract fails when the call asks for another id, or relies on SavePayment's empty
 // contract, or on two calls agreeing, which the world threaded between them does not give, with or without a [ProofFor]
-// script; and a contract-class member whose Spec calls admit no result.
+// script; a contract-class member whose Spec calls admit no result; and an awaited call that breaks its callee's Requires.
 using System.Threading.Tasks;
 using Warrant;
 
@@ -88,4 +88,22 @@ public sealed class Tally(ICounter counter)
 {
     [Verified]
     public int Size() => counter.Count();
+}
+
+// An awaited call that breaks its callee's precondition: x < 200 does not give Next's x < 100 (#228).
+public static class Steps
+{
+    [Verified]
+    public static async Task<int> Next(int x)
+    {
+        Spec.Requires(x < 100);
+        return x + 1;
+    }
+
+    [Verified]
+    public static async Task Run(int x)
+    {
+        Spec.Requires(x < 200);
+        await Next(x);
+    }
 }

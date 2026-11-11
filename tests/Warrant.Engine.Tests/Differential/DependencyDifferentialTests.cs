@@ -101,6 +101,8 @@ public sealed class DependencyDifferentialTests(M6DependencyFixture fixture, ITe
         ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Lookups.Saved(Corpus.M6.Refuted.Dependencies.Payment)"),
         ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Lookups.Twice(System.Int32)"),
         ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Lookups.TwiceScripted(System.Int32)"),
+        ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Steps.Next(System.Int32)"),
+        ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Steps.Run(System.Int32)"),
     ];
 
     /// <summary>The functions with dependencies that are not compared, each with the reason.</summary>

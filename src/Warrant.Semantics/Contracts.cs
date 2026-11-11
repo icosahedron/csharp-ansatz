@@ -380,7 +380,7 @@ internal sealed partial class BodyTranslator
             case ConvertExpr c:
                 {
                     var a = Value(c.Operand, env);
-                    spec.Operation(this, e, c.Type, _ => CheckedNarrowing(c, a));
+                    spec.Operation(this, e, c.Type, sigma => CheckedNarrowing(sigma, c, a));
                     return Operators.Convert(_types.Underlying(c.From), _types.Underlying(c.To), a);
                 }
             case UnwrapExpr u:

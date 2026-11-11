@@ -5,7 +5,9 @@ using FsCheck;
 using FsCheck.Fluent;
 using Microsoft.CodeAnalysis.CSharp;
 using Warrant.Extraction;
+using Warrant.Cic;
 using Warrant.Kernel;
+using Warrant.Semantics;
 using Warrant.Vir;
 using Xunit.Abstractions;
 using Xunit.Sdk;
@@ -14,25 +16,114 @@ namespace Warrant.Engine.Tests.Differential;
 
 /// <summary>
 /// One compilation on both sides, for functions that can raise (plan M6 U13): the compilation extraction read, emitted and
-/// loaded; and the engine's run over its units, frozen.
+/// loaded; and the engine's run over its units, frozen. The model is a function's kernel-admitted definition, whether or
+/// not its contract obligation (M6 U10) is proved: the engine admits the definition before the obligation and keeps it
+/// when the obligation is not proved (<see cref="NotProvedOutcome"/>), and a caller of such a function, which the engine
+/// skips, is admitted here (<see cref="AdmittedByTheHarness"/>).
 /// </summary>
 internal sealed class EffectCorpus : IDisposable
 {
+    private readonly Dictionary<string, string> _admittedByTheHarness = new(StringComparer.Ordinal);
+
     public EffectCorpus(CSharpCompilation compilation)
     {
         Extraction = EngineCorpus.Extract(compilation);
-        Run = Pipeline.Run(EngineCorpus.Inputs(Extraction), EngineFixture.SharedBundle.Value, KernelLimits.Corpus);
+        var inputs = EngineCorpus.Inputs(Extraction);
+        Run = Pipeline.Run(inputs, EngineFixture.SharedBundle.Value, KernelLimits.Corpus);
         Run.Environment.Freeze();
+        Environment = Run.Environment.Fork();
+        KernelThread.Run(() => AdmitCallersOfUnprovedContracts(inputs));
+        Environment.Freeze();
         Assembly = CorpusAssembly.Load(compilation);
         var definitions = Extraction.Units.Where(u => u.Unit.Definition is not null).ToDictionary(u => u.Key, u => u.Unit.Definition!, StringComparer.Ordinal);
         var values = new Values(Assembly, definitions);
         Inputs = new Inputs(values);
-        Model = new ModelCheck(Run.Environment, values, KernelLimits.Corpus);
+        Model = new ModelCheck(Environment, values, KernelLimits.Corpus);
     }
 
     public ExtractionResult Extraction { get; }
 
     public EngineResult Run { get; }
+
+    /// <summary>The run's environment with the definitions in <see cref="AdmittedByTheHarness"/> admitted: the model's.</summary>
+    public KernelEnvironment Environment { get; }
+
+    /// <summary>
+    /// The functions whose definition this harness admitted, not the engine, each with the dependency it was skipped for: a
+    /// function whose contract obligation is not proved (M6 U10).
+    /// </summary>
+    public IReadOnlyDictionary<string, string> AdmittedByTheHarness => _admittedByTheHarness;
+
+    /// <summary>
+    /// Whether the engine admitted <paramref name="key"/>'s definition: its outcome is <see cref="TranslatedOutcome"/>, or
+    /// <see cref="NotProvedOutcome"/> for a contract obligation not proved after the definition, and in either case the
+    /// run admitted a definition under the function's name. A unit translation or the kernel rejected
+    /// (<see cref="FailedOutcome"/>), one that ran out (<see cref="UndecidedOutcome"/>), one skipped, and a recursive
+    /// method whose decrease obligation was not proved (its definition comes after them) are not.
+    /// </summary>
+    public bool EngineAdmitted(string key)
+    {
+        var outcome = Run.Find(key);
+        var name = LeanNames.ForKey(key);
+        bool IsDefinition(KernelDeclaration d) => d is DefinitionDecl { Value.Name: var n } && n == name;
+        return outcome switch
+        {
+            TranslatedOutcome translated => translated.Declarations.Any(IsDefinition),
+            NotProvedOutcome { Decrease: null } => Run.Admitted.Any(IsDefinition),
+            _ => false,
+        };
+    }
+
+    /// <summary>Fails unless <paramref name="key"/>'s definition was admitted, by the engine or by this harness.</summary>
+    public void AssertDefinitionAdmitted(string key) =>
+        Assert.True(
+            EngineAdmitted(key) || _admittedByTheHarness.ContainsKey(key),
+            $"{key}: its definition was not admitted, so there is no model to compare: {Run.Find(key)}");
+
+    /// <summary>
+    /// A function the engine skips because a function it depends on has a contract obligation that is not proved (M6 U10:
+    /// such a function is not usable as a lemma) still has a definition, over that function's admitted definition. It is
+    /// translated as the engine translates it and admitted into <see cref="Environment"/> here, in dependency order, so
+    /// that its model is compared too. Only a skip whose dependency's definition is admitted qualifies; a skip for a
+    /// dependency that failed to translate or was rejected does not.
+    /// </summary>
+    private void AdmitCallersOfUnprovedContracts(IReadOnlyList<EngineUnit> inputs)
+    {
+        bool Present(string key) => EngineAdmitted(key) || _admittedByTheHarness.ContainsKey(key);
+        bool Candidate(UnitOutcome outcome) => outcome is SkippedOutcome && outcome.UnitKind == VirUnitKind.Function;
+        if (!Run.Units.Any(Candidate))
+        {
+            return;
+        }
+        // What the engine translated: every unit not failed, cancelled or skipped, then each skipped one whose dependency is.
+        var translated = Run.Units.Where(o => o is not (FailedOutcome or SkippedOutcome or CancelledOutcome)).Select(o => o.Key).ToHashSet(StringComparer.Ordinal);
+        bool grown = true;
+        while (grown)
+        {
+            grown = false;
+            foreach (var skipped in Run.Units.OfType<SkippedOutcome>().Where(s => !translated.Contains(s.Key) && translated.Contains(s.Dependency)))
+            {
+                grown |= translated.Add(skipped.Key);
+            }
+        }
+        var units = inputs.Where(u => translated.Contains(u.Unit.Key)).ToList();
+        var translation = Translator.Translate(
+            units.Select(u => u.Unit),
+            EngineFixture.SharedBundle.Value.Env,
+            units.Where(u => u.DisplayName is not null).ToDictionary(u => u.Unit.Key, u => u.DisplayName!, StringComparer.Ordinal));
+        foreach (var unit in translation.Units)
+        {
+            if (Run.Find(unit.Key) is not SkippedOutcome skipped || !Candidate(skipped) || !Present(skipped.Dependency) || unit.Recursion is not null)
+            {
+                continue;
+            }
+            foreach (var declaration in unit.Declarations)
+            {
+                Kernel.Kernel.Add(Environment, declaration, KernelLimits.Corpus);
+            }
+            _admittedByTheHarness.Add(unit.Key, skipped.Dependency);
+        }
+    }
 
     public CorpusAssembly Assembly { get; }
 
@@ -49,7 +140,7 @@ internal sealed class EffectCorpus : IDisposable
     /// </summary>
     public Func<object?[], InputCheck> Checker(ExtractedUnit unit)
     {
-        Assert.IsType<TranslatedOutcome>(Run.Find(unit.Key));
+        AssertDefinitionAdmitted(unit.Key);
         var method = Assembly.MethodOf(unit.Unit);
         var types = ModelCheck.ParameterTypes(unit.Unit);
         var returns = unit.Unit.Returns!;
@@ -210,22 +301,31 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         ("checked-project", "M:Corpus.Rejected.CheckedProject.Checked.Add(System.Int32,System.Int32)"),
         ("checked-project", "M:Corpus.Rejected.CheckedProject.Checked.Negate(System.Int32)"),
         ("checked-project", "M:Corpus.Rejected.CheckedProject.Checked.Narrow(System.Int64)"),
+        // Contracts (M6 U10). A Spec.Requires is not checked at run time and the model is the body as is, so the inputs
+        // that violate one are compared too; Average's Spec.Assert skips the inputs on which a + b wraps below zero.
+        ("accepted", "M:Corpus.M6.Contracts.NonNegative(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Contracts.AtMost(System.Int32,System.Int32)"),
+        ("accepted", "M:Corpus.M6.Contracts.Capped(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Contracts.Average(System.Int32,System.Int32)"),
+        ("accepted", "M:Corpus.M6.Contracts.Same(System.Int32)"),
     ];
 
-    private const string ContractsUntilU10 = "Spec.Requires or Spec.Ensures: not translated until M6 U10";
+    /// <summary>
+    /// The functions without dependencies that are not compared yet, each with the reason. Empty: every one is compared.
+    /// <see cref="EveryM6FunctionWithoutDependenciesIsComparedOrSkippedForAReason"/> fails if one of these translates.
+    /// </summary>
+    private static readonly Dictionary<string, string> Skipped = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The functions without dependencies that are not compared yet, each because translation does not take it on this
-    /// branch. <see cref="EveryM6FunctionWithoutDependenciesIsComparedOrSkippedForAReason"/> fails as soon as one translates,
-    /// so it moves to <see cref="Covered"/> with the inputs it needs.
+    /// The compared functions the engine skips because a function they call has a contract obligation that is not proved
+    /// (M6 U10), whose definition the harness admits itself (<see cref="EffectCorpus.AdmittedByTheHarness"/>), each with
+    /// that callee. Capped calls AtMost, whose obligation waits for the default procedure (M6 U11); when U11 proves it, the
+    /// engine admits Capped and <see cref="EveryM6FunctionWithoutDependenciesIsComparedOrSkippedForAReason"/> fails until
+    /// Capped is removed from here.
     /// </summary>
-    private static readonly Dictionary<string, string> Skipped = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, string> AdmittedByTheHarness = new(StringComparer.Ordinal)
     {
-        ["M:Corpus.M6.Contracts.NonNegative(System.Int32)"] = ContractsUntilU10,
-        ["M:Corpus.M6.Contracts.AtMost(System.Int32,System.Int32)"] = ContractsUntilU10,
-        ["M:Corpus.M6.Contracts.Capped(System.Int32)"] = ContractsUntilU10,
-        ["M:Corpus.M6.Contracts.Average(System.Int32,System.Int32)"] = ContractsUntilU10,
-        ["M:Corpus.M6.Contracts.Same(System.Int32)"] = ContractsUntilU10,
+        ["M:Corpus.M6.Contracts.Capped(System.Int32)"] = "M:Corpus.M6.Contracts.AtMost(System.Int32,System.Int32)",
     };
 
     /// <summary>The namespaces of the functions with dependencies (and their async helpers), which plan U22 compares with mocks.</summary>
@@ -273,25 +373,22 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         foreach (var (compilation, key) in Covered)
         {
             Assert.Contains((compilation, key), functions);
-            Assert.IsType<TranslatedOutcome>(corpus[compilation].Run.Find(key));
+            var side = corpus[compilation];
+            side.AssertDefinitionAdmitted(key);
+            var outcome = side.Run.Find(key);
+            output.WriteLine($"{key}: {outcome!.GetType().Name}{(side.AdmittedByTheHarness.ContainsKey(key) ? ", admitted by the harness" : "")}");
         }
         foreach (var (key, reason) in Skipped)
         {
             var compilation = functions.Single(f => f.Key == key).Compilation;
-            var outcome = corpus[compilation].Run.Find(key);
-            Assert.False(outcome is TranslatedOutcome, $"{key} translates now: compare it (move it from Skipped to Covered).");
-            if (outcome is FailedOutcome failed)
-            {
-                Assert.Equal(ContractsUntilU10, reason);
-                Assert.Contains("until M6 U10", failed.Reason, StringComparison.Ordinal);
-            }
-            else
-            {
-                // A function whose callee failed to translate (Capped calls AtMost).
-                Assert.IsType<SkippedOutcome>(outcome);
-            }
+            Assert.False(corpus[compilation].EngineAdmitted(key), $"{key} is admitted now ({reason}): compare it (move it from Skipped to Covered).");
         }
-        output.WriteLine($"{Covered.Length} functions compared, {Skipped.Count} skipped");
+        Assert.Equal(
+            AdmittedByTheHarness.OrderBy(p => p.Key, StringComparer.Ordinal),
+            M6DifferentialFixture.Compilations
+                .SelectMany(c => corpus[c].AdmittedByTheHarness.Where(p => Covered.Contains((c, p.Key))))
+                .OrderBy(p => p.Key, StringComparer.Ordinal));
+        output.WriteLine($"{Covered.Length} functions compared ({AdmittedByTheHarness.Count} admitted by the harness), {Skipped.Count} skipped");
     }
 
     [Theory]
@@ -546,6 +643,73 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         Assert.Equal((7, 6), (run.Checked, run.Skipped));
         var failure = Assert.Throws<XunitException>(() => run.AssertEnoughEvaluated("OnlyZero"));
         Assert.Contains("only 1 of its 7 inputs were evaluated; 6 were skipped", failure.Message, StringComparison.Ordinal);
+    }
+
+    // ---- Which definitions are compared ----
+
+    private const string Admission = """
+        public static class A
+        {
+            [Verified]
+            public static int Bounded(int x)
+            {
+                Spec.Requires(x >= 0);
+                Spec.Ensures<int>(r => r > x);
+                return x;
+            }
+
+            [Verified]
+            public static int CallsBounded(int x) => Bounded(x < 0 ? 0 : x);
+
+            [Verified]
+            public static int Climb(int n)
+            {
+                Spec.Decreases(n);
+                return n <= 0 ? 0 : Climb(n + 1);
+            }
+
+            [Verified]
+            public static int CallsClimb(int n) => Climb(n);
+        }
+        """;
+
+    /// <summary>
+    /// A function whose contract obligation is not proved is compared, by its definition the engine admitted before the
+    /// obligation, and so is a caller the engine skips for it, admitted by the harness. A recursive method whose decrease
+    /// obligation is not proved has no admitted definition, nor its caller: neither is compared.
+    /// </summary>
+    [Fact]
+    public void OnlyAnAdmittedDefinitionIsCompared()
+    {
+        using var side = new EffectCorpus(Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Admission.cs", "using Warrant;\n" + Admission)], checkOverflow: false));
+        // Its obligation, r > x for r = x, is false: not proved now, nor once M6 U11's default procedure runs on it.
+        Assert.Null(Assert.IsType<NotProvedOutcome>(side.Run.Find("M:A.Bounded(System.Int32)")).Decrease);
+        Assert.True(side.EngineAdmitted("M:A.Bounded(System.Int32)"));
+        Assert.IsType<SkippedOutcome>(side.Run.Find("M:A.CallsBounded(System.Int32)"));
+        Assert.False(side.EngineAdmitted("M:A.CallsBounded(System.Int32)"));
+        Assert.Equal(new Dictionary<string, string> { ["M:A.CallsBounded(System.Int32)"] = "M:A.Bounded(System.Int32)" }, side.AdmittedByTheHarness);
+
+        Assert.NotNull(Assert.IsType<NotProvedOutcome>(side.Run.Find("M:A.Climb(System.Int32)")).Decrease);
+        Assert.False(side.EngineAdmitted("M:A.Climb(System.Int32)"));
+        Assert.IsType<SkippedOutcome>(side.Run.Find("M:A.CallsClimb(System.Int32)"));
+        Assert.Throws<TrueException>(() => side.AssertDefinitionAdmitted("M:A.Climb(System.Int32)"));
+        Assert.Throws<TrueException>(() => side.AssertDefinitionAdmitted("M:A.CallsClimb(System.Int32)"));
+
+        foreach (var key in new[] { "M:A.Bounded(System.Int32)", "M:A.CallsBounded(System.Int32)" })
+        {
+            var check = side.Checker(side.Unit(key));
+            var run = new EffectRun();
+            KernelThread.Run(() =>
+            {
+                foreach (var x in Generators.Int32Boundaries)
+                {
+                    run.Record(check([x]));
+                }
+            });
+            Assert.True(run.Disagreements.Count == 0, run.Report());
+            run.AssertEnoughEvaluated(key);
+        }
     }
 
     /// <summary>

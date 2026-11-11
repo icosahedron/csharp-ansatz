@@ -13,21 +13,59 @@
 
       "M:Corpus.M6.Effects.Biggest(System.Int32,System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Effects.Smallest(System.Int64,System.Int64)": { "outcome": "translated" },
-      "M:Corpus.M6.Effects.Guard(System.Int32)": { "outcome": "translated" }
+      "M:Corpus.M6.Effects.Guard(System.Int32)": { "outcome": "translated" },
+
+      "M:Corpus.Rejected.Types.NullableParameter(Corpus.Rejected.Point)": { "outcome": "translated" },
+      "M:Corpus.Rejected.Types.ReturnsNull": { "outcome": "translated" },
+      "M:Corpus.Rejected.Statements.Decimals(System.Decimal)": { "outcome": "translated" },
+
+      "T:Corpus.M6.Payment": { "outcome": "translated" },
+      "M:Corpus.M6.Nullables.IsMissing(Corpus.M6.Payment)": { "outcome": "translated" },
+      "M:Corpus.M6.Nullables.OrZero(System.Nullable{System.Int32})": { "outcome": "translated" },
+      "M:Corpus.M6.Nullables.OrDefault(System.Nullable{System.Int64})": { "outcome": "translated" },
+      "M:Corpus.M6.Nullables.Wrap(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Nullables.ValueWhenKnown(System.Nullable{System.Int32})": { "outcome": "translated" },
+      "M:Corpus.M6.Nullables.Use(Corpus.M6.Payment)": { "outcome": "translated", "assumeNonNull": ["payment"] },
+      "M:Corpus.M6.Nullables.Guarded(Corpus.M6.Payment)": { "outcome": "translated" },
+      "M:Corpus.M6.Nullables.IdOrZero(Corpus.M6.Payment)": { "outcome": "translated" },
+      "M:Corpus.M6.Decimals.AtLeastOne(System.Decimal)": { "outcome": "translated" },
+      "M:Corpus.M6.Decimals.SameAmount(Corpus.M6.Payment,Corpus.M6.Payment)": { "outcome": "translated", "assumeNonNull": ["a", "b"] },
+      "M:Corpus.M6.Decimals.SamePayment(Corpus.M6.Payment,Corpus.M6.Payment)": { "outcome": "translated", "assumeNonNull": ["a", "b"] },
+      "M:Corpus.M6.Decimals.Negate(System.Decimal)": { "outcome": "translated" },
+      "M:Corpus.M6.Decimals.Largest(System.Decimal,System.Decimal)": { "outcome": "translated" },
+      "M:Corpus.M6.Decimals.Smallest(System.Decimal,System.Decimal)": { "outcome": "translated" },
+      "M:Corpus.M6.Decimals.Size(System.Decimal)": { "outcome": "translated" }
     },
     "refuted": {
       "M:Corpus.Rejected.Arithmetic.CheckedAdd(System.Int32,System.Int32)": { "outcome": "translated" },
       "M:Corpus.Rejected.Statements.CallsUnverified(System.Int32)": { "outcome": "translated" },
 
       "M:Corpus.M6.Refuted.Effects.Ratio(System.Int32,System.Int32)": { "outcome": "translated" },
-      "M:Corpus.M6.Refuted.Effects.Magnitude(System.Int64)": { "outcome": "translated" }
+      "M:Corpus.M6.Refuted.Effects.Magnitude(System.Int64)": { "outcome": "translated" },
+
+      "M:Corpus.M6.Refuted.Nullables.Read(System.Nullable{System.Int32})": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Nullables.Cast(System.Nullable{System.Int64})": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Nullables.Use(Corpus.M6.Refuted.Payment)": { "outcome": "translated", "assumeNonNull": ["payment"] },
+      "M:Corpus.M6.Refuted.Nullables.IdOf(Corpus.M6.Refuted.Payment)": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Nullables.Unchecked(Corpus.M6.Refuted.Payment)": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Decimals.AddFee(System.Decimal)": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Decimals.Difference(System.Decimal,System.Decimal)": { "outcome": "translated" }
     },
     "rejected": {
       "M:Corpus.M6.Rejected.Effects.ThrowsOdd(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "exception type that is not a System exception or a plain subclass of one" }] },
       "M:Corpus.M6.Rejected.Effects.TryFinally(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "try" }] },
       "M:Corpus.M6.Rejected.Effects.Sign(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0005", "construct": "M:System.Math.Sign(System.Int32)" }] },
       "M:Corpus.M6.Rejected.Effects.RatioAtMost(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "division" }] },
-      "M:Corpus.M6.Rejected.Effects.AbsoluteIsNonNegative(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "modelled member M:System.Math.Abs(System.Int32)" }] }
+      "M:Corpus.M6.Rejected.Effects.AbsoluteIsNonNegative(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "modelled member M:System.Math.Abs(System.Int32)" }] },
+
+      "M:Corpus.M6.Rejected.Nullables.Use(Corpus.M6.Rejected.Payment)": { "outcome": "translated", "assumeNonNull": ["payment"] },
+      "M:Corpus.M6.Rejected.Nullables.Forgiven(Corpus.M6.Rejected.Payment)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "null-forgiving operator" }] },
+      "M:Corpus.M6.Rejected.Nullables.LiftedLess(System.Nullable{System.Int32})": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "lifted comparison" }] },
+      "M:Corpus.M6.Rejected.Nullables.LiftedEquals(System.Nullable{System.Int32})": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "lifted comparison" }] },
+      "M:Corpus.M6.Rejected.Nullables.LiftedAdd(System.Nullable{System.Int32},System.Nullable{System.Int32})": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "lifted arithmetic" }] },
+      "M:Corpus.M6.Rejected.Nullables.ReadIsPositive(System.Nullable{System.Int32})": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "nullable read" }] },
+      "M:Corpus.M6.Rejected.Decimals.Product(System.Decimal,System.Decimal)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "decimal operator other than + and -" }] },
+      "M:Corpus.M6.Rejected.Decimals.AddingOneIsLarger(System.Decimal)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "decimal arithmetic" }] }
     },
     "checked-project": {
       "M:Corpus.Rejected.CheckedProject.Checked.Add(System.Int32,System.Int32)": { "outcome": "translated" },

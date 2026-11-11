@@ -486,7 +486,8 @@ public class ExtractionTests
         Assert.Equal(["p"], NonNull(Unit(result, "M:C.Validate(Payment)")));
         Assert.Equal(["o", "o.Inner", "o.Inner.Payment", "o.Outcome"], NonNull(Unit(result, "M:C.Deep(Outer,System.Int32)")));
         Assert.Equal(["this.Inner", "this.Inner.Payment", "this.Outcome"], NonNull(Unit(result, "P:Outer.Amount")));
-        Assert.Equal("WRT0002 | nullable type", Only(result, "M:C.Maybe(Payment)"));
+        // A parameter declared nullable may be null (M6 U17), so nothing assumes it is not.
+        Assert.Empty(NonNull(Unit(result, "M:C.Maybe(Payment)")));
     }
 
     [Fact]

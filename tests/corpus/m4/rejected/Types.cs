@@ -100,12 +100,8 @@ public static class Types
     [Verified]
     public static int UsesReservedName(Reserved r) => r.casesOn;
 
-    [Verified]
-    public static int NullableParameter(Point? p) => p is null ? 0 : 1;
-
-    [Verified]
-    public static Point? ReturnsNull() => null;
-
+    // NullableParameter and ReturnsNull, which M6 supports, moved to tests/corpus/m6 (README). A parameter not
+    // declared nullable is assumed non-null, so comparing it with null stays rejected.
     [Verified]
     public static bool ComparesWithNull(Point p) => p == null;
 }

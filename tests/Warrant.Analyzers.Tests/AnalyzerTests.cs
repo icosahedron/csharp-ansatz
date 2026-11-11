@@ -106,6 +106,34 @@ public sealed class AnalyzerTests
     }
 
     [Fact]
+    public async Task NullableValuesAndDecimalsAreCheckedAsTheBuildChecksThem()
+    {
+        // M6 U17 under this Roslyn: the accepted forms get nothing, `!` and lifted operators are rejected by name.
+        var compilation = AnalyzerHarness.Compile(("N.cs", """
+            #nullable enable
+            using Warrant;
+            public sealed record Payment(int Id, decimal Amount);
+            public static class N
+            {
+                [Verified] public static int Use(Payment p) => p.Id;
+                [Verified] public static int Guarded(Payment? p) { if (p is null) return 0; return Use(p); }
+                [Verified] public static int OrZero(int? x) => x ?? x.GetValueOrDefault();
+                [Verified] public static bool Large(decimal d) => -d < 1.5m + d;
+                [Verified] public static int Forgiven(Payment? p) => Use(p!);
+                [Verified] public static bool Lifted(int? x) => x > 0;
+            }
+            """));
+
+        var (lines, exceptions) = await AnalyzerHarness.Run(compilation);
+
+        Assert.Empty(exceptions);
+        Assert.Collection(
+            lines,
+            l => Assert.Equal("N.cs(10,62,10,64): error WRT0002: M4 does not support null-forgiving operator.", l),
+            l => Assert.Equal("N.cs(11,53,11,58): error WRT0002: M4 does not support lifted comparison.", l));
+    }
+
+    [Fact]
     public async Task AMemberThatDoesNotCompileIsLeftToTheCompilerAndItsNeighboursAreStillChecked()
     {
         var compilation = AnalyzerHarness.Compile(("S.cs", """

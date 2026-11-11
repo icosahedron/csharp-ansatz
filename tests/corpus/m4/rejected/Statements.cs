@@ -103,9 +103,7 @@ public static class Statements
         return alias;
     }
 
-    [Verified]
-    public static decimal Decimals(decimal d) => d;
-
+    // Decimals, which M6 supports, moved to tests/corpus/m6 (README).
     [Verified]
     public static double Doubles(double d) => d;
 

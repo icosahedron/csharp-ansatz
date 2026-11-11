@@ -683,6 +683,7 @@ public static class Extractor
                 throw Reject(member, "ref return");
             }
             candidate.Returns = walker.MapType(returnType, annotated, ReturnTypeSyntax(member));
+            walker.SetReturns(returnType, annotated);
             if (!member.IsStatic)
             {
                 candidate.Self = ((RefType)walker.MapType(type, annotated: false, null)).Key;
@@ -712,7 +713,7 @@ public static class Extractor
         {
             if (block.Operations.Length == 1 && block.Operations[0] is IReturnOperation { ReturnedValue: { } value })
             {
-                return walker.Expr(value);
+                return walker.Returned(value);
             }
             // `=> throw new E(...)`: the body is the throw statement, of the member's return type.
             if (block.Operations.Length == 1
@@ -925,7 +926,8 @@ public static class Extractor
             var result = new List<VirAssumption>();
             foreach (var p in c.ParameterSymbols.Concat(c.Walker?.Universals ?? []))
             {
-                if (Symbols.IsNullableReference(p.Type))
+                // A value declared nullable (`Payment? p`) may be null, which the model says (M6 KTD5); nothing assumes otherwise.
+                if (Symbols.IsNullableReference(p.Type) && p.NullableAnnotation != NullableAnnotation.Annotated)
                 {
                     result.Add(new VirAssumption(VirAssumptionKind.NonNull, p.Name));
                     NonNullFields(p.Name, p.Type, [], result);
@@ -968,7 +970,7 @@ public static class Extractor
             }
             foreach (var field in fields)
             {
-                if (Symbols.IsNullableReference(field.Type))
+                if (Symbols.IsNullableReference(field.Type) && field.NullableAnnotation != NullableAnnotation.Annotated)
                 {
                     var subject = prefix + "." + field.Name;
                     result.Add(new VirAssumption(VirAssumptionKind.NonNull, subject));

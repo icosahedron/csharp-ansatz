@@ -57,6 +57,10 @@ Each move, with the milestone unit that made it and where the member went:
 | `M:Corpus.Rejected.CheckedProject.Checked.Add(System.Int32,System.Int32)` | WRT0002 `checked arithmetic` | M6 U7 | `tests/corpus/m6/refuted/CheckedProject.cs` |
 | `M:Corpus.Rejected.CheckedProject.Checked.Negate(System.Int32)` | WRT0002 `checked arithmetic` | M6 U7 | `tests/corpus/m6/refuted/CheckedProject.cs` |
 | `M:Corpus.Rejected.CheckedProject.Checked.Narrow(System.Int64)` | WRT0002 `checked arithmetic` | M6 U7 | `tests/corpus/m6/refuted/CheckedProject.cs` |
+| `M:Corpus.Rejected.Types.NullableParameter(Corpus.Rejected.Point)` | WRT0002 `nullable type` | M6 U17 | `tests/corpus/m6/accepted/Types.cs` |
+| `M:Corpus.Rejected.Types.ReturnsNull` | WRT0002 `nullable type` | M6 U17 | `tests/corpus/m6/accepted/Types.cs` |
+| `M:Corpus.Rejected.Statements.Decimals(System.Decimal)` | WRT0002 `decimal` | M6 U17 | `tests/corpus/m6/accepted/Statements.cs` |
 
 Their keys are unchanged, and the M6 corpus README gives each one's M6 outcome.
 `CallsUnmodelled` (`Math.Sign`) replaces `CallsUnverified`, so the corpus still has a WRT0005 member.
+`ComparesWithNull` stays: its parameter is not declared nullable, so it is assumed non-null and comparing it with `null` is still rejected as `null`.

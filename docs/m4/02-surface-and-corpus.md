@@ -191,3 +191,4 @@ The construct names are the ones extraction puts in its messages, so `expected.j
 The `checked-project` compilation is the one case that needs its own options: `rejected/CheckedProject.cs` is compiled with overflow checking on, its `+`, unary `-` and narrowing cast are rejected as `checked arithmetic`, and its widening cast, which cannot overflow, translates.
 
 M6 supports `/`, `%`, `throw`, checked arithmetic and `Math.Abs` (plan M6 U7), so the members that used them, `Halve` in the excerpt above among them, moved to `tests/corpus/m6`; the M4 corpus README's flip list records each move, and `checked-project` keeps only the widening cast.
+U17 moved the members with a nullable parameter or return value and with a `decimal` the same way; `ComparesWithNull` stays, since its parameter is not declared nullable.

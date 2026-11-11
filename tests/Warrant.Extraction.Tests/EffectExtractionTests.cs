@@ -249,13 +249,13 @@ public class EffectExtractionTests
     }
 
     [Fact]
-    public void TheModelledMembersAreMinMaxAndAbsOnIntAndLongAndTheThrowingOnesAreTheVirs()
+    public void TheModelledMembersAreMinMaxAndAbsOnIntLongAndDecimalAndTheThrowingOnesAreTheVirs()
     {
         Assert.Equal(
             [
-                "M:System.Math.Abs(System.Int32)", "M:System.Math.Abs(System.Int64)",
-                "M:System.Math.Max(System.Int32,System.Int32)", "M:System.Math.Max(System.Int64,System.Int64)",
-                "M:System.Math.Min(System.Int32,System.Int32)", "M:System.Math.Min(System.Int64,System.Int64)",
+                "M:System.Math.Abs(System.Decimal)", "M:System.Math.Abs(System.Int32)", "M:System.Math.Abs(System.Int64)",
+                "M:System.Math.Max(System.Decimal,System.Decimal)", "M:System.Math.Max(System.Int32,System.Int32)", "M:System.Math.Max(System.Int64,System.Int64)",
+                "M:System.Math.Min(System.Decimal,System.Decimal)", "M:System.Math.Min(System.Int32,System.Int32)", "M:System.Math.Min(System.Int64,System.Int64)",
             ],
             ModelledMembers.Keys.Order(StringComparer.Ordinal));
         Assert.Subset(ModelledMembers.Keys.ToHashSet(StringComparer.Ordinal), Effects.ThrowingModelledMembers.ToHashSet(StringComparer.Ordinal));

@@ -124,7 +124,6 @@
       "M:Corpus.Rejected.Statements.Strings(System.String)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "string" }] },
       "M:Corpus.Rejected.Statements.RefLocal(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "ref local" }] },
       "M:Corpus.Rejected.Statements.RefReadonlyLocal(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "ref local" }] },
-      "M:Corpus.Rejected.Statements.Decimals(System.Decimal)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "decimal" }] },
       "M:Corpus.Rejected.Statements.Doubles(System.Double)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "floating point" }] },
       "M:Corpus.Rejected.Statements.CallsUnmodelled(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0005", "construct": "M:System.Math.Sign(System.Int32)" }] },
 
@@ -184,8 +183,6 @@
       "M:Corpus.Rejected.Types.UsesRecordStruct(Corpus.Rejected.Pair)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.UsesCyclicRecords(Corpus.Rejected.Left)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.UsesReservedName(Corpus.Rejected.Reserved)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
-      "M:Corpus.Rejected.Types.NullableParameter(Corpus.Rejected.Point)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "nullable type" }] },
-      "M:Corpus.Rejected.Types.ReturnsNull": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "nullable type" }] },
       "M:Corpus.Rejected.Types.ComparesWithNull(Corpus.Rejected.Point)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "null" }] }
     },
     "checked-project": {

@@ -200,6 +200,10 @@ internal static class Init
     public static readonly Expr PropTrue = C("True");
     public static readonly Expr PropFalse = C("False");
 
+    // The exception half of a Spec.NoThrow contract in place of ClrExn.Allowed (#182): only an exception propagated from a
+    // dependency.
+    public static readonly Expr ClrExnIsExternal = C("Warrant.ClrExn.External");
+
     /// <summary>The binder name of a constant function's or an implication's unused argument.</summary>
     public static readonly Name Unused = Name.From("x");
 

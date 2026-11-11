@@ -134,6 +134,91 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
         AssertPropositions(env, contract);
     }
 
+    // ---- Spec.NoThrow (#182) ----
+
+    /// <summary><paramref name="e"/> with every <c>ClrExn.External</c> replaced by <c>ClrExn.Allowed</c>.</summary>
+    private static Expr AllowedFor(Expr e) =>
+        ExprOps.Replace(e, (x, _) => x is ConstExpr { Name: var n } && n == N("Warrant.ClrExn.External") ? C("Warrant.ClrExn.Allowed") : null);
+
+    [Fact]
+    public void NoThrowStatesTheExternalExceptionPostconditionAndChangesNothingElse()
+    {
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Guard(int a, int b)
+                {
+                    Spec.Requires(b != 0);
+                    Spec.NoThrow();
+                    Spec.Ensures<int>(r => r == a);
+                    if (b == 0)
+                    {
+                        throw new ArgumentException("b");
+                    }
+                    return a;
+                }
+
+                [Verified]
+                public static int Plain(int a, int b)
+                {
+                    Spec.Requires(b != 0);
+                    Spec.Ensures<int>(r => r == a);
+                    if (b == 0)
+                    {
+                        throw new ArgumentException("b");
+                    }
+                    return a;
+                }
+            }
+            """);
+        var guard = Contract(translation, "M:S.Guard(System.Int32,System.Int32)");
+        var plain = Contract(translation, "M:S.Plain(System.Int32,System.Int32)");
+        Assert.True(guard.Raising);
+        var (_, _, _, exceptions) = Triple(Under(guard.Theorem.Type, guard.Binders));
+        var parts = exceptions.GetAppArgs();
+        Assert.Equal(Expr.App(C("Warrant.ClrExn.External"), Expr.BVar(0)), Assertion(Assert.IsType<LamExpr>(parts[2]).Body));
+        AssertOnlyExplicitAndExternalExceptionsAllowed(Triple(Under(plain.Theorem.Type, plain.Binders)).Exceptions);
+        // Only the exception postcondition differs: with Allowed in place of External, the two statements are the same
+        // up to the function's name.
+        var guardName = translation.Find("M:S.Guard(System.Int32,System.Int32)")!.Name;
+        var plainName = translation.Find("M:S.Plain(System.Int32,System.Int32)")!.Name;
+        var renamed = ExprOps.Replace(AllowedFor(guard.Theorem.Type), (x, _) => x is ConstExpr c && c.Name == guardName ? Expr.Const(plainName) : null);
+        Assert.Equal(plain.Theorem.Type, renamed);
+        Assert.Equal(guard.Binders, plain.Binders);
+        AssertPropositions(env, guard);
+    }
+
+    [Fact]
+    public void NoThrowOnAPureMethodChangesNothing()
+    {
+        // A pure method raises nothing, so NoThrow holds of it already and its obligation is the one without (#182).
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Half(int x)
+                {
+                    Spec.Requires(x >= 0);
+                    Spec.NoThrow();
+                    return x / 2;
+                }
+
+                [Verified]
+                public static int Same(int x)
+                {
+                    Spec.NoThrow();
+                    return x;
+                }
+            }
+            """);
+        var half = Contract(translation, "M:S.Half(System.Int32)");
+        Assert.False(half.Raising);
+        AssertOnlyExplicitAndExternalExceptionsAllowed(Triple(Under(half.Theorem.Type, half.Binders)).Exceptions);
+        Assert.Null(translation.Find("M:S.Same(System.Int32)")!.Contract);
+        AssertPropositions(env, half);
+    }
+
     [Fact]
     public void AContractFreeMethodThatDividesHasATrueTrueObligationOverItsProgram()
     {

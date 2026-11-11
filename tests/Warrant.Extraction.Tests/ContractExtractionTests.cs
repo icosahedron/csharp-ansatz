@@ -183,6 +183,118 @@ public class ContractExtractionTests
         Assert.Contains("out of order", d.Message, StringComparison.Ordinal);
     }
 
+    // ---- Spec.NoThrow (#182) ----
+
+    [Fact]
+    public void NoThrowBetweenRequiresAndEnsuresBecomesItsVirStatement()
+    {
+        var result = Members("""
+                [Verified]
+                public static int Guard(int b)
+                {
+                    Spec.Requires(b != 0);
+                    Spec.NoThrow();
+                    Spec.Ensures<int>(r => r == b);
+                    if (b == 0)
+                    {
+                        throw new ArgumentException("b");
+                    }
+                    return b;
+                }
+            """);
+
+        Assert.Empty(result.Diagnostics);
+        var body = Assert.IsType<BlockStmt>(Unit(result, "M:C.Guard(System.Int32)").Body);
+        Assert.IsType<RequiresStmt>(body.Stmts[0]);
+        Assert.Equal(new NoThrowStmt(), body.Stmts[1]);
+        Assert.IsType<EnsuresStmt>(body.Stmts[2]);
+    }
+
+    [Fact]
+    public void NoThrowAloneOrAfterDecreasesIsAccepted()
+    {
+        var result = Members("""
+                [Verified]
+                public static int Only(int b)
+                {
+                    Spec.NoThrow();
+                    return 10 / b;
+                }
+
+                [Verified]
+                public static int Down(int n)
+                {
+                    Spec.Decreases(n);
+                    Spec.NoThrow();
+                    return n <= 0 ? 0 : Down(n - 1);
+                }
+            """);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(new NoThrowStmt(), Assert.IsType<BlockStmt>(Unit(result, "M:C.Only(System.Int32)").Body).Stmts[0]);
+        Assert.Equal(new NoThrowStmt(), Assert.IsType<BlockStmt>(Unit(result, "M:C.Down(System.Int32)").Body).Stmts[1]);
+    }
+
+    [Theory]
+    [InlineData("Spec.NoThrow(); Spec.Requires(x > 0);", "Spec.Requires after Spec.NoThrow")]
+    [InlineData("Spec.Ensures<int>(r => r == x); Spec.NoThrow();", "Spec.NoThrow after Spec.Ensures")]
+    public void NoThrowOutOfOrderIsRejectedNamingTheOrder(string prefix, string construct)
+    {
+        var result = Members($$"""
+                [Verified]
+                public static int F(int x)
+                {
+                    {{prefix}}
+                    return x;
+                }
+            """);
+
+        var d = Single(result, "M:C.F(System.Int32)");
+        Assert.Equal("WRT0002 | " + construct, d.Id + " | " + d.Construct);
+        Assert.Contains("out of order", d.Message, StringComparison.Ordinal);
+        Assert.Contains("then Spec.NoThrow, then Spec.Ensures", d.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASecondNoThrowIsRejected()
+    {
+        var result = Members("""
+                [Verified]
+                public static int F(int x)
+                {
+                    Spec.NoThrow();
+                    Spec.NoThrow();
+                    return x;
+                }
+            """);
+
+        var d = Single(result, "M:C.F(System.Int32)");
+        Assert.Equal("WRT0002 | second Spec.NoThrow", d.Id + " | " + d.Construct);
+        Assert.Contains("at most once", d.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoThrowAfterAnotherStatementMustLeadTheBody()
+    {
+        var result = Members("""
+                [Verified]
+                public static int F(int x)
+                {
+                    var y = x;
+                    Spec.NoThrow();
+                    return y;
+                }
+
+                [Verified]
+                public static void G(int x) => Spec.NoThrow();
+            """);
+
+        var d = Single(result, "M:C.F(System.Int32)");
+        Assert.Equal("WRT0002 | Spec.NoThrow not leading the body", d.Id + " | " + d.Construct);
+        Assert.Contains("after any Spec.Decreases and Spec.Requires", d.Message, StringComparison.Ordinal);
+        Assert.Equal("WRT0002 | Spec.NoThrow in an expression-bodied member", Only(result, "M:C.G(System.Int32)"));
+    }
+
     [Fact]
     public void AContractOnARecursiveMethodIsRejected()
     {

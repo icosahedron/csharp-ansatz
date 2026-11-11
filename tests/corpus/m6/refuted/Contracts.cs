@@ -60,4 +60,17 @@ public static class Contracts
         Spec.Requires(x < 0);
         return x;
     }
+
+    // Spec.NoThrow (#182) without b != 0 in the Requires: the throw is reachable, so the build fails at it.
+    [Verified]
+    public static int QuotientOfAny(int a, int b)
+    {
+        Spec.Requires(b != -1);
+        Spec.NoThrow();
+        if (b == 0)
+        {
+            throw new System.ArgumentException("b");
+        }
+        return a / b;
+    }
 }

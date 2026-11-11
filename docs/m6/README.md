@@ -161,7 +161,6 @@ Decisions that are the owner's, still open:
 |---|---|
 | #180 | A pure unit for `Math.Min`/`Max` and constant-divisor `/` and `%` right after U7 (a question of unit order; U9 built these pure forms). |
 | #181 | Properties relating two calls of a raising method (a `[Theorem]` cannot call one; chapter 4). |
-| #182 | A way to fail the build when an explicit `throw` is reachable (chapter 6). |
 | #183 | Unbounded integers in specs, or record the limit (#160; chapter 6). |
 | #213 | `Spec.Implies` inside `Spec.Requires` and `Spec.Ensures` (still WRT0004 there; chapter 4). |
 | #219 | A caller of a method whose contract is not proved is skipped, even when it needs only the definition (chapter 6). |
@@ -182,5 +181,5 @@ Design Q14 (collections) and Q19 (spec sidecars) are open too; design §12 recor
 | Operation | A bound variable of a dependency method's obligation that stands for one (dependency, member) pair (KTD9). |
 | VC | A verification condition: a goal the walker leaves, reported at the VIR node that produced it (KTD18). |
 | Default procedure | The VC walker, then the VC simp set, then `omega` (KTD13, KTD14). |
-| Allowed exception | An explicit `throw` (`ClrExn.thrown`) or one propagated from a dependency (`ClrExn.external`) (KTD12). |
+| Allowed exception | An explicit `throw` (`ClrExn.thrown`) or one propagated from a dependency (`ClrExn.external`) (KTD12); under `Spec.NoThrow`, only the latter (#182). |
 | Spec lemma | A Lean theorem marked `@[spec]` that states a model operation's triple; the sidecar carries the attribute (KTD15). |

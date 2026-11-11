@@ -25,7 +25,8 @@ M6 adds four kinds (KTD20), rendered by `src/Warrant.Engine/Reports/` under two 
   Spec.Requires at each call" when the member has one.
 - `MayThrow` is each explicit `throw` the walker could not show unreachable, each call to a dependency (whose exception
   the contract allows), and each call to a verified callee that may throw, naming the call and the callee's throw site
-  (#70). A throw proved unreachable is not listed (#92). Its subject carries VIR node IDs, not lines
+  (#70). A throw proved unreachable is not listed (#92), and neither is any explicit throw of a method with
+  `Spec.NoThrow`, whose proof shows them all unreachable (#182); its dependency calls are still listed. Its subject carries VIR node IDs, not lines
   (`MayThrowSubject`), so a cached outcome renders at the current lines.
   The list does not depend on how the contract was proved (#229): for a `[ProofFor]` script it comes from every walk the
   script's `Tactic.VcGen()` steps ran, and for a script that ran none from the walk the default procedure would make,

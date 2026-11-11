@@ -331,6 +331,26 @@ internal static class Samples
     [
         Payout(), Capped(), Everything(), ExpressionBodied(), ImpliesTheorem(),
         RecordType(), EnumType(), ClosedEnumType(), ClosedClassType(), Escapes(), Sum(), Quantified(),
-        GetContract(), SaveContract(), Effectful(),
+        GetContract(), SaveContract(), Effectful(), Guard(),
     ];
+
+    public const string GuardKey = "M:Payments.Service.Guard(System.Int32)";
+
+    /// <summary>
+    /// A function with <c>Spec.NoThrow</c> (#182) between its <c>Requires</c> and <c>Ensures</c>, whose explicit throw the
+    /// <c>Requires</c> rules out.
+    /// </summary>
+    public static VirUnit Guard() => VirUnit.Function(
+        GuardKey,
+        VirList.Of(new VirParam("b", VirType.Int32)),
+        VirType.Int32,
+        new BlockStmt(VirList.Of<VirStmt>(
+            new RequiresStmt(new CompareExpr(CompareOp.Ne, CompareKind.Int, P(0), LitExpr.Int32(0))),
+            new NoThrowStmt(),
+            new EnsuresStmt(0, "r", new CompareExpr(CompareOp.Eq, CompareKind.Int, new LocalExpr(VirType.Int32, 0), P(0))),
+            new IfStmt(new CompareExpr(CompareOp.Eq, CompareKind.Int, P(0), LitExpr.Int32(0)), new ThrowStmt("T:System.ArgumentException"), null),
+            new ReturnStmt(P(0)))),
+        VirList<VirAssumption>.Empty,
+        Facts,
+        VirList<string>.Empty);
 }

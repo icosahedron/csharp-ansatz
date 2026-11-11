@@ -319,6 +319,39 @@ Proved (`tests/corpus/m6/accepted/Contracts.cs`): the asserted fact is a conditi
 script, and the code after it may use it. `Spec.Assert(b != 0); return a / b;` with no `Spec.Requires` fails at the
 `Spec.Assert` line with `Spec.Assert` (`AFailingAssertFailsAtItsLineAndTheDivisionAfterItUsesTheAssertedFact`).
 
+### No reachable throw: `Spec.NoThrow`
+
+```csharp
+[Verified]
+public static int NonZero(int b)
+{
+    Spec.Requires(b != 0);
+    Spec.NoThrow();
+    if (b == 0)
+    {
+        throw new ArgumentException("b must not be zero");
+    }
+    return b;
+}
+```
+
+Proved, and its report lists no "Assumed (exceptions)": `Spec.NoThrow` makes the proof show that the throw is
+unreachable under the `Spec.Requires`, rather than allow it (#182). The guard still protects callers Warrant does not
+verify, which can pass 0. The same method without the `Spec.Requires` fails at the `throw`
+(`TheGuideExampleProvesAndItsTwinWithoutTheRequiresFailsAtTheThrow` in `tests/Warrant.Engine.Tests/NoThrowTests.cs`,
+whose class is `S`; here it is in a class `Guards`):
+
+```text
+Guards.cs(24,13): error WRT0001: The contract of 'Guards.NonZeroOfAny(int)' could not be proved: an explicit throw is reachable under the Requires (Spec.NoThrow): omega could not prove the goal:
+  case ht
+  b : Int32
+  h : b = 0
+  ⊢ False
+```
+
+The path condition `b = 0` is the branch that throws; nothing contradicts it. In the M6 corpus, `Quotient` in
+`accepted/Contracts.cs` proves and its twin `QuotientOfAny` in `refuted/Contracts.cs` fails at its `throw`.
+
 ## A contract proved by a script (M6)
 
 ```csharp

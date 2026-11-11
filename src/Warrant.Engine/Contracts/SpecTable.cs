@@ -39,6 +39,18 @@ internal static class SpecTable
     /// <summary>A verified callee's proved contract at its call (KTD12): its precondition, then its postcondition.</summary>
     public static readonly Name Call = Name.Parse("Warrant.Vc.call");
 
+    /// <summary><see cref="Call"/> for a callee with <c>Spec.NoThrow</c>, whose contract allows only <c>ClrExn.External</c> (#182).</summary>
+    public static readonly Name CallExternal = Name.Parse("Warrant.Vc.callExternal");
+
+    /// <summary>
+    /// <see cref="Call"/> for a pure callee, <c>pure a</c>, whose exception postcondition is not used: a caller with
+    /// <c>Spec.NoThrow</c> uses a pure callee's contract with it (#182).
+    /// </summary>
+    public static readonly Name CallPure = Name.Parse("Warrant.Vc.callPure");
+
+    /// <summary><c>ClrExn.External e → ClrExn.Allowed e</c>: a caller without <c>Spec.NoThrow</c> allows what a NoThrow callee may raise (#182).</summary>
+    public static readonly Name AllowedOfExternal = Name.Parse("Warrant.ClrExn.allowed_of_external");
+
     /// <summary>U3's <c>ite</c> rule, which <c>Std.Do</c> lacks.</summary>
     public static readonly Name Ite = Name.Parse("Warrant.Triple.ite");
 
@@ -52,5 +64,5 @@ internal static class SpecTable
     public static readonly Name FalseElim = Name.Parse("False.elim");
 
     /// <summary>Every rule name, which the bundle must hold (<see cref="EmittedConstants"/>).</summary>
-    public static IReadOnlyList<Name> All { get; } = [Pre, Spec, Resume, Bind, Pure, Throw, Assert, OptionRec, Call, Ite, Dite, AndIntro, FalseElim];
+    public static IReadOnlyList<Name> All { get; } = [Pre, Spec, Resume, Bind, Pure, Throw, Assert, OptionRec, Call, CallExternal, CallPure, AllowedOfExternal, Ite, Dite, AndIntro, FalseElim];
 }

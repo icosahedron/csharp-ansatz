@@ -472,10 +472,31 @@ fails at the division twice: `division by zero` and
 `overflow in a checked operation` (`int.MinValue / -1`).
 
 - A throw the verifier can show unreachable under `Spec.Requires` is not
-  listed. To prove a method never throws, make every throwing path
-  unreachable and check that "Assumed (exceptions)" is empty; the build does
-  not fail on a reachable explicit throw (whether it should be able to is
-  open, GitHub #182).
+  listed.
+- To prove a method never throws explicitly, add `Spec.NoThrow()` after its
+  `Spec.Requires` (and before any `Spec.Ensures`). The build then fails at any
+  `throw` the `Spec.Requires` does not rule out, with `an explicit throw is
+  reachable under the Requires (Spec.NoThrow)`, instead of listing it. The
+  guard can stay for callers Warrant doesn't verify:
+
+  ```csharp
+  [Verified]
+  public static int PerItem(int total, int count)
+  {
+      Spec.Requires(count > 0);
+      Spec.NoThrow();
+      if (count <= 0)
+      {
+          throw new ArgumentOutOfRangeException(nameof(count));
+      }
+      return total / count;
+  }
+  ```
+
+  An exception from a dependency is still allowed and listed. A verified
+  method it calls that can throw needs `Spec.NoThrow` too, or the build fails
+  at the call; a caller without `Spec.NoThrow` uses its contract as before.
+  `Spec.NoThrow` is not valid in a `[ContractFor]` class.
 - A method that throws on every path proves any `Spec.Ensures`, since it
   never returns normally; the report lists the throw.
 - `try`/`catch` is rejected (WRT0002 `try`), and no milestone schedules it.

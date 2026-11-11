@@ -74,7 +74,8 @@ public sealed class SpecObligation
 /// D9, <c>Dependencies.cs</c>), none for a method without, <c>program</c> is <c>@f σ ops params</c> for a method that can
 /// raise and <c>pure (f params)</c> for a pure one, a
 /// missing <c>Requires</c> or <c>Ensures</c> is <c>True</c>, and the exception postcondition allows only an explicit throw
-/// and an exception propagated from a dependency. With it come the well-definedness obligations of its <c>Spec</c>
+/// and an exception propagated from a dependency; with <c>Spec.NoThrow</c> (#182), a method that can raise has
+/// <c>ClrExn.External</c> in place of <c>ClrExn.Allowed</c>, which allows only the latter. With it come the well-definedness obligations of its <c>Spec</c>
 /// expressions (KTD26), the vacuity checks of its <c>Spec.Requires</c> (KTD25), and for a pure method with
 /// <c>Spec.Ensures</c>, its contract as a proposition, <c>f.$contract_spec</c>, which call sites use.
 /// </summary>
@@ -185,13 +186,14 @@ internal static class Triples
     /// <summary>
     /// KTD12's postcondition, <c>(ok, (fun e =&gt; ⌜ClrExn.Allowed e⌝, ()))</c>: <paramref name="ok"/>, a function from the
     /// result to an assertion, on normal return, and for an exception, only an explicit throw or one propagated from a
-    /// dependency.
+    /// dependency. With <paramref name="noThrow"/> (<c>Spec.NoThrow</c>, #182) the exception half is
+    /// <c>ClrExn.External</c>: only one propagated from a dependency.
     /// </summary>
-    public static Expr Post(Expr sigma, Expr alpha, Expr ok)
+    public static Expr Post(Expr sigma, Expr alpha, Expr ok, bool noThrow = false)
     {
         var shape = Shape(sigma);
         var arg = ArgShape(sigma);
-        var allowed = Expr.Lam(Name.From("e"), Init.ClrExn, PureArg(sigma, Expr.App(Init.ClrExnAllowed, Expr.BVar(0))));
+        var allowed = Expr.Lam(Name.From("e"), Init.ClrExn, PureArg(sigma, Expr.App(noThrow ? Init.ClrExnIsExternal : Init.ClrExnAllowed, Expr.BVar(0))));
         var exceptions = Expr.App(Init.ProdMk,
             Expr.Forall(Name.From("e"), Init.ClrExn, Expr.App(Init.Assertion, arg)),
             Expr.App(Init.ExceptConds, arg),
@@ -260,6 +262,9 @@ internal sealed partial class BodyTranslator
         var stmts = unit.Body is BlockStmt block ? block.Stmts : VirList<VirStmt>.Empty;
         var requires = stmts.OfType<RequiresStmt>().ToList();
         var ensures = stmts.OfType<EnsuresStmt>().ToList();
+        // Spec.NoThrow (#182) narrows the exception postcondition of a method that can raise; a pure one raises nothing, so
+        // it already holds and the obligation is the one without it.
+        bool noThrow = raising && stmts.Any(s => s is NoThrowStmt);
         if (!raising && requires.Count == 0 && ensures.Count == 0)
         {
             return null;
@@ -270,7 +275,7 @@ internal sealed partial class BodyTranslator
         var binders = Binders(unit);
         var returns = ReturnType(unit);
         // One contract hypothesis per operation, at every argument and every world (M6 U19, KTD9, design D9).
-        var hypotheses = operations.Select(o => _lctx.MkLocalDecl(_ngen, ContractHypothesisName(o), Hypothesis(o, sigma))).ToList();
+        var hypotheses = operations.Select(o => _lctx.MkLocalDecl(_ngen, ContractHypothesisName(o), Hypothesis(o, sigma, noThrow))).ToList();
         var spec = _spec = new SpecState(unit, sigma, binders);
         var vacuity = new List<SpecObligation>();
 
@@ -307,7 +312,7 @@ internal sealed partial class BodyTranslator
         List<Expr> ops = [.. operations.Select(o => o.Op)];
         var program = raising ? Expr.App(Expr.Const(function), [sigma, .. ops, .. binders]) : Monadic.Pure(sigma, returns, call);
         var triple = Triples.Triple(sigma, returns, program, Triples.Pure(sigma, requiresProp),
-            Triples.Post(sigma, returns, _lctx.MkLambda([r], Triples.Pure(sigma, ensuresProp))));
+            Triples.Post(sigma, returns, _lctx.MkLambda([r], Triples.Pure(sigma, ensuresProp)), noThrow));
         List<Expr> all = [sigma, .. ops, .. binders, .. hypotheses];
         var statement = Closed(_lctx.MkPi(all, triple));
         var theorem = new TheoremShell(LeanNames.Contract(unit.Key), new Condition(statement, null), null, null);

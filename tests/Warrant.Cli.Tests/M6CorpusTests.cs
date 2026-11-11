@@ -84,6 +84,8 @@ public sealed class M6CorpusTests
         Assert.Matches($@"(?m)^{contracts}\(35,\d+\): error WRT0001: The contract of 'Contracts\.Twice\(int\)' could not be proved: postcondition of the method: ", output);
         Assert.Matches($@"(?m)^{contracts}\(52,\d+\): error WRT0001: The contract of 'Contracts\.Asserted\(int, int\)' could not be proved: Spec\.Assert: ", output);
         Assert.Matches($@"(?m)^{contracts}\(60,\d+\): error WRT0001: The contract of 'Contracts\.Impossible\(int\)' could not be proved: The contract is unsatisfiable: ", output);
+        // #182: under Spec.NoThrow a reachable explicit throw fails the build at the throw.
+        Assert.Matches($@"(?m)^{contracts}\(72,\d+\): error WRT0001: The contract of 'Contracts\.QuotientOfAny\(int, int\)' could not be proved: an explicit throw is reachable under the Requires \(Spec\.NoThrow\): ", output);
         // A [ProofFor] script that fails is reported at the step that failed, as a theorem's script is.
         Assert.Matches($@"(?m)^{contracts}\(47,\d+\): error WRT0001: The contract of 'Contracts\.Kept\(int\)' could not be proved: omega could not prove the goal:", output);
         var dependencies = Regex.Escape(Path.Combine(dir, "Dependencies.cs"));

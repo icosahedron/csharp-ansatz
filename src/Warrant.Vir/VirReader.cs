@@ -157,10 +157,20 @@ public static class VirReader
             "throw" => new ThrowStmt(Str(v, "exception")),
             "eval" => new EvalStmt(Expr(v)),
             "requires" => new RequiresStmt(Expr(v)),
+            "nothrow" => NoThrow(v),
             "ensures" => Ensures(v),
             "assert" => new AssertStmt(Expr(v.GetProperty("c")), List(v.GetProperty("script"), Tactic)),
             _ => throw new FormatException($"Unknown VIR statement '{name}'."),
         };
+    }
+
+    private static NoThrowStmt NoThrow(JsonElement v)
+    {
+        if (v.ValueKind != JsonValueKind.Object || v.EnumerateObject().Any())
+        {
+            throw new FormatException("A nothrow is an empty object.");
+        }
+        return new NoThrowStmt();
     }
 
     private static EnsuresStmt Ensures(JsonElement v)

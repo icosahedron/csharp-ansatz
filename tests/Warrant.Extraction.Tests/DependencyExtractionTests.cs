@@ -592,6 +592,24 @@ public class DependencyExtractionTests
     }
 
     [Fact]
+    public void NoThrowInAContractMemberIsRejectedAsOutOfScope()
+    {
+        // #182: Spec.NoThrow states that a method's own explicit throws are unreachable; a contract member has none.
+        var result = Contract("""
+            [ContractFor(typeof(IStore))]
+            internal abstract class StoreContract : IStore
+            {
+                public int Get(int id) { Spec.Requires(id > 0); Spec.NoThrow(); return default!; }
+                public void Save(int value) { }
+            }
+            """);
+
+        var d = Assert.Single(result.DiagnosticsFor("T:StoreContract"));
+        Assert.Equal("WRT0002 | Spec.NoThrow in a contract member", d.Id + " | " + d.Construct);
+        Assert.Contains("Spec.NoThrow is for a verified method's own body", d.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AVoidMemberWithOnlySpecCallsAndAnAbstractMemberAreAccepted()
     {
         var result = Contract("""

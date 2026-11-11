@@ -42,6 +42,9 @@ internal sealed partial class BodyTranslator
             EvalStmt e when IsPure(e.Value) => rest.Invoke(env),
             // Claims, never run: the contract obligation states them (M6 KTD12, Contracts.cs).
             RequiresStmt or EnsuresStmt when Contracted => rest.Invoke(env),
+            // A claim about the exception postcondition, which the obligation states when the method can raise; a pure
+            // method raises nothing, so it holds already (#182).
+            NoThrowStmt => rest.Invoke(env),
             RequiresStmt or EnsuresStmt => throw new TranslationException(null, "a contract would be dropped unread: the unit's obligation is not being stated."),
             var other => throw new TranslationException(null, $"unsupported statement {other.GetType().Name}."),
         };

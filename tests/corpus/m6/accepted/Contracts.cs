@@ -48,4 +48,25 @@ public static class Contracts
 
     [ProofFor(nameof(Same))]
     static Proof SameProof() => Prove.Contract().By(Tactic.VcGen(), Tactic.Omega());
+
+    // Spec.NoThrow (#182): the Requires rules the throw out, so the proof shows it unreachable and the report lists no
+    // may-throw for it. Its twin without b != 0 is refuted/Contracts.cs's QuotientOfAny.
+    [Verified]
+    public static int Quotient(int a, int b)
+    {
+        Spec.Requires(b != 0 && b != -1);
+        Spec.NoThrow();
+        if (b == 0)
+        {
+            throw new System.ArgumentException("b");
+        }
+        return a / b;
+    }
+
+    // A caller without Spec.NoThrow uses Quotient's contract by consequence.
+    [Verified]
+    public static int Half(int a)
+    {
+        return Quotient(a, 2);
+    }
 }

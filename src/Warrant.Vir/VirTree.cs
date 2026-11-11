@@ -52,7 +52,7 @@ public static class VirTree
         switch (node)
         {
             case LitExpr or ParamExpr or LocalExpr or SelfExpr or MemberExpr or DiscardPattern
-                or DecimalLitExpr or NullExpr or ThrowExpr or ThrowStmt:
+                or DecimalLitExpr or NullExpr or ThrowExpr or ThrowStmt or NoThrowStmt:
                 break;
             case IsNullExpr e:
                 yield return e.Operand;

@@ -191,6 +191,49 @@ public sealed class DependencyObligationTests(SemanticsBundleFixture bundle) : I
             Definition(translation, "M:S.Size(System.Int32)").Value);
     }
 
+    [Fact]
+    public void UnderNoThrowADependencysHypothesisAllowsOnlyItsExternalExceptions()
+    {
+        // #182: a NoThrow method's contract allows only ClrExn.external, which is what a dependency's exception is (KTD12),
+        // so its hypotheses about its dependencies say so too; without NoThrow they allow every explicit throw as well.
+        var (translation, env) = Translate("""
+            public interface IStore { int Count(int id); }
+
+            [ContractFor(typeof(IStore))]
+            internal abstract class StoreContract : IStore
+            {
+                public int Count(int id) { Spec.Requires(id > 0); return default!; }
+            }
+
+            public sealed class S(IStore store)
+            {
+                [Verified]
+                public int Size(int id)
+                {
+                    Spec.Requires(id > 0);
+                    Spec.NoThrow();
+                    return store.Count(id);
+                }
+
+                [Verified]
+                public int Plain(int id)
+                {
+                    Spec.Requires(id > 0);
+                    return store.Count(id);
+                }
+            }
+            """);
+        var size = translation.Find("M:S.Size(System.Int32)")!.Contract!;
+        var plain = translation.Find("M:S.Plain(System.Int32)")!.Contract!;
+        AssertProposition(env, size.Theorem.Type);
+        static Expr Exceptions(Expr triple) => Assert.IsType<LamExpr>(triple.GetAppArgs()[6].GetAppArgs()[3].GetAppArgs()[2]).Body.GetAppArgs()[1];
+        var hypothesis = Assert.IsType<ForallExpr>(Assert.IsType<ForallExpr>(Assert.IsType<ForallExpr>(Assert.IsType<ForallExpr>(size.Theorem.Type).Body).Body).Body);
+        Assert.Equal(Expr.App(C("Warrant.ClrExn.External"), Expr.BVar(0)), Exceptions(Assert.IsType<ForallExpr>(hypothesis.BinderType).Body));
+        Assert.Equal(Expr.App(C("Warrant.ClrExn.External"), Expr.BVar(0)), Exceptions(hypothesis.Body));
+        var plainHypothesis = Assert.IsType<ForallExpr>(Assert.IsType<ForallExpr>(Assert.IsType<ForallExpr>(Assert.IsType<ForallExpr>(plain.Theorem.Type).Body).Body).Body);
+        Assert.Equal(Expr.App(C("Warrant.ClrExn.Allowed"), Expr.BVar(0)), Exceptions(Assert.IsType<ForallExpr>(plainHypothesis.BinderType).Body));
+    }
+
     // ---- External calls thread the world (KTD4) ----
 
     /// <summary>
@@ -401,11 +444,15 @@ public sealed class DependencyObligationTests(SemanticsBundleFixture bundle) : I
         var result = Extraction.Extractor.Extract(CorpusSet.M6.Compile(compilation));
         var translation = Translator.Translate(result.Units.Select(u => u.Unit), bundle.Env);
         var env = TranslationCorpus.Admit(bundle, translation);
+        var noThrow = result.Units.Where(u => u.Unit.Body is BlockStmt b && b.Stmts.Any(s => s is NoThrowStmt)).Select(u => u.Unit.Key).ToHashSet();
         foreach (var unit in translation.Units)
         {
             if (unit.Contract is { } contract)
             {
                 AssertProposition(env, contract.Theorem.Type);
+                // #182: only a raising method with Spec.NoThrow states ClrExn.External; every other obligation is as before.
+                bool external = ExprOps.Find(contract.Theorem.Type, (x, _) => x is ConstExpr { Name: var n } && n == N("Warrant.ClrExn.External")) is not null;
+                Assert.True(external == (noThrow.Contains(unit.Key) && contract.Raising), unit.Key);
             }
             foreach (var obligation in unit.MemberContract is { } member ? member.Vacuity.Concat(member.WellDefinedness) : [])
             {

@@ -6,3 +6,4 @@ import Warrant.Effect
 import Warrant.Checked
 import Warrant.Nullable
 import Warrant.Math
+import Warrant.Decimal

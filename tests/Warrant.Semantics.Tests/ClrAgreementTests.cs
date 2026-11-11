@@ -574,6 +574,211 @@ public sealed class ClrAgreementTests(SemanticsBundleFixture bundle) : IClassFix
         });
     }
 
+    // ------------------------------------------------------------------ decimal (M6 U4, KTD7)
+
+    // Every expected value below is the CLR's own decimal arithmetic on the same operands (#117), compared with the model
+    // by representation: sign, mantissa and scale, so 1.0m and 1.00m, and 0m and negative zero, are different results.
+
+    private static readonly Expr DecimalT = Expr.Const(Name.Parse("Warrant.Decimal"));
+
+    private static Expr Dec(decimal value) => Literals.Decimal(DecimalLitExpr.Of(value));
+
+    private static Expr DecimalOp(string op, params Expr[] args) => Expr.App(Expr.Const(Name.Parse($"Warrant.Decimal.{op}")), args);
+
+    /// <summary>A decimal for a failure message: its value, scale and sign bit.</summary>
+    private static string Show(decimal d) => $"{d}m (scale {d.Scale}{(decimal.IsNegative(d) ? ", negative" : "")})";
+
+    private bool AgreesDecimal(Expr term, decimal clr) => Agrees(term, Dec(clr), DecimalT);
+
+    /// <summary><c>a + b</c> or <c>a - b</c> on the model, run from any world, against the CLR's result or exception.</summary>
+    private bool SumAgrees(string op, decimal a, decimal b) =>
+        RaisingAgrees(DecimalT, s => DecimalOp(op, s, Dec(a), Dec(b)), () => Dec(op == "add" ? Runtime(a) + b : Runtime(a) - b));
+
+    /// <summary>A projection of a literal, reduced by the kernel.</summary>
+    private Expr Field(string field, Expr literal)
+    {
+        var tc = new TypeChecker(env);
+        return tc.Whnf(DecimalOp(field, literal));
+    }
+
+    [Fact]
+    public void DecimalLiteralsRoundTripAtEveryScale() => KernelThread.Run(() =>
+    {
+        var tc = new TypeChecker(env);
+        var limit = DecimalLitExpr.MantissaLimit;
+        var random = new Random(7);
+        for (int scale = 0; scale <= DecimalLitExpr.MaxScale; scale++)
+        {
+            var random96 = new BigInteger(random.NextInt64()) * new BigInteger(random.NextInt64()) % limit;
+            foreach (var mantissa in new[] { BigInteger.Zero, BigInteger.One, new BigInteger(12345), BigInteger.Abs(random96), limit - 1 })
+            {
+                foreach (var negative in new[] { false, true })
+                {
+                    var literal = new DecimalLitExpr(negative, mantissa, scale);
+                    var value = literal.ToDecimal();
+                    Assert.Equal(literal, DecimalLitExpr.Of(value));
+                    var term = Literals.Decimal(literal);
+                    Assert.True(tc.IsDefEq(tc.Check(term), DecimalT), $"{literal} is a Warrant.Decimal");
+                    Assert.Equal(Literals.Bool(negative), Field("negative", term));
+                    Assert.Equal(Expr.NatLit(mantissa), Field("mantissa", term));
+                    Assert.Equal(Expr.NatLit(scale), Field("scale", term));
+                }
+            }
+        }
+    });
+
+    [Fact]
+    public void ADecimalLiteralOutOfRangeIsRejected() => KernelThread.Run(() =>
+    {
+        Assert.Throws<TranslationException>(() => Literals.Decimal(new DecimalLitExpr(false, DecimalLitExpr.MantissaLimit, 0)));
+        Assert.Throws<TranslationException>(() => Literals.Decimal(new DecimalLitExpr(false, BigInteger.One, 29)));
+
+        // The kernel checks the bounds itself: the same term with an out-of-range mantissa or scale does not type-check.
+        var refl = Expr.App(Expr.Const(Name.Parse("Eq.refl"), Level.One), Literals.Type(VirPrimitive.Bool), Literals.Bool(true));
+        foreach (var (mantissa, scale) in new[] { (DecimalLitExpr.MantissaLimit, 0), (BigInteger.One, 29) })
+        {
+            var term = DecimalOp("lit", Literals.Bool(false), Expr.NatLit(mantissa), Expr.NatLit(scale), refl, refl);
+            Assert.ThrowsAny<KernelException>(() => new TypeChecker(env).Check(term));
+        }
+    });
+
+    [Fact]
+    public void DecimalAdditionAndSubtractionAgree() => KernelThread.Run(() =>
+    {
+        foreach (var op in new[] { "add", "sub" })
+        {
+            Assert.All(Generators.DecimalBoundaryPairs(), p => Assert.True(SumAgrees(op, p.Item1, p.Item2), $"{Show(p.Item1)} {op} {Show(p.Item2)}"));
+            Pbt.Check(Prop.ForAll(Generators.DecimalPairs, p => SumAgrees(op, p.Item1, p.Item2)), Cases);
+        }
+    });
+
+    /// <summary>The named cases of KTD7 and U4, each pinned on the CLR first so the expected outcome is not assumed.</summary>
+    [Fact]
+    public void NamedDecimalCasesAgree()
+    {
+        decimal max = Runtime(decimal.MaxValue);
+        Assert.Throws<OverflowException>(() => max + 1m);
+        Assert.Throws<OverflowException>(() => max + 0.5m);
+        Assert.Equal((decimal.MaxValue, 0), Bits(max + 0.4m));
+        Assert.Equal((decimal.MaxValue, 0), Bits(max - 0.4m));
+        Assert.Equal((79228162514264337593543950334m, 0), Bits(max - 0.5m));
+        Assert.Equal((9m, 27), Bits(Runtime(9m) + 0.0000000000000000000000000001m));
+        Assert.Equal((79228162514264337593543950331m, 0), Bits(Runtime(79228162514264337593543950331m) + 0.46m));
+        Assert.Equal((79228162514264337593543950330m, 0), Bits(Runtime(79228162514264337593543950330m) + 0.5m));
+        Assert.Equal((79228162514264337593543950332m, 0), Bits(Runtime(79228162514264337593543950331m) + 0.5m));
+        Assert.Equal((0.3m, 1), Bits(Runtime(0.1m) + 0.2m));
+        Assert.True(Runtime(0.1m) + 0.2m == 0.3m);
+        KernelThread.Run(() =>
+        {
+            Assert.True(SumAgrees("add", decimal.MaxValue, 1m), "decimal.MaxValue + 1m raises overflow");
+            Assert.True(SumAgrees("add", 9m, 0.0000000000000000000000000001m), "9m + 1e-28m rounds to 9 at scale 27");
+            Assert.True(SumAgrees("sub", decimal.MaxValue, 0.5m), "decimal.MaxValue - 0.5m rounds to ...334");
+            Assert.True(SumAgrees("add", decimal.MaxValue, 0.4m), "decimal.MaxValue + 0.4m is decimal.MaxValue");
+            Assert.True(SumAgrees("add", decimal.MaxValue, 0.5m), "decimal.MaxValue + 0.5m raises overflow");
+            Assert.True(SumAgrees("sub", decimal.MaxValue, 0.4m), "decimal.MaxValue - 0.4m is decimal.MaxValue, so a - b < a needs exactness");
+            Assert.True(SumAgrees("add", 79228162514264337593543950331m, 0.46m), "...331m + 0.46m rounds once, to ...331");
+            Assert.True(SumAgrees("add", 79228162514264337593543950330m, 0.5m), "...330m + 0.5m ties to even, ...330");
+            Assert.True(SumAgrees("add", 79228162514264337593543950331m, 0.5m), "...331m + 0.5m ties to even, ...332");
+            Assert.True(SumAgrees("add", 0.1m, 0.2m), "0.1m + 0.2m is 0.3m at scale 1");
+            // The model's sum is the CLR's 0.3m (above), which equals 0.3m and 0.30m by value.
+            Assert.True(Decide("eq", Dec(Runtime(0.1m) + 0.2m), Dec(0.3m), true), "0.1m + 0.2m == 0.3m");
+            Assert.True(Decide("eq", Dec(Runtime(0.1m) + 0.2m), Dec(0.30m), true), "0.1m + 0.2m == 0.30m");
+        });
+    }
+
+    private static (decimal Value, int Scale) Bits(decimal d) => (d, d.Scale);
+
+    [Fact]
+    public void DecimalNegationAgrees()
+    {
+        bool Ok(decimal x) => AgreesDecimal(DecimalOp("neg", Dec(x)), -Runtime(x));
+        Assert.True(decimal.IsNegative(-Runtime(0m)), "-0m is negative zero on the CLR");
+        KernelThread.Run(() =>
+        {
+            Assert.All(Generators.DecimalBoundaries, x => Assert.True(Ok(x), $"-{Show(x)}"));
+            Pbt.Check(Prop.ForAll(Generators.Decimals, Ok), Cases);
+        });
+    }
+
+    /// <summary><c>decide</c> of a decimal comparison: <c>eq</c>, <c>&lt;</c> or <c>&lt;=</c>, against the CLR's answer.</summary>
+    private bool Decide(string relation, Expr a, Expr b, bool clr)
+    {
+        var (prop, inst) = relation switch
+        {
+            "eq" => (DecimalOp("eq", a, b), DecimalOp("decEq", a, b)),
+            "lt" => (Expr.App(Expr.Const(Name.Parse("LT.lt"), Level.Zero), DecimalT, Expr.Const(Name.Parse("Warrant.Decimal.instLT")), a, b), DecimalOp("decLt", a, b)),
+            "le" => (Expr.App(Expr.Const(Name.Parse("LE.le"), Level.Zero), DecimalT, Expr.Const(Name.Parse("Warrant.Decimal.instLE")), a, b), DecimalOp("decLe", a, b)),
+            _ => throw new ArgumentOutOfRangeException(nameof(relation)),
+        };
+        return AgreesBool(Expr.App(Expr.Const(Name.Parse("Decidable.decide")), prop, inst), clr);
+    }
+
+    [Fact]
+    public void DecimalComparisonsAgree()
+    {
+        bool Ok((decimal A, decimal B) p)
+        {
+            Expr a = Dec(p.A), b = Dec(p.B);
+            return Decide("eq", a, b, p.A == p.B) && Decide("eq", a, b, !(p.A != p.B))
+                && Decide("lt", a, b, p.A < p.B) && Decide("le", a, b, p.A <= p.B)
+                && Decide("lt", b, a, p.A > p.B) && Decide("le", b, a, p.A >= p.B);
+        }
+        KernelThread.Run(() =>
+        {
+            Assert.All(Generators.DecimalBoundaryPairs(), p => Assert.True(Ok(p), $"{Show(p.Item1)} vs {Show(p.Item2)}"));
+            Pbt.Check(Prop.ForAll(Generators.DecimalPairs, Ok), Cases);
+        });
+    }
+
+    private sealed record Priced(decimal Amount);
+
+    [Fact]
+    public void EqualValuesAtDifferentScalesAreEqual()
+    {
+        Assert.True(Runtime(1.0m) == 1.00m);
+        Assert.Equal(new Priced(Runtime(1.0m)), new Priced(1.00m));
+        Assert.True(Runtime(0m) == -Runtime(0m));
+        KernelThread.Run(() =>
+        {
+            Assert.True(Decide("eq", Dec(1.0m), Dec(1.00m), true), "1.0m == 1.00m");
+            Assert.True(Decide("eq", Dec(0m), Dec(-Runtime(0m)), true), "0m == -0m");
+            Assert.True(Decide("lt", Dec(1.0m), Dec(1.00m), false), "!(1.0m < 1.00m)");
+            var tc = new TypeChecker(env);
+            Assert.False(tc.IsDefEq(Dec(1.0m), Dec(1.00m)), "1.0m and 1.00m are different representations");
+        });
+    }
+
+    [Fact]
+    public void MathOnDecimalAgrees()
+    {
+        bool Ok((decimal A, decimal B) p) =>
+            AgreesDecimal(DecimalOp("min", Dec(p.A), Dec(p.B)), Math.Min(Runtime(p.A), p.B)) &&
+            AgreesDecimal(DecimalOp("max", Dec(p.A), Dec(p.B)), Math.Max(Runtime(p.A), p.B)) &&
+            AgreesDecimal(DecimalOp("abs", Dec(p.A)), Math.Abs(Runtime(p.A)));
+        Assert.Equal((1.00m, 2), Bits(Math.Min(Runtime(1.0m), 1.00m)));
+        Assert.Equal((1.0m, 1), Bits(Math.Max(Runtime(1.0m), 1.00m)));
+        KernelThread.Run(() =>
+        {
+            Assert.True(AgreesDecimal(DecimalOp("min", Dec(1.0m), Dec(1.00m)), 1.00m), "Math.Min(1.0m, 1.00m) is 1.00m");
+            Assert.True(AgreesDecimal(DecimalOp("max", Dec(1.0m), Dec(1.00m)), 1.0m), "Math.Max(1.0m, 1.00m) is 1.0m");
+            Assert.False(AgreesDecimal(DecimalOp("min", Dec(1.0m), Dec(1.00m)), 1.0m), "Math.Min(1.0m, 1.00m) is not 1.0m");
+            Assert.All(Generators.DecimalBoundaryPairs(), p => Assert.True(Ok(p), $"Math.Min/Max/Abs({Show(p.Item1)}, {Show(p.Item2)})"));
+            Pbt.Check(Prop.ForAll(Generators.DecimalPairs, Ok), Cases);
+        });
+    }
+
+    [Fact]
+    public void TheDecimalOracleComparesRepresentations() => KernelThread.Run(() =>
+    {
+        var tc = new TypeChecker(env);
+        var sum = RunFromAnyWorld(DecimalT, s => DecimalOp("add", s, Dec(0.1m), Dec(0.2m)));
+        Assert.True(tc.IsDefEq(sum, Outcome(DecimalT, () => Dec(0.3m))), "0.1m + 0.2m is 0.3m");
+        Assert.False(tc.IsDefEq(sum, Outcome(DecimalT, () => Dec(0.30m))), "0.1m + 0.2m is not 0.30m");
+        var zero = RunFromAnyWorld(DecimalT, s => DecimalOp("add", s, Dec(-1.0m), Dec(1.00m)));
+        Assert.True(tc.IsDefEq(zero, Outcome(DecimalT, () => Dec(Runtime(-1.0m) + 1.00m))), "-1.0m + 1.00m");
+        Assert.False(tc.IsDefEq(zero, Outcome(DecimalT, () => Dec(0.00m))), "-1.0m + 1.00m is negative zero, not 0.00m");
+    });
+
     // ------------------------------------------------------------------ CLR-side pins (no model half in M4)
 
     /// <summary>Hides a value from constant folding by the C# compiler and the JIT.</summary>

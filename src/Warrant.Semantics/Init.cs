@@ -130,6 +130,25 @@ internal static class Init
     public static readonly Expr Int64Max = C("Warrant.Int64.max");
     public static readonly Expr Int64Abs = C("Warrant.Int64.abs");
 
+    // decimal (M6 U4; plan M6 KTD7, lean/Warrant/Decimal.lean and Math.lean): the type, the literal constructor, equality
+    // and order by value with their decision procedures, unary minus, the raising + and -, and Math.Min, Max and Abs.
+    // None is universe polymorphic.
+    public static readonly Expr EqRefl = C("Eq.refl", Level.One);
+    public static readonly Expr Decimal = C("Warrant.Decimal");
+    public static readonly Expr DecimalLit = C("Warrant.Decimal.lit");
+    public static readonly Expr DecimalEq = C("Warrant.Decimal.eq");
+    public static readonly Expr DecimalDecEq = C("Warrant.Decimal.decEq");
+    public static readonly Expr DecimalLt = C("Warrant.Decimal.instLT");
+    public static readonly Expr DecimalLe = C("Warrant.Decimal.instLE");
+    public static readonly Expr DecimalDecLt = C("Warrant.Decimal.decLt");
+    public static readonly Expr DecimalDecLe = C("Warrant.Decimal.decLe");
+    public static readonly Expr DecimalNeg = C("Warrant.Decimal.neg");
+    public static readonly Expr DecimalAdd = C("Warrant.Decimal.add");
+    public static readonly Expr DecimalSub = C("Warrant.Decimal.sub");
+    public static readonly Expr DecimalMin = C("Warrant.Decimal.min");
+    public static readonly Expr DecimalMax = C("Warrant.Decimal.max");
+    public static readonly Expr DecimalAbs = C("Warrant.Decimal.abs");
+
     /// <summary>The binder name of a constant function's or an implication's unused argument.</summary>
     public static readonly Name Unused = Name.From("x");
 

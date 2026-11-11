@@ -70,6 +70,26 @@ public static class Literals
         }
     }
 
+    /// <summary>
+    /// A <c>decimal</c> literal (M6 KTD7), exactly as VIR stores it: <c>Warrant.Decimal.lit negative mantissa scale
+    /// (Eq.refl true) (Eq.refl true)</c>, whose two proofs the kernel checks by evaluating that the mantissa is below
+    /// 2^96 and the scale at most 28.
+    /// </summary>
+    /// <param name="literal">The literal.</param>
+    /// <returns>The term.</returns>
+    /// <exception cref="TranslationException">The mantissa or scale is out of range.</exception>
+    public static Expr Decimal(DecimalLitExpr literal)
+    {
+        ArgumentNullException.ThrowIfNull(literal);
+        if (!literal.IsValid)
+        {
+            throw new TranslationException(null,
+                $"the decimal literal with mantissa {literal.Mantissa} and scale {literal.Scale} is out of range.");
+        }
+        var refl = Expr.App(Init.EqRefl, Init.Bool, Init.True);
+        return Expr.App(Init.DecimalLit, Bool(literal.Negative), Expr.NatLit(literal.Mantissa), Expr.NatLit(literal.Scale), refl, refl);
+    }
+
     private static Expr Integer(VirPrimitive type, BigInteger value)
     {
         var (cic, ofNat, neg) = type == VirPrimitive.Int32

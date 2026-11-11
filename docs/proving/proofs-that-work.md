@@ -195,6 +195,37 @@ theorem, which cannot call it. These examples are
 not in the corpus: `PureDivisionAndMathMaxAreProvable` in `tests/Warrant.Engine.Tests/TheoremTests.cs` proves all
 three (`dotnet test tests/Warrant.Engine.Tests --filter PureDivisionAndMathMaxAreProvable`).
 
+## `decimal` equality and order (M6)
+
+```csharp
+public sealed record Price(decimal Amount);
+
+[Verified] public static decimal Larger(decimal a, decimal b) => Math.Max(a, b);
+
+[Theorem] static Proof ScaleIsIgnored() => Prove.That(new Price(1.0m) == new Price(1.00m));
+
+[Theorem] static Proof LargerKeepsTheFirstOfEqualValues() => Prove.That(Larger(1.0m, 1.00m) == 1m && 0.1m < 0.11m);
+
+[Theorem]
+static Proof OrderIsTransitive(decimal a, decimal b, decimal c) =>
+    Prove.That(Spec.Implies(a < b && b <= c, a < c))
+         .By(Tactic.Simp(Lean.Const("Warrant.Decimal.lt_iff"), Lean.Const("Warrant.Decimal.le_iff")), Tactic.Omega());
+
+[Theorem]
+static Proof EqualityIsReflexive(decimal a) => Prove.That(a == a).By(Tactic.Apply(Lean.Const("Warrant.Decimal.eq_refl")));
+```
+
+A `decimal` keeps its scale, as the CLR's does, but `==`, `<` and `<=` compare values, so `1.0m == 1.00m`, and a
+record's `==` compares a `decimal` field the same way. Comparisons, unary `-` and `Math.Min`, `Max` and `Abs` cannot
+throw, so theorems may use them; the first two theorems are proved by computation. Over every `decimal`,
+`Warrant.Decimal.lt_iff` and `le_iff` turn the order into one on `units`, the value as an integer count of 10^-28, which
+`omega` reads. Two things do not work yet: `simp` does not compute `units` of a literal, so a claim over every `decimal`
+that mentions one (`a > 0m`) is not proved, and nothing splits the `if` that `Math.Max` unfolds to, so
+`Larger(a, b) >= a` is not proved either. `+` and `-` on `decimal` can throw, so a method that uses them is a program in
+the effect monad, for its contract obligation (from M6 U10 and U11). These examples are not in the corpus:
+`DecimalEqualityAndOrderAreProvable` in `tests/Warrant.Engine.Tests/TheoremTests.cs` proves all four
+(`dotnet test tests/Warrant.Engine.Tests --filter DecimalEqualityAndOrderAreProvable`).
+
 ## Facts about particular inputs (M4)
 
 Source: `tests/corpus/m4/accepted/`. These 33 theorems have no parameters, and are proved by computation in the

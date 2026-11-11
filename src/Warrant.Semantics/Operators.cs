@@ -24,7 +24,7 @@ public sealed record Condition(Expr Prop, Expr? Instance)
 /// </summary>
 public static class Literals
 {
-    /// <summary>The CIC type of a primitive: <c>Int32</c>, <c>Int64</c> or <c>Bool</c>.</summary>
+    /// <summary>The CIC type of a primitive: <c>Int32</c>, <c>Int64</c>, <c>Bool</c> or <c>Warrant.Decimal</c> (M6 KTD7).</summary>
     /// <param name="type">The primitive.</param>
     /// <returns>The type.</returns>
     public static Expr Type(VirPrimitive type) => type switch
@@ -32,7 +32,7 @@ public static class Literals
         VirPrimitive.Int32 => Init.Int32,
         VirPrimitive.Int64 => Init.Int64,
         VirPrimitive.Bool => Init.Bool,
-        VirPrimitive.Decimal => throw new TranslationException(null, "decimal is not translated until M6 U21."),
+        VirPrimitive.Decimal => Init.Decimal,
         VirPrimitive.Unit => throw new TranslationException(null, "a method that returns no value is not translated until M6 U19."),
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
@@ -135,12 +135,16 @@ public static class Operators
         return Expr.App(head, t, t, t, Expr.App(inst, t, impl), a, b);
     }
 
-    /// <summary><c>-a</c>: <c>@Neg.neg T T.instNeg a</c>.</summary>
-    /// <param name="type"><c>Int32</c> or <c>Int64</c>.</param>
+    /// <summary>
+    /// <c>-a</c>: <c>@Neg.neg T T.instNeg a</c>; on <c>decimal</c>, <c>Warrant.Decimal.neg a</c>, which flips the sign and
+    /// cannot raise (M6 KTD7).
+    /// </summary>
+    /// <param name="type"><c>Int32</c>, <c>Int64</c> or <c>Decimal</c>.</param>
     /// <param name="a">The operand.</param>
     /// <returns>The term.</returns>
-    public static Expr Neg(VirPrimitive type, Expr a) =>
-        Expr.App(Init.Neg, Integer(type), type == VirPrimitive.Int32 ? Init.Int32Neg : Init.Int64Neg, a);
+    public static Expr Neg(VirPrimitive type, Expr a) => type == VirPrimitive.Decimal
+        ? Expr.App(Init.DecimalNeg, a)
+        : Expr.App(Init.Neg, Integer(type), type == VirPrimitive.Int32 ? Init.Int32Neg : Init.Int64Neg, a);
 
     /// <summary>
     /// An integer conversion: <c>Int32.toInt64 a</c> for <c>(long)a</c>, <c>Int64.toInt32 a</c> for <c>(int)a</c> on a
@@ -222,26 +226,36 @@ public static class Operators
 /// </summary>
 public static class Conditions
 {
-    /// <summary><c>a == b</c>: <c>@Eq T a b</c> with <c>instDecidableEqT a b</c>.</summary>
-    /// <param name="type"><c>Int32</c>, <c>Int64</c> or <c>Bool</c>.</param>
+    /// <summary>
+    /// <c>a == b</c>: <c>@Eq T a b</c> with <c>instDecidableEqT a b</c>; on <c>decimal</c>, equal values (M6 KTD7, so
+    /// <c>1.0m == 1.00m</c>): <c>Warrant.Decimal.eq a b</c> with <c>Warrant.Decimal.decEq a b</c>.
+    /// </summary>
+    /// <param name="type"><c>Int32</c>, <c>Int64</c>, <c>Bool</c> or <c>Decimal</c>.</param>
     /// <param name="a">The left operand.</param>
     /// <param name="b">The right operand.</param>
     /// <returns>The condition.</returns>
     public static Condition Eq(VirPrimitive type, Expr a, Expr b)
     {
+        if (type == VirPrimitive.Decimal)
+        {
+            return new Condition(Expr.App(Init.DecimalEq, a, b), Expr.App(Init.DecimalDecEq, a, b));
+        }
         var inst = type switch
         {
             VirPrimitive.Int32 => Init.DecidableEqInt32,
             VirPrimitive.Int64 => Init.DecidableEqInt64,
             VirPrimitive.Bool => Init.DecidableEqBool,
-            VirPrimitive.Decimal => throw new TranslationException(null, "== on decimal is not translated until M6 U21."),
             _ => throw new TranslationException(null, $"== is not defined on {type}."),
         };
         return new Condition(Expr.App(Init.Eq, Literals.Type(type), a, b), Expr.App(inst, a, b));
     }
 
-    /// <summary><c>a &lt; b</c>: <c>@LT.lt T instLTT a b</c> with <c>T.decLt a b</c>. For <c>a &gt; b</c>, swap the operands.</summary>
-    /// <param name="type"><c>Int32</c> or <c>Int64</c>.</param>
+    /// <summary>
+    /// <c>a &lt; b</c>: <c>@LT.lt T instLTT a b</c> with <c>T.decLt a b</c>, and on <c>decimal</c> <c>@LT.lt Warrant.Decimal
+    /// Warrant.Decimal.instLT a b</c> with <c>Warrant.Decimal.decLt a b</c>, which compare values. For <c>a &gt; b</c>, swap
+    /// the operands.
+    /// </summary>
+    /// <param name="type"><c>Int32</c>, <c>Int64</c> or <c>Decimal</c>.</param>
     /// <param name="a">The left operand.</param>
     /// <param name="b">The right operand.</param>
     /// <returns>The condition.</returns>
@@ -249,11 +263,15 @@ public static class Conditions
     {
         VirPrimitive.Int32 => new(Expr.App(Init.Lt, Init.Int32, Init.LtInt32, a, b), Expr.App(Init.Int32DecLt, a, b)),
         VirPrimitive.Int64 => new(Expr.App(Init.Lt, Init.Int64, Init.LtInt64, a, b), Expr.App(Init.Int64DecLt, a, b)),
+        VirPrimitive.Decimal => new(Expr.App(Init.Lt, Init.Decimal, Init.DecimalLt, a, b), Expr.App(Init.DecimalDecLt, a, b)),
         _ => throw new TranslationException(null, $"< is not defined on {type}."),
     };
 
-    /// <summary><c>a &lt;= b</c>: <c>@LE.le T instLET a b</c> with <c>T.decLe a b</c>. For <c>a &gt;= b</c>, swap the operands.</summary>
-    /// <param name="type"><c>Int32</c> or <c>Int64</c>.</param>
+    /// <summary>
+    /// <c>a &lt;= b</c>: <c>@LE.le T instLET a b</c> with <c>T.decLe a b</c>, and on <c>decimal</c> with
+    /// <c>Warrant.Decimal.instLE</c> and <c>Warrant.Decimal.decLe</c>, as <see cref="Lt"/>. For <c>a &gt;= b</c>, swap the operands.
+    /// </summary>
+    /// <param name="type"><c>Int32</c>, <c>Int64</c> or <c>Decimal</c>.</param>
     /// <param name="a">The left operand.</param>
     /// <param name="b">The right operand.</param>
     /// <returns>The condition.</returns>
@@ -261,6 +279,7 @@ public static class Conditions
     {
         VirPrimitive.Int32 => new(Expr.App(Init.Le, Init.Int32, Init.LeInt32, a, b), Expr.App(Init.Int32DecLe, a, b)),
         VirPrimitive.Int64 => new(Expr.App(Init.Le, Init.Int64, Init.LeInt64, a, b), Expr.App(Init.Int64DecLe, a, b)),
+        VirPrimitive.Decimal => new(Expr.App(Init.Le, Init.Decimal, Init.DecimalLe, a, b), Expr.App(Init.DecimalDecLe, a, b)),
         _ => throw new TranslationException(null, $"<= is not defined on {type}."),
     };
 
@@ -268,7 +287,7 @@ public static class Conditions
     /// <c>a &gt; b</c> in a quantified statement, as Lean elaborates it: <c>@GT.gt T instLTT a b</c> with <c>T.decLt b a</c>
     /// (M5a KTD17). A closed statement and a function body keep M4's swapped <see cref="Lt"/>.
     /// </summary>
-    /// <param name="type"><c>Int32</c> or <c>Int64</c>.</param>
+    /// <param name="type"><c>Int32</c>, <c>Int64</c> or <c>Decimal</c>.</param>
     /// <param name="a">The left operand.</param>
     /// <param name="b">The right operand.</param>
     /// <returns>The condition.</returns>
@@ -276,11 +295,12 @@ public static class Conditions
     {
         VirPrimitive.Int32 => new(Expr.App(Init.Gt, Init.Int32, Init.LtInt32, a, b), Expr.App(Init.Int32DecLt, b, a)),
         VirPrimitive.Int64 => new(Expr.App(Init.Gt, Init.Int64, Init.LtInt64, a, b), Expr.App(Init.Int64DecLt, b, a)),
+        VirPrimitive.Decimal => new(Expr.App(Init.Gt, Init.Decimal, Init.DecimalLt, a, b), Expr.App(Init.DecimalDecLt, b, a)),
         _ => throw new TranslationException(null, $"> is not defined on {type}."),
     };
 
     /// <summary><c>a &gt;= b</c> in a quantified statement: <c>@GE.ge T instLET a b</c> with <c>T.decLe b a</c>, as <see cref="Gt"/>.</summary>
-    /// <param name="type"><c>Int32</c> or <c>Int64</c>.</param>
+    /// <param name="type"><c>Int32</c>, <c>Int64</c> or <c>Decimal</c>.</param>
     /// <param name="a">The left operand.</param>
     /// <param name="b">The right operand.</param>
     /// <returns>The condition.</returns>
@@ -288,6 +308,7 @@ public static class Conditions
     {
         VirPrimitive.Int32 => new(Expr.App(Init.Ge, Init.Int32, Init.LeInt32, a, b), Expr.App(Init.Int32DecLe, b, a)),
         VirPrimitive.Int64 => new(Expr.App(Init.Ge, Init.Int64, Init.LeInt64, a, b), Expr.App(Init.Int64DecLe, b, a)),
+        VirPrimitive.Decimal => new(Expr.App(Init.Ge, Init.Decimal, Init.DecimalLe, a, b), Expr.App(Init.DecimalDecLe, b, a)),
         _ => throw new TranslationException(null, $">= is not defined on {type}."),
     };
 

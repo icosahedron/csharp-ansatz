@@ -5,8 +5,8 @@ namespace Warrant.Semantics;
 
 /// <summary>
 /// The type units being translated, by key, and the mapping of VIR types to CIC (docs/m4/05, "Types"):
-/// <c>int</c>, <c>long</c> and <c>bool</c> are Init's types, a type unit is its own constant, and <c>T?</c> is
-/// <c>Option T</c> (M6 KTD5).
+/// <c>int</c>, <c>long</c> and <c>bool</c> are Init's types, <c>decimal</c> is <c>Warrant.Decimal</c> (M6 KTD7), a type unit
+/// is its own constant, and <c>T?</c> is <c>Option T</c> (M6 KTD5).
 /// </summary>
 internal sealed class TypeTable
 {

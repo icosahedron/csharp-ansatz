@@ -58,15 +58,24 @@ internal static class Monadic
 
     /// <summary>
     /// The model of a binary operation that raises (KTD6, U3): checked <c>+</c>, <c>-</c> and <c>*</c>, and <c>/</c> and
-    /// <c>%</c>, as <c>Warrant.Int32.addChecked σ a b</c> and likewise.
+    /// <c>%</c>, as <c>Warrant.Int32.addChecked σ a b</c> and likewise; and <c>+</c> and <c>-</c> on <c>decimal</c>, which
+    /// raise in any context (KTD7, KTD11), as <c>Warrant.Decimal.add σ a b</c> and <c>Warrant.Decimal.sub σ a b</c>.
     /// </summary>
     public static Expr Binary(BinaryOp op, VirPrimitive type, Expr sigma, Expr a, Expr b)
     {
+        if (type == VirPrimitive.Decimal)
+        {
+            return op switch
+            {
+                BinaryOp.Add => Expr.App(Init.DecimalAdd, sigma, a, b),
+                BinaryOp.Sub => Expr.App(Init.DecimalSub, sigma, a, b),
+                _ => throw new TranslationException(null, $"{op} is not defined on decimal."),
+            };
+        }
         bool is32 = type switch
         {
             VirPrimitive.Int32 => true,
             VirPrimitive.Int64 => false,
-            VirPrimitive.Decimal => throw new TranslationException(null, "decimal arithmetic is not translated until M6 U21."),
             _ => throw new TranslationException(null, $"{op} is not defined on {type}."),
         };
         var model = op switch

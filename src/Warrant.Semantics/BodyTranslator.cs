@@ -123,6 +123,8 @@ internal sealed partial class BodyTranslator
         {
             case LitExpr l:
                 return Literals.Of(_types.Underlying(l.Type), l.Value);
+            case DecimalLitExpr d:
+                return Literals.Decimal(d);
             case ParamExpr p:
                 return p.Index >= 0 && p.Index < _params.Count ? _params[p.Index] : throw new TranslationException(null, $"no parameter {p.Index}.");
             case LocalExpr l:
@@ -268,14 +270,20 @@ internal sealed partial class BodyTranslator
         return Expr.App(Init.NullableCoalesce, type, l, r);
     }
 
-    /// <summary><c>Math.Min</c> or <c>Math.Max</c> on <c>int</c> or <c>long</c>, which cannot raise (KTD23); <c>Math.Abs</c> raises.</summary>
+    /// <summary>
+    /// A modelled member that cannot raise (KTD23): <c>Math.Min</c> or <c>Math.Max</c> on <c>int</c>, <c>long</c> or
+    /// <c>decimal</c>, and <c>Math.Abs</c> on <c>decimal</c> (M6 KTD7). <c>Math.Abs</c> on <c>int</c> and <c>long</c> raises.
+    /// </summary>
     private static Expr Modelled(ModelledCallExpr m, IReadOnlyList<Expr> args) => m.Member switch
     {
         "M:System.Math.Min(System.Int32,System.Int32)" => Expr.App(Init.Int32Min, [.. args]),
         "M:System.Math.Max(System.Int32,System.Int32)" => Expr.App(Init.Int32Max, [.. args]),
         "M:System.Math.Min(System.Int64,System.Int64)" => Expr.App(Init.Int64Min, [.. args]),
         "M:System.Math.Max(System.Int64,System.Int64)" => Expr.App(Init.Int64Max, [.. args]),
-        _ => throw new TranslationException(null, $"the modelled member {m.Member} is not translated{(m.Type == VirType.Decimal ? " until M6 U21" : "")}."),
+        "M:System.Math.Min(System.Decimal,System.Decimal)" => Expr.App(Init.DecimalMin, [.. args]),
+        "M:System.Math.Max(System.Decimal,System.Decimal)" => Expr.App(Init.DecimalMax, [.. args]),
+        "M:System.Math.Abs(System.Decimal)" => Expr.App(Init.DecimalAbs, [.. args]),
+        _ => throw new TranslationException(null, $"the modelled member {m.Member} is not translated."),
     };
 
     // ---- Conditions ----
@@ -309,8 +317,9 @@ internal sealed partial class BodyTranslator
     }
 
     /// <summary>
-    /// A comparison as a condition. Integers and open enums (at the underlying type) use the order and equality rows; records
-    /// compare with <c>R.$eq r s = true</c>, closed types with <c>Nat.beq (T.$index r) (T.$index s) = true</c> (KTD10).
+    /// A comparison as a condition. Integers and open enums (at the underlying type) use the order and equality rows, and so
+    /// does <c>decimal</c>, whose rows compare values (M6 KTD7); records compare with <c>R.$eq r s = true</c>, closed types
+    /// with <c>Nat.beq (T.$index r) (T.$index s) = true</c> (KTD10).
     /// </summary>
     private Condition Compare(CompareExpr c, Env env) => Compare(c, Value(c.L, env), Value(c.R, env));
 
@@ -320,9 +329,13 @@ internal sealed partial class BodyTranslator
         Condition eq;
         switch (c.Kind)
         {
-            case CompareKind.Int or CompareKind.Enum:
+            case CompareKind.Int or CompareKind.Enum or CompareKind.Decimal:
                 {
                     var t = _types.Underlying(c.L.Type);
+                    if ((c.Kind == CompareKind.Decimal) != (t == VirPrimitive.Decimal) || c.R.Type != c.L.Type)
+                    {
+                        throw new TranslationException(null, $"a {c.Kind} comparison of {c.L.Type} and {c.R.Type}.");
+                    }
                     switch (c.Op)
                     {
                         case CompareOp.Lt: return Conditions.Lt(t, a, b);
@@ -345,8 +358,6 @@ internal sealed partial class BodyTranslator
                     eq = Conditions.IsTrue(Operators.NatBeq(Expr.App(index, a), Expr.App(index, b)));
                     break;
                 }
-            case CompareKind.Decimal:
-                throw new TranslationException(null, "a decimal comparison is not translated until M6 U21.");
             default:
                 throw new TranslationException(null, $"unsupported comparison kind {c.Kind}.");
         }

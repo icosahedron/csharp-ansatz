@@ -697,6 +697,41 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     [Fact]
+    public void DecimalEqualityAndOrderAreProvable()
+    {
+        // M6 U21: decimal comparisons, equality (in records too) and Math.Max cannot raise, so theorems state facts about
+        // them (docs/proving/proofs-that-work.md). Closed claims are proved by computation; a claim over every decimal
+        // reads the order as the integer `units` (the value in units of 10^-28) through Warrant.Decimal's lemmas.
+        var result = Script("""
+            public sealed record Price(decimal Amount);
+            public static class S
+            {
+                [Verified] public static decimal Larger(decimal a, decimal b) => System.Math.Max(a, b);
+
+                [Theorem] static Proof ScaleIsIgnored() => Prove.That(new Price(1.0m) == new Price(1.00m));
+
+                [Theorem] static Proof LargerKeepsTheFirstOfEqualValues() => Prove.That(Larger(1.0m, 1.00m) == 1m && 0.1m < 0.11m);
+
+                [Theorem]
+                static Proof OrderIsTransitive(decimal a, decimal b, decimal c) =>
+                    Prove.That(Spec.Implies(a < b && b <= c, a < c))
+                         .By(Tactic.Simp(Lean.Const("Warrant.Decimal.lt_iff"), Lean.Const("Warrant.Decimal.le_iff")), Tactic.Omega());
+
+                [Theorem]
+                static Proof EqualityIsReflexive(decimal a) => Prove.That(a == a).By(Tactic.Apply(Lean.Const("Warrant.Decimal.eq_refl")));
+            }
+            """);
+        Assert.True(result.Find("M:S.ScaleIsIgnored") is ProvedOutcome { By: ProofKind.Rfl or ProofKind.Decide }, $"{result.Find("M:S.ScaleIsIgnored")}");
+        Assert.True(result.Find("M:S.LargerKeepsTheFirstOfEqualValues") is ProvedOutcome { By: ProofKind.Rfl or ProofKind.Decide },
+            $"{result.Find("M:S.LargerKeepsTheFirstOfEqualValues")}");
+        foreach (var key in new[] { "M:S.OrderIsTransitive(System.Decimal,System.Decimal,System.Decimal)", "M:S.EqualityIsReflexive(System.Decimal)" })
+        {
+            var outcome = result.Find(key);
+            Assert.True(outcome is ProvedOutcome { By: ProofKind.Script }, $"{key}: {outcome}");
+        }
+    }
+
+    [Fact]
     public void AMethodThatCanRaiseIsAdmittedAsAClrMProgram()
     {
         // M6 U9: a method that can raise translates into ClrM and the kernel admits it; until M6 U10 states its contract

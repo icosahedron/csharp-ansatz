@@ -22,6 +22,7 @@ public sealed class Diagnoser
     private readonly Lazy<List<INamedTypeSymbol>> _types;
     private readonly Lazy<Dictionary<string, ISymbol>> _attributed;
     private readonly Lazy<CompilationScan> _scan;
+    private readonly Lazy<ProofIndex> _proofs;
 
     /// <summary>Creates the diagnoser for a compilation.</summary>
     /// <param name="compilation">The compilation.</param>
@@ -35,18 +36,25 @@ public sealed class Diagnoser
         _scan = new Lazy<CompilationScan>(
             () => CompilationScan.Run(new ExtractionContext(compilation, Extractor.Run.Facts(compilation)), CancellationToken.None),
             LazyThreadSafetyMode.ExecutionAndPublication);
+        _proofs = new Lazy<ProofIndex>(
+            () => ProofIndex.Build(compilation, _types.Value, CancellationToken.None), LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
-    /// <summary>The compilation's <c>[Verified]</c> members and <c>[Theorem]</c>s, by key.</summary>
-    public IEnumerable<ISymbol> Members() => _attributed.Value.Values.OrderBy(Symbols.Key, StringComparer.Ordinal);
+    /// <summary>The compilation's <c>[Verified]</c> members, <c>[Theorem]</c>s and <c>[ProofFor]</c> methods, by key.</summary>
+    public IEnumerable<ISymbol> Members() =>
+        _attributed.Value.Values.Concat(_proofs.Value.Methods).Distinct(SymbolEqualityComparer.Default).OrderBy(Symbols.Key, StringComparer.Ordinal);
 
     /// <summary>The compilation's <c>[Closed]</c> types, by key.</summary>
     public IEnumerable<INamedTypeSymbol> ClosedTypes() => _types.Value.Where(Symbols.IsClosed);
 
-    /// <summary>Whether a symbol is one <see cref="Member"/> diagnoses: a <c>[Verified]</c> member or a <c>[Theorem]</c>.</summary>
+    /// <summary>
+    /// Whether a symbol is one <see cref="Member"/> diagnoses: a <c>[Verified]</c> member, a <c>[Theorem]</c>, or a
+    /// <c>[ProofFor]</c> method (M6 KTD16).
+    /// </summary>
     public static bool IsAttributed(ISymbol symbol) =>
-        symbol is IMethodSymbol { MethodKind: not MethodKind.PropertyGet and not MethodKind.PropertySet } or IPropertySymbol
-        && (Symbols.IsVerified(symbol) || Symbols.IsTheorem(symbol));
+        (symbol is IMethodSymbol { MethodKind: not MethodKind.PropertyGet and not MethodKind.PropertySet } or IPropertySymbol
+            && (Symbols.IsVerified(symbol) || Symbols.IsTheorem(symbol)))
+        || ProofIndex.IsProofFor(symbol);
 
     /// <summary>Whether a type is one <see cref="ClosedType"/> diagnoses: one marked <c>[Closed]</c>.</summary>
     public static bool IsClosed(INamedTypeSymbol type) => Symbols.IsClosed(type);
@@ -72,7 +80,7 @@ public sealed class Diagnoser
             return [];
         }
         var key = Symbols.Key(member);
-        var diagnostics = new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true).ExecuteFor(member, _attributed.Value);
+        var diagnostics = new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true, proofs: _proofs).ExecuteFor(member, _attributed.Value);
         var types = new HashSet<string>(diagnostics.Select(d => d.MemberKey).Where(k => k is not null && !_attributed.Value.ContainsKey(k))!, StringComparer.Ordinal);
         return diagnostics.Where(d => d.MemberKey == key || (d.MemberKey is not null && types.Contains(d.MemberKey))).ToList();
     }
@@ -92,7 +100,7 @@ public sealed class Diagnoser
             return [];
         }
         var key = Symbols.Key(type);
-        return new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true).ExecuteFor(type, _attributed.Value)
+        return new Extractor.Run(_compilation, cancellationToken, _scan, deferReferenced: true, proofs: _proofs).ExecuteFor(type, _attributed.Value)
             .Where(d => d.MemberKey == key)
             .ToList();
     }

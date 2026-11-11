@@ -11,7 +11,7 @@ namespace Warrant.Extraction;
 /// <summary>
 /// Turns a compilation into VIR units and diagnostics, enforcing the M4 subset (docs/m4/03).
 /// </summary>
-public static class Extractor
+public static partial class Extractor
 {
     /// <summary>The extractor version recorded in every unit's <c>facts</c>.</summary>
     public const string Version = "0.1.0";
@@ -320,7 +320,7 @@ public static class Extractor
     }
 
     /// <summary>One extraction: the whole compilation (<see cref="Execute"/>), or one member's closure (<see cref="ExecuteFor"/>).</summary>
-    internal sealed class Run
+    internal sealed partial class Run
     {
         private readonly CSharpCompilation _compilation;
         private readonly CancellationToken _cancellationToken;
@@ -328,6 +328,7 @@ public static class Extractor
         private readonly Dictionary<string, Candidate> _candidates = new(StringComparer.Ordinal);
         private readonly List<ExtractionDiagnostic> _diagnostics = [];
         private readonly Lazy<CompilationScan> _scan;
+        private readonly Lazy<ProofIndex> _proofs;
 
         /// <param name="compilation">The compilation.</param>
         /// <param name="cancellationToken">Cancels the run.</param>
@@ -337,17 +338,21 @@ public static class Extractor
         /// Whether a closed class from another assembly is accepted unchecked, with no type unit: the analyzer's setting,
         /// since only the build has the referenced projects' source and checks such classes.
         /// </param>
+        /// <param name="proofs">The compilation's <c>[ProofFor]</c> methods, shared by runs on the same compilation; null to index them when needed.</param>
         public Run(
             CSharpCompilation compilation,
             CancellationToken cancellationToken,
             Lazy<CompilationScan>? scan = null,
             Func<string, CSharpCompilation?>? referencedSource = null,
-            bool deferReferenced = false)
+            bool deferReferenced = false,
+            Lazy<ProofIndex>? proofs = null)
         {
             _compilation = compilation;
             _cancellationToken = cancellationToken;
             _context = new ExtractionContext(compilation, Facts(compilation), referencedSource, deferReferenced);
             _scan = scan ?? new Lazy<CompilationScan>(() => CompilationScan.Run(_context, _cancellationToken), LazyThreadSafetyMode.None);
+            _proofs = proofs ?? new Lazy<ProofIndex>(
+                () => ProofIndex.Build(compilation, SortedSourceTypes(compilation), _cancellationToken), LazyThreadSafetyMode.None);
         }
 
         public static VirFacts Facts(CSharpCompilation compilation) => new(
@@ -381,11 +386,16 @@ public static class Extractor
             _diagnostics.AddRange(UnnamedClosedValues(_scan.Value, types));
 
             RejectCycles();
+            RejectEffects();
             RejectDependents();
 
             foreach (var c in _candidates.Values.Where(c => c.Rejection is not null).OrderBy(c => c.Key, StringComparer.Ordinal))
             {
                 Report(c.Key, c.Rejection!);
+            }
+            foreach (var proof in _proofs.Value.Methods)
+            {
+                ReportProof(proof);
             }
 
             var accepted = _candidates.Values.Where(c => c.Rejection is null).ToDictionary(c => c.Key, StringComparer.Ordinal);
@@ -405,6 +415,15 @@ public static class Extractor
         /// <returns>The diagnostics, keyed by the members and types they are about.</returns>
         public List<ExtractionDiagnostic> ExecuteFor(ISymbol root, IReadOnlyDictionary<string, ISymbol> attributed)
         {
+            // A [ProofFor] method is not a unit: what can be wrong with it is in the compilation's index (KTD16).
+            if (ProofIndex.IsProofFor(root))
+            {
+                ReportProof((IMethodSymbol)root);
+                if (!attributed.ContainsKey(Symbols.Key(root)))
+                {
+                    return Sort(_diagnostics);
+                }
+            }
             if (root is INamedTypeSymbol type)
             {
                 _context.UseType(type);
@@ -435,12 +454,23 @@ public static class Extractor
             }
             AddUsedTypes();
             RejectCycles();
+            RejectEffects();
             RejectDependents();
             foreach (var c in _candidates.Values.Where(c => c.Rejection is not null).OrderBy(c => c.Key, StringComparer.Ordinal))
             {
                 Report(c.Key, c.Rejection!);
             }
             return Sort(_diagnostics);
+        }
+
+        /// <summary>Reports why a <c>[ProofFor]</c> method supplies no script, if it supplies none.</summary>
+        private void ReportProof(IMethodSymbol proof)
+        {
+            var key = Symbols.Key(proof);
+            if (_proofs.Value.ProblemOf(key) is { } problem)
+            {
+                Report(key, problem);
+            }
         }
 
         private void AddUsedTypes()
@@ -697,6 +727,12 @@ public static class Extractor
                 IBlockOperation b when IsArrow(b) => ExpressionBody(walker, member, b, candidate.Returns),
                 _ => throw Reject(member, "member without a body"),
             };
+
+            // A [ProofFor(nameof(M))] method's script proves M's contract obligation (KTD16); a malformed step rejects M.
+            if (_proofs.Value.ScriptFor(candidate.Key) is { } by)
+            {
+                candidate.Script = walker.ContractScript(by, candidate.Key);
+            }
         }
 
         private static bool IsArrow(IBlockOperation block) => block.Syntax is ArrowExpressionClauseSyntax;
@@ -904,7 +940,12 @@ public static class Extractor
             var deps = new VirList<string>(c.Deps);
             var unit = c.Kind switch
             {
-                VirUnitKind.Function => VirUnit.Function(c.Key, new VirList<VirParam>(c.Params), c.Returns!, c.Body!, assumptions, _context.Facts, deps, c.Self),
+                // A function's script is its [ProofFor] method's (KTD16). The constructor, not `with`: an init accessor's
+                // signature differs between Warrant.Vir's netstandard2.0 build, which this assembly compiles against, and
+                // its net10.0 build.
+                VirUnitKind.Function => new VirUnit(
+                    VirUnit.CurrentVersion, c.Key, VirUnitKind.Function, c.Self, new VirList<VirParam>(c.Params), c.Returns!, c.Body!, null, c.Script,
+                    null, null, assumptions, _context.Facts, deps),
                 VirUnitKind.Theorem => VirUnit.Theorem(
                     c.Key, c.Statement!, assumptions, _context.Facts, deps, new VirList<VirParam>(c.Params), c.Script, c.Budget),
                 VirUnitKind.Type => VirUnit.TypeUnit(c.Key, c.Type!.Definition!, assumptions, _context.Facts, deps),

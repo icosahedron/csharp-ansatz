@@ -70,17 +70,11 @@ internal sealed partial class Walker
     }
 
     /// <summary>
-    /// The value inside a nullable value, which throws on null. A theorem statement is a <c>Prop</c> and cannot throw (KTD11),
-    /// so there it is rejected, naming the read.
+    /// The value inside a nullable value, which throws on null. A theorem statement is a <c>Prop</c> and cannot throw, so
+    /// one with an unwrap is rejected through effect inference (KTD11), naming the read.
     /// </summary>
-    private UnwrapExpr Unwrap(VirType type, UnwrapKind kind, VirExpr operand, SyntaxNode at)
-    {
-        if (_inTheorem)
-        {
-            throw Reject(kind == UnwrapKind.Value ? "nullable read" : "non-null unwrap", at, "it can throw, and a theorem statement cannot");
-        }
-        return Track(new UnwrapExpr(type, kind, operand), at);
-    }
+    private UnwrapExpr Unwrap(VirType type, UnwrapKind kind, VirExpr operand, SyntaxNode at) =>
+        Track(new UnwrapExpr(type, kind, operand), at);
 
     /// <summary>
     /// The type of a conditional or switch expression over reference values: its own, or that type's nullable form when a

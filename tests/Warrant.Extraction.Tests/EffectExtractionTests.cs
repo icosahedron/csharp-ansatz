@@ -322,7 +322,7 @@ public class EffectExtractionTests
     [InlineData("x % 2 == 0 || x % 2 != 0", "remainder")]
     [InlineData("checked(x + 1) > x", "checked arithmetic")]
     [InlineData("checked(-x) != x", "checked arithmetic")]
-    [InlineData("checked((int)l) == l", "checked arithmetic")]
+    [InlineData("checked((int)l) == l", "checked narrowing")]
     [InlineData("(x > 0 ? x : throw new ArgumentException()) > 0", "throw")]
     [InlineData("Math.Abs(x) >= 0", "modelled member M:System.Math.Abs(System.Int32)")]
     public void ARaisingOperationInATheoremStatementIsStillRejected(string claim, string construct)

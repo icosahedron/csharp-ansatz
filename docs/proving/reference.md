@@ -179,7 +179,7 @@ diagnostic message uses.
 | `recursion` | WRT0002 | Direct or mutual. M5a accepts direct recursion with `Spec.Decreases` (below). |
 | `theorem with parameters` | WRT0002 | Accepted from M5a. |
 | `division`, `remainder` | WRT0002 | M6 extracts `/` and `%` on `int` and `long` in a `[Verified]` method; proving such a method needs M6's effect translation. Still rejected in a theorem statement. A constant expression such as `unchecked(int.MinValue / -1)` is folded first and accepted. |
-| `checked arithmetic` | WRT0002 | `checked(...)`, or any arithmetic or narrowing cast in a project with `CheckForOverflowUnderflow` on. A checked widening cast cannot overflow and is accepted. M6 extracts the rest in a `[Verified]` method; still rejected in a theorem statement. |
+| `checked arithmetic` | WRT0002 | `checked(...)`, or any arithmetic or narrowing cast in a project with `CheckForOverflowUnderflow` on. A checked widening cast cannot overflow and is accepted. M6 extracts the rest in a `[Verified]` method; still rejected in a theorem statement, where a checked narrowing cast is named `checked narrowing`. |
 | `integer bitwise operator`, `shift` | WRT0002 | `&`, `\|`, `^`, `~`, `<<`, `>>`, `>>>` on integers. Not scheduled. |
 | `throw`, `try` | WRT0002 | M6 extracts `throw new T(...)` in a `[Verified]` method when each argument is a constant or a parameter and `T` is a `System` exception or a plain subclass of one: a constructor with an empty body that only calls its base, a `System` exception, with constants and its parameters. Otherwise `rethrow`, `throw of a value other than a new exception`, `exception argument that is not a constant or a parameter` or `exception type that is not a System exception or a plain subclass of one`. `throw` in a theorem statement and `try` stay rejected. |
 | `non-exhaustive switch over an open enum` | WRT0002 | A switch expression over an open enum without `_`: .NET throws for unnamed values. M6. |
@@ -222,17 +222,42 @@ rejections:
 | Construct | Code | Notes |
 |---|---|---|
 | `recursion without Spec.Decreases` | WRT0002 | Including any expression-bodied recursive method, which has no statement to hold the measure. |
-| `Spec.Decreases not first` | WRT0002 | The measure is read on entry. |
+| `Spec.Decreases not first` | WRT0002 | The measure is read on entry. From M6 it also comes before any `Spec.Requires` and `Spec.Ensures`. |
 | `mutual recursion` | WRT0002 | Even with a measure on each method. |
 | `nested recursion` | WRT0002 | A recursive call inside another recursive call's argument, such as `F(F(n - 1))`. |
 | `lambda with statements` | WRT0002 | The claim of `Spec.ForAll` or `Spec.Exists` must be an expression. |
 | `Spec.ForAll outside a theorem statement`, `Spec.Exists outside a theorem statement` | WRT0004 | |
 | `quantifier whose claim is not a lambda` | WRT0004 | Including a lambda with more than one parameter. |
-| `proof script outside a theorem` | WRT0004 | A `Tactic` or `Lean` call, or `.By`, anywhere but a theorem's script. |
+| `proof script outside a theorem` | WRT0004 | A `Tactic` or `Lean` call, or `.By`, anywhere but a theorem's script, a `[ProofFor]` method's script or a `Spec.Assert` script (M6). |
 | `nameof of an overloaded method`, `nameof that names no verified member or theorem` | WRT0004 | |
 | `string literal where a lemma is expected`, `string literal where a member name is expected` | WRT0004 | In `Tactic.Simp` and `Tactic.Unfold`. |
 | `unsupported script argument` | WRT0004 | A step that is not a `Tactic.X(...)` call, an option value that is not a constant, an argument array, or `Lean.Const` of a non-literal. |
 | `theorem used in its own proof` | WRT0004 | |
+
+### The M6 contract rejections
+
+M6 extraction reads `Spec.Requires`, `Spec.Ensures` and `Spec.Assert` in a
+`[Verified]` method or property, and the script of a `[ProofFor(nameof(M))]`
+method, which becomes `M`'s script. `Tactic.VcGen()` is a step of a
+`[ProofFor]` or `Spec.Assert` script only; in a theorem's script it is still
+`unsupported script argument`. Proving a contract needs M6's translation.
+`[ContractFor]` classes are not read yet. These are rejected:
+
+| Construct | Code | Notes |
+|---|---|---|
+| `Spec.Requires not leading the body`, `Spec.Ensures not leading the body` | WRT0002 | They must lead the block body: after any `Spec.Decreases`, and before any other statement. |
+| `Spec.Requires after Spec.Ensures` | WRT0002 | The order is `Spec.Decreases`, then `Spec.Requires`, then `Spec.Ensures`. |
+| `Spec.Requires in an expression-bodied member`, `Spec.Ensures in an expression-bodied member`, `Spec.Assert in an expression-bodied member`, `Spec.Assert outside a statement` | WRT0002 | A contract needs a block body (design Q17). |
+| `Spec.Ensures type argument that is not the return type` | WRT0002 | `T` in `Spec.Ensures<T>` is the return type, nullable annotation included, or the awaited type of `Task<T>` or `ValueTask<T>`. The message names it. |
+| `Spec.Ensures without the result`, `Spec.Ensures with a result on a method that returns none` | WRT0002 | `Spec.Ensures(() => ...)` is for `void`, `Task` and `ValueTask` methods only. |
+| `Spec.Ensures whose condition is not a lambda` | WRT0004 | |
+| `contract on a recursive method` | WRT0002 | Its recursive call cannot use its own contract before it is proved. |
+| `recursion with effects` | WRT0002 | A recursive method that can raise: one that throws, divides by a variable, reads a nullable value, calls a method with `Spec.Requires`, and so on, itself or through a callee. The message names the construct and the callee. |
+| `Spec expression calling a raising method` | WRT0002 | A `Spec.Requires` or `Spec.Ensures` is a claim, so it cannot call a method that can raise. A call to a method that cannot raise is accepted, even when that method has a `Spec.Requires`. |
+| `theorem calling a raising method` | WRT0002 | A theorem statement that calls a method that can raise, directly or through its callees; the message names the construct and where it is. State the property as a `Spec.Ensures` instead. A raising operation in the statement itself is named as the operation (`division`, `nullable read`, `checked arithmetic`, …). Division or remainder by a constant cannot raise, but is rejected in a theorem statement until M6 translates it. |
+| `[ProofFor] naming no method`, `[ProofFor] of an overloaded method`, `[ProofFor] of a member that is not verified` | WRT0002 | `[ProofFor(nameof(M))]` names one `[Verified]` member of its own class, without overloads. |
+| `[ProofFor] method that is not static and parameterless`, `[ProofFor] body that is not Prove.Contract().By(...)` | WRT0002 | |
+| `second [ProofFor] for a method` | WRT0002 | The message names the first, whose script is kept. |
 
 ## Type mapping
 

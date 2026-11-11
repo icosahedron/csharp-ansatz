@@ -11,7 +11,7 @@ namespace Warrant.Analyzers;
 
 /// <summary>
 /// Reports extraction's diagnostics while the developer types (M5b R18, KTD22, docs/m5b/06): WRT0002 to WRT0005 and
-/// WRT0009 for each <c>[Verified]</c> member, <c>[Theorem]</c> and <c>[Closed]</c> type, and WRT0008 for the
+/// WRT0009 for each <c>[Verified]</c> member, <c>[Theorem]</c>, <c>[ProofFor]</c> method and <c>[Closed]</c> type, and WRT0008 for the
 /// compilation. It runs the extractor's own rules through <see cref="Diagnoser"/>, so it reports what the build
 /// reports, at the same place. It does no I/O and never reports proof results.
 /// </summary>

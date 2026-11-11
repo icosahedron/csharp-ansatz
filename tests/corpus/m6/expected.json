@@ -34,7 +34,13 @@
       "M:Corpus.M6.Decimals.Negate(System.Decimal)": { "outcome": "translated" },
       "M:Corpus.M6.Decimals.Largest(System.Decimal,System.Decimal)": { "outcome": "translated" },
       "M:Corpus.M6.Decimals.Smallest(System.Decimal,System.Decimal)": { "outcome": "translated" },
-      "M:Corpus.M6.Decimals.Size(System.Decimal)": { "outcome": "translated" }
+      "M:Corpus.M6.Decimals.Size(System.Decimal)": { "outcome": "translated" },
+
+      "M:Corpus.M6.Contracts.NonNegative(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Contracts.AtMost(System.Int32,System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Contracts.Capped(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Contracts.Average(System.Int32,System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Contracts.Same(System.Int32)": { "outcome": "translated" }
     },
     "refuted": {
       "M:Corpus.Rejected.Arithmetic.CheckedAdd(System.Int32,System.Int32)": { "outcome": "translated" },
@@ -65,7 +71,32 @@
       "M:Corpus.M6.Rejected.Nullables.LiftedAdd(System.Nullable{System.Int32},System.Nullable{System.Int32})": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "lifted arithmetic" }] },
       "M:Corpus.M6.Rejected.Nullables.ReadIsPositive(System.Nullable{System.Int32})": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "nullable read" }] },
       "M:Corpus.M6.Rejected.Decimals.Product(System.Decimal,System.Decimal)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "decimal operator other than + and -" }] },
-      "M:Corpus.M6.Rejected.Decimals.AddingOneIsLarger(System.Decimal)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "decimal arithmetic" }] }
+      "M:Corpus.M6.Rejected.Decimals.AddingOneIsLarger(System.Decimal)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "decimal arithmetic" }] },
+
+      "M:Corpus.M6.Rejected.Contracts.EnsuresLate(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Spec.Ensures not leading the body" }] },
+      "M:Corpus.M6.Rejected.Contracts.RequiresAfterEnsures(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Spec.Requires after Spec.Ensures" }] },
+      "M:Corpus.M6.Rejected.Contracts.DecreasesAfterRequires(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Spec.Decreases not first" }] },
+      "M:Corpus.M6.Rejected.Contracts.Countdown(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "contract on a recursive method" }] },
+      "M:Corpus.M6.Rejected.Contracts.Descend(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "recursion with effects" }] },
+      "M:Corpus.M6.Rejected.Contracts.Widened(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Spec.Ensures type argument that is not the return type" }] },
+      "M:Corpus.M6.Rejected.Contracts.NoResult(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Spec.Ensures without the result" }] },
+      "M:Corpus.M6.Rejected.Contracts.NotALambda(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0004", "construct": "Spec.Ensures whose condition is not a lambda" }] },
+      "M:Corpus.M6.Rejected.Contracts.Scale(System.Int32,System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Contracts.Scaled(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Spec expression calling a raising method" }] },
+      "M:Corpus.M6.Rejected.Contracts.Checked(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Contracts.Next(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Contracts.NextIsPositive(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "theorem calling a raising method" }] },
+      "M:Corpus.M6.Rejected.Contracts.MissingProof": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "[ProofFor] naming no method" }] },
+      "M:Corpus.M6.Rejected.Contracts.Kept(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Contracts.KeptAgain": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "second [ProofFor] for a method" }] },
+      "M:Corpus.M6.Rejected.Contracts.Bare(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Contracts.BareProof": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "[ProofFor] body that is not Prove.Contract().By(...)" }] },
+      "M:Corpus.M6.Rejected.Contracts.Given(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Contracts.GivenProof(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "[ProofFor] method that is not static and parameterless" }] },
+      "M:Corpus.M6.Rejected.Contracts.Twin(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Contracts.Twin(System.Int64)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Contracts.TwinProof": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "[ProofFor] of an overloaded method" }] },
+      "M:Corpus.M6.Rejected.Contracts.PlainProof": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "[ProofFor] of a member that is not verified" }] }
     },
     "checked-project": {
       "M:Corpus.Rejected.CheckedProject.Checked.Add(System.Int32,System.Int32)": { "outcome": "translated" },

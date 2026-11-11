@@ -144,31 +144,41 @@ internal sealed partial class Walker
 
     public BlockStmt Block(IBlockOperation block) => Track(new BlockStmt(Statements(block.Operations)), block.Syntax);
 
-    /// <summary>A member's block body, whose first statement may be <c>Spec.Decreases</c>.</summary>
-    public BlockStmt Body(IBlockOperation block) => Track(new BlockStmt(Statements(block.Operations, measureFirst: true)), block.Syntax);
+    /// <summary>
+    /// A member's block body, which may start with the leading <c>Spec</c> statements (M6 KTD8): <c>Spec.Decreases</c> if
+    /// any, then <c>Spec.Requires</c>, then <c>Spec.Ensures</c>.
+    /// </summary>
+    public BlockStmt Body(IBlockOperation block) => Track(new BlockStmt(Statements(block.Operations, leading: true)), block.Syntax);
 
-    private VirList<VirStmt> Statements(IEnumerable<IOperation> operations, bool measureFirst = false)
+    private VirList<VirStmt> Statements(IEnumerable<IOperation> operations, bool leading = false)
     {
         var result = new List<VirStmt>();
         bool ended = false;
-        bool first = true;
+
+        // The rank of the last leading Spec statement read; -1 before the first. Leading ends at the first other statement.
+        int last = -1;
         foreach (var op in operations)
         {
             if (op is IEmptyOperation)
             {
                 continue;
             }
-            if (op is IExpressionStatementOperation { Operation: IInvocationOperation call } && IsDecreases(call))
+            if (op is IExpressionStatementOperation { Operation: IInvocationOperation call } && LeadingRank(call) is { } rank)
             {
-                if (!(measureFirst && first))
-                {
-                    throw DecreasesNotFirst(op.Syntax);
-                }
-                result.Add(Track(new DecreasesStmt(Measure(call)), op.Syntax));
-                first = false;
+                result.Add(Leading(call, rank, leading, last, op.Syntax));
+                last = rank;
                 continue;
             }
-            first = false;
+            leading = false;
+            if (op is IExpressionStatementOperation { Operation: IInvocationOperation assert } && IsSpec(assert, "Assert"))
+            {
+                if (ended)
+                {
+                    throw Reject("unreachable code", op.Syntax);
+                }
+                result.Add(Assert(assert, op.Syntax));
+                continue;
+            }
             if (op is ILocalFunctionOperation)
             {
                 throw Reject("local function", op.Syntax);
@@ -550,11 +560,6 @@ internal sealed partial class Walker
         }
         switch (b.OperatorKind)
         {
-            // A theorem is a Prop, where Lean's total division would make `a / 0 == 0` provable (KTD11).
-            case BinaryOperatorKind.Divide when _inTheorem:
-                throw Reject("division", syntax);
-            case BinaryOperatorKind.Remainder when _inTheorem:
-                throw Reject("remainder", syntax);
             case BinaryOperatorKind.LeftShift or BinaryOperatorKind.RightShift or BinaryOperatorKind.UnsignedRightShift:
                 throw Reject("shift", syntax);
         }
@@ -606,10 +611,6 @@ internal sealed partial class Walker
         }
         switch (kind)
         {
-            case BinaryOperatorKind.Divide when _inTheorem:
-                throw Reject("division", syntax);
-            case BinaryOperatorKind.Remainder when _inTheorem:
-                throw Reject("remainder", syntax);
             case BinaryOperatorKind.LeftShift or BinaryOperatorKind.RightShift or BinaryOperatorKind.UnsignedRightShift:
                 throw Reject("shift", syntax);
             case BinaryOperatorKind.And or BinaryOperatorKind.Or or BinaryOperatorKind.ExclusiveOr:
@@ -648,14 +649,16 @@ internal sealed partial class Walker
             throw Reject("enum arithmetic", syntax);
         }
         // `/` and `%` throw on a zero divisor and on MinValue / -1 in any context (KTD6), so their node is always `wrap`.
-        var overflow = VirOverflow.Wrap;
-        if (isChecked && op is not (BinaryOp.Div or BinaryOp.Rem))
+        var overflow = isChecked && op is not (BinaryOp.Div or BinaryOp.Rem) ? VirOverflow.Checked : VirOverflow.Wrap;
+
+        // A theorem statement is a Prop: a raising `/` or `%` there is rejected through effect inference (KTD11). One that
+        // cannot raise is pure, but pure division is translated only from M6 U9, so until then it is rejected here.
+        if (_inTheorem && op is BinaryOp.Div or BinaryOp.Rem && right is LitExpr { Value: not 0 and not -1 })
         {
-            if (_inTheorem)
-            {
-                throw Reject("checked arithmetic", syntax);
-            }
-            overflow = VirOverflow.Checked;
+            throw Reject(
+                op == BinaryOp.Div ? "division" : "remainder",
+                syntax,
+                "a theorem statement may divide by a constant once division is translated, in M6 U9");
         }
         return Track(new BinaryExpr(type, op, overflow, left, right), syntax);
     }
@@ -669,10 +672,6 @@ internal sealed partial class Walker
         if (op is not (BinaryOp.Add or BinaryOp.Sub))
         {
             throw Reject("decimal operator other than + and -", syntax, op.ToString());
-        }
-        if (_inTheorem)
-        {
-            throw Reject("decimal arithmetic", syntax, "it can throw, and a theorem statement cannot");
         }
         var right = Expr(rightOp);
         if (left.Type != VirType.Decimal || right.Type != VirType.Decimal)
@@ -855,10 +854,6 @@ internal sealed partial class Walker
                     // Negating a decimal flips its sign bit, which cannot overflow (KTD7).
                     if (u.OperatorKind == UnaryOperatorKind.Minus && u.IsChecked && type != VirType.Decimal)
                     {
-                        if (_inTheorem)
-                        {
-                            throw Reject("checked arithmetic", syntax);
-                        }
                         overflow = VirOverflow.Checked;
                     }
                     var operand = Expr(u.Operand);
@@ -926,15 +921,7 @@ internal sealed partial class Walker
         }
         if (from == VirType.Int64 && to == VirType.Int32)
         {
-            var overflow = VirOverflow.Wrap;
-            if (c.IsChecked)
-            {
-                if (_inTheorem)
-                {
-                    throw Reject("checked arithmetic", syntax);
-                }
-                overflow = VirOverflow.Checked;
-            }
+            var overflow = c.IsChecked ? VirOverflow.Checked : VirOverflow.Wrap;
             return Track(new ConvertExpr(from, to, overflow, Expr(c.Operand)), syntax);
         }
         if (Symbols.Shape(fromType) == TypeShape.OpenEnum && IsUnderlying(fromType, toType))
@@ -999,7 +986,11 @@ internal sealed partial class Walker
         }
         if (IsDecreases(call))
         {
-            throw DecreasesNotFirst(syntax);
+            throw DecreasesNotFirst(syntax, outOfOrder: false);
+        }
+        if (IsSpec(call, "Requires") || IsSpec(call, "Ensures") || IsSpec(call, "Assert"))
+        {
+            throw ContractNotAStatement(call);
         }
         if (IsScriptMember(target))
         {
@@ -1047,18 +1038,14 @@ internal sealed partial class Walker
     }
 
     /// <summary>
-    /// A call to a modelled BCL member (KTD23). One that can throw (<see cref="Effects.ThrowingModelledMembers"/>) is
-    /// rejected in a theorem statement, which is a <c>Prop</c> and cannot raise (KTD11).
+    /// A call to a modelled BCL member (KTD23). One that can throw (<see cref="Effects.ThrowingModelledMembers"/>) makes
+    /// the unit raising, and a theorem statement with one is rejected through effect inference (KTD11).
     /// </summary>
     private ModelledCallExpr Modelled(IInvocationOperation call)
     {
         var syntax = call.Syntax;
         var target = call.TargetMethod;
         var key = Symbols.Key(target);
-        if (_inTheorem && Effects.ThrowingModelledMembers.Contains(key))
-        {
-            throw Reject($"modelled member {key}", syntax, $"{Symbols.Display(target)} can throw, and a theorem statement cannot");
-        }
         var type = MapType(target.ReturnType, annotated: false, syntax);
         return Track(new ModelledCallExpr(type, key, Arguments(target, call.Arguments, syntax)), syntax);
     }
@@ -1071,10 +1058,6 @@ internal sealed partial class Walker
     private string Thrown(IThrowOperation t)
     {
         var syntax = t.Syntax;
-        if (_inTheorem)
-        {
-            throw Reject("throw", syntax);
-        }
         var value = t.Exception;
         if (value is null)
         {

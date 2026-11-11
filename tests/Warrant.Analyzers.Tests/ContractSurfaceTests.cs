@@ -1,14 +1,20 @@
+extern alias analyzers;
+
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using ExtractionOptions = analyzers::Warrant.Extraction.ExtractionOptions;
+using ExtractionSeverity = analyzers::Warrant.Extraction.ExtractionSeverity;
+using Extractor = analyzers::Warrant.Extraction.Extractor;
 
 namespace Warrant.Analyzers.Tests;
 
 /// <summary>
 /// The M6 contract surface (plan U5, KTD8, KTD16) compiles against the netstandard2.0 package under this project's Roslyn,
-/// leaves no call in the IL unless <c>WARRANT_CONTRACTS</c> is defined, and is still rejected in verified code until
-/// extraction reads it (U8). This file runs under Roslyn 5.9 and, linked into Warrant.Analyzers.Tests.Roslyn48, under 4.8.
+/// leaves no call in the IL unless <c>WARRANT_CONTRACTS</c> is defined, and is read by the analyzer as extraction reads it
+/// (U8), with every contract diagnostic the build reports. This file runs under Roslyn 5.9 and, linked into
+/// Warrant.Analyzers.Tests.Roslyn48, under 4.8.
 /// </summary>
 public sealed class ContractSurfaceTests
 {
@@ -81,7 +87,7 @@ public sealed class ContractSurfaceTests
     }
 
     [Fact]
-    public async Task AContractInVerifiedCodeIsRejectedAsAnUnverifiedCallUntilExtractionReadsIt()
+    public async Task AContractAndItsProofForMethodInVerifiedCodeAreAccepted()
     {
         var compilation = AnalyzerHarness.Compile(("Rules.cs", Source));
         Assert.Empty(compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
@@ -89,8 +95,129 @@ public sealed class ContractSurfaceTests
         var (lines, exceptions) = await AnalyzerHarness.Run(compilation);
 
         Assert.Empty(exceptions);
-        // Only the [Verified] method is reported, at its first Spec call; the contract class and the proof method are not read yet.
-        Assert.Matches(@"^Rules\.cs\(26,9,26,30\): error WRT0005: Verified code may call only verified or modelled members, not .*Spec\.Requires", Assert.Single(lines));
+        // The contract class is not read until M6 U18, and the async method is not verified.
+        Assert.Empty(lines);
+    }
+
+    /// <summary>One member per contract diagnostic of U8 (KTD8, KTD11, KTD16), in C# 12 so Roslyn 4.8 reads it.</summary>
+    private const string Rejected = """
+        using System;
+        using Warrant;
+
+        namespace Sample;
+
+        public static class Rejected
+        {
+            [Verified]
+            public static int EnsuresLate(int x)
+            {
+                var y = x;
+                Spec.Ensures<int>(r => r == x);
+                return y;
+            }
+
+            [Verified]
+            public static int RequiresAfterEnsures(int x)
+            {
+                Spec.Ensures<int>(r => r == x);
+                Spec.Requires(x > 0);
+                return x;
+            }
+
+            [Verified]
+            public static int Countdown(int n)
+            {
+                Spec.Decreases(n);
+                Spec.Requires(n >= 0);
+                return n <= 0 ? 0 : Countdown(n - 1);
+            }
+
+            [Verified]
+            public static int Descend(int n)
+            {
+                Spec.Decreases(n);
+                if (n < 0) throw new ArgumentException("negative");
+                return n == 0 ? 0 : Descend(n - 1);
+            }
+
+            [Verified]
+            public static int Widened(int x)
+            {
+                Spec.Ensures<long>(r => r >= 0);
+                return x;
+            }
+
+            [Verified]
+            public static int NoResult(int x)
+            {
+                Spec.Ensures(() => x >= 0);
+                return x;
+            }
+
+            [Verified] public static int Scale(int x, int d) => x / d;
+
+            [Verified]
+            public static int Scaled(int x, int d)
+            {
+                Spec.Ensures<int>(r => r == Scale(x, d));
+                return x / d;
+            }
+
+            [Theorem] static Proof ScaleIsSmall(int x) => Prove.That(Scale(x, 2) <= x);
+            [Theorem] static Proof RatioAtMost(int x, int y) => Prove.That(x / y <= x);
+
+            [ProofFor("Missing")]
+            static Proof MissingProof() => Prove.Contract().By(Tactic.Omega());
+
+            [Verified] public static int Kept(int x) { Spec.Ensures<int>(r => r == x); return x; }
+
+            [ProofFor(nameof(Kept))]
+            static Proof KeptProof() => Prove.Contract().By(Tactic.Omega());
+
+            [ProofFor(nameof(Kept))]
+            static Proof KeptAgain() => Prove.Contract();
+
+            [Verified] public static int Twin(int x) => x;
+            [Verified] public static long Twin(long x) => x;
+
+            [ProofFor(nameof(Twin))]
+            static Proof TwinProof() => Prove.Contract().By(Tactic.Omega());
+        }
+        """;
+
+    [Fact]
+    public async Task TheAnalyzerReportsEachContractDiagnosticAsTheBuildDoes()
+    {
+        var compilation = AnalyzerHarness.Compile(("Rejected.cs", Rejected));
+        Assert.Empty(compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+        var extraction = Extractor.Extract(compilation, new ExtractionOptions { BuildDefines = true });
+        var expected = extraction.Diagnostics
+            .Select(d => AnalyzerHarness.Line(
+                d.Location!.Path, d.Location.StartLine, d.Location.StartColumn, d.Location.EndLine, d.Location.EndColumn,
+                d.Severity == ExtractionSeverity.Warning ? "warning" : "error", d.Id, d.Message))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        var (lines, exceptions) = await AnalyzerHarness.Run(compilation);
+
+        Assert.Empty(exceptions);
+        Assert.Equal(expected, lines.Order(StringComparer.Ordinal).ToList());
+        Assert.Equal(
+            [
+                "WRT0002 | Spec.Ensures not leading the body",
+                "WRT0002 | Spec.Requires after Spec.Ensures",
+                "WRT0002 | contract on a recursive method",
+                "WRT0002 | recursion with effects",
+                "WRT0002 | Spec.Ensures type argument that is not the return type",
+                "WRT0002 | Spec.Ensures without the result",
+                "WRT0002 | Spec expression calling a raising method",
+                "WRT0002 | theorem calling a raising method",
+                "WRT0002 | division",
+                "WRT0002 | [ProofFor] naming no method",
+                "WRT0002 | second [ProofFor] for a method",
+                "WRT0002 | [ProofFor] of an overloaded method",
+            ],
+            extraction.Diagnostics.Select(d => d.Id + " | " + d.Construct));
     }
 
     private static byte[] Emit(bool defineContracts)

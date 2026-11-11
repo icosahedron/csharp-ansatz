@@ -281,6 +281,7 @@ public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFi
     {
         var source = Counter.Replace("[ProofFor(nameof(Size))]", "", StringComparison.Ordinal)
             .Replace("static Proof SizeProof() => Prove.Contract().By(Tactic.Unfold(nameof(Size)), Tactic.Exact(\"counter_Count_spec\"));", "", StringComparison.Ordinal)
+            .Replace("Spec.Ensures<int>(r => r >= 0);" + Environment.NewLine + "        return", "Spec.Ensures<int>(r => r > 0);" + Environment.NewLine + "        return", StringComparison.Ordinal)
             .Replace("Spec.Ensures<int>(r => r >= 0);\n        return", "Spec.Ensures<int>(r => r > 0);\n        return", StringComparison.Ordinal);
         Assert.Contains("r => r > 0", source, StringComparison.Ordinal);
         var outcome = Assert.IsType<NotProvedOutcome>(Run(source).Find("M:S.Size"));

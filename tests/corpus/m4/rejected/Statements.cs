@@ -38,9 +38,6 @@ public static class Statements
     }
 
     [Verified]
-    public static int Throws(int n) => n >= 0 ? n : throw new ArgumentOutOfRangeException(nameof(n));
-
-    [Verified]
     public static int TryCatch(int n)
     {
         try
@@ -112,6 +109,7 @@ public static class Statements
     [Verified]
     public static double Doubles(double d) => d;
 
+    // Replaces CallsUnverified (Math.Abs), which M6 models and which moved to tests/corpus/m6 (README).
     [Verified]
-    public static int CallsUnverified(int n) => Math.Abs(n);
+    public static int CallsUnmodelled(int n) => Math.Sign(n);
 }

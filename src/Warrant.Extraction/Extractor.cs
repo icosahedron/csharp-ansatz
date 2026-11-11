@@ -691,9 +691,9 @@ public static class Extractor
             var body = Body(member) ?? throw Reject(member, "member without a body");
             candidate.Body = body switch
             {
-                IMethodBodyOperation { ExpressionBody: { } e } => ExpressionBody(walker, member, e),
+                IMethodBodyOperation { ExpressionBody: { } e } => ExpressionBody(walker, member, e, candidate.Returns),
                 IMethodBodyOperation { BlockBody: { } b } => walker.Body(b),
-                IBlockOperation b when IsArrow(b) => ExpressionBody(walker, member, b),
+                IBlockOperation b when IsArrow(b) => ExpressionBody(walker, member, b, candidate.Returns),
                 _ => throw Reject(member, "member without a body"),
             };
         }
@@ -708,11 +708,17 @@ public static class Extractor
                 var other => other,
             };
 
-        private static VirExpr ExpressionBody(Walker walker, ISymbol member, IBlockOperation block)
+        private static VirExpr ExpressionBody(Walker walker, ISymbol member, IBlockOperation block, VirType returns)
         {
             if (block.Operations.Length == 1 && block.Operations[0] is IReturnOperation { ReturnedValue: { } value })
             {
                 return walker.Expr(value);
+            }
+            // `=> throw new E(...)`: the body is the throw statement, of the member's return type.
+            if (block.Operations.Length == 1
+                && (block.Operations[0] is IExpressionStatementOperation { Operation: IThrowOperation } s ? s.Operation : block.Operations[0]) is IThrowOperation t)
+            {
+                return walker.ThrowExpression(t, returns);
             }
             throw Reject(member, "member without a body");
         }

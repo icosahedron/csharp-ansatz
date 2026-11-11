@@ -1,0 +1,38 @@
+{
+  "compilations": [
+    { "name": "accepted", "files": ["accepted/*.cs"], "checkOverflow": false },
+    { "name": "refuted", "files": ["refuted/*.cs"], "exclude": ["refuted/CheckedProject.cs"], "checkOverflow": false },
+    { "name": "rejected", "files": ["rejected/*.cs"], "checkOverflow": false },
+    { "name": "checked-project", "files": ["refuted/CheckedProject.cs"], "checkOverflow": true }
+  ],
+  "members": {
+    "accepted": {
+      "M:Corpus.Rejected.Arithmetic.Halve(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.Rejected.Arithmetic.Remainder(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.Rejected.Statements.Throws(System.Int32)": { "outcome": "translated" },
+
+      "M:Corpus.M6.Effects.Biggest(System.Int32,System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Effects.Smallest(System.Int64,System.Int64)": { "outcome": "translated" },
+      "M:Corpus.M6.Effects.Guard(System.Int32)": { "outcome": "translated" }
+    },
+    "refuted": {
+      "M:Corpus.Rejected.Arithmetic.CheckedAdd(System.Int32,System.Int32)": { "outcome": "translated" },
+      "M:Corpus.Rejected.Statements.CallsUnverified(System.Int32)": { "outcome": "translated" },
+
+      "M:Corpus.M6.Refuted.Effects.Ratio(System.Int32,System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Effects.Magnitude(System.Int64)": { "outcome": "translated" }
+    },
+    "rejected": {
+      "M:Corpus.M6.Rejected.Effects.ThrowsOdd(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "exception type that is not a System exception or a plain subclass of one" }] },
+      "M:Corpus.M6.Rejected.Effects.TryFinally(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "try" }] },
+      "M:Corpus.M6.Rejected.Effects.Sign(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0005", "construct": "M:System.Math.Sign(System.Int32)" }] },
+      "M:Corpus.M6.Rejected.Effects.RatioAtMost(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "division" }] },
+      "M:Corpus.M6.Rejected.Effects.AbsoluteIsNonNegative(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "modelled member M:System.Math.Abs(System.Int32)" }] }
+    },
+    "checked-project": {
+      "M:Corpus.Rejected.CheckedProject.Checked.Add(System.Int32,System.Int32)": { "outcome": "translated" },
+      "M:Corpus.Rejected.CheckedProject.Checked.Negate(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.Rejected.CheckedProject.Checked.Narrow(System.Int64)": { "outcome": "translated" }
+    }
+  }
+}

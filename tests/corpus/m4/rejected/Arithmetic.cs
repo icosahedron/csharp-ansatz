@@ -1,21 +1,12 @@
-// Arithmetic M4 rejects: division and remainder need exceptions (M6), checked arithmetic needs
-// OverflowException (M6), and integer bitwise operators and shifts wait for a milestone that
-// needs them (plan KTD15). Each member uses one rejected construct and nothing else unsupported.
+// Arithmetic M4 rejects: integer bitwise operators and shifts wait for a milestone that needs them
+// (plan KTD15). Each member uses one rejected construct and nothing else unsupported. Division,
+// remainder and checked arithmetic moved to tests/corpus/m6 when M6 accepted them (README).
 using Warrant;
 
 namespace Corpus.Rejected;
 
 public static class Arithmetic
 {
-    [Verified]
-    public static int Halve(int x) => x / 2;
-
-    [Verified]
-    public static int Remainder(int x) => x % 3;
-
-    [Verified]
-    public static int CheckedAdd(int a, int b) => checked(a + b);
-
     [Verified]
     public static int And(int a, int b) => a & b;
 

@@ -21,10 +21,10 @@ public sealed class AnalyzerTests
 
             public static class Rules
             {
-                [Verified] public static int Half(int x) => x / 2;
+                [Verified] public static int Half(int x) => x << 1;
                 [Verified] public static int Fine(int x) => x + 1;
                 [Verified] public static int UsesHalf(int x) => Half(x) + 1;
-                [Verified] public static int Absolute(int x) => System.Math.Abs(x);
+                [Verified] public static int Absolute(int x) => System.Math.Sign(x);
                 [Verified] public static bool Implies(int x) => Spec.Implies(x > 0, x > 1);
                 [Theorem] static Proof FineOfOne() => Prove.That(Fine(1) == 2);
                 [Verified] public static int CallsTheorem() { FineOfOne(); return 0; }
@@ -70,7 +70,7 @@ public sealed class AnalyzerTests
             lines,
             l => Assert.StartsWith("Outcomes.cs(6,21,6,28): error WRT0009: ", l, StringComparison.Ordinal),
             l => Assert.Equal("Outcomes.cs(18,9,18,44): error WRT0002: M4 does not support loop.", l),
-            l => Assert.Equal("Rules.cs(9,49,9,54): error WRT0002: M4 does not support division.", l),
+            l => Assert.Equal("Rules.cs(9,49,9,55): error WRT0002: M4 does not support shift.", l),
             l => Assert.Matches(@"^Rules\.cs\(11,\d+,11,\d+\): error WRT0002: .*depends on .*Half", l),
             l => Assert.Matches(@"^Rules\.cs\(12,\d+,12,\d+\): error WRT0005: ", l),
             l => Assert.Matches(@"^Rules\.cs\(13,\d+,13,\d+\): error WRT0004: ", l),
@@ -113,13 +113,13 @@ public sealed class AnalyzerTests
             public static class S
             {
                 [Verified] public static int Broken(int x) => x / undefinedName;
-                [Verified] public static int Rem(int x) => x % 3;
+                [Verified] public static int Rem(int x) => x & 3;
             }
             """));
 
         var (lines, exceptions) = await AnalyzerHarness.Run(compilation);
 
         Assert.Empty(exceptions);
-        Assert.Matches(@"^S\.cs\(5,\d+,5,\d+\): error WRT0002: .*remainder", Assert.Single(lines));
+        Assert.Matches(@"^S\.cs\(5,\d+,5,\d+\): error WRT0002: .*integer bitwise operator", Assert.Single(lines));
     }
 }

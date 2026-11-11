@@ -13,7 +13,7 @@ None of these files belongs to a project: the tests compile them in memory with 
 | `accepted` | `accepted/*.cs` | Every member translates and every theorem is proved. `warrant translate` exits 0 here, and `scripts/cross-check.sh` has Lean's kernel re-check the result. |
 | `refuted` | `refuted/*.cs` | Theorems that translate but are false (WRT0001). |
 | `rejected` | `rejected/*.cs` except `CheckedProject.cs` | One member per rejected construct, using nothing else unsupported. |
-| `checked-project` | `rejected/CheckedProject.cs` | Compiled with overflow checking on. |
+| `checked-project` | `rejected/CheckedProject.cs` | Compiled with overflow checking on. Only its widening cast is left (see the flip list). |
 
 ## Outcomes
 
@@ -41,3 +41,22 @@ A unit that depends on a rejected unit is rejected with the construct `depends o
 | `Records.cs` | Construction, property reads, `with`, equality, a verified instance property, and record fields of record and closed-class type. |
 | `Locals.cs` | Reassignment, a `let` of an `ite`, a join point, the nested-`return` shape that the shortcut rules must not touch, compound assignment, `++`, and a switch statement that falls through. |
 | `Conversions.cs` | `int` to `long` and back, and casts between open enums and integers, including an unnamed value. |
+
+## Flip list
+
+A member whose construct a later milestone supports leaves this corpus, so every member here keeps its M4 outcome (M6 R14).
+Each move, with the milestone unit that made it and where the member went:
+
+| Member | M4 outcome | Moved by | Now |
+|---|---|---|---|
+| `M:Corpus.Rejected.Arithmetic.Halve(System.Int32)` | WRT0002 `division` | M6 U7 | `tests/corpus/m6/accepted/Arithmetic.cs` |
+| `M:Corpus.Rejected.Arithmetic.Remainder(System.Int32)` | WRT0002 `remainder` | M6 U7 | `tests/corpus/m6/accepted/Arithmetic.cs` |
+| `M:Corpus.Rejected.Arithmetic.CheckedAdd(System.Int32,System.Int32)` | WRT0002 `checked arithmetic` | M6 U7 | `tests/corpus/m6/refuted/Arithmetic.cs` |
+| `M:Corpus.Rejected.Statements.Throws(System.Int32)` | WRT0002 `throw` | M6 U7 | `tests/corpus/m6/accepted/Statements.cs` |
+| `M:Corpus.Rejected.Statements.CallsUnverified(System.Int32)` | WRT0005 `M:System.Math.Abs(System.Int32)` | M6 U7 | `tests/corpus/m6/refuted/Statements.cs` |
+| `M:Corpus.Rejected.CheckedProject.Checked.Add(System.Int32,System.Int32)` | WRT0002 `checked arithmetic` | M6 U7 | `tests/corpus/m6/refuted/CheckedProject.cs` |
+| `M:Corpus.Rejected.CheckedProject.Checked.Negate(System.Int32)` | WRT0002 `checked arithmetic` | M6 U7 | `tests/corpus/m6/refuted/CheckedProject.cs` |
+| `M:Corpus.Rejected.CheckedProject.Checked.Narrow(System.Int64)` | WRT0002 `checked arithmetic` | M6 U7 | `tests/corpus/m6/refuted/CheckedProject.cs` |
+
+Their keys are unchanged, and the M6 corpus README gives each one's M6 outcome.
+`CallsUnmodelled` (`Math.Sign`) replaces `CallsUnverified`, so the corpus still has a WRT0005 member.

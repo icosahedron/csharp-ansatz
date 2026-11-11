@@ -134,9 +134,9 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         var (exitCode, log) = host.Build(dir);
         Report(host, dir, log);
 
-        // The CLI reports the division once, in its own format, and still proves the theorem (M5b R19, KTD23).
+        // The CLI reports the shift once, in its own format, and still proves the theorem (M5b R19, KTD23).
         Assert.Equal(1, exitCode);
-        Assert.Equal(["Mixed.cs(9,49,9,54): error WRT0002: M4 does not support division."], Samples.Diagnostics(log, dir));
+        Assert.Equal(["Mixed.cs(9,49,9,55): error WRT0002: M4 does not support shift."], Samples.Diagnostics(log, dir));
         Assert.Contains("1 theorems proved, 0 not proved.", log, StringComparison.Ordinal);
         Assert.DoesNotContain("Warrant.Analyzers", File.ReadAllText(Path.Combine(dir, "obj", "analyzers-build.txt")), StringComparison.Ordinal);
 
@@ -627,7 +627,7 @@ internal static class Samples
             {
                 [Verified]
                 public static int Same(int x) => x;
-                [Verified] public static int Half(int x) => x / 2;
+                [Verified] public static int Half(int x) => x << 1;
 
                 [Theorem]
                 static Proof SameIsIdentity(int x) =>

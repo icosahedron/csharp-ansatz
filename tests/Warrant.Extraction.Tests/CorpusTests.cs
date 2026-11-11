@@ -6,8 +6,8 @@ using Warrant.Vir;
 namespace Warrant.Extraction.Tests;
 
 /// <summary>
-/// Every member of every compilation of the M4 and M5a corpora gets the outcome expected.json gives it, as far as
-/// extraction decides it (docs/m4/02, docs/m5a/01).
+/// Every member of every compilation of the M4, M5a and M6 corpora gets the outcome expected.json gives it, as far as
+/// extraction decides it (docs/m4/02, docs/m5a/01, tests/corpus/m6/README.md).
 /// </summary>
 public class CorpusTests
 {

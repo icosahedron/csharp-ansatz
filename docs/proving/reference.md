@@ -178,10 +178,10 @@ diagnostic message uses.
 |---|---|---|
 | `recursion` | WRT0002 | Direct or mutual. M5a accepts direct recursion with `Spec.Decreases` (below). |
 | `theorem with parameters` | WRT0002 | Accepted from M5a. |
-| `division`, `remainder` | WRT0002 | M6. A constant expression such as `unchecked(int.MinValue / -1)` is folded first and accepted. |
-| `checked arithmetic` | WRT0002 | `checked(...)`, or any arithmetic or narrowing cast in a project with `CheckForOverflowUnderflow` on. A checked widening cast cannot overflow and is accepted. M6. |
+| `division`, `remainder` | WRT0002 | M6 extracts `/` and `%` on `int` and `long` in a `[Verified]` method; proving such a method needs M6's effect translation. Still rejected in a theorem statement. A constant expression such as `unchecked(int.MinValue / -1)` is folded first and accepted. |
+| `checked arithmetic` | WRT0002 | `checked(...)`, or any arithmetic or narrowing cast in a project with `CheckForOverflowUnderflow` on. A checked widening cast cannot overflow and is accepted. M6 extracts the rest in a `[Verified]` method; still rejected in a theorem statement. |
 | `integer bitwise operator`, `shift` | WRT0002 | `&`, `\|`, `^`, `~`, `<<`, `>>`, `>>>` on integers. Not scheduled. |
-| `throw`, `try` | WRT0002 | M6. |
+| `throw`, `try` | WRT0002 | M6 extracts `throw new T(...)` in a `[Verified]` method when each argument is a constant or a parameter and `T` is a `System` exception or a plain subclass of one: a constructor with an empty body that only calls its base, a `System` exception, with constants and its parameters. Otherwise `rethrow`, `throw of a value other than a new exception`, `exception argument that is not a constant or a parameter` or `exception type that is not a System exception or a plain subclass of one`. `throw` in a theorem statement and `try` stay rejected. |
 | `non-exhaustive switch over an open enum` | WRT0002 | A switch expression over an open enum without `_`: .NET throws for unnamed values. M6. |
 | `null`, `nullable type` | WRT0002 | Including nullable parameters such as `Payment?`. M6. |
 | `loop` | WRT0002 | `for`, `foreach`, `while`, `do`. M7. |
@@ -207,7 +207,7 @@ diagnostic message uses.
 | `case guard`, `switch arm guard`, `lambda`, `user-defined operator`, `user-defined conversion`, `indexer`, `property setter`, `ref parameter`, `ref return`, `ref local`, `ref conditional`, `params argument`, `object initializer`, `object creation`, `constructor other than the primary constructor`, `with on a type that is not a record`, `with on a property that is not positional`, `assignment to a parameter`, `assignment to a field or property`, `local without an initializer`, `expression statement`, `jump statement`, `increment of a non-integer`, `enum arithmetic`, `closed enum constant that names no member`, `pattern that is not a constant`, `type defined outside the compilation`, `enum with an underlying type other than int or long`, `positional property that is not the compiler's auto-property`, `member without a body`, `theorem that is not static`, `theorem that is not Prove.That` | WRT0002 | Less common constructs, each named in its message. Anything else gets a name that starts with `unsupported` (`unsupported expression`, `unsupported operator`, …). |
 | A call to a `[Theorem]` | WRT0003 | |
 | `Spec.Implies outside a theorem statement`, `Prove.That outside a theorem statement` | WRT0004 | |
-| A call to a member that is neither `[Verified]` nor modelled | WRT0005 | For example `System.Math.Abs(int)`. |
+| A call to a member that is neither `[Verified]` nor modelled | WRT0005 | For example `System.Math.Round(double)`. From M6, `Math.Min`, `Math.Max` and `Math.Abs` on `int` and `long` are modelled; `Math.Abs`, which can throw, is rejected in a theorem statement as `modelled member M:System.Math.Abs(System.Int32)` (or `Int64`, WRT0002). |
 | `integer cast to a closed enum`, `unboxing to a closed enum`, `arithmetic on a closed enum`, `closed enum without a member valued 0` | WRT0008 (warning) | Anywhere in the compilation, verified or not. |
 | A `[Closed]` class without the closed shape | WRT0009 | Names the failed step: `not sealed`, `constructor that is not private`, `static instance that is not an initialised get-only auto-property or readonly field`, `static constructor`, `constructor or initialiser that could throw`, `constructor called outside the static instances`, `instance created or changed without a constructor call`, or `no static instances`. |
 

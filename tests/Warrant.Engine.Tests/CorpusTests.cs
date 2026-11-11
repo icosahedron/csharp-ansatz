@@ -9,6 +9,17 @@ namespace Warrant.Engine.Tests;
 /// </summary>
 public sealed class CorpusTests(EngineFixture engine) : IClassFixture<EngineFixture>
 {
+    /// <summary>
+    /// The M6 corpus holds members translation cannot take until M6 U9, so the engine and differential tests must not
+    /// read it before U11 and U13 add its proof outcomes (tests/corpus/m6/README.md). They enumerate the M4 and M5a sets
+    /// by name; this pins that the M6 one is not even copied here.
+    /// </summary>
+    [Fact]
+    public void TheM6CorpusIsNotReadHereYet()
+    {
+        Assert.False(Directory.Exists(CorpusSet.M6.Root), CorpusSet.M6.Root);
+    }
+
     [Fact]
     public void EveryM5aMemberGetsItsExpectedOutcome()
     {

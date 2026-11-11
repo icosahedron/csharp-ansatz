@@ -5,14 +5,14 @@ using Warrant.TestSupport;
 
 namespace Warrant.Extraction.Tests;
 
-/// <summary>The M4 and M5a corpora and their expected outcomes (tests/corpus/*/expected.json); the M4 one by default.</summary>
+/// <summary>The M4, M5a and M6 corpora and their expected outcomes (tests/corpus/*/expected.json); the M4 one by default.</summary>
 internal static class Corpus
 {
     public static string Root => CorpusCompilations.Root;
 
     private static readonly Dictionary<(string, string), ExtractionResult> Results = [];
 
-    public static IEnumerable<CorpusSet> Sets => [CorpusSet.M4, CorpusSet.M5a];
+    public static IEnumerable<CorpusSet> Sets => [CorpusSet.M4, CorpusSet.M5a, CorpusSet.M6];
 
     public static CorpusSet Set(string name) => Sets.Single(s => s.Name == name);
 

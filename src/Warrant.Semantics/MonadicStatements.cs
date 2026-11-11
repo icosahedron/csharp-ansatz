@@ -149,6 +149,23 @@ internal sealed partial class BodyTranslator
     private readonly HashSet<Expr> _bound = [];
 
     /// <summary>
+    /// Whether each site the VC walker reports at (M6 KTD18: a raising operation, a throw, a <c>Spec.Assert</c>, a call that
+    /// the walker sees) is wrapped in metadata naming its VIR node, <see cref="ContractObligation.SiteKey"/>. Such a program is the walker's
+    /// view of a unit (<see cref="ContractObligation.Program"/>), never a declaration: metadata changes nothing the
+    /// kernel checks, and the definition is translated without it.
+    /// </summary>
+    public bool TagSites { get; init; }
+
+    /// <summary>The VIR node IDs of the unit being translated, while <see cref="TagSites"/> is set.</summary>
+    private Dictionary<VirNode, int>? _nodeIds;
+
+    /// <summary><paramref name="program"/>, wrapped in metadata naming <paramref name="node"/> when <see cref="TagSites"/> is set.</summary>
+    private Expr Site(VirNode node, Expr program) =>
+        _nodeIds is { } ids && ids.TryGetValue(node, out var id)
+            ? Expr.MData(new KVMap([new KVMapEntry(ContractObligation.SiteKey, id.ToString(System.Globalization.CultureInfo.InvariantCulture))]), program)
+            : program;
+
+    /// <summary>
     /// What happens to an expression's value: <paramref name="Apply"/> builds the rest of the program from it, a term of
     /// type <paramref name="ResultM"/>, a <c>ClrM</c> type. A value bound with <c>bind</c> is named <paramref name="Name"/>.
     /// </summary>
@@ -160,6 +177,15 @@ internal sealed partial class BodyTranslator
     /// </summary>
     public (Expr Type, Expr Value) MonadicFunction(VirUnit unit)
     {
+        if (TagSites)
+        {
+            _nodeIds = new Dictionary<VirNode, int>(ReferenceEqualityComparer.Instance);
+            var nodes = VirTree.PreOrder(unit);
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                _nodeIds.TryAdd(nodes[i], i);
+            }
+        }
         _sigma = _lctx.MkLocalDecl(_ngen, Name.From("σ"), Expr.Type, BinderInfo.Implicit);
         var binders = Binders(unit);
         var returns = Monadic.Type(_sigma, ReturnType(unit));
@@ -236,14 +262,14 @@ internal sealed partial class BodyTranslator
                     var prim = _types.Underlying(u.Type);
                     return Bound(u.Operand, env, Then(a => Effects.Construct(u) is null
                         ? Finish(Operators.Neg(prim, a), u.Type, k)
-                        : Emit(Expr.App(NegChecked(prim), _sigma!, a), u.Type, k)));
+                        : Emit(Site(u, Expr.App(NegChecked(prim), _sigma!, a)), u.Type, k)));
                 }
             case BinaryExpr b:
                 {
                     var prim = _types.Underlying(b.Type);
                     return Bound(b.L, env, Then(l => Bound(b.R, env, Then(r => Effects.Construct(b) is null
                         ? Finish(Operators.Binary(b.Op, prim, l, r), b.Type, k)
-                        : Emit(Monadic.Binary(b.Op, prim, _sigma!, l, r), b.Type, k)))));
+                        : Emit(Site(b, Monadic.Binary(b.Op, prim, _sigma!, l, r)), b.Type, k)))));
                 }
             case LogicalExpr { Op: LogicalOp.And or LogicalOp.Or } l when !IsPure(l.R):
                 {
@@ -271,7 +297,7 @@ internal sealed partial class BodyTranslator
             case ConvertExpr c:
                 return Bound(c.Operand, env, Then(a => Effects.Construct(c) is null
                     ? Finish(Convert(c, a), c.Type, k)
-                    : Emit(CheckedNarrowing(c, a), c.Type, k)));
+                    : Emit(Site(c, CheckedNarrowing(c, a)), c.Type, k)));
             case CondExpr c:
                 if (IsPure(c.Then) && IsPure(c.Else))
                 {
@@ -286,12 +312,12 @@ internal sealed partial class BodyTranslator
                     var f = Expr.Const(LeanNames.ForKey(call.Target));
                     if (IsRaisingCallee(call.Target))
                     {
-                        return Emit(Expr.App(f, [_sigma!, .. args]), call.Type, k);
+                        return Emit(Site(call, Expr.App(f, [_sigma!, .. args])), call.Type, k);
                     }
                     var value = Expr.App(f, [.. args]);
                     // A unit with Spec.Requires: the walker proves its precondition where it is called (KTD11, KTD12).
                     return HasRequires(call.Target)
-                        ? Emit(Monadic.Pure(_sigma!, _types.Cic(call.Type), value), call.Type, k)
+                        ? Emit(Site(call, Monadic.Pure(_sigma!, _types.Cic(call.Type), value)), call.Type, k)
                         : Finish(value, call.Type, k);
                 });
             case NewExpr n:
@@ -311,7 +337,7 @@ internal sealed partial class BodyTranslator
                     Finish(Nullables.IsNone(_types.Cic(Nullables.ValueType(n.Operand.Type)), a), VirType.Bool, k)));
             case UnwrapExpr u:
                 return Bound(u.Operand, env, Then(a =>
-                    Emit(Expr.App(u.Kind == UnwrapKind.Value ? Init.NullableValue : Init.NullableNonNull, _sigma!, _types.Cic(u.Type), a), u.Type, k)));
+                    Emit(Site(u, Expr.App(u.Kind == UnwrapKind.Value ? Init.NullableValue : Init.NullableNonNull, _sigma!, _types.Cic(u.Type), a)), u.Type, k)));
             case CoalesceExpr c:
                 return Bound(c.L, env, Then(l => IsPure(c.R)
                     ? Finish(Coalesce(c, l, Value(c.R, env)), c.Type, k)
@@ -319,10 +345,10 @@ internal sealed partial class BodyTranslator
             case ModelledCallExpr m:
                 return BoundAll(m.Args, env, result, args => Effects.Construct(m) is null
                     ? Finish(Modelled(m, args), m.Type, k)
-                    : Emit(Expr.App(Abs(m), _sigma!, args[0]), m.Type, k));
+                    : Emit(Site(m, Expr.App(Abs(m), _sigma!, args[0])), m.Type, k));
             case ThrowExpr t:
                 // Control does not reach the continuation, so the throw has the type of the program it ends.
-                return Monadic.Throw(_sigma!, Monadic.ValueType(result), Monadic.Thrown(t.Exception));
+                return Site(t, Monadic.Throw(_sigma!, Monadic.ValueType(result), Monadic.Thrown(t.Exception)));
             default:
                 throw new TranslationException(null, $"unsupported expression {e.GetType().Name} in a method that can raise.");
         }
@@ -390,9 +416,9 @@ internal sealed partial class BodyTranslator
         CondBound(a.Condition, env, k.ResultType, c =>
         {
             var sigma = _sigma!;
-            var check = Operators.Ite(Monadic.Type(sigma, Init.Unit), c,
+            var check = Site(a, Operators.Ite(Monadic.Type(sigma, Init.Unit), c,
                 Monadic.Pure(sigma, Init.Unit, Init.UnitUnit),
-                Monadic.Throw(sigma, Init.Unit, Init.ClrExnAssertFailed));
+                Monadic.Throw(sigma, Init.Unit, Init.ClrExnAssertFailed)));
             var unit = _lctx.MkLocalDecl(_ngen, Name.From("_"), Init.Unit);
             return Monadic.Bind(sigma, Init.Unit, Monadic.ValueType(k.ResultType), check, _lctx.MkLambda([unit], k.Invoke(env)));
         });

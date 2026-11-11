@@ -10,20 +10,48 @@ namespace Warrant.Engine.Tests;
 public sealed class CorpusTests(EngineFixture engine) : IClassFixture<EngineFixture>
 {
     /// <summary>
-    /// The M6 corpus holds members translation cannot take until M6 U10, U19 and U21 (contracts, dependencies, decimal), so
-    /// the engine's corpus tests must not read it before U11 adds its proof outcomes (tests/corpus/m6/README.md). It is
-    /// copied here for the differential tests (plan U13), which compare only the functions that translate; this pins that
-    /// the engine's corpus runs, which enumerate the M4 and M5a sets by name, refuse it.
+    /// The M6 corpus's members without dependencies (plan M6 U11, as amended by #167) get their expected.json outcome
+    /// from extraction through the default procedure: <c>accepted/</c> proves (a proved contract is a translated unit
+    /// with its <c>$contract</c>), and <c>refuted/</c> fails with WRT0001 with the expected VC kind at the expected line.
+    /// Members marked <c>"awaits": "U19"</c> have dependencies, which translation takes from U19 on, so they are not
+    /// checked here yet.
     /// </summary>
     [Fact]
-    public void TheEngineCorpusRunsDoNotReadTheM6CorpusYet()
+    public void EveryM6MemberWithoutDependenciesGetsItsExpectedOutcome()
     {
-        Assert.True(Directory.Exists(CorpusSet.M6.Root), CorpusSet.M6.Root);
-        foreach (var compilation in CorpusSet.M6.Names)
+        var set = CorpusSet.M6;
+        var mismatches = new List<string>();
+        int members = 0;
+        foreach (var compilation in set.Names)
         {
-            var refused = Assert.Throws<ArgumentException>(() => engine.Run($"m6/{compilation}"));
-            Assert.Contains("come with plan M6 U11", refused.Message, StringComparison.Ordinal);
+            var extraction = Extractor.Extract(set.Compile(compilation));
+            var result = engine.Run($"m6/{compilation}");
+            var expected = set.Expected.GetProperty("members").GetProperty(compilation);
+            foreach (var member in expected.EnumerateObject())
+            {
+                if (member.Value.TryGetProperty("awaits", out _))
+                {
+                    continue;
+                }
+                members++;
+                var actual = result.Find(member.Name);
+                mismatches.AddRange(Compare(member.Name, member.Value, actual, extraction.DiagnosticsFor(member.Name)));
+                if (actual is NotProvedOutcome notProved && member.Value.TryGetProperty("vc", out var vc))
+                {
+                    var line = Reports.OutcomeText.SpanOf(engine.Spans($"m6/{compilation}", member.Name), notProved.TacticNode) is { } span
+                        ? $"{Path.GetFileName(span.Path)}:{span.StartLine}"
+                        : "no line";
+                    var kind = notProved.Vcs.IsDefaultOrEmpty ? "none" : notProved.Vcs[0].Kind.ToString();
+                    var wanted = $"{vc.GetProperty("kind").GetString()} at {vc.GetProperty("at").GetString()} of {vc.GetProperty("count").GetInt32()}";
+                    if (wanted != $"{kind} at {line} of {notProved.Vcs.Length}")
+                    {
+                        mismatches.Add($"{member.Name}: expected the VC {wanted}, got {kind} at {line} of {notProved.Vcs.Length}");
+                    }
+                }
+            }
         }
+        Assert.True(mismatches.Count == 0, string.Join("\n", mismatches));
+        Assert.Equal(108, members);
     }
 
     [Fact]

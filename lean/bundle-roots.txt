@@ -700,3 +700,18 @@ Std.Do.SPred.pure
 Std.Do.Assertion
 Std.Do.ExceptConds
 PUnit.unit
+
+# The VC walker's rules (M6 U11; plan M6 KTD13, lean/Warrant/Vc.lean): Std.Do's bind, pure and consequence rules and
+# U3's throw rule re-stated at ClrM σ with the precondition ⌜True⌝, so every fact the walk learns is a hypothesis.
+Warrant.Vc.Post
+Warrant.Vc.pre
+Warrant.Vc.spec
+Warrant.Vc.resume
+Warrant.Vc.bind
+Warrant.Vc.pure
+Warrant.Vc.throw
+Warrant.Vc.assert
+Warrant.Vc.optionRec
+Warrant.Vc.call
+# And.intro splits a model operation's precondition into its cases; False.elim closes an unreachable throw (#92).
+And.intro

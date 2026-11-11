@@ -140,7 +140,13 @@ public static class Translator
                         var (type, value) = new BodyTranslator(types, callees) { Contracted = true }.MonadicFunction(unit);
                         var decl = TypeDeclarations.Definition(name, type, value, Regular);
                         Declare(unit.Key, name, display, decl.Value.Hints);
-                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null) { Contract = Contract(unit, name, display, types, callees, raising: true) };
+                        var contract = Contract(unit, name, display, types, callees, raising: true);
+                        if (contract is not null)
+                        {
+                            // The walker's view of the same program, its sites naming their VIR nodes (M6 KTD18).
+                            contract.Program = new BodyTranslator(types, callees) { Contracted = true, TagSites = true }.MonadicFunction(unit).Value;
+                        }
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null) { Contract = contract };
                     }
                 case VirUnitKind.Theorem when raising:
                     // Extraction rejects this (KTD11): a theorem is a Prop, and Lean's total operations would make a / 0 == 0 provable.

@@ -43,6 +43,11 @@ public static class EmittedConstants
         Name.Parse("Unit.unit"),
         Name.Parse("True.intro"),
 
+        // The default procedure (M6 U11, KTD13, KTD14): the VC walker's structural rules and the VC simp set. A model
+        // operation's rule is its @[spec] lemma, a bundle root the sidecar names (KTD15).
+        .. Contracts.SpecTable.All,
+        .. Contracts.VcSimpSet.Lemmas,
+
         // Tactic.Omega(): the omega-prep set (KTD13) and every constant omega's proofs are built from (KTD12).
         .. OmegaPrepSet.Names,
         .. OmegaNames.All,

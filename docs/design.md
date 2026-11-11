@@ -556,7 +556,7 @@ nested inductives.
 - The bundle shipped with Warrant is `warrant-semantics`
   (`tests/data/warrant-semantics.ndjson.gz`): the Warrant semantics library and
   every Init constant the translator emits, with their whole dependency closure
-  (4,099 constants at Lean 4.35.0 with M6's `Std.Do`, division, effect-core, nullable, `Math`, `decimal` and monadic-translation roots; 2,835 in M5b), exported by `scripts/export-semantics.sh`.
+  (4,109 constants at Lean 4.35.0 with M6's `Std.Do`, division, effect-core, nullable, `Math`, `decimal`, monadic-translation and VC-walker roots; 2,835 in M5b), exported by `scripts/export-semantics.sh`.
   The kernel and corpus tests also use Ansatz's `init-medium` subset of Lean
   4.33.1's Init (5,118 constants in 4,631 declaration records, 3.3 MB gzipped),
   but it is not shipped: it has no `Int32` or `Int64`.

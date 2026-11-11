@@ -34,7 +34,7 @@ internal sealed partial class BodyTranslator
             // The measure is read on entry; it is the recursion's, not a statement of the body (M5a KTD14).
             DecreasesStmt when _sigma is null => rest.Invoke(env),
             // `throw new E(…)` raises `thrown "T:E"` (M6 KTD4); control does not reach the rest.
-            ThrowStmt t when _sigma is not null => Monadic.Throw(_sigma, Monadic.ValueType(k.ResultType), Monadic.Thrown(t.Exception)),
+            ThrowStmt t when _sigma is not null => Site(t, Monadic.Throw(_sigma, Monadic.ValueType(k.ResultType), Monadic.Thrown(t.Exception))),
             AssertStmt a when _sigma is not null => Assert(a, env, rest),
             // Claims, never run: the contract obligation states them (M6 KTD12, Contracts.cs).
             RequiresStmt or EnsuresStmt when Contracted => rest.Invoke(env),

@@ -20,6 +20,8 @@
     <None Include="..\corpus\m4\**\*" LinkBase="corpus\m4" CopyToOutputDirectory="PreserveNewest" />
     <!-- The M5a exit corpus, which the parity test verifies through the server and in-process (M5b KTD28). -->
     <None Include="..\corpus\m5a\**\*" LinkBase="corpus\m5a" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The M6 corpus's members without dependencies (plan M6 U11); the files with dependencies come with U19 and U20. -->
+    <None Include="..\corpus\m6\**\*" Exclude="..\corpus\m6\accepted\Payments.cs;..\corpus\m6\accepted\Dependencies.cs;..\corpus\m6\rejected\Dependencies.cs" LinkBase="corpus\m6" CopyToOutputDirectory="PreserveNewest" />
     <!-- A Csc argument file and the project files it names (plan M5a U12); its sources are data, not this project's code. -->
     <Compile Remove="cscargs\**" />
     <None Remove="cscargs\**" />

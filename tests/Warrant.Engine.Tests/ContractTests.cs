@@ -9,7 +9,7 @@ namespace Warrant.Engine.Tests;
 /// <summary>
 /// Contract obligations in the pipeline (plan M6 U10, KTD12, KTD16, KTD25, KTD26): each is admitted after its method's
 /// definition, as a recursive method's decrease proofs are; a <c>[ProofFor]</c> script proves it from the triple; an
-/// obligation that waits for the default procedure (M6 U11) is not proved; and a method whose contract is not proved is
+/// obligation without a script is proved by the default procedure (M6 U11); and a method whose contract is not proved is
 /// not usable as a lemma, so its callers report that.
 /// </summary>
 public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFixture>
@@ -74,7 +74,7 @@ public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFi
     }
 
     [Fact]
-    public void AScriptThatStartsWithVcGenWaitsForTheWalker()
+    public void AScriptThatStartsWithVcGenRunsTheWalkerAndLeavesItsVcsToTheScript()
     {
         const string source = """
             public static class S
@@ -90,9 +90,9 @@ public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFi
                 static Proof SameProof() => Prove.Contract().By(Tactic.VcGen(), Tactic.Omega());
             }
             """;
-        var outcome = Assert.IsType<NotProvedOutcome>(Run(source).Find("M:S.Same(System.Int32)"));
-        Assert.Equal("Tactic `vcgen` is not available yet", outcome.Message);
-        Assert.Equal("Tactic.VcGen()", Text(source, "M:S.Same(System.Int32)", outcome.TacticNode));
+        // M6 U11: the walker leaves the postcondition x = x, with Same unfolded (#173), and omega closes it.
+        var outcome = Assert.IsType<TranslatedOutcome>(Run(source).Find("M:S.Same(System.Int32)"));
+        Assert.Contains("$contract,", Names(outcome), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -195,16 +195,17 @@ public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFi
             }
             """;
         var result = Run(source);
-        // Inside's precondition obligation is proved; its own obligation then waits for the default procedure.
+        // Inside's precondition obligation is proved; its own postcondition, r == Positive(x), is not: a pure callee is known
+        // only through its Spec.Ensures (M6 #173), and Positive has none.
         var inside = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Inside(System.Int32)"));
-        Assert.StartsWith("The contract obligation was not proved", inside.Message, StringComparison.Ordinal);
+        Assert.StartsWith("postcondition of the method", inside.Message, StringComparison.Ordinal);
         var outside = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Outside(System.Int32)"));
         Assert.StartsWith("omega could not prove the goal", outside.Message, StringComparison.Ordinal);
         Assert.Equal("Positive(x)", Text(source, "M:S.Outside(System.Int32)", outside.TacticNode));
     }
 
     [Fact]
-    public void APartialOperationInASpecExpressionWaitsForTheDefaultProcedureAtItsNode()
+    public void APartialOperationInASpecExpressionIsReportedAtItsNode()
     {
         const string source = """
             public static class S
@@ -218,7 +219,8 @@ public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFi
             }
             """;
         var outcome = Assert.IsType<NotProvedOutcome>(Run(source).Find("M:S.Ratio(System.Int32,System.Int32)"));
-        Assert.StartsWith("The well-definedness of a Spec expression", outcome.Message, StringComparison.Ordinal);
+        // b != 0 rules out a zero divisor but not int.MinValue / -1 (M6 U11).
+        Assert.StartsWith("well-definedness of a Spec expression", outcome.Message, StringComparison.Ordinal);
         Assert.Equal("a / b", Text(source, "M:S.Ratio(System.Int32,System.Int32)", outcome.TacticNode));
     }
 

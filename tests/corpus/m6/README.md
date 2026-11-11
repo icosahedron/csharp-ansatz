@@ -5,16 +5,17 @@ It follows the [M4 corpus](../m4/README.md)'s layout: the tests compile these fi
 
 ## Who reads it
 
-Until the default procedure proves contract obligations (plan U11), extraction reads this corpus, and translation reads the members it can take: `MonadicTranslationTests` in `Warrant.Semantics.Tests` (U9) translates the members with no `decimal`, contract or dependency and admits them.
+Extraction reads this corpus, and translation reads the members it can take: `MonadicTranslationTests` in `Warrant.Semantics.Tests` (U9) translates the members with no `decimal`, contract or dependency and admits them.
 `Warrant.Extraction.Tests` (`CorpusTests`, `DiagnoseTests`), `Warrant.Analyzers.Tests` (`CorpusParityTests`) and `Warrant.Semantics.Tests` copy it and check it.
-`Warrant.Engine.Tests` copies it for the differential tests (U13, `Differential/EffectDifferentialTests`), which compare every function without dependencies that translates with the CLR, accepted and refuted alike; its engine corpus runs refuse it (`CorpusTests.TheEngineCorpusRunsDoNotReadTheM6CorpusYet`), and `Warrant.Cli.Tests` pins that it is absent from its output.
-The CLI and cross-check tests do not read it; U11 adds the engine's and the CLI's runs.
+`Warrant.Engine.Tests` runs the members without dependencies through the default procedure (U11, `CorpusTests.EveryM6MemberWithoutDependenciesGetsItsExpectedOutcome`), and copies the corpus for the differential tests (U13, `Differential/EffectDifferentialTests`).
+`Warrant.Cli.Tests` (`M6CorpusTests`) runs `warrant verify` on its files without dependencies.
+The members with dependencies are marked `"awaits": "U19"` and are not run by the engine or the CLI until U19 and U20; the cross-check row comes with U14.
 
 ## Outcomes
 
-Each outcome is, for now, the one extraction decides: `translated` means the member becomes a VIR unit with no diagnostics, and `rejected` lists exactly the diagnostics it gets, as in the M4 corpus.
-U11 replaces each `translated` with the member's proof outcome.
-The directory a member sits in is the outcome it is expected to have then: `accepted/` proves, `refuted/` fails with WRT0001 because an implicit exception (overflow, a zero divisor, a null read) is possible and nothing rules it out (KTD12).
+Each outcome is the member's proof outcome under the default procedure (U11): `translated` means the member's definition and, when it has one, its contract obligation are admitted; `unproved` means WRT0001, with `vc` giving the first failing VC's kind and line and the number of failing VCs, and `goal` that VC's goal after the VC simp set; `rejected` lists exactly the diagnostics a member gets, as in the M4 corpus.
+`accepted/` proves, and `refuted/` fails with WRT0001 because an implicit exception (overflow, a zero divisor, a null read) is possible and nothing rules it out (KTD12).
+In `rejected/`, the methods the rejected members name or call have proof outcomes too: `Scale`'s unguarded division is not proved, and `Kept`'s script (`Tactic.Omega()` on the triple) does not close it.
 
 ## Compilations
 
@@ -31,17 +32,17 @@ These members were rejected in the M4 corpus for a construct M6 supports. U7, U1
 
 | Member | M4 outcome | M6 outcome now |
 |---|---|---|
-| `Corpus.Rejected.Arithmetic.Halve` | WRT0002 `division` | `translated` (accepted) |
-| `Corpus.Rejected.Arithmetic.Remainder` | WRT0002 `remainder` | `translated` (accepted) |
-| `Corpus.Rejected.Statements.Throws` | WRT0002 `throw` | `translated` (accepted) |
-| `Corpus.Rejected.Arithmetic.CheckedAdd` | WRT0002 `checked arithmetic` | `translated` (refuted) |
-| `Corpus.Rejected.Statements.CallsUnverified` | WRT0005 `M:System.Math.Abs(System.Int32)` | `translated` (refuted) |
-| `Corpus.Rejected.CheckedProject.Checked.Add` | WRT0002 `checked arithmetic` | `translated` (checked-project) |
-| `Corpus.Rejected.CheckedProject.Checked.Negate` | WRT0002 `checked arithmetic` | `translated` (checked-project) |
-| `Corpus.Rejected.CheckedProject.Checked.Narrow` | WRT0002 `checked arithmetic` | `translated` (checked-project) |
-| `Corpus.Rejected.Types.NullableParameter` | WRT0002 `nullable type` | `translated` (accepted) |
-| `Corpus.Rejected.Types.ReturnsNull` | WRT0002 `nullable type` | `translated` (accepted) |
-| `Corpus.Rejected.Statements.Decimals` | WRT0002 `decimal` | `translated` (accepted) |
+| `Corpus.Rejected.Arithmetic.Halve` | WRT0002 `division` | proved (accepted) |
+| `Corpus.Rejected.Arithmetic.Remainder` | WRT0002 `remainder` | proved (accepted) |
+| `Corpus.Rejected.Statements.Throws` | WRT0002 `throw` | proved (accepted) |
+| `Corpus.Rejected.Arithmetic.CheckedAdd` | WRT0002 `checked arithmetic` | `unproved` (refuted) |
+| `Corpus.Rejected.Statements.CallsUnverified` | WRT0005 `M:System.Math.Abs(System.Int32)` | `unproved` (refuted) |
+| `Corpus.Rejected.CheckedProject.Checked.Add` | WRT0002 `checked arithmetic` | `unproved` (checked-project) |
+| `Corpus.Rejected.CheckedProject.Checked.Negate` | WRT0002 `checked arithmetic` | `unproved` (checked-project) |
+| `Corpus.Rejected.CheckedProject.Checked.Narrow` | WRT0002 `checked arithmetic` | `unproved` (checked-project) |
+| `Corpus.Rejected.Types.NullableParameter` | WRT0002 `nullable type` | proved (accepted) |
+| `Corpus.Rejected.Types.ReturnsNull` | WRT0002 `nullable type` | proved (accepted) |
+| `Corpus.Rejected.Statements.Decimals` | WRT0002 `decimal` | proved (accepted) |
 | `Corpus.Rejected.Counter.Next` | WRT0002 `instance member of a class` | WRT0002 `member access on this` (rejected): U18 accepts a class's instance methods, and this one reads a field that is not a dependency |
 
 ## Files

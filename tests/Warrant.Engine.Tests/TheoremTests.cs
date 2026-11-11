@@ -732,11 +732,11 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     [Fact]
-    public void AMethodThatCanRaiseHasAnObligationThatIsNotProvedWithoutTheDefaultProcedure()
+    public void AMethodThatCanRaiseHasAnObligationThatTheDefaultProcedureMustProve()
     {
-        // M6 U9 translates a method that can raise into ClrM, and M6 U10 states its contract obligation (KTD12). Without a
-        // [ProofFor] script nothing proves it until M6 U11's default procedure, so it is not proved, never `translated`;
-        // its caller depends on an unproved contract and reports that, not a goal of its own.
+        // M6 U9 translates a method that can raise into ClrM, and M6 U10 states its contract obligation (KTD12). The
+        // default procedure (M6 U11) cannot prove an unguarded division, so it is not proved, never `translated`; its
+        // caller depends on an unproved contract and reports that, not a goal of its own.
         var result = Script("""
             public static class S
             {
@@ -745,8 +745,8 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
             }
             """);
         var ratio = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Ratio(System.Int32,System.Int32)"));
-        Assert.StartsWith("The contract obligation was not proved: " + Pipeline.DefaultProcedurePending, ratio.Message, StringComparison.Ordinal);
-        Assert.Null(ratio.TacticNode);
+        Assert.StartsWith("division by zero: ", ratio.Message, StringComparison.Ordinal);
+        Assert.NotNull(ratio.TacticNode);
         Assert.Contains("a b : Int32", ratio.Goals, StringComparison.Ordinal);
         var twice = Assert.IsType<SkippedOutcome>(result.Find("M:S.Twice(System.Int32,System.Int32)"));
         Assert.Equal("M:S.Ratio(System.Int32,System.Int32)", twice.Dependency);

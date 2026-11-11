@@ -128,6 +128,16 @@ public sealed class ContractObligation
 
     /// <summary>Whether the method can raise, so the program is <c>@f σ params</c> rather than <c>pure (f params)</c>.</summary>
     public bool Raising { get; }
+
+    /// <summary>
+    /// For a method that can raise, its definition's value with each site the VC walker reports at wrapped in metadata
+    /// naming its VIR node (M6 KTD18, <see cref="SiteKey"/>): the same term as the definition once the
+    /// metadata is erased, which the walker checks before it uses it. Null for a pure method.
+    /// </summary>
+    public Expr? Program { get; internal set; }
+
+    /// <summary>The metadata key under which <see cref="Program"/> names a site's VIR node ID (pre-order, docs/m4/04).</summary>
+    public const string SiteKey = "warrant.node";
 }
 
 /// <summary>

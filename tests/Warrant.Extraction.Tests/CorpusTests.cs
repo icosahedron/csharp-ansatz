@@ -69,7 +69,9 @@ public class CorpusTests
             case "translated" or "proved" or "false" or "unproved":
                 Assert.Empty(diagnostics);
                 Assert.NotNull(unit);
-                if (outcome != "translated" && !expected.TryGetProperty("recursive", out _))
+                // A proof outcome is a theorem's, a recursive method's decrease obligation's, or in the M6 corpus a method's
+                // contract obligation's (plan M6 U11).
+                if (outcome != "translated" && !expected.TryGetProperty("recursive", out _) && corpus != "m6")
                 {
                     Assert.Equal(VirUnitKind.Theorem, unit.Unit.Kind);
                 }

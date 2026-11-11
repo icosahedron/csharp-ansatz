@@ -126,6 +126,12 @@ public static partial class Pipeline
             Scope? scope = null;
             var proofs = hit.Declarations.OfType<TheoremDecl>().ToDictionary(d => d.Value.Name, d => d.Value.Proof);
             var outcome = Cancelled(engineUnit) ?? Skip(engineUnit) ?? (scope = new Scope(this, Env, Attributes) { CachedProofs = proofs }).Admit(unit);
+            if (scope is { FellBack: false } && outcome is TranslatedOutcome translated)
+            {
+                // The assumptions the default procedure found (M6 U11, KTD20) come from its walk, which a cached proof skips.
+                var found = hit.Assumptions.Where(a => a.Assumption.Kind is VirAssumptionKind.MayThrow or VirAssumptionKind.CalleeContract && !translated.Assumptions.Contains(a));
+                outcome = translated with { Assumptions = [.. translated.Assumptions, .. found] };
+            }
             outcome = SettleCancel(engineUnit, outcome);
             Outcomes.Add(unit.Key, outcome);
             Elapsed.Add(unit.Key, stopwatch.Elapsed);

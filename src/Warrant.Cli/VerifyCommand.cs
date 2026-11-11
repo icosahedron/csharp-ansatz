@@ -386,11 +386,15 @@ internal static class VerifyCommand
                     }
                     report.Diagnostic("error", FalseOutcome.Code, location, OutcomeText.FalseMessage(name), lines);
                     break;
-                case NotProvedOutcome n:
-                    var spans = engineUnits[unit.Key].Spans;
-                    report.Diagnostic(
-                        "error", NotProvedOutcome.Code, OutcomeText.SpanOf(spans, n.TacticNode) ?? location,
-                        OutcomeText.NotProvedMessage(name, n, spans, report.Sources.Text), OutcomeText.NotProvedDetails(n), n.Goals);
+                case NotProvedOutcome failed:
+                    // A contract obligation reports every VC that failed, each at its node (M6 U11, #90).
+                    foreach (var n in failed.EachFailure())
+                    {
+                        var spans = engineUnits[unit.Key].Spans;
+                        report.Diagnostic(
+                            "error", NotProvedOutcome.Code, OutcomeText.SpanOf(spans, n.TacticNode) ?? location,
+                            OutcomeText.NotProvedMessage(name, n, spans, report.Sources.Text), OutcomeText.NotProvedDetails(n), n.Goals);
+                    }
                     break;
                 case UndecidedOutcome u:
                     report.Diagnostic("error", UndecidedOutcome.Code, location, OutcomeText.UndecidedMessage(u.UnitKind, name, u.Reason));

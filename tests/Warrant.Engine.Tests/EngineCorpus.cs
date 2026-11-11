@@ -29,7 +29,7 @@ public sealed class EngineFixture
 
     /// <summary>
     /// The engine's run over a named corpus compilation, at <see cref="KernelLimits.Corpus"/>: an M4 compilation by its
-    /// name, an M5a one as <c>m5a/name</c>.
+    /// name, an M5a one as <c>m5a/name</c>, an M6 one as <c>m6/name</c>.
     /// </summary>
     public EngineResult Run(string compilation) => Get(compilation).Result;
 
@@ -45,13 +45,10 @@ public sealed class EngineFixture
         {
             if (!_runs.TryGetValue(compilation, out var run))
             {
-                if (compilation.StartsWith("m6/", StringComparison.Ordinal))
-                {
-                    // Only the differential tests read the M6 corpus until U11 gives its members proof outcomes.
-                    throw new ArgumentException($"{compilation}: the engine's M6 corpus runs come with plan M6 U11.", nameof(compilation));
-                }
-                var set = compilation.StartsWith("m5a/", StringComparison.Ordinal) ? CorpusSet.M5a : CorpusSet.M4;
-                var name = set == CorpusSet.M5a ? compilation["m5a/".Length..] : compilation;
+                var set = compilation.StartsWith("m5a/", StringComparison.Ordinal) ? CorpusSet.M5a
+                    : compilation.StartsWith("m6/", StringComparison.Ordinal) ? CorpusSet.M6
+                    : CorpusSet.M4;
+                var name = set == CorpusSet.M4 ? compilation : compilation[(compilation.IndexOf('/', StringComparison.Ordinal) + 1)..];
                 var inputs = EngineCorpus.Inputs(EngineCorpus.Extract(set.Compile(name)));
                 run = (inputs, Pipeline.Run(inputs, Bundle, Options));
                 _runs.Add(compilation, run);

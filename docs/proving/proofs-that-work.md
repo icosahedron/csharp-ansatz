@@ -226,6 +226,99 @@ the effect monad, for its contract obligation (from M6 U10 and U11). These examp
 `DecimalEqualityAndOrderAreProvable` in `tests/Warrant.Engine.Tests/TheoremTests.cs` proves all four
 (`dotnet test tests/Warrant.Engine.Tests --filter DecimalEqualityAndOrderAreProvable`).
 
+## Contracts proved with no script (M6)
+
+A method that can throw, divides, uses checked arithmetic or reads a nullable value, or that states `Spec.Requires` or
+`Spec.Ensures`, has a contract obligation, and the build proves it with no script: the VC walker follows the method's
+program, the VC simp set and `omega` close what it leaves, and each condition that does not close is WRT0001 at the
+operation that produced it, starting with its kind. The examples below are run by
+`tests/Warrant.Engine.Tests/DefaultProcedureTests.cs` (each in a class `S`) and the M6 corpus
+(`tests/corpus/m6/`, `EveryM6MemberWithoutDependenciesGetsItsExpectedOutcome`).
+
+### A division under its precondition
+
+```csharp
+[Verified]
+public static int Ratio(int a, int b)
+{
+    Spec.Requires(b != 0 && b != -1);
+    return a / b;
+}
+```
+
+Proved. `Spec.Requires` rules out both ways C#'s `/` throws: a zero divisor, and `int.MinValue / -1`, which overflows.
+With only `Spec.Requires(b != 0)` the build fails at `a / b` with `overflow in a checked operation`, because
+`int.MinValue / -1` is still possible (`RatioWithoutTheMinusOneGuardFailsAtTheDivisionAsOverflow`).
+
+### A division with nothing to rule out its exceptions
+
+```csharp
+[Verified]
+public static int Ratio(int a, int b) => a / b;
+```
+
+Not proved, with two errors at the division's line (`tests/corpus/m6/refuted/Effects.cs`):
+
+```text
+Effects.cs(10,46): error WRT0001: The contract of 'Effects.Ratio(int, int)' could not be proved: division by zero: omega could not prove the goal:
+  a b : Int32
+  h : b = 0
+  ⊢ False
+Effects.cs(10,46): error WRT0001: The contract of 'Effects.Ratio(int, int)' could not be proved: overflow in a checked operation: omega could not prove the goal:
+```
+
+Each error names the kind of condition, then its path conditions as hypotheses (here, the divisor is zero), then the
+goal left after the VC simp set. A method with no contract still has to prove that no implicit exception happens.
+
+### Checked arithmetic with bounds
+
+```csharp
+[Verified]
+public static int Bounded(int a, int b)
+{
+    Spec.Requires(a > -1000 && a < 1000 && b > -1000 && b < 1000);
+    return checked(a + b);
+}
+```
+
+Proved: the bounds keep the sum inside `int`. With only the upper bounds, `checked(a + b)` can still overflow below
+`int.MinValue`, and the build fails at `a + b` (`CheckedAddProvesWithBothBoundsAndFailsAtThePlusWithOnlyTheUpperOnes`).
+
+### A null guard
+
+```csharp
+[Verified]
+public static int Guarded(Payment? p)
+{
+    if (p is not null)
+    {
+        return p.Id;
+    }
+    return 0;
+}
+```
+
+Proved: the guard is a path condition, so reading `p.Id` cannot meet a null. Without the guard the build fails at `p`
+with `null read`, and passing an unchecked `Payment?` to a method that takes a `Payment` fails with `null passed where
+a non-null value is required` (`ANullDereferenceGuardedByIsNotNullProvesAndAnUnguardedOneFailsAtItsLine`,
+`ANullablePassedWhereANonNullValueIsRequiredProvesOnlyUnderItsGuard`).
+
+### `Spec.Assert`
+
+```csharp
+[Verified]
+public static int Average(int a, int b)
+{
+    Spec.Requires(a >= 0 && a <= 1000 && b >= 0 && b <= 1000);
+    Spec.Assert(a + b >= 0, Tactic.Omega());
+    return (a + b) / 2;
+}
+```
+
+Proved (`tests/corpus/m6/accepted/Contracts.cs`): the asserted fact is a condition at the `Spec.Assert`, proved by its
+script, and the code after it may use it. `Spec.Assert(b != 0); return a / b;` with no `Spec.Requires` fails at the
+`Spec.Assert` line with `Spec.Assert` (`AFailingAssertFailsAtItsLineAndTheDivisionAfterItUsesTheAssertedFact`).
+
 ## A contract proved by a script (M6)
 
 ```csharp
@@ -253,9 +346,10 @@ A method's `Spec.Requires` and `Spec.Ensures` are one obligation, a `Std.Do` tri
 `NonNegative.$contract : ∀ σ x, ⦃⌜True⌝⦄ pure (NonNegative x) ⦃⇓r => ⌜r ≥ 0⌝, allowed⦄`, which the `[ProofFor]` script
 proves from the triple: `Triple.pure` leaves `⌜True⌝ ⊢ₛ ⌜NonNegative x ≥ 0⌝`, and the three `SPred` lemmas turn it into a
 plain goal for `omega`. Once proved, a pure method's contract is also the lemma `NonNegative.$contract_spec : ∀ x,
-NonNegative x ≥ 0`, which a theorem can apply without unfolding the method. Until M6 U11's default procedure, an
-obligation without such a script, or with one that starts with `Tactic.VcGen()`, is reported as not proved, and so is
-every method that can throw. `AProofForScriptProvesAPureMethodsContractAndItsSpecLemmaIsAvailableToCallers` in
+NonNegative x ≥ 0`, which a theorem can apply without unfolding the method. This contract also proves with no script
+(`APureMethodWithAnEnsuresProvesWithNoScript`); a script that starts with `Tactic.VcGen()` runs the walker first and
+gets its conditions as goals, as `Contracts.Same` in the M6 corpus does with `Tactic.VcGen(), Tactic.Omega()`.
+`AProofForScriptProvesAPureMethodsContractAndItsSpecLemmaIsAvailableToCallers` in
 `tests/Warrant.Engine.Tests/ContractTests.cs` runs this example, in a class `S`.
 
 ## Facts about particular inputs (M4)
@@ -281,9 +375,8 @@ diagnostic it must produce (`tests/corpus/m4/expected.json`).
 
 ## What cannot be proved yet
 
-Division and remainder by anything but a constant other than 0 and -1, checked arithmetic, `null`, `string`, `decimal`,
-loops, exceptions, and calls to anything that is not `[Verified]` or modelled are rejected with WRT0002, or, from M6,
-translated but not yet proved about until M6's contract obligations land; [the reference](reference.md#supported-c) lists the subset and
+`string`, loops, `try`, and calls to anything that is not `[Verified]` or modelled are rejected with WRT0002; a
+method that calls a dependency is translated from M6 U19 on; [the reference](reference.md#supported-c) lists the subset and
 the milestone that lifts each limit. A type defined in another assembly cannot appear in verified code, with one
 exception: a `[Closed]` class from a referenced project that imports `Warrant.Build` (even with `WarrantEnabled` false)
 is checked from the source that project recorded, and the assumption report says so. Source generators run as in the compiler, and a call that a generated

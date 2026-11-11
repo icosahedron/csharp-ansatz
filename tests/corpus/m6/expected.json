@@ -42,36 +42,36 @@
       "M:Corpus.M6.Contracts.Average(System.Int32,System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Contracts.Same(System.Int32)": { "outcome": "translated" },
 
-      "M:Corpus.M6.Payments.PaymentService.Validate(Corpus.M6.Payments.Payment)": { "outcome": "translated", "assumeNonNull": ["payment"] },
-      "M:Corpus.M6.Payments.PaymentService.ProcessPayment(System.Int32)": { "outcome": "translated", "assumeNonNull": ["store", "store.GetPayment()", "store.SavePayment()"] },
-      "M:Corpus.M6.Payments.IPaymentStore.GetPayment(System.Int32)": { "outcome": "translated" },
-      "M:Corpus.M6.Payments.IPaymentStore.SavePayment(Corpus.M6.Payments.Payment)": { "outcome": "translated", "assumeNonNull": ["p"] },
+      "M:Corpus.M6.Payments.PaymentService.Validate(Corpus.M6.Payments.Payment)": { "outcome": "translated", "awaits": "U19", "assumeNonNull": ["payment"] },
+      "M:Corpus.M6.Payments.PaymentService.ProcessPayment(System.Int32)": { "outcome": "translated", "awaits": "U19", "assumeNonNull": ["store", "store.GetPayment()", "store.SavePayment()"] },
+      "M:Corpus.M6.Payments.IPaymentStore.GetPayment(System.Int32)": { "outcome": "translated", "awaits": "U19" },
+      "M:Corpus.M6.Payments.IPaymentStore.SavePayment(Corpus.M6.Payments.Payment)": { "outcome": "translated", "awaits": "U19", "assumeNonNull": ["p"] },
 
-      "M:Corpus.M6.Dependencies.OrderService.QuantityOf(System.Int32)": { "outcome": "translated", "assumeNonNull": ["orders", "orders.Find()"] },
-      "M:Corpus.M6.Dependencies.OrderService.Counted(System.Int32)": { "outcome": "translated", "assumeNonNull": ["orders"] },
-      "M:Corpus.M6.Dependencies.OrderService.Reserved(System.Int32)": { "outcome": "translated", "assumeNonNull": ["orders"] },
-      "M:Corpus.M6.Dependencies.IOrders.Find(System.Int32)": { "outcome": "translated" },
-      "M:Corpus.M6.Dependencies.IOrders.Count": { "outcome": "translated" },
-      "M:Corpus.M6.Dependencies.IOrders.Log(System.Int32)": { "outcome": "translated" },
-      "M:Corpus.M6.Dependencies.IOrders.Reserve(System.Int32,System.Int32)": { "outcome": "translated" },
-      "M:System.IDisposable.Dispose": { "outcome": "translated" },
-      "M:Corpus.M6.Dependencies.Steps.Next(System.Int32)": { "outcome": "translated" },
-      "M:Corpus.M6.Dependencies.Steps.Run(System.Int32)": { "outcome": "translated" }
+      "M:Corpus.M6.Dependencies.OrderService.QuantityOf(System.Int32)": { "outcome": "translated", "awaits": "U19", "assumeNonNull": ["orders", "orders.Find()"] },
+      "M:Corpus.M6.Dependencies.OrderService.Counted(System.Int32)": { "outcome": "translated", "awaits": "U19", "assumeNonNull": ["orders"] },
+      "M:Corpus.M6.Dependencies.OrderService.Reserved(System.Int32)": { "outcome": "translated", "awaits": "U19", "assumeNonNull": ["orders"] },
+      "M:Corpus.M6.Dependencies.IOrders.Find(System.Int32)": { "outcome": "translated", "awaits": "U19" },
+      "M:Corpus.M6.Dependencies.IOrders.Count": { "outcome": "translated", "awaits": "U19" },
+      "M:Corpus.M6.Dependencies.IOrders.Log(System.Int32)": { "outcome": "translated", "awaits": "U19" },
+      "M:Corpus.M6.Dependencies.IOrders.Reserve(System.Int32,System.Int32)": { "outcome": "translated", "awaits": "U19" },
+      "M:System.IDisposable.Dispose": { "outcome": "translated", "awaits": "U19" },
+      "M:Corpus.M6.Dependencies.Steps.Next(System.Int32)": { "outcome": "translated", "awaits": "U19" },
+      "M:Corpus.M6.Dependencies.Steps.Run(System.Int32)": { "outcome": "translated", "awaits": "U19" }
     },
     "refuted": {
-      "M:Corpus.Rejected.Arithmetic.CheckedAdd(System.Int32,System.Int32)": { "outcome": "translated" },
-      "M:Corpus.Rejected.Statements.CallsUnverified(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.Rejected.Arithmetic.CheckedAdd(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Arithmetic.cs:10", "count": 1 }, "goal": "case h.left\na b : Int32\nh : a.toInt + b.toInt < -2147483648 ∨ 2147483647 < a.toInt + b.toInt\n⊢ False" },
+      "M:Corpus.Rejected.Statements.CallsUnverified(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Statements.cs:11", "count": 1 }, "goal": "case h.left\nn : Int32\nh : n = Int32.minValue\n⊢ False" },
 
-      "M:Corpus.M6.Refuted.Effects.Ratio(System.Int32,System.Int32)": { "outcome": "translated" },
-      "M:Corpus.M6.Refuted.Effects.Magnitude(System.Int64)": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Effects.Ratio(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "DivisionByZero", "at": "Effects.cs:10", "count": 2 }, "goal": "case h.left\na b : Int32\nh : b = 0\n⊢ False" },
+      "M:Corpus.M6.Refuted.Effects.Magnitude(System.Int64)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Effects.cs:13", "count": 1 }, "goal": "case h.left\na : Int64\nh : a = Int64.minValue\n⊢ False" },
 
-      "M:Corpus.M6.Refuted.Nullables.Read(System.Nullable{System.Int32})": { "outcome": "translated" },
-      "M:Corpus.M6.Refuted.Nullables.Cast(System.Nullable{System.Int64})": { "outcome": "translated" },
+      "M:Corpus.M6.Refuted.Nullables.Read(System.Nullable{System.Int32})": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "NullRead", "at": "Nullables.cs:12", "count": 1 }, "goal": "case h.left\nx : Option Int32\nh : x = Option.none\n⊢ False" },
+      "M:Corpus.M6.Refuted.Nullables.Cast(System.Nullable{System.Int64})": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "NullRead", "at": "Nullables.cs:15", "count": 1 }, "goal": "case h.left\nx : Option Int64\nh : x = Option.none\n⊢ False" },
       "M:Corpus.M6.Refuted.Nullables.Use(Corpus.M6.Refuted.Payment)": { "outcome": "translated", "assumeNonNull": ["payment"] },
-      "M:Corpus.M6.Refuted.Nullables.IdOf(Corpus.M6.Refuted.Payment)": { "outcome": "translated" },
-      "M:Corpus.M6.Refuted.Nullables.Unchecked(Corpus.M6.Refuted.Payment)": { "outcome": "translated" },
-      "M:Corpus.M6.Refuted.Decimals.AddFee(System.Decimal)": { "outcome": "translated" },
-      "M:Corpus.M6.Refuted.Decimals.Difference(System.Decimal,System.Decimal)": { "outcome": "translated" }
+      "M:Corpus.M6.Refuted.Nullables.IdOf(Corpus.M6.Refuted.Payment)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "NullRead", "at": "Nullables.cs:22", "count": 1 }, "goal": "case h.left\npayment : Option Payment?\nh : payment = Option.none\n⊢ False" },
+      "M:Corpus.M6.Refuted.Nullables.Unchecked(Corpus.M6.Refuted.Payment)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "NullPassed", "at": "Nullables.cs:25", "count": 1 }, "goal": "case h.left\npayment : Option Payment?\nh : payment = Option.none\n⊢ False" },
+      "M:Corpus.M6.Refuted.Decimals.AddFee(System.Decimal)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Nullables.cs:32", "count": 1 }, "goal": "case h.left\namount : Warrant.Decimal\nh : Warrant.Decimal.sum amount (Warrant.Decimal.lit Bool.false 125 2 (Eq.refl Bool.true) (Eq.refl Bool.true)) = Option.none\n⊢ False" },
+      "M:Corpus.M6.Refuted.Decimals.Difference(System.Decimal,System.Decimal)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Nullables.cs:35", "count": 1 }, "goal": "case h.left\na b : Warrant.Decimal\nh : Warrant.Decimal.sum a (Warrant.Decimal.neg b) = Option.none\n⊢ False" }
     },
     "rejected": {
       "M:Corpus.M6.Rejected.Effects.ThrowsOdd(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "exception type that is not a System exception or a plain subclass of one" }] },
@@ -97,13 +97,13 @@
       "M:Corpus.M6.Rejected.Contracts.Widened(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Spec.Ensures type argument that is not the return type" }] },
       "M:Corpus.M6.Rejected.Contracts.NoResult(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Spec.Ensures without the result" }] },
       "M:Corpus.M6.Rejected.Contracts.NotALambda(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0004", "construct": "Spec.Ensures whose condition is not a lambda" }] },
-      "M:Corpus.M6.Rejected.Contracts.Scale(System.Int32,System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Contracts.Scale(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "DivisionByZero", "at": "Contracts.cs:77", "count": 2 }, "goal": "case h.left\nx d : Int32\nh : d = 0\n⊢ False" },
       "M:Corpus.M6.Rejected.Contracts.Scaled(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Spec expression calling a raising method" }] },
       "M:Corpus.M6.Rejected.Contracts.Checked(System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Rejected.Contracts.Next(System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Rejected.Contracts.NextIsPositive(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "theorem calling a raising method" }] },
       "M:Corpus.M6.Rejected.Contracts.MissingProof": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "[ProofFor] naming no method" }] },
-      "M:Corpus.M6.Rejected.Contracts.Kept(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Rejected.Contracts.Kept(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "goal": "σ : Type\nx : Int32\n⊢ ⦃⌜True⌝⦄ (Pure.pure (Kept x)) ⦃Prod.mk (fun r => ⌜r = x⌝) (Prod.mk (fun e => ⌜Warrant.ClrExn.Allowed e⌝) PUnit.unit)⦄" },
       "M:Corpus.M6.Rejected.Contracts.KeptAgain": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "second [ProofFor] for a method" }] },
       "M:Corpus.M6.Rejected.Contracts.Bare(System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Rejected.Contracts.BareProof": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "[ProofFor] body that is not Prove.Contract().By(...)" }] },
@@ -143,9 +143,9 @@
       "T:Corpus.M6.Rejected.Dependencies.LaxContract": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "contract member whose nullability differs from its interface" }] }
     },
     "checked-project": {
-      "M:Corpus.Rejected.CheckedProject.Checked.Add(System.Int32,System.Int32)": { "outcome": "translated" },
-      "M:Corpus.Rejected.CheckedProject.Checked.Negate(System.Int32)": { "outcome": "translated" },
-      "M:Corpus.Rejected.CheckedProject.Checked.Narrow(System.Int64)": { "outcome": "translated" }
+      "M:Corpus.Rejected.CheckedProject.Checked.Add(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "CheckedProject.cs:10", "count": 1 }, "goal": "case h.left\na b : Int32\nh : a.toInt + b.toInt < -2147483648 ∨ 2147483647 < a.toInt + b.toInt\n⊢ False" },
+      "M:Corpus.Rejected.CheckedProject.Checked.Negate(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "CheckedProject.cs:13", "count": 1 }, "goal": "case h.left\na : Int32\nh : -a.toInt < -2147483648 ∨ 2147483647 < -a.toInt\n⊢ False" },
+      "M:Corpus.Rejected.CheckedProject.Checked.Narrow(System.Int64)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "CheckedProject.cs:16", "count": 1 }, "goal": "case h.left\na : Int64\nh : a.toInt < -2147483648 ∨ 2147483647 < a.toInt\n⊢ False" }
     }
   }
 }

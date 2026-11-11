@@ -233,7 +233,7 @@ A method that can throw, divides, uses checked arithmetic or reads a nullable va
 program, the VC simp set and `omega` close what it leaves, and each condition that does not close is WRT0001 at the
 operation that produced it, starting with its kind. The examples below are run by
 `tests/Warrant.Engine.Tests/DefaultProcedureTests.cs` (each in a class `S`) and the M6 corpus
-(`tests/corpus/m6/`, `EveryM6MemberWithoutDependenciesGetsItsExpectedOutcome`).
+(`tests/corpus/m6/`, `EveryM6MemberGetsItsExpectedOutcome`).
 
 ### A division under its precondition
 
@@ -351,6 +351,40 @@ NonNegative x ≥ 0`, which a theorem can apply without unfolding the method. Th
 gets its conditions as goals, as `Contracts.Same` in the M6 corpus does with `Tactic.VcGen(), Tactic.Omega()`.
 `AProofForScriptProvesAPureMethodsContractAndItsSpecLemmaIsAvailableToCallers` in
 `tests/Warrant.Engine.Tests/ContractTests.cs` runs this example, in a class `S`.
+
+## A dependency's contract used by a script (M6)
+
+```csharp
+public interface ICounter { int Count(); }
+
+[ContractFor(typeof(ICounter))]
+internal abstract class CounterContract : ICounter
+{
+    public int Count() { Spec.Ensures<int>(r => r >= 0); return default!; }
+}
+
+public sealed class S(ICounter counter)
+{
+    [Verified]
+    public int Size()
+    {
+        Spec.Ensures<int>(r => r >= 0);
+        return counter.Count();
+    }
+
+    [ProofFor(nameof(Size))]
+    static Proof SizeProof() => Prove.Contract().By(Tactic.Unfold(nameof(Size)), Tactic.Exact("counter_Count_spec"));
+}
+```
+
+A method that calls a dependency is proved for every implementation that keeps the dependency's contract: its obligation
+binds one operation per member it calls and takes that member's contract as a hypothesis, `∀ σ (counter_Count : ClrM σ
+Int32), ⦃⌜True⌝⦄ counter_Count ⦃⇓r => ⌜r ≥ 0⌝, allowed⦄ → ⦃⌜True⌝⦄ Size counter_Count ⦃⇓r => ⌜r ≥ 0⌝, allowed⦄`. Here
+`Size` is the call itself, so once unfolded the goal is the hypothesis, named after the dependency and the member with
+`_spec` appended. Until M6 U20 gives the walker a rule for an external call, a dependency obligation without such a
+script is proved only when the VC simp set closes the call's triple from these hypotheses as it stands (this `Size` is
+such a case); otherwise it is WRT0001 with a VC the walker has no rule for. `AProofForScriptProvesADependencyObligationFromTheMembersContract` in
+`tests/Warrant.Engine.Tests/ContractTests.cs` runs this example.
 
 ## Facts about particular inputs (M4)
 

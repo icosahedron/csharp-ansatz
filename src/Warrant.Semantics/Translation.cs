@@ -145,6 +145,12 @@ public sealed class TranslatedUnit
     /// obligation, to prove and admit after <see cref="Declarations"/>; null for other units.
     /// </summary>
     public ContractObligation? Contract { get; init; }
+
+    /// <summary>
+    /// For a contract unit (M6 KTD10), the checks of its <c>Spec</c> calls (KTD25, KTD26); null for other units. The
+    /// contract itself is a hypothesis of each caller's <see cref="Contract"/> (KTD9).
+    /// </summary>
+    public MemberContract? MemberContract { get; init; }
 }
 
 /// <summary>The translation of a set of units (docs/m4/05): declarations in dependency order, and a display-name table.</summary>

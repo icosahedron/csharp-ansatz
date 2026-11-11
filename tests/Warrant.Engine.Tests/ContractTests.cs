@@ -224,6 +224,100 @@ public sealed class ContractTests(EngineFixture engine) : IClassFixture<EngineFi
         Assert.Equal("a / b", Text(source, "M:S.Ratio(System.Int32,System.Int32)", outcome.TacticNode));
     }
 
+    // ---- Dependencies (M6 U19, KTD9, KTD25) ----
+
+    private const string Counter = """
+        public interface ICounter { int Count(); }
+
+        [ContractFor(typeof(ICounter))]
+        internal abstract class CounterContract : ICounter
+        {
+            public int Count() { Spec.Ensures<int>(r => r >= 0); return default!; }
+        }
+
+        public sealed class S(ICounter counter)
+        {
+            [Verified]
+            public int Size()
+            {
+                Spec.Ensures<int>(r => r >= 0);
+                return counter.Count();
+            }
+
+            // The obligation's last binder is Count's contract, which is Size's own once Size is unfolded.
+            [ProofFor(nameof(Size))]
+            static Proof SizeProof() => Prove.Contract().By(Tactic.Unfold(nameof(Size)), Tactic.Exact("counter_Count_spec"));
+        }
+        """;
+
+    [Fact]
+    public void AProofForScriptProvesADependencyObligationFromTheMembersContract()
+    {
+        var result = Run(Counter);
+        var outcome = Assert.IsType<TranslatedOutcome>(result.Find("M:S.Size"));
+        Assert.Equal("Cs.S.Size, Cs.S.Size.$contract", Names(outcome));
+        // The contract unit admits nothing: its contract is a hypothesis of Size's obligation.
+        var contract = Assert.IsType<TranslatedOutcome>(result.Find("M:ICounter.Count"));
+        Assert.Empty(contract.Declarations);
+    }
+
+    /// <summary>
+    /// Without a script the default procedure runs (M6 U11): the walker has no rule for the external call until U20, so the
+    /// call's triple is a leftover, and the VC simp set closes it only when a member's contract hypothesis states it, as here,
+    /// where <c>Size</c> is the call. The kernel checks the proof, as any other.
+    /// </summary>
+    [Fact]
+    public void ADependencyObligationWithoutAScriptIsProvedWhenTheCallsTripleIsTheMembersContract()
+    {
+        var source = Counter.Replace("[ProofFor(nameof(Size))]", "", StringComparison.Ordinal)
+            .Replace("static Proof SizeProof() => Prove.Contract().By(Tactic.Unfold(nameof(Size)), Tactic.Exact(\"counter_Count_spec\"));", "", StringComparison.Ordinal);
+        Assert.DoesNotContain("ProofFor", source, StringComparison.Ordinal);
+        var outcome = Assert.IsType<TranslatedOutcome>(Run(source).Find("M:S.Size"));
+        Assert.Equal("Cs.S.Size, Cs.S.Size.$contract", Names(outcome));
+    }
+
+    [Fact]
+    public void ADependencyObligationWithoutAScriptIsAnUnsupportedVcWithItsOperationsAndHypothesesInTheGoal()
+    {
+        var source = Counter.Replace("[ProofFor(nameof(Size))]", "", StringComparison.Ordinal)
+            .Replace("static Proof SizeProof() => Prove.Contract().By(Tactic.Unfold(nameof(Size)), Tactic.Exact(\"counter_Count_spec\"));", "", StringComparison.Ordinal)
+            .Replace("Spec.Ensures<int>(r => r >= 0);\n        return", "Spec.Ensures<int>(r => r > 0);\n        return", StringComparison.Ordinal);
+        Assert.Contains("r => r > 0", source, StringComparison.Ordinal);
+        var outcome = Assert.IsType<NotProvedOutcome>(Run(source).Find("M:S.Size"));
+        Assert.StartsWith("a program shape the VC walker has no rule for", outcome.Message, StringComparison.Ordinal);
+        // The world, the operation, then its contract, introduced under the names the statement gives them.
+        Assert.StartsWith("σ : Type\ncounter_Count : Warrant.ClrM σ Int32\ncounter_Count_spec : ", outcome.Goals, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AContractMemberWhoseEnsuresAdmitsNoResultIsUnsatisfiableAtItsLine()
+    {
+        const string source = """
+            public interface ICounter { int Count(); }
+
+            [ContractFor(typeof(ICounter))]
+            internal abstract class CounterContract : ICounter
+            {
+                public int Count()
+                {
+                    Spec.Ensures<int>(r => r > 0 && r < 0);
+                    return default!;
+                }
+            }
+
+            public sealed class S(ICounter counter)
+            {
+                [Verified] public int Size() => counter.Count();
+            }
+            """;
+        var result = Run(source);
+        var outcome = Assert.IsType<NotProvedOutcome>(result.Find("M:ICounter.Count"));
+        Assert.StartsWith("The contract is unsatisfiable", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal("Spec.Ensures<int>(r => r > 0 && r < 0);", Text(source, "M:ICounter.Count", outcome.TacticNode));
+        // A method calling the member would hold vacuously after the call, so it is not verified.
+        Assert.IsType<SkippedOutcome>(result.Find("M:S.Size"));
+    }
+
     // ---- The statement is the one Lean elaborates ----
 
     [Fact]

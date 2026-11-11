@@ -269,7 +269,11 @@ interface type whose `[ContractFor]` class is in the same project; the
 interface may come from any assembly. Each member called through a dependency
 gets a contract unit from its contract class. A call returning `Task`,
 `Task<T>`, `ValueTask` or `ValueTask<T>` must be the direct operand of `await`.
-Proving such a method needs M6's translation. These are rejected:
+Such a method is translated with one operation per member it calls and that
+member's contract as a hypothesis of its obligation; until M6 U20 gives the
+walker a rule for an external call, a `[ProofFor]` script proves it, or the
+default procedure when a member's contract states the call's triple as it
+stands. These are rejected:
 
 | Construct | Code | Notes |
 |---|---|---|

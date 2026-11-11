@@ -119,11 +119,13 @@ public static class Translator
         public TranslatedUnit Unit(VirUnit unit, TypeTable types, CalleeEffects callees, string display)
         {
             var name = LeanNames.ForKey(unit.Key);
-            if (unit.Dependencies is { Count: > 0 })
-            {
-                throw new TranslationException(unit.Key, "a unit with external dependencies is not translated until M6 U19.");
-            }
             bool raising = callees.Analysis.IsRaising(unit.Key);
+            if (unit.Dependencies is { Count: > 0 } && (unit.Kind != VirUnitKind.Function || !raising))
+            {
+                // A method that calls a dependency can raise (KTD11); one that lists a dependency it never calls would drop
+                // the dependency's contract unread.
+                throw new TranslationException(unit.Key, "it lists dependencies, but calls none of them.");
+            }
             bool recursive = BodyTranslator.IsRecursive(unit) || callees.Analysis.IsRecursive(unit.Key);
             switch (unit.Kind)
             {
@@ -206,7 +208,20 @@ public static class Translator
                         return new TranslatedUnit(unit.Key, unit.Kind, name, display, decls, null);
                     }
                 case VirUnitKind.Contract:
-                    throw new TranslationException(unit.Key, "a contract unit is not translated until M6 U19.");
+                    {
+                        // M6 KTD10: a contract is never verified and admits nothing; each method that calls the member
+                        // states it as a hypothesis (KTD9). Its own checks are KTD25's and KTD26's.
+                        var member = new BodyTranslator(types, callees).MemberObligations(unit);
+                        foreach (var wd in member.WellDefinedness)
+                        {
+                            Declare(unit.Key, wd.Theorem.Name, $"{display} (well-definedness {wd.Index})", null);
+                        }
+                        foreach (var vacuity in member.Vacuity)
+                        {
+                            Declare(unit.Key, vacuity.Theorem.Name, $"{display} (vacuity {vacuity.Index})", null);
+                        }
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [], null) { MemberContract = member };
+                    }
                 default:
                     throw new TranslationException(unit.Key, $"unknown unit kind {unit.Kind}.");
             }

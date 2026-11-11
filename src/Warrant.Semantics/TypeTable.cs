@@ -26,6 +26,8 @@ internal sealed class TypeTable
         RefType r => Expr.Const(LeanNames.ForKey(Known(r.Key))),
         // T? is Option T (M6 KTD5).
         NullableType n => Nullables.Option(Cic(n.Value)),
+        // A task is not a value: a call returning one is awaited where it is made, and its result is the value (M6 KTD22).
+        TaskType => throw new TranslationException(null, $"a {type} is not a value; only its awaited result is."),
         _ => throw new TranslationException(null, $"unknown type {type}."),
     };
 

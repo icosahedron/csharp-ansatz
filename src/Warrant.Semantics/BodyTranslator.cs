@@ -14,8 +14,8 @@ namespace Warrant.Semantics;
 internal sealed partial class BodyTranslator
 {
     private readonly TypeTable _types;
-    private readonly LocalContext _lctx = new();
-    private readonly NameGenerator _ngen = new(Name.From("_warrant"));
+    private readonly LocalContext _lctx;
+    private readonly NameGenerator _ngen;
     private readonly Dictionary<int, DeclStmt> _locals = [];
     private readonly List<Expr> _params = [];
     private Expr? _self;
@@ -31,9 +31,20 @@ internal sealed partial class BodyTranslator
     private readonly CalleeEffects? _callees;
 
     public BodyTranslator(TypeTable types, CalleeEffects? callees = null)
+        : this(types, callees, new LocalContext(), new NameGenerator(Name.From("_warrant")))
+    {
+    }
+
+    /// <summary>
+    /// A translator that declares its free variables in <paramref name="lctx"/> with <paramref name="ngen"/>, another
+    /// translator's, so a term it builds can sit inside that one's without two free variables sharing a name.
+    /// </summary>
+    private BodyTranslator(TypeTable types, CalleeEffects? callees, LocalContext lctx, NameGenerator ngen)
     {
         _types = types;
         _callees = callees;
+        _lctx = lctx;
+        _ngen = ngen;
     }
 
     /// <summary>A function unit's type (<c>∀</c> over <c>self</c> and the parameters) and value (<c>fun</c> over the same).</summary>
@@ -46,7 +57,11 @@ internal sealed partial class BodyTranslator
         {
             case BlockStmt block:
                 CollectLocals(block);
-                body = Statements(block.Stmts, 0, Env.Empty, new Unreachable(returns));
+                body = Statements(block.Stmts, 0, Env.Empty, End(unit, returns));
+                break;
+            case VirExpr e when ReturnsNothing(unit) && e.Type != VirType.Unit:
+                // `=> F(x)` in a method that returns no value and cannot raise: nothing to run for its effects.
+                body = Init.UnitUnit;
                 break;
             case VirExpr e:
                 CollectLocals(e);
@@ -76,8 +91,12 @@ internal sealed partial class BodyTranslator
         return binders;
     }
 
+    /// <summary>
+    /// The type of a function's value: its return type, a task's result for an <c>async</c> method (M6 KTD22), and
+    /// <c>Unit</c> for one that returns no value.
+    /// </summary>
     private Expr ReturnType(VirUnit unit) =>
-        _types.Cic(unit.Returns ?? throw new TranslationException(unit.Key, "a function has no return type."));
+        _types.Cic(Awaited(unit.Returns ?? throw new TranslationException(unit.Key, "a function has no return type.")));
 
     /// <summary>
     /// A theorem's statement, translated as a condition (docs/m4/06, "The statement"). The parameters become free

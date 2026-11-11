@@ -132,6 +132,8 @@ internal static class Nullables
 /// <item>A call to a unit that can raise is that unit's program, <c>f σ args</c>; a call to a unit with <c>Spec.Requires</c>
 /// is <c>pure (f args)</c> bound, so the VC walker sees the call (KTD11, KTD12).</item>
 /// <item>A non-variable switch discriminant is <c>let</c>-bound, so the walker can case on it.</item>
+/// <item>An external call is its bound operation applied to its arguments, and <c>await</c> binds the awaited call's
+/// program (U19, <c>Dependencies.cs</c>).</item>
 /// <item><c>Spec.Assert(c)</c> is <c>if c then pure () else throw assertFailed</c> (KTD16), and a nullable value used where
 /// a non-nullable one is required is <c>Warrant.Nullable.nonNull</c>, which throws <c>nullReference</c> on null (#163).</item>
 /// </list>
@@ -172,8 +174,10 @@ internal sealed partial class BodyTranslator
     private sealed record Next(Expr ResultM, Func<Expr, Expr> Apply, Name? Name = null);
 
     /// <summary>
-    /// A unit that can raise (KTD11): its type <c>∀ {σ : Type} params, ClrM σ R</c>, and its value, the body's program over
-    /// an opaque world <c>σ</c> (KTD4), which every obligation quantifies over.
+    /// A unit that can raise (KTD11): its type <c>∀ {σ : Type} ops params, ClrM σ R</c>, and its value, the body's program
+    /// over an opaque world <c>σ</c> (KTD4), which every obligation quantifies over, and the operations of its dependencies
+    /// (U19, KTD9). <c>R</c> is a task's result for an <c>async</c> method and <c>Unit</c> for one that returns no value
+    /// (KTD22).
     /// </summary>
     public (Expr Type, Expr Value) MonadicFunction(VirUnit unit)
     {
@@ -187,6 +191,7 @@ internal sealed partial class BodyTranslator
             }
         }
         _sigma = _lctx.MkLocalDecl(_ngen, Name.From("σ"), Expr.Type, BinderInfo.Implicit);
+        var operations = Operations(unit, _sigma);
         var binders = Binders(unit);
         var returns = Monadic.Type(_sigma, ReturnType(unit));
         Expr body;
@@ -194,7 +199,12 @@ internal sealed partial class BodyTranslator
         {
             case BlockStmt block:
                 CollectLocals(block);
-                body = Statements(block.Stmts, 0, Env.Empty, new Unreachable(returns));
+                body = Statements(block.Stmts, 0, Env.Empty, End(unit, returns));
+                break;
+            case VirExpr e when ReturnsNothing(unit) && e.Type != VirType.Unit:
+                // `=> F(x)` in a method that returns no value: F's program run for its effects (KTD22).
+                CollectLocals(e);
+                body = Statements([new EvalStmt(e)], 0, Env.Empty, End(unit, returns));
                 break;
             case VirExpr e:
                 CollectLocals(e);
@@ -203,7 +213,7 @@ internal sealed partial class BodyTranslator
             default:
                 throw new TranslationException(unit.Key, "a function has no body.");
         }
-        List<Expr> all = [_sigma, .. binders];
+        List<Expr> all = [_sigma, .. operations.Select(o => o.Op), .. binders];
         return (_lctx.MkPi(all, returns), _lctx.MkLambda(all, body));
     }
 
@@ -306,7 +316,12 @@ internal sealed partial class BodyTranslator
                 }
                 return CondBound(c.C, env, result, cond =>
                     Emit(Operators.Ite(M(c.Type), cond, Bound(c.Then, env, null), Bound(c.Else, env, null)), c.Type, k));
+            case ExternalCallExpr x when x.Type is not TaskType:
+                return External(x, x.Type, env, result, k);
+            case AwaitExpr a:
+                return Await(a, env, result, k);
             case CallExpr call:
+                RejectCallWithDependencies(call.Target);
                 return BoundAll(call.Args, env, result, args =>
                 {
                     var f = Expr.Const(LeanNames.ForKey(call.Target));

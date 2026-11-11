@@ -5,7 +5,7 @@ namespace Warrant.Cli.Tests;
 /// <summary>
 /// <c>warrant verify</c> on the M6 corpus's members without dependencies (plan M6 U11, as amended by #167), in-process
 /// with no server: contracts proved by the default procedure with no script, and refuted members reported as WRT0001 at
-/// each failing VC's operation, starting with its kind (#90). The files with dependencies come with U19 and U20.
+/// each failing VC's operation, starting with its kind (#90). The files with dependencies translate from U19 on but their methods are not proved until U20 (the engine corpus test pins them unproved), so they are not copied here.
 /// </summary>
 public sealed class M6CorpusTests
 {

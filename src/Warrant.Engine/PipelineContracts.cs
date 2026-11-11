@@ -130,17 +130,11 @@ public static partial class Pipeline
             }
         }
 
-        /// <summary>The names a contract obligation's binders are introduced under: the world, <c>self</c>, then the parameters.</summary>
-        private static List<Name> BinderNames(EngineUnit unit)
-        {
-            List<Name> names = [Name.From("σ")];
-            if (unit.Unit.Self is not null)
-            {
-                names.Add(Name.From("self"));
-            }
-            names.AddRange((unit.Unit.Params ?? VirList<VirParam>.Empty).Select(p => Name.From(p.Name)));
-            return names;
-        }
+        /// <summary>
+        /// The names a contract obligation's binders are introduced under: the world, the operations of its dependencies,
+        /// <c>self</c>, the parameters, then the operations' contracts (M6 U19), as the statement names them.
+        /// </summary>
+        private static List<Name> BinderNames(ContractObligation contract) => [.. contract.BinderNames];
 
         private void CountSearchOnce()
         {
@@ -173,7 +167,7 @@ public static partial class Pipeline
             if (contract.Script is not { } script)
             {
                 return Default(
-                    unit, shell, contract.Binders, BinderNames(unit), null, NewWalker,
+                    unit, shell, contract.Binders, BinderNames(contract), null, NewWalker,
                     (walker, g) => walker.Contract(g, contract.Program, function, contract.Raising), display, assumptions, admitted, budget, meta, printer);
             }
             var recorder = options.TacticTrace is null
@@ -197,7 +191,7 @@ public static partial class Pipeline
                         return [.. walker.Leftovers.Select(walker.Prepare)];
                     },
                 };
-                found = Search(unit, shell, script, BinderNames(unit), display, assumptions, budget, meta, printer, runner, () => []);
+                found = Search(unit, shell, script, BinderNames(contract), display, assumptions, budget, meta, printer, runner, () => []);
             }
             finally
             {
@@ -298,7 +292,9 @@ public static partial class Pipeline
         /// omega under a small budget; if omega finds one, the method fails at that <c>Spec.Requires</c>, since every claim
         /// after it would hold vacuously. Null when no refutation was found, else the unit's outcome.
         /// </summary>
-        private UnitOutcome? Refute(EngineUnit unit, SpecObligation vacuity, string display, ImmutableArray<UnitAssumption> assumptions, TheoremBudget budget)
+        private UnitOutcome? Refute(
+            EngineUnit unit, SpecObligation vacuity, string display, ImmutableArray<UnitAssumption> assumptions, TheoremBudget budget,
+            string message = "The contract is unsatisfiable: no input satisfies this Spec.Requires and the ones before it, so every claim after it would hold vacuously (M6 KTD25).")
         {
             var key = unit.Unit.Key;
             var kind = unit.Unit.Kind;
@@ -326,10 +322,7 @@ public static partial class Pipeline
             {
                 return new InternalErrorOutcome(key, kind, display, assumptions, $"Meta failed unexpectedly: {ex.GetType().Name}: {ex.Message}");
             }
-            return new NotProvedOutcome(
-                key, kind, display, assumptions,
-                "The contract is unsatisfiable: no input satisfies this Spec.Requires and the ones before it, so every claim after it would hold vacuously (M6 KTD25).",
-                "", VirTree.IdOf(unit.Unit, vacuity.Node), []);
+            return new NotProvedOutcome(key, kind, display, assumptions, message, "", VirTree.IdOf(unit.Unit, vacuity.Node), []);
         }
 
         /// <summary>

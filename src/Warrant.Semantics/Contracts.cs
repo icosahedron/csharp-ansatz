@@ -68,9 +68,11 @@ public sealed class SpecObligation
 /// <summary>
 /// A verified method's contract obligation (M6 KTD12), stated by trusted translation, the claim the engine proves:
 /// <code>
-/// f.$contract : ∀ (σ : Type) params, ⦃⌜Requires⌝⦄ program ⦃post⟨fun r =&gt; ⌜Ensures r⌝, fun e =&gt; ⌜ClrExn.Allowed e⌝⟩⦄
+/// f.$contract : ∀ (σ : Type) ops params, hyps → ⦃⌜Requires⌝⦄ program ⦃post⟨fun r =&gt; ⌜Ensures r⌝, fun e =&gt; ⌜ClrExn.Allowed e⌝⟩⦄
 /// </code>
-/// where <c>program</c> is <c>@f σ params</c> for a method that can raise and <c>pure (f params)</c> for a pure one, a
+/// where <c>ops</c> and <c>hyps</c> are the operations of the method's dependencies and their contracts (M6 U19, design
+/// D9, <c>Dependencies.cs</c>), none for a method without, <c>program</c> is <c>@f σ ops params</c> for a method that can
+/// raise and <c>pure (f params)</c> for a pure one, a
 /// missing <c>Requires</c> or <c>Ensures</c> is <c>True</c>, and the exception postcondition allows only an explicit throw
 /// and an exception propagated from a dependency. With it come the well-definedness obligations of its <c>Spec</c>
 /// expressions (KTD26), the vacuity checks of its <c>Spec.Requires</c> (KTD25), and for a pure method with
@@ -81,6 +83,8 @@ public sealed class ContractObligation
     internal ContractObligation(
         TheoremShell theorem,
         int binders,
+        ImmutableArray<Name> binderNames,
+        int operations,
         VirList<TacticNode>? script,
         TheoremShell? spec,
         int specBinders,
@@ -90,6 +94,8 @@ public sealed class ContractObligation
     {
         Theorem = theorem;
         Binders = binders;
+        BinderNames = binderNames;
+        Operations = operations;
         Script = script;
         Spec = spec;
         SpecBinders = specBinders;
@@ -101,8 +107,20 @@ public sealed class ContractObligation
     /// <summary>The obligation, <c>f.$contract</c>.</summary>
     public TheoremShell Theorem { get; }
 
-    /// <summary>The number of binders in front of the triple: the world, <c>self</c> for an instance member, then the parameters.</summary>
+    /// <summary>
+    /// The number of binders in front of the triple: the world, one operation per dependency member the method calls (M6
+    /// U19, KTD9), <c>self</c> for an instance member, the parameters, then one contract hypothesis per operation.
+    /// </summary>
     public int Binders { get; }
+
+    /// <summary>The names of the <see cref="Binders"/> binders, in order, as goals show them once introduced.</summary>
+    public ImmutableArray<Name> BinderNames { get; }
+
+    /// <summary>
+    /// The number of operations, the binders after the world, and so of contract hypotheses, the last binders (M6 U19,
+    /// KTD9): zero for a method without dependencies.
+    /// </summary>
+    public int Operations { get; }
 
     /// <summary>
     /// The script of the method's <c>[ProofFor]</c> method, which replaces the default procedure and starts at the triple
@@ -248,8 +266,11 @@ internal sealed partial class BodyTranslator
         }
         _quantified = true;
         var sigma = _lctx.MkLocalDecl(_ngen, Name.From("σ"), Expr.Type);
+        var operations = Operations(unit, sigma);
         var binders = Binders(unit);
         var returns = ReturnType(unit);
+        // One contract hypothesis per operation, at every argument and every world (M6 U19, KTD9, design D9).
+        var hypotheses = operations.Select(o => _lctx.MkLocalDecl(_ngen, ContractHypothesisName(o), Hypothesis(o, sigma))).ToList();
         var spec = _spec = new SpecState(unit, sigma, binders);
         var vacuity = new List<SpecObligation>();
 
@@ -283,10 +304,12 @@ internal sealed partial class BodyTranslator
         var requiresProp = Triples.Conjunction(pre);
         var ensuresProp = Triples.Conjunction(post);
         var call = Expr.App(Expr.Const(function), [.. binders]);
-        var program = raising ? Expr.App(Expr.Const(function), [sigma, .. binders]) : Monadic.Pure(sigma, returns, call);
+        List<Expr> ops = [.. operations.Select(o => o.Op)];
+        var program = raising ? Expr.App(Expr.Const(function), [sigma, .. ops, .. binders]) : Monadic.Pure(sigma, returns, call);
         var triple = Triples.Triple(sigma, returns, program, Triples.Pure(sigma, requiresProp),
             Triples.Post(sigma, returns, _lctx.MkLambda([r], Triples.Pure(sigma, ensuresProp))));
-        var statement = Closed(_lctx.MkPi([sigma, .. binders], triple));
+        List<Expr> all = [sigma, .. ops, .. binders, .. hypotheses];
+        var statement = Closed(_lctx.MkPi(all, triple));
         var theorem = new TheoremShell(LeanNames.Contract(unit.Key), new Condition(statement, null), null, null);
 
         TheoremShell? specLemma = null;
@@ -305,7 +328,7 @@ internal sealed partial class BodyTranslator
         }
 
         return new ContractObligation(
-            theorem, 1 + binders.Count, unit.Script, specLemma, specBinders,
+            theorem, all.Count, [.. all.Select(x => _lctx.Get(x).UserName)], operations.Count, unit.Script, specLemma, specBinders,
             [.. spec.WellDefinedness], [.. vacuity], raising);
     }
 
@@ -480,6 +503,8 @@ internal sealed partial class BodyTranslator
                 return Literals.Bool(false);
             case PrimitiveType { Kind: VirPrimitive.Int32 or VirPrimitive.Int64 } p:
                 return Literals.Of(p.Kind, 0);
+            case PrimitiveType { Kind: VirPrimitive.Decimal }:
+                return Literals.Decimal(new DecimalLitExpr(false, 0, 0));
             case RefType r when _types.IsRecord(type):
                 return Expr.App(Expr.Const(LeanNames.Constructor(r.Key)), [.. _types.Record(type).Fields.Select(f => Default(f.Type))]);
             case RefType r when _types.IsClosed(type):

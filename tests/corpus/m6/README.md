@@ -5,16 +5,16 @@ It follows the [M4 corpus](../m4/README.md)'s layout: the tests compile these fi
 
 ## Who reads it
 
-Extraction reads this corpus, and translation reads the members it can take: `MonadicTranslationTests` in `Warrant.Semantics.Tests` (U9) translates the members with no `decimal`, contract or dependency and admits them.
+Extraction reads this corpus, and so does translation: `MonadicTranslationTests` in `Warrant.Semantics.Tests` (U9) translates the members with no `decimal`, contract or dependency and admits them, and `DependencyObligationTests` (U19) translates every compilation in full and admits it.
 `Warrant.Extraction.Tests` (`CorpusTests`, `DiagnoseTests`), `Warrant.Analyzers.Tests` (`CorpusParityTests`) and `Warrant.Semantics.Tests` copy it and check it.
-`Warrant.Engine.Tests` runs the members without dependencies through the default procedure (U11, `CorpusTests.EveryM6MemberWithoutDependenciesGetsItsExpectedOutcome`), and copies the corpus for the differential tests (U13, `Differential/EffectDifferentialTests`).
-`Warrant.Cli.Tests` (`M6CorpusTests`) runs `warrant verify` on its files without dependencies.
-The members with dependencies are marked `"awaits": "U19"` and are not run by the engine or the CLI until U19 and U20; the cross-check row comes with U14.
+`Warrant.Engine.Tests` runs every member through the default procedure (U11, U19, `CorpusTests.EveryM6MemberGetsItsExpectedOutcome`), and copies the corpus for the differential tests (U13, `Differential/EffectDifferentialTests`).
+`Warrant.Cli.Tests` (`M6CorpusTests`) runs `warrant verify` on its files without dependencies (U20 adds the others).
+The methods that call a dependency (`ProcessPayment`, `QuantityOf`, `Counted`, `Reserved`) are marked `"awaits": "U20"`: they translate (U19) and their dependencies' contract members pass their KTD25 and KTD26 checks, but the walker has no rule for an external call until U20, so each is `unproved` with one `Unsupported` VC, the first call's triple (`"at": "no line"`: the walker's leftover for the call carries no VIR node yet), for now. U20 is to prove them; the cross-check row comes with U14.
 
 ## Outcomes
 
 Each outcome is the member's proof outcome under the default procedure (U11): `translated` means the member's definition and, when it has one, its contract obligation are admitted; `unproved` means WRT0001, with `vc` giving the first failing VC's kind and line and the number of failing VCs, and `goal` that VC's goal after the VC simp set; `rejected` lists exactly the diagnostics a member gets, as in the M4 corpus.
-`accepted/` proves, and `refuted/` fails with WRT0001 because an implicit exception (overflow, a zero divisor, a null read) is possible and nothing rules it out (KTD12).
+`accepted/` proves, except the four methods awaiting U20, and `refuted/` fails with WRT0001 because an implicit exception (overflow, a zero divisor, a null read) is possible and nothing rules it out (KTD12).
 In `rejected/`, the methods the rejected members name or call have proof outcomes too: `Scale`'s unguarded division is not proved, and `Kept`'s script (`Tactic.Omega()` on the triple) does not close it.
 
 ## Compilations

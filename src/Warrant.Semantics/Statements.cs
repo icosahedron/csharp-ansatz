@@ -36,6 +36,10 @@ internal sealed partial class BodyTranslator
             // `throw new E(…)` raises `thrown "T:E"` (M6 KTD4); control does not reach the rest.
             ThrowStmt t when _sigma is not null => Site(t, Monadic.Throw(_sigma, Monadic.ValueType(k.ResultType), Monadic.Thrown(t.Exception))),
             AssertStmt a when _sigma is not null => Assert(a, env, rest),
+            // A call run for its effects (M6 U19): its program bound and its value dropped. A call that cannot raise has
+            // no effect to keep.
+            EvalStmt e when _sigma is not null => Bound(e.Value, env, new Next(rest.ResultType, _ => rest.Invoke(env))),
+            EvalStmt e when IsPure(e.Value) => rest.Invoke(env),
             // Claims, never run: the contract obligation states them (M6 KTD12, Contracts.cs).
             RequiresStmt or EnsuresStmt when Contracted => rest.Invoke(env),
             RequiresStmt or EnsuresStmt => throw new TranslationException(null, "a contract would be dropped unread: the unit's obligation is not being stated."),
@@ -249,6 +253,24 @@ internal sealed partial class BodyTranslator
         public override IReadOnlySet<int> Reads { get; } = locals.ToHashSet();
 
         public override Expr Invoke(Env env) => Expr.App(joinPoint, [.. locals.Select(env.Get)]);
+    }
+
+    /// <summary>
+    /// What control reaching the end of a method body means: returning nothing, <c>()</c> or <c>pure ()</c>, for a method
+    /// that returns no value (M6 KTD22, U19), and otherwise a translation error, since extraction rejects a body that can
+    /// fall off its end.
+    /// </summary>
+    private Continuation End(VirUnit unit, Expr returns) =>
+        !ReturnsNothing(unit) ? new Unreachable(returns)
+        : _sigma is null ? new Returns(returns, Init.UnitUnit)
+        : new Returns(returns, Monadic.Pure(_sigma, Init.Unit, Init.UnitUnit));
+
+    /// <summary>The end of a method that returns no value: its fixed result, a leaf that may be copied.</summary>
+    private sealed class Returns(Expr type, Expr value) : Continuation(type)
+    {
+        public override IReadOnlySet<int> Reads { get; } = new HashSet<int>();
+
+        public override Expr Invoke(Env env) => value;
     }
 
     /// <summary>The end of a method body or of a branch that returns on every path; reaching it is a translation error.</summary>

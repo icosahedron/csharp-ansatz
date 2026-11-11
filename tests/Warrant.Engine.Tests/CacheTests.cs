@@ -474,6 +474,71 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
     }
 
     [Fact]
+    public void AnEditedContractClassMemberInvalidatesTheCachedObligationOfEveryMethodThatCallsIt()
+    {
+        // M6 U19, #166: a method that calls a dependency member depends on its contract unit, whose Spec calls are the
+        // hypothesis its obligation is proved from, so changing or removing them must never leave a cached verdict.
+        const string source = """
+            public interface ICounter { int Count(); }
+
+            [ContractFor(typeof(ICounter))]
+            internal abstract class CounterContract : ICounter
+            {
+                public int Count() { Spec.Ensures<int>(r => r >= 0); return default!; }
+            }
+
+            public sealed class S(ICounter counter)
+            {
+                [Verified]
+                public int Size()
+                {
+                    Spec.Ensures<int>(r => r >= 0);
+                    return counter.Count();
+                }
+
+                [ProofFor(nameof(Size))]
+                static Proof SizeProof() => Prove.Contract().By(Tactic.Unfold(nameof(Size)), Tactic.Exact("counter_Count_spec"));
+
+                [Verified]
+                public int Again()
+                {
+                    Spec.Ensures<int>(r => r >= 0);
+                    return counter.Count();
+                }
+
+                [ProofFor(nameof(Again))]
+                static Proof AgainProof() => Prove.Contract().By(Tactic.Unfold(nameof(Again)), Tactic.Exact("counter_Count_spec"));
+            }
+            """;
+        const string size = "M:S.Size";
+        const string again = "M:S.Again";
+        var units = Units(source);
+        var cold = NewService().Verify(Request(units));
+        Assert.Equal(OutcomeKind.Translated, Result(cold, size).Outcome.Kind);
+        Assert.Equal(OutcomeKind.Translated, Result(cold, again).Outcome.Kind);
+        var warm = NewService().Verify(Request(units));
+        Assert.True(Result(warm, size).FromCache);
+        Assert.True(Result(warm, again).FromCache);
+
+        foreach (var edited in new[] { "Spec.Ensures<int>(r => r >= -1); return default!;", "return default!;" })
+        {
+            var changed = Units(source.Replace("Spec.Ensures<int>(r => r >= 0); return default!;", edited, StringComparison.Ordinal));
+            foreach (var key in new[] { size, again })
+            {
+                Assert.NotEqual(KeyOf(units, key), KeyOf(changed, key));
+            }
+            var response = NewService().Verify(Request(changed));
+            foreach (var key in new[] { size, again })
+            {
+                // Proved again from the weaker contract, which no longer gives r >= 0: a stale entry would say it holds.
+                var result = Result(response, key);
+                Assert.False(result.FromCache, key);
+                Assert.Equal(OutcomeKind.NotProved, result.Outcome.Kind);
+            }
+        }
+    }
+
+    [Fact]
     public void ATheoremThatMissesNextToTheCachedLemmaItNamesIsProvedAsInAColdRun()
     {
         const string source = """

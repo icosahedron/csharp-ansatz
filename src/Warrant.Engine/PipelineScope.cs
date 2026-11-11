@@ -111,6 +111,46 @@ public static partial class Pipeline
                 // M6 KTD12: the definition, then its contract obligation, as a recursive method's decrease proofs.
                 return AdmitContract(unit, translated, contract, assumptions, admitted, definitionBudget);
             }
+            if (translated.MemberContract is { } member)
+            {
+                return AdmitMemberContract(unit, translated, member, assumptions, admitted, definitionBudget);
+            }
+            return new TranslatedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, [.. admitted]);
+        }
+
+        /// <summary>
+        /// A contract-class member's checks (M6 U19): each of its <c>Spec</c> calls checked not to be unsatisfiable together
+        /// with the ones before it (KTD25), then the well-definedness of its <c>Spec</c> expressions (KTD26). The contract
+        /// itself is never proved: it is a hypothesis of each caller's obligation (KTD9).
+        /// </summary>
+        private UnitOutcome AdmitMemberContract(
+            EngineUnit unit,
+            TranslatedUnit translated,
+            MemberContract member,
+            ImmutableArray<UnitAssumption> assumptions,
+            List<KernelDeclaration> admitted,
+            TheoremBudget budget)
+        {
+            var display = translated.DisplayName;
+            if (CachedProofs is null)
+            {
+                foreach (var vacuity in member.Vacuity)
+                {
+                    const string unsatisfiable = "The contract is unsatisfiable: no result satisfies this Spec call together with the ones before it, so every method that calls the member would hold vacuously after the call (M6 KTD25).";
+                    if (Refute(unit, vacuity, display, assumptions, budget, unsatisfiable) is { } refuted)
+                    {
+                        return refuted;
+                    }
+                }
+            }
+            foreach (var wd in member.WellDefinedness)
+            {
+                UnitOutcome? Prove() => ProveWellDefined(unit, wd, display, assumptions, admitted, budget);
+                if ((CachedProofs is null ? Prove() : AdmitCached(unit, wd.Theorem, display, assumptions, admitted, budget, Prove)) is { } failure)
+                {
+                    return failure;
+                }
+            }
             return new TranslatedOutcome(unit.Unit.Key, unit.Unit.Kind, display, assumptions, [.. admitted]);
         }
 

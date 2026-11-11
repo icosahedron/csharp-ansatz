@@ -24,7 +24,7 @@ public sealed record Condition(Expr Prop, Expr? Instance)
 /// </summary>
 public static class Literals
 {
-    /// <summary>The CIC type of a primitive: <c>Int32</c>, <c>Int64</c>, <c>Bool</c> or <c>Warrant.Decimal</c> (M6 KTD7).</summary>
+    /// <summary>The CIC type of a primitive: <c>Int32</c>, <c>Int64</c>, <c>Bool</c>, <c>Warrant.Decimal</c> (M6 KTD7) or <c>Unit</c> (M6 KTD22).</summary>
     /// <param name="type">The primitive.</param>
     /// <returns>The type.</returns>
     public static Expr Type(VirPrimitive type) => type switch
@@ -33,7 +33,8 @@ public static class Literals
         VirPrimitive.Int64 => Init.Int64,
         VirPrimitive.Bool => Init.Bool,
         VirPrimitive.Decimal => Init.Decimal,
-        VirPrimitive.Unit => throw new TranslationException(null, "a method that returns no value is not translated until M6 U19."),
+        // What a method that returns no value returns, and a void, Task or ValueTask member's result (M6 KTD22).
+        VirPrimitive.Unit => Init.Unit,
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

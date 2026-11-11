@@ -10,14 +10,14 @@ namespace Warrant.Engine.Tests;
 public sealed class CorpusTests(EngineFixture engine) : IClassFixture<EngineFixture>
 {
     /// <summary>
-    /// The M6 corpus's members without dependencies (plan M6 U11, as amended by #167) get their expected.json outcome
-    /// from extraction through the default procedure: <c>accepted/</c> proves (a proved contract is a translated unit
-    /// with its <c>$contract</c>), and <c>refuted/</c> fails with WRT0001 with the expected VC kind at the expected line.
-    /// Members marked <c>"awaits": "U19"</c> have dependencies, which translation takes from U19 on, so they are not
-    /// checked here yet.
+    /// Every M6 corpus member (plan M6 U11, as amended by #167, and U19) gets its expected.json outcome from extraction
+    /// through the default procedure: <c>accepted/</c> proves (a proved contract is a translated unit with its
+    /// <c>$contract</c>), and <c>refuted/</c> fails with WRT0001 with the expected VC kind at the expected line. A method
+    /// with dependencies (marked <c>"awaits": "U20"</c>) translates and its contract members pass their checks, but its
+    /// obligation is not proved: the walker has no rule for an external call until U20, so it is pinned as unproved.
     /// </summary>
     [Fact]
-    public void EveryM6MemberWithoutDependenciesGetsItsExpectedOutcome()
+    public void EveryM6MemberGetsItsExpectedOutcome()
     {
         var set = CorpusSet.M6;
         var mismatches = new List<string>();
@@ -29,10 +29,6 @@ public sealed class CorpusTests(EngineFixture engine) : IClassFixture<EngineFixt
             var expected = set.Expected.GetProperty("members").GetProperty(compilation);
             foreach (var member in expected.EnumerateObject())
             {
-                if (member.Value.TryGetProperty("awaits", out _))
-                {
-                    continue;
-                }
                 members++;
                 var actual = result.Find(member.Name);
                 mismatches.AddRange(Compare(member.Name, member.Value, actual, extraction.DiagnosticsFor(member.Name)));
@@ -51,7 +47,7 @@ public sealed class CorpusTests(EngineFixture engine) : IClassFixture<EngineFixt
             }
         }
         Assert.True(mismatches.Count == 0, string.Join("\n", mismatches));
-        Assert.Equal(108, members);
+        Assert.Equal(122, members);
     }
 
     [Fact]

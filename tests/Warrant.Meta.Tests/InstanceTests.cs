@@ -109,6 +109,36 @@ public sealed class InstanceTests(AttributeSidecarFixture fixture) : IClassFixtu
     }
 
     [Fact]
+    public void ApplySynthesizesAnInstanceArgumentUnificationLeavesUnassigned()
+    {
+        // of_decide_eq_true : ∀ {p : Prop} [inst : Decidable p], decide p = true → p. The goal fixes p but not inst, which
+        // Apply synthesizes as Lean's synthAppInstances does (M6 U3).
+        var m = NewMeta();
+        var max = C("Int32.maxValue");
+        var statement = Expr.App(C("Eq", Level.One), Int32T, max, max);
+        var goal = m.MkFreshExprSyntheticOpaqueMVar(statement);
+        var rest = Assert.Single(m.ApplyConst(goal.Id, N("of_decide_eq_true")));
+        Assert.Empty(m.ApplyConst(rest, N("Eq.refl")));
+        var proof = m.InstantiateMVars(goal);
+        Assert.Equal(Expr.App(C("instDecidableEqInt32"), max, max), proof.GetAppArgs()[1]);
+        KernelThread.Run(() => Kernel.Kernel.Add(fixture.Bundle.Fork(), new TheoremDecl(new TheoremInfo(N("t"), [], statement, proof, [N("t")]))));
+    }
+
+    [Fact]
+    public void ApplyRejectsAnInstanceArgumentWithNoInstance()
+    {
+        var m = NewMeta();
+        m.WithLocalDeclD(N("q"), Expr.Prop, q =>
+        {
+            // No instance decides an opaque proposition.
+            var goal = m.MkFreshExprSyntheticOpaqueMVar(q);
+            var ex = Assert.Throws<TacticException>(() => m.ApplyConst(goal.Id, N("of_decide_eq_true")));
+            Assert.Equal("Tactic `apply` failed: failed to synthesize\n  Decidable q", ex.Message);
+            return 0;
+        });
+    }
+
+    [Fact]
     public void UnificationSynthesizesAPendingInstance()
     {
         var m = NewMeta();

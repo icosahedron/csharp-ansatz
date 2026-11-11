@@ -87,6 +87,33 @@ internal static class Init
     public static readonly Expr BoolXor = C("Bool.xor");
     public static readonly Expr NatBeq = C("Nat.beq");
 
+    // The effect core (M6 U3; plan M6 KTD4, KTD6, lean/Warrant/Effect.lean and Checked.lean): the effect monad, its
+    // exceptions and throw, and the raising integer models, which the monadic translation (M6 U9) emits. None is universe
+    // polymorphic: the world and every value live in Type.
+    public static readonly Expr ClrM = C("Warrant.ClrM");
+    public static readonly Expr ClrExn = C("Warrant.ClrExn");
+    public static readonly Expr ClrMThrow = C("Warrant.ClrM.throw");
+    public static readonly Expr ClrExnOverflow = C("Warrant.ClrExn.overflow");
+    public static readonly Expr ClrExnDivideByZero = C("Warrant.ClrExn.divideByZero");
+    public static readonly Expr ClrExnNullReference = C("Warrant.ClrExn.nullReference");
+    public static readonly Expr ClrExnInvalidOperation = C("Warrant.ClrExn.invalidOperation");
+    public static readonly Expr ClrExnAssertFailed = C("Warrant.ClrExn.assertFailed");
+    public static readonly Expr ClrExnThrown = C("Warrant.ClrExn.thrown");
+    public static readonly Expr ClrExnExternal = C("Warrant.ClrExn.external");
+    public static readonly Expr Int32AddChecked = C("Warrant.Int32.addChecked");
+    public static readonly Expr Int32SubChecked = C("Warrant.Int32.subChecked");
+    public static readonly Expr Int32MulChecked = C("Warrant.Int32.mulChecked");
+    public static readonly Expr Int32NegChecked = C("Warrant.Int32.negChecked");
+    public static readonly Expr Int32Div = C("Warrant.Int32.div");
+    public static readonly Expr Int32Rem = C("Warrant.Int32.rem");
+    public static readonly Expr Int64AddChecked = C("Warrant.Int64.addChecked");
+    public static readonly Expr Int64SubChecked = C("Warrant.Int64.subChecked");
+    public static readonly Expr Int64MulChecked = C("Warrant.Int64.mulChecked");
+    public static readonly Expr Int64NegChecked = C("Warrant.Int64.negChecked");
+    public static readonly Expr Int64Div = C("Warrant.Int64.div");
+    public static readonly Expr Int64Rem = C("Warrant.Int64.rem");
+    public static readonly Expr Int64ToInt32Checked = C("Warrant.Int64.toInt32Checked");
+
     /// <summary>The binder name of a constant function's or an implication's unused argument.</summary>
     public static readonly Name Unused = Name.From("x");
 

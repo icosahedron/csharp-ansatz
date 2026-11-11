@@ -518,3 +518,58 @@ Std.Do.PredTrans.apply_pushArg
 Std.Do.PredTrans.apply_pushExcept
 Std.Do.PredTrans.apply_dite
 Std.Do.PredTrans.apply_ite
+
+# The effect core (M6 U3; plan M6 KTD4, lean/Warrant/Effect.lean): the effect monad, its exceptions with each
+# constructor the monadic translation emits (U9), and throw with its spec (Std.Do.Spec.throw_ExceptT does not unify
+# with ClrM's WP instance).
+Warrant.ClrExn
+Warrant.ClrExn.overflow
+Warrant.ClrExn.divideByZero
+Warrant.ClrExn.nullReference
+Warrant.ClrExn.invalidOperation
+Warrant.ClrExn.assertFailed
+Warrant.ClrExn.thrown
+Warrant.ClrExn.external
+Warrant.ClrM
+Warrant.ClrM.throw
+Warrant.ClrM.throw_spec
+# The exceptions a contract's exception postcondition allows (KTD12), and its equations for the VC simp set (KTD14):
+Warrant.ClrExn.Allowed
+Warrant.ClrExn.allowed_overflow
+Warrant.ClrExn.allowed_divideByZero
+Warrant.ClrExn.allowed_nullReference
+Warrant.ClrExn.allowed_invalidOperation
+Warrant.ClrExn.allowed_assertFailed
+Warrant.ClrExn.allowed_thrown
+Warrant.ClrExn.allowed_external
+# The VC walker's branch rules, which Std.Do lacks, and the consequence rule's postcondition half (KTD13):
+Warrant.Triple.ite
+Warrant.Triple.dite
+Std.Do.PostCond.entails.mk
+# The raising integer models and their @[spec] lemmas (KTD6, KTD15, lean/Warrant/Checked.lean):
+Warrant.Int32.addChecked
+Warrant.Int32.addChecked_spec
+Warrant.Int32.subChecked
+Warrant.Int32.subChecked_spec
+Warrant.Int32.mulChecked
+Warrant.Int32.mulChecked_spec
+Warrant.Int32.negChecked
+Warrant.Int32.negChecked_spec
+Warrant.Int32.div
+Warrant.Int32.div_spec
+Warrant.Int32.rem
+Warrant.Int32.rem_spec
+Warrant.Int64.addChecked
+Warrant.Int64.addChecked_spec
+Warrant.Int64.subChecked
+Warrant.Int64.subChecked_spec
+Warrant.Int64.mulChecked
+Warrant.Int64.mulChecked_spec
+Warrant.Int64.negChecked
+Warrant.Int64.negChecked_spec
+Warrant.Int64.div
+Warrant.Int64.div_spec
+Warrant.Int64.rem
+Warrant.Int64.rem_spec
+Warrant.Int64.toInt32Checked
+Warrant.Int64.toInt32Checked_spec

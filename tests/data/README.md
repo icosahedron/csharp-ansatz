@@ -9,7 +9,7 @@ lean4export NDJSON files used by the reader, writer and (later) kernel tests.
 | `arena/001_basicDef`, `002_badDef`, `141_falseFromUnsafe`, `proj-of-subst-prop`, `rec-of-subst-prop` | 3.1.0 | [leanprover/lean-kernel-arena](https://github.com/leanprover/lean-kernel-arena), via Ansatz `test-data/arena/` | Apache-2.0 |
 | `arena/forged-quot-ind.ndjson`, `arena/inductive-undeclared-universe.ndjson` | 3.1.0 | [leanprover/lean-kernel-arena](https://github.com/leanprover/lean-kernel-arena) tests `bugs/forged-quot-ind` and `other/inductive-undeclared-universe` at commit `236ab46` (SHA-256 as in its `results.json`): regression fixtures for the cross-kernel disagreements in `docs/kernel.md` (Ansatz and nanoda accept them; Warrant must reject) | Apache-2.0 |
 | `arena/sparse-name-index.ndjson` | 3.1.0 | Hand-written by Ansatz (`test-data/arena/`): non-contiguous table indices | Apache-2.0 |
-| `warrant-semantics.ndjson.gz` | 3.1.0 | Exported from this repository's `lean/` by `scripts/export-semantics.sh` with Lean 4.35.0 and lean4export `5a9a355`: the semantics library and its 456 roots (`lean/bundle-roots.txt`) with their dependency closure, including the `Std.Do` triples, weakest preconditions and `@[spec]` lemmas M6's contracts use (M6 U1), exported with `--export-mdata` so `no_index` annotations survive. The M4 tests load it instead of init-medium, which is a Lean 4.33.1 subset without `Int32` or `Int64`. | Apache-2.0 (Lean 4, Warrant) |
+| `warrant-semantics.ndjson.gz` | 3.1.0 | Exported from this repository's `lean/` by `scripts/export-semantics.sh` with Lean 4.35.0 and lean4export `5a9a355`: the semantics library and its 504 roots (`lean/bundle-roots.txt`) with their dependency closure, including the `Std.Do` triples, weakest preconditions and `@[spec]` lemmas M6's contracts use (M6 U1) and the effect monad `ClrM` with its raising integer models (M6 U3), exported with `--export-mdata` so `no_index` annotations survive. The M4 tests load it instead of init-medium, which is a Lean 4.33.1 subset without `Int32` or `Int64`. | Apache-2.0 (Lean 4, Warrant) |
 | `warrant-attributes.ndjson.gz` | sidecar 2 | Exported by `scripts/export-attributes.sh` (`tools/warrant-attrs/Main.lean`) with Lean 4.35.0 from `Init` and `lean/`: the simp, congr, instance, reducibility, defeq, matcher, class and `@[spec]` entries of the bundle's constants (plan KTD9, docs/m5a/05; `spec`, M6 KTD15). Not a lean4export file. | Apache-2.0 (Lean 4, Warrant) |
 
 Several arena files contain declarations a kernel **must reject** (for example
@@ -35,7 +35,7 @@ the raw JSON. These are the values asserted in `ReaderCorpusTests`.
 | `proj-of-subst-prop` | 708 | 18 | 4,030 | 110 | 0/63/26/2/0/19/23/19 = 152 |
 | `rec-of-subst-prop` | 776 | 18 | 4,203 | 127 | 1/76/25/3/0/22/25/22 = 174 |
 | `sparse-name-index` | 1 | 0 | 1 | 1 | 1/0/0/0/0/0/0/0 = 1 |
-| `warrant-semantics` | 20,526 | 83 | 288,338 | 3,633 | 3/1254/2241/1/4/130/155/132 = 3,920 |
+| `warrant-semantics` | 20,708 | 83 | 292,683 | 3,678 | 3/1274/2265/1/4/131/162/133 = 3,973 |
 
 ### The `Std.Do` roots (M6 U1)
 
@@ -70,6 +70,23 @@ logical cores), seven alternating cold starts of the U1 and U2 CLIs built in Rel
 The new roots cost about 1.0 s (32%) of start time. That is under M6 KTD3's 5 s threshold, with 0.85 s left for U3,
 U16 and U4.
 
+### The effect core (M6 U3)
+
+M6 U3's roots (`lean/Warrant/Effect.lean`'s `ClrExn`, `ClrM`, throw, `ClrExn.Allowed` and the `ite`/`dite` triple
+rules, `Std.Do.PostCond.entails.mk`, and `lean/Warrant/Checked.lean`'s raising integer models with their `@[spec]`
+lemmas) grew the bundle from 3,920 to 3,973 constants (3,633 to 3,678 declaration records), with no new axiom and no
+new pinned declaration: the proofs reuse what U1 and U2 already brought in. Measured on 2026-11-10 on the reference
+workstation, seven alternating cold starts of the U2 and U3 CLIs built in Release, as above:
+
+| Bundle | Server start, median (range) | GC heap after the request |
+|---|---|---|
+| M6 U2, 3,920 constants | 4,303 ms (3,793–4,415) | 41–48 MB |
+| M6 U3, 3,973 constants | 4,217 ms (3,943–4,591) | 44–50 MB |
+
+The difference is within the run-to-run noise (an earlier pair of runs in the same session gave 4,461 and 4,289 ms).
+U3 stays under M6 KTD3's 5 s threshold; U2's bundle measured 0.15 s slower here than on 2026-11-10, so the headroom
+for U16 and U4 is about 0.7 s against this session's figures.
+
 Regenerate `warrant-semantics.ndjson.gz` with `scripts/export-semantics.sh` after changing `lean/`.
 The export is deterministic: an unchanged library gives a byte-identical file.
 
@@ -86,11 +103,11 @@ constant of the bundle. `tools/warrant-attrs/Main.lean` documents each kind's fi
 | `simp` (default simp set, with priority, direction, `←` and Lean's keys) | 528 |
 | `congr` | 3 |
 | `instance` (with class, priority and declaration order) | 199 |
-| `reducibility` (every status other than semireducible) | 713 |
-| `defeq` | 78 |
-| `matcher` | 395 |
+| `reducibility` (every status other than semireducible) | 718 |
+| `defeq` | 85 |
+| `matcher` | 396 |
 | `class` (with out-parameter positions) | 77 |
-| `spec` (`mvcgen`'s `@[spec]` lemmas, triple or equation, with priority; format 2) | 13 |
+| `spec` (`mvcgen`'s `@[spec]` lemmas, triple or equation, with priority; format 2): 13 from `Std.Do`, 14 of M6 U3 (`ClrM.throw` and the raising models) | 27 |
 
 Regenerate it with `scripts/export-attributes.sh` after regenerating the bundle.
 The export is deterministic: an unchanged library and bundle give a byte-identical file.

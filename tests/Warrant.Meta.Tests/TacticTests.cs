@@ -129,16 +129,15 @@ public sealed class TacticTests(SemanticsBundleFixture bundle) : IClassFixture<S
     }
 
     [Fact]
-    public void ApplyFailsClearlyWhenAnInstanceArgumentStaysUnassigned()
+    public void ApplyFailsClearlyWhenNoInstanceIsFound()
     {
-        // of_decide_eq_true : ∀ {p : Prop} [inst : Decidable p], decide p = true → p. The goal fixes p but not inst, which
-        // only instance synthesis (U16) could find.
+        // of_decide_eq_true : ∀ {p : Prop} [inst : Decidable p], decide p = true → p. The goal fixes p but not inst, and
+        // without the attribute sidecar there is no instance to synthesize it from (InstanceTests has the sidecar).
         var max = Expr.Const(N("Int32.maxValue"));
         var (m, t, _) = Start(Eq(Int32, max, max));
 
         var ex = Assert.Throws<TacticException>(() => t.LiftMetaTactic(g => m.ApplyConst(g, N("of_decide_eq_true"))));
-        Assert.StartsWith("Tactic `apply` failed: failed to synthesize instance\n  Decidable (", ex.Message, StringComparison.Ordinal);
-        Assert.EndsWith("instance synthesis is not available yet, so an instance argument must be determined by the goal", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("Tactic `apply` failed: failed to synthesize\n  Decidable (Int32.maxValue = Int32.maxValue)", ex.Message);
     }
 
     [Fact]

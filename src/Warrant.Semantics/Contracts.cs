@@ -411,13 +411,15 @@ internal sealed partial class BodyTranslator
 
     /// <summary>
     /// Whether <paramref name="e"/> is <c>+</c>, <c>-</c> or <c>*</c> on <c>int</c> or <c>long</c>, or unary <c>-</c> on
-    /// one, which a <c>Spec</c> expression treats as partial even where C# would wrap (#183): its value is the wrapped one,
-    /// and its well-definedness obligation says it does not overflow. An explicit cast is left as written.
+    /// one, in C#'s default context (<see cref="VirOverflow.Wrap"/>), which a <c>Spec</c> expression treats as partial even
+    /// where C# would wrap (#183): its value is the wrapped one, and its well-definedness obligation says it does not
+    /// overflow. Explicit <c>unchecked</c> arithmetic wraps on purpose and has none (#236); an explicit cast is left as
+    /// written.
     /// </summary>
     private static bool SpecOverflows(VirExpr e) => e switch
     {
-        BinaryExpr { Op: BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul } b => b.Type == VirType.Int32 || b.Type == VirType.Int64,
-        UnaryExpr { Op: UnaryOp.Neg } u => u.Type == VirType.Int32 || u.Type == VirType.Int64,
+        BinaryExpr { Op: BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul, Overflow: VirOverflow.Wrap } b => b.Type == VirType.Int32 || b.Type == VirType.Int64,
+        UnaryExpr { Op: UnaryOp.Neg, Overflow: VirOverflow.Wrap } u => u.Type == VirType.Int32 || u.Type == VirType.Int64,
         _ => false,
     };
 

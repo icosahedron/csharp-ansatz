@@ -26,6 +26,7 @@ internal static class VirSpelling
     {
         VirOverflow.Wrap => "wrap",
         VirOverflow.Checked => "checked",
+        VirOverflow.Unchecked => "unchecked",
         _ => throw Bad(overflow),
     };
 

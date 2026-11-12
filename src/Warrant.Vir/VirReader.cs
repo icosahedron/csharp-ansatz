@@ -98,7 +98,9 @@ public static class VirReader
     }
 
     private static VirFacts Facts(JsonElement e) => new(
-        Parse<VirOverflow>(Str(e, "overflow"), VirSpelling.Of),
+        Parse<VirOverflow>(Str(e, "overflow"), VirSpelling.Of) is var overflow && overflow != VirOverflow.Unchecked
+            ? overflow
+            : throw new FormatException("A unit's facts give the project's overflow setting, 'wrap' or 'checked', never 'unchecked'."),
         Str(e, "language"),
         Str(e, "extractor"),
         Str(e, "roslyn"));

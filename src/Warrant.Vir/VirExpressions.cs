@@ -40,14 +40,14 @@ public sealed record SelfExpr(VirType Type) : VirExpr(Type);
 /// <summary><c>unary{op, overflow}</c>.</summary>
 /// <param name="Type">The result type, equal to the operand's.</param>
 /// <param name="Op">The operator.</param>
-/// <param name="Overflow">Overflow behaviour; always <see cref="VirOverflow.Wrap"/> in M4 and M5a.</param>
+/// <param name="Overflow">Overflow behaviour (<see cref="VirOverflow"/>); always <see cref="VirOverflow.Wrap"/> in M4 and M5a.</param>
 /// <param name="Operand">The operand.</param>
 public sealed record UnaryExpr(VirType Type, UnaryOp Op, VirOverflow Overflow, VirExpr Operand) : VirExpr(Type);
 
 /// <summary><c>binary{op, overflow}</c>.</summary>
 /// <param name="Type">The result type, equal to the operands'.</param>
 /// <param name="Op">The operator.</param>
-/// <param name="Overflow">Overflow behaviour; always <see cref="VirOverflow.Wrap"/> in M4 and M5a.</param>
+/// <param name="Overflow">Overflow behaviour (<see cref="VirOverflow"/>); always <see cref="VirOverflow.Wrap"/> in M4 and M5a.</param>
 /// <param name="L">The left operand.</param>
 /// <param name="R">The right operand.</param>
 public sealed record BinaryExpr(VirType Type, BinaryOp Op, VirOverflow Overflow, VirExpr L, VirExpr R) : VirExpr(Type);

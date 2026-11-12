@@ -492,6 +492,38 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     }
 
     [Fact]
+    public void ExplicitUncheckedArithmeticInASpecExpressionWrapsWithNoObligation()
+    {
+        // #236: unchecked(...) wraps on purpose, so it has no obligation; its value is the wrapped one, as the default's.
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Add(int a, int b)
+                {
+                    Spec.Ensures<int>(r => r == unchecked(a + b));
+                    return unchecked(a + b);
+                }
+
+                [Verified]
+                public static int Plain(int a, int b)
+                {
+                    Spec.Ensures<int>(r => r == a + b);
+                    return a + b;
+                }
+            }
+            """);
+        var add = Contract(translation, "M:S.Add(System.Int32,System.Int32)");
+        Assert.Empty(add.WellDefinedness);
+        AssertPropositions(env, add);
+        var plain = Contract(translation, "M:S.Plain(System.Int32,System.Int32)");
+        Assert.Single(plain.WellDefinedness);
+        // The same program: only the obligation differs.
+        static Expr Value(TranslatedUnit u) => Assert.IsType<DefinitionDecl>(Assert.Single(u.Declarations)).Value.Value;
+        Assert.Equal(Value(translation.Find("M:S.Plain(System.Int32,System.Int32)")!), Value(translation.Find("M:S.Add(System.Int32,System.Int32)")!));
+    }
+
+    [Fact]
     public void ACallToAPureMethodWithRequiresInASpecExpressionHasItsPreconditionAsAnObligation()
     {
         var (translation, env) = Translate("""

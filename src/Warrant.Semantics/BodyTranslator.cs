@@ -408,10 +408,13 @@ internal sealed partial class BodyTranslator
 
     // ---- Helpers ----
 
-    /// <summary>Checks that arithmetic wraps; checked arithmetic that can overflow needs exceptions (M6).</summary>
+    /// <summary>
+    /// Checks that arithmetic wraps, in the default context or in an explicit <c>unchecked</c> one, whose values are the
+    /// same (#236); checked arithmetic that can overflow needs exceptions (M6).
+    /// </summary>
     private static void RequireWrap(VirOverflow overflow)
     {
-        if (overflow != VirOverflow.Wrap)
+        if (overflow is not (VirOverflow.Wrap or VirOverflow.Unchecked))
         {
             throw new TranslationException(null, "checked arithmetic needs exceptions.");
         }

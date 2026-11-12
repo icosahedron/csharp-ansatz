@@ -636,6 +636,124 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     [Fact]
+    public void AGuardAgainstMinValueIsReadByOmega()
+    {
+        // #41: the compiler folds int.MinValue (long.MinValue) to -2147483648 (-9223372036854775808), which reaches omega as
+        // the negation of a literal 2^31 (2^63); the guard used to stay an unknown atom, and both theorems failed.
+        var result = Script("""
+            public static class S
+            {
+                [Verified] public static int Abs(int x) => x < 0 ? -x : x;
+                [Verified] public static long AbsLong(long x) => x < 0 ? -x : x;
+
+                [Theorem]
+                static Proof AbsIsNonNegativeAboveMin(int x) =>
+                    Prove.That(Spec.Implies(x > int.MinValue, Abs(x) >= 0))
+                         .By(Tactic.Unfold(nameof(Abs)), Tactic.Simp(), Tactic.Omega());
+
+                [Theorem]
+                static Proof AbsLongIsNonNegativeAboveMin(long x) =>
+                    Prove.That(Spec.Implies(x > long.MinValue, AbsLong(x) >= 0))
+                         .By(Tactic.Unfold(nameof(AbsLong)), Tactic.Simp(), Tactic.Omega());
+            }
+            """);
+        foreach (var key in new[] { "M:S.AbsIsNonNegativeAboveMin(System.Int32)", "M:S.AbsLongIsNonNegativeAboveMin(System.Int64)" })
+        {
+            var outcome = result.Find(key);
+            Assert.True(outcome is ProvedOutcome { By: ProofKind.Script }, $"{key}: {outcome}");
+        }
+    }
+
+    [Fact]
+    public void PureDivisionAndMathMaxAreProvable()
+    {
+        // M6 U9: `/` and `%` by a constant other than 0 and -1, and Math.Min and Math.Max, cannot raise (KTD11), so they stay
+        // pure and theorems can state and prove facts about them (docs/proving/proofs-that-work.md).
+        var result = Script("""
+            public static class S
+            {
+                [Verified] public static int Half(int x) => x / 2;
+                [Verified] public static int AtLeastZero(int x) => System.Math.Max(x, 0);
+
+                [Theorem]
+                static Proof HalfIsAtMost(int x) =>
+                    Prove.That(Spec.Implies(x >= 0, Half(x) <= x))
+                         .By(Tactic.Unfold(nameof(Half)), Tactic.Simp(), Tactic.Omega());
+
+                [Theorem]
+                static Proof HalfOfALong(long a) => Prove.That(Spec.Implies(a >= 0, a / 2 <= a && a % 2 < 2)).By(Tactic.Simp(), Tactic.Omega());
+
+                [Theorem]
+                static Proof NeverNegative(int x) =>
+                    Prove.That(AtLeastZero(x) >= 0)
+                         .By(Tactic.Unfold(nameof(AtLeastZero)), Tactic.Simp(Lean.Const("Warrant.Int32.max_def")), Tactic.Omega());
+            }
+            """);
+        foreach (var key in new[] { "M:S.HalfIsAtMost(System.Int32)", "M:S.HalfOfALong(System.Int64)", "M:S.NeverNegative(System.Int32)" })
+        {
+            var outcome = result.Find(key);
+            Assert.True(outcome is ProvedOutcome { By: ProofKind.Script }, $"{key}: {outcome}");
+        }
+    }
+
+    [Fact]
+    public void DecimalEqualityAndOrderAreProvable()
+    {
+        // M6 U21: decimal comparisons, equality (in records too) and Math.Max cannot raise, so theorems state facts about
+        // them (docs/proving/proofs-that-work.md). Closed claims are proved by computation; a claim over every decimal
+        // reads the order as the integer `units` (the value in units of 10^-28) through Warrant.Decimal's lemmas.
+        var result = Script("""
+            public sealed record Price(decimal Amount);
+            public static class S
+            {
+                [Verified] public static decimal Larger(decimal a, decimal b) => System.Math.Max(a, b);
+
+                [Theorem] static Proof ScaleIsIgnored() => Prove.That(new Price(1.0m) == new Price(1.00m));
+
+                [Theorem] static Proof LargerKeepsTheFirstOfEqualValues() => Prove.That(Larger(1.0m, 1.00m) == 1m && 0.1m < 0.11m);
+
+                [Theorem]
+                static Proof OrderIsTransitive(decimal a, decimal b, decimal c) =>
+                    Prove.That(Spec.Implies(a < b && b <= c, a < c))
+                         .By(Tactic.Simp(Lean.Const("Warrant.Decimal.lt_iff"), Lean.Const("Warrant.Decimal.le_iff")), Tactic.Omega());
+
+                [Theorem]
+                static Proof EqualityIsReflexive(decimal a) => Prove.That(a == a).By(Tactic.Apply(Lean.Const("Warrant.Decimal.eq_refl")));
+            }
+            """);
+        Assert.True(result.Find("M:S.ScaleIsIgnored") is ProvedOutcome { By: ProofKind.Rfl or ProofKind.Decide }, $"{result.Find("M:S.ScaleIsIgnored")}");
+        Assert.True(result.Find("M:S.LargerKeepsTheFirstOfEqualValues") is ProvedOutcome { By: ProofKind.Rfl or ProofKind.Decide },
+            $"{result.Find("M:S.LargerKeepsTheFirstOfEqualValues")}");
+        foreach (var key in new[] { "M:S.OrderIsTransitive(System.Decimal,System.Decimal,System.Decimal)", "M:S.EqualityIsReflexive(System.Decimal)" })
+        {
+            var outcome = result.Find(key);
+            Assert.True(outcome is ProvedOutcome { By: ProofKind.Script }, $"{key}: {outcome}");
+        }
+    }
+
+    [Fact]
+    public void AMethodThatCanRaiseHasAnObligationThatTheDefaultProcedureMustProve()
+    {
+        // M6 U9 translates a method that can raise into ClrM, and M6 U10 states its contract obligation (KTD12). The
+        // default procedure (M6 U11) cannot prove an unguarded division, so it is not proved, never `translated`; its
+        // caller depends on an unproved contract and reports that, not a goal of its own.
+        var result = Script("""
+            public static class S
+            {
+                [Verified] public static int Ratio(int a, int b) => a / b;
+                [Verified] public static int Twice(int a, int b) => Ratio(a, b) * 2;
+            }
+            """);
+        var ratio = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Ratio(System.Int32,System.Int32)"));
+        Assert.StartsWith("division by zero: ", ratio.Message, StringComparison.Ordinal);
+        Assert.NotNull(ratio.TacticNode);
+        Assert.Contains("a b : Int32", ratio.Goals, StringComparison.Ordinal);
+        var twice = Assert.IsType<SkippedOutcome>(result.Find("M:S.Twice(System.Int32,System.Int32)"));
+        Assert.Equal("M:S.Ratio(System.Int32,System.Int32)", twice.Dependency);
+        Assert.Equal("it depends on S.Ratio(int, int), whose contract is not proved.", twice.Reason);
+    }
+
+    [Fact]
     public void AlwaysLargerFailsAtOmegaWithItsConstraintsAndTheCounterexample()
     {
         // The exit criterion's false claim: the goal omega was given (after Unfold, before the prep step) with C# names,

@@ -44,7 +44,7 @@ public sealed record VerifyRequest(
 /// </summary>
 /// <param name="CheckOverflow">Whether the compilation checks arithmetic for overflow.</param>
 /// <param name="Bundle">The semantics bundle's name, as <see cref="Reports.ReportSettings.Bundle"/> has it.</param>
-/// <param name="Claims">Each theorem's claim text, by unit key; a theorem without one has no entry.</param>
+/// <param name="Claims">Each theorem's claim text and each contract member's Spec calls (M6 U20), by unit key; a unit without one has no entry.</param>
 public sealed record VerifyReport(bool CheckOverflow, string Bundle, ImmutableDictionary<string, string> Claims);
 
 /// <summary>A request to verify one unit with a trace of its proof script (M5b KTD24, <c>warrant explain</c>).</summary>
@@ -174,6 +174,9 @@ public sealed record OutcomeDto(OutcomeKind Kind, string Key, VirUnitKind UnitKi
     /// <summary>A recursive method's decrease obligation that was not proved.</summary>
     public DecreaseFailure? Decrease { get; init; }
 
+    /// <summary>A contract obligation's failing VCs, each at its node (M6 U11, #90).</summary>
+    public ImmutableArray<Contracts.VcFailure> Vcs { get; init; } = [];
+
     /// <summary>A false comparison's sides with their values.</summary>
     public ImmutableArray<ReadBackSideDto> Sides { get; init; } = [];
 
@@ -203,6 +206,7 @@ public sealed record OutcomeDto(OutcomeKind Kind, string Key, VirUnitKind UnitKi
                 Node = n.TacticNode,
                 Counterexample = n.Counterexample,
                 Decrease = n.Decrease,
+                Vcs = n.Vcs,
             },
             UndecidedOutcome u => Of(OutcomeKind.Undecided) with { Message = u.Reason },
             InternalErrorOutcome i => Of(OutcomeKind.InternalError) with { Message = i.Reason },
@@ -237,6 +241,7 @@ public sealed record OutcomeDto(OutcomeKind Kind, string Key, VirUnitKind UnitKi
             OutcomeKind.NotProved => new NotProvedOutcome(Key, UnitKind, DisplayName, assumptions, Text(Message), Goals ?? "", Node, Counterexample)
             {
                 Decrease = Decrease,
+                Vcs = Vcs.IsDefault ? [] : Vcs,
             },
             OutcomeKind.Undecided => new UndecidedOutcome(Key, UnitKind, DisplayName, assumptions, Text(Message)),
             OutcomeKind.InternalError => new InternalErrorOutcome(Key, UnitKind, DisplayName, assumptions, Text(Message)),

@@ -1,0 +1,15 @@
+Corpus.M6.Payments.PaymentService.ProcessPayment(int)                     TRANSLATED   (kernel: Warrant test, bundle: warrant-semantics test)
+  Assumed (parameters):
+    - store is not null
+    - store.GetPayment() is not null
+    - store.SavePayment() is not null
+  Assumed (contracts):
+    - Every implementation of Corpus.M6.Payments.IPaymentStore.GetPayment(int) keeps its contract: Spec.Ensures<Payment?>(r => r is null || r.Id == id)
+    - Every implementation of Corpus.M6.Payments.IPaymentStore.SavePayment(Corpus.M6.Payments.Payment) keeps its contract, which states nothing: a call may return any value or throw
+  Assumed (exceptions):
+    - Corpus.M6.Payments.PaymentService.ProcessPayment(int) may throw an exception from Corpus.M6.Payments.IPaymentStore.GetPayment(int) (the call at accepted/Payments.cs:48); its proof says nothing about a call that ends in it
+    - Corpus.M6.Payments.PaymentService.ProcessPayment(int) may throw an exception from Corpus.M6.Payments.IPaymentStore.SavePayment(Corpus.M6.Payments.Payment) (the call at accepted/Payments.cs:53); its proof says nothing about a call that ends in it
+  Assumed (global):
+    - Arithmetic wraps on overflow, except in a checked region, where it throws (overflow checking is off)
+    - The semantics bundle models C# 14 int, long, bool and decimal, their nullable forms, records, enums, closed classes, throw and the exceptions arithmetic, division and null access raise, and Math.Min, Math.Max and Math.Abs on int, long and decimal; decimal arithmetic throws on overflow in every region
+    - The only axioms are Lean's standard ones: propext, Classical.choice, Quot.sound

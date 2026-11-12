@@ -30,7 +30,14 @@ internal sealed class TacticRunner(TacticM tactics, TacticRecorder? recorder = n
         ["omega"] = Omega,
         ["all_goals"] = AllGoals,
         ["try"] = Try,
+        ["vcgen"] = VcGenTactic,
     };
+
+    /// <summary>
+    /// <c>Tactic.VcGen()</c> (M6 KTD16): the VC walker on a contract obligation's triple, which returns the VCs it leaves;
+    /// null outside a <c>[ProofFor]</c> script.
+    /// </summary>
+    public Func<MVarId, IReadOnlyList<MVarId>>? VcGen { get; init; }
 
     /// <summary>The tactic state.</summary>
     public TacticM State => tactics;
@@ -201,6 +208,19 @@ internal sealed class TacticRunner(TacticM tactics, TacticRecorder? recorder = n
     /// failure names the goal as <c>omega</c> was given it, with <c>omega</c>'s constraints.
     /// </summary>
     private static void Omega(TacticRunner r, TacticNode _) => r.State.LiftMetaFinishingTactic(r.State.Meta.OmegaTactic);
+
+    /// <summary>
+    /// <c>Tactic.VcGen()</c>: the VC walker (KTD13) on the main goal, leaving its VCs for the script's next tactics, readied
+    /// as the default procedure readies them but not simplified (#173).
+    /// </summary>
+    private static void VcGenTactic(TacticRunner r, TacticNode node)
+    {
+        if (r.VcGen is not { } vcgen)
+        {
+            throw TacticException.Failed(node.Name, r.State.GetMainGoal(), "Tactic.VcGen() proves a contract obligation; this is not one");
+        }
+        r.State.LiftMetaTactic(vcgen);
+    }
 
     /// <summary><c>Tactic.AllGoals(t)</c>.</summary>
     private static void AllGoals(TacticRunner r, TacticNode node)

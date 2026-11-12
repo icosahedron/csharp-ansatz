@@ -6,7 +6,11 @@ public enum VirOverflow
     /// <summary><c>wrap</c>: two's-complement wrapping, as in <c>unchecked</c> C#.</summary>
     Wrap,
 
-    /// <summary><c>checked</c>: overflow throws. Never on a node in M4.</summary>
+    /// <summary>
+    /// <c>checked</c>: overflow throws <c>OverflowException</c>. On a unit's facts, the project's setting. On a node, from M6:
+    /// checked <c>+</c>, <c>-</c>, <c>*</c> and unary <c>-</c> (a <see cref="BinaryExpr"/> or <see cref="UnaryExpr"/>), and checked
+    /// narrowing (a <see cref="ConvertExpr"/> from <c>int64</c> to <c>int32</c>). Never on a node in M4 or M5a.
+    /// </summary>
     Checked,
 }
 
@@ -31,6 +35,15 @@ public enum BinaryOp
 
     /// <summary><c>mul</c>.</summary>
     Mul,
+
+    /// <summary>
+    /// <c>div</c>: C#'s truncating <c>/</c> on <c>int</c> and <c>long</c> (M6, KTD6). It throws on a zero divisor and on
+    /// <c>MinValue / -1</c> whatever the node's overflow setting.
+    /// </summary>
+    Div,
+
+    /// <summary><c>rem</c>: C#'s <c>%</c> on <c>int</c> and <c>long</c> (M6, KTD6), throwing as <see cref="Div"/> does.</summary>
+    Rem,
 }
 
 /// <summary>Operator of a <see cref="LogicalExpr"/>.</summary>
@@ -91,6 +104,25 @@ public enum CompareKind
 
     /// <summary><c>closed</c>: same member.</summary>
     Closed,
+
+    /// <summary><c>decimal</c>: comparison of the values, so <c>1.0m == 1.00m</c> (M6, KTD7).</summary>
+    Decimal,
+}
+
+/// <summary>What an <see cref="UnwrapExpr"/> reads, which decides the exception it throws on null (M6, KTD5).</summary>
+public enum UnwrapKind
+{
+    /// <summary>
+    /// <c>value</c>: <c>Nullable&lt;T&gt;.Value</c>, or an explicit cast from <c>T?</c> to <c>T</c>, which throws
+    /// <c>InvalidOperationException</c> on null.
+    /// </summary>
+    Value,
+
+    /// <summary>
+    /// <c>non-null</c>: a <c>T?</c> value used where a non-nullable <c>T</c> is required, or a dereference of a nullable
+    /// reference, which throws <c>NullReferenceException</c> on null.
+    /// </summary>
+    NonNull,
 }
 
 /// <summary>Operator of a <see cref="RelationalPattern"/>.</summary>

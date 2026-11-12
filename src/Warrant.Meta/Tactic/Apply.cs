@@ -18,15 +18,18 @@ public sealed partial class MetaM
     /// those no other new goal's type mentions first (<c>ApplyNewGoals.nonDependentFirst</c>).
     /// </summary>
     /// <remarks>
-    /// Lean synthesizes every instance-implicit argument (<c>synthAppInstances</c>, Apply.lean 40). Until instance
-    /// synthesis exists (U16), an instance argument that unification leaves unassigned fails the tactic with a message
-    /// saying so, and one it assigned is left to the kernel's check of the whole proof.
+    /// Every instance-implicit argument is synthesized with <see cref="SynthInstance"/>, also one unification already
+    /// assigned, which must then agree with the instance found (<c>synthAppInstances</c> with Lean's default
+    /// <c>synthAssignedInstances := true</c>, Apply.lean 40; M6 U3).
     /// </remarks>
     /// <param name="mvarId">The goal.</param>
     /// <param name="e">The function or lemma to apply.</param>
     /// <param name="term">How messages name <paramref name="e"/>, e.g. <c>'Eq.symm'</c>; null for "the term".</param>
     /// <returns>The new goals.</returns>
-    /// <exception cref="TacticException">No number of arguments makes the types unify, or an instance stays unassigned.</exception>
+    /// <exception cref="TacticException">
+    /// No number of arguments makes the types unify, an instance argument has no instance, or the instance found does not
+    /// agree with the one unification assigned.
+    /// </exception>
     public IReadOnlyList<MVarId> Apply(MVarId mvarId, Expr e, string? term = null)
     {
         ArgumentNullException.ThrowIfNull(e);
@@ -57,14 +60,7 @@ public sealed partial class MetaM
                 throw ApplyError(mvarId, eType, lower == 0 ? null : ForallMetaTelescopeReducing(eType, lower).Type, targetType, term);
             }
 
-            // synthAppInstances, without synthesis (see remarks).
-            for (int i = 0; i < newMVars.Length; i++)
-            {
-                if (binderInfos[i] == BinderInfo.InstImplicit && !MCtx.IsAssigned(((MVarExpr)newMVars[i]).Id))
-                {
-                    throw TacticException.Failed("apply", mvarId, $"failed to synthesize instance\n  {Pp(InferType(newMVars[i]))}\ninstance synthesis is not available yet, so an instance argument must be determined by the goal");
-                }
-            }
+            SynthAppInstances(mvarId, newMVars, binderInfos);
 
             var f = this.InstantiateMVars(e);
             Assign(mvarId, ExprExtensions.MkAppN(f, newMVars));
@@ -91,6 +87,67 @@ public sealed partial class MetaM
 
     /// <summary><see cref="Apply"/> of a constant at fresh universe metavariables (Lean's <c>MVarId.applyConst</c>, Apply.lean 234).</summary>
     public IReadOnlyList<MVarId> ApplyConst(MVarId mvarId, Name c) => Apply(mvarId, MkConstWithFreshMVarLevels(c), $"'{PpConst(c)}'");
+
+    /// <summary>
+    /// Lean's <c>synthAppInstances</c> (Apply.lean 40) with <c>synthAssignedInstances := true</c> and
+    /// <c>allowSynthFailures := false</c>: synthesizes every instance-implicit argument and unifies it with the instance
+    /// found. An argument whose synthesis fails, or is stuck on a metavariable, is tried again in a further round while
+    /// a round makes progress after its first failure, since solving one instance can assign another's out-parameters
+    /// (Lean's <c>step</c>); when a round makes none, the first failure is the error.
+    /// </summary>
+    private void SynthAppInstances(MVarId mvarId, Expr[] newMVars, BinderInfo[] binderInfos)
+    {
+        var todo = new List<Expr>();
+        for (int i = 0; i < newMVars.Length; i++)
+        {
+            if (binderInfos[i] == BinderInfo.InstImplicit)
+            {
+                todo.Add(newMVars[i]);
+            }
+        }
+        while (todo.Count > 0)
+        {
+            Expr? firstFailure = null;
+            bool progressAfterFailure = false;
+            var postponed = new List<Expr>();
+            foreach (var mvar in todo)
+            {
+                var mvarType = InferType(mvar);
+                Expr? val;
+                try
+                {
+                    val = SynthInstance(mvarType);
+                }
+                catch (IsDefEqStuckException)
+                {
+                    val = null;
+                }
+                if (val is null)
+                {
+                    firstFailure ??= mvarType;
+                    postponed.Add(mvar);
+                    continue;
+                }
+                if (postponed.Count > 0)
+                {
+                    progressAfterFailure = true;
+                }
+                if (!IsDefEq(mvar, val))
+                {
+                    throw TacticException.Failed("apply", mvarId, "failed to assign synthesized instance");
+                }
+            }
+            if (firstFailure is null)
+            {
+                return;
+            }
+            if (!progressAfterFailure)
+            {
+                throw TacticException.Failed("apply", mvarId, $"failed to synthesize\n  {Pp(this.InstantiateMVars(firstFailure))}");
+            }
+            todo = postponed;
+        }
+    }
 
     /// <summary>Lean's <c>throwApplyError</c> (Apply.lean 29).</summary>
     private TacticException ApplyError(MVarId mvarId, Expr eType, Expr? conclusionType, Expr targetType, string? term)

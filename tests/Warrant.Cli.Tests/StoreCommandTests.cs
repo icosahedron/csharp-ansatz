@@ -68,7 +68,7 @@ public sealed class StoreCommandTests : IDisposable
         var (code, output, error) = Import(Bundle, "--store", Store, "--verified");
 
         Assert.True(code == 0, error);
-        Assert.Matches(@"wrote v1-[0-9a-f]{12}: 2,927 declarations, 3,210 constants in", output);
+        Assert.Matches(@"wrote v1-[0-9a-f]{12}: 3,813 declarations, 4,112 constants in", output);
         using (var reader = StoreReader.Open(Store))
         {
             Assert.Equal(Manifest.Verified, reader.Manifest.Mode);
@@ -79,7 +79,7 @@ public sealed class StoreCommandTests : IDisposable
         (code, output, error) = CheckStore(Store);
 
         Assert.True(code == 0, output + error);
-        Assert.Matches(@"^checking store .+ \(v1-[0-9a-f]{12}, Lean 4\.35\.0\)\naccepted 2,927, rejected 0, declined 0; 3,210 constants in \d+\.\ds\n$", output);
+        Assert.Matches(@"^checking store .+ \(v1-[0-9a-f]{12}, Lean 4\.35\.0\)\naccepted 3,813, rejected 0, declined 0; 4,112 constants in \d+\.\ds\n$", output);
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public sealed class StoreCommandTests : IDisposable
 
         Assert.True(code == 0, error);
         Assert.Contains("  again.ndjson: 0 declarations stored, 200 repeated\n", output, StringComparison.Ordinal);
-        Assert.Contains(": 2,927 declarations, 3,210 constants", output, StringComparison.Ordinal);
+        Assert.Contains(": 3,813 declarations, 4,112 constants", output, StringComparison.Ordinal);
 
         var (tampered, name) = WithASwappedProof();
         var different = Export("different.ndjson", tampered.Where(d => d.Constants[0].Name == name));
@@ -146,7 +146,7 @@ public sealed class StoreCommandTests : IDisposable
         Assert.Equal(count, reader.ConstantCount);
         Assert.Equal(declarations.Take(100), reader.ReadAll());
         using var fresh = StoreReader.Open(Store);
-        Assert.Equal(3210, fresh.ConstantCount);
+        Assert.Equal(4112, fresh.ConstantCount);
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public sealed class StoreCommandTests : IDisposable
 
         Assert.True(code == 0, error);
         var lines = output.Split('\n');
-        Assert.Matches(@"^opened store .+ \(v1-[0-9a-f]{12}, 3,210 constants\) in \d+\.\d ms$", lines[0]);
+        Assert.Matches(@"^opened store .+ \(v1-[0-9a-f]{12}, 4,112 constants\) in \d+\.\d ms$", lines[0]);
         var looked = Regex.Match(lines[1], $@"^looked up {Count} random constants \(seed 7\) in \d+\.\d ms, decoding (\d+) records$");
         Assert.True(looked.Success, lines[1]);
         Assert.InRange(int.Parse(looked.Groups[1].Value, CultureInfo.InvariantCulture), 1, Count + QuotientCheckRecords);

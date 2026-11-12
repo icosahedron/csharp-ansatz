@@ -49,7 +49,11 @@ internal sealed class CorpusAssembly : IDisposable
         PrimitiveType { Kind: VirPrimitive.Int32 } => typeof(int),
         PrimitiveType { Kind: VirPrimitive.Int64 } => typeof(long),
         PrimitiveType { Kind: VirPrimitive.Bool } => typeof(bool),
+        PrimitiveType { Kind: VirPrimitive.Decimal } => typeof(decimal),
         RefType r => TypeOf(r.Key),
+        // int? is Nullable<int>; a nullable reference is the reference type itself (M6 KTD5).
+        NullableType { Value: PrimitiveType } n => typeof(Nullable<>).MakeGenericType(TypeOf(n.Value)),
+        NullableType n => TypeOf(n.Value),
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
     };
 
@@ -80,6 +84,28 @@ internal sealed class CorpusAssembly : IDisposable
         var (target, rest) = method.IsStatic ? (null, args.ToArray()) : (args[0], args.Skip(1).ToArray());
         return method.Invoke(target, BindingFlags.DoNotWrapExceptions, binder: null, rest, culture: null);
     }
+
+    /// <summary>
+    /// Calls a method on a receiver (null for a static one) and, when it returns a <c>Task</c>, <c>Task&lt;T&gt;</c>,
+    /// <c>ValueTask</c> or <c>ValueTask&lt;T&gt;</c>, waits for it with <c>GetAwaiter().GetResult()</c> (plan M6 U22): the
+    /// awaited value, null for a non-generic task, and the task's own exception rather than an aggregate. Exceptions are
+    /// not wrapped.
+    /// </summary>
+    public static object? InvokeAndAwait(MethodInfo method, object? target, IReadOnlyList<object?> args)
+    {
+        var result = method.Invoke(target, BindingFlags.DoNotWrapExceptions, binder: null, args.ToArray(), culture: null);
+        if (!IsTask(method.ReturnType))
+        {
+            return result;
+        }
+        var awaiter = method.ReturnType.GetMethod("GetAwaiter", Type.EmptyTypes)!.Invoke(result, BindingFlags.DoNotWrapExceptions, binder: null, [], culture: null)!;
+        return awaiter.GetType().GetMethod("GetResult", Type.EmptyTypes)!.Invoke(awaiter, BindingFlags.DoNotWrapExceptions, binder: null, [], culture: null);
+    }
+
+    /// <summary>Whether a type is <c>Task</c>, <c>Task&lt;T&gt;</c>, <c>ValueTask</c> or <c>ValueTask&lt;T&gt;</c>.</summary>
+    public static bool IsTask(Type type) =>
+        type == typeof(Task) || type == typeof(ValueTask)
+        || (type.IsGenericType && (type.GetGenericTypeDefinition() == typeof(Task<>) || type.GetGenericTypeDefinition() == typeof(ValueTask<>)));
 
     /// <summary>A static instance of a closed class, read through its property or field.</summary>
     public static object? ReadStatic(Type type, string member) =>

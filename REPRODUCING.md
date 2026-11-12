@@ -185,6 +185,34 @@ and the design is explained chapter by chapter in [docs/m5b/](docs/m5b/README.md
    is a test in `M5bExitTests`, and `scripts/measure-m5b.sh` records the
    baselines M9 starts from.
 
+### Milestone 6: contracts and effects
+
+The plan is [docs/plans/2026-11-08-1445-feat-m6-contracts-effects-plan.md](docs/plans/2026-11-08-1445-feat-m6-contracts-effects-plan.md),
+and the design is explained chapter by chapter in [docs/m6/](docs/m6/README.md).
+
+1. **Bring in `Std.Do` by roots, and measure.** Only the `Std.Do` constants
+   the models and the walker use joined the bundle, which stays a verified
+   load: each unit that grew it measured server start against the plan's 5 s
+   threshold, and the complete bundle starts in 4.05 s on the reference
+   workstation.
+2. **Prove the route before building on it.** A go/no-go checkpoint proved
+   three hand-built contract triples, one with a dependency, with Warrant's
+   own `apply`, simp and `omega` before any contract was extracted.
+3. **Grow trusted code one construct group at a time.** Four extraction units
+   and four translation units, each with rejected-corpus members, analyzer
+   parity, and the M4 corpus members it flips moved to the M6 corpus; the M4
+   and M5a translations are pinned byte for byte.
+4. **Keep the prover untrusted.** The VC walker, its simp set and `omega`
+   build a proof term that the kernel checks; a shape the walker does not know
+   becomes a reported failure, never a guessed rule.
+5. **Test the models against the CLR three ways.** Agreement rows per
+   operation, differential runs of every M6 corpus function (dependencies
+   included, through reply tapes that keep each member's contract), and every
+   proved contract run on the CLR on inputs that satisfy its precondition.
+6. **Have Lean's kernel agree.** `scripts/cross-check.sh` gained M6 rows:
+   Lean accepts the certificate with `ProcessPayment`'s contract theorem, and
+   both kernels reject a tampered copy.
+
 ### Notes on the environment
 
 - The cloud container had no .NET; the SDK was installed with Microsoft's
@@ -354,7 +382,7 @@ scripts/export-semantics.sh /tmp/bundle.ndjson.gz   # or anywhere else
 
 The script uses the same Lean 4.35.0 toolchain and lean4export `5a9a355` as
 step 5 (on Windows, see `scripts/lib/lean-toolchain.sh` for how the toolchain
-is found), builds the library with `lake build`, and exports the 394 roots in
+is found), builds the library with `lake build`, and exports the 630 roots in
 `lean/bundle-roots.txt` with their dependency closure. It exports with
 `--export-mdata`, so the `no_index` markers simp needs survive. It fails if a
 root does not exist or if anything depends on `sorryAx`. The output is
@@ -362,7 +390,15 @@ deterministic: with an unchanged `lean/`, it is byte-identical to the
 committed file. Check the counts independently with:
 
 ```sh
-python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 3,210 constants
+python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 4,112 constants
+```
+
+After the bundle, regenerate the pinned declarations the engine embeds (the
+standard axioms and the constants the kernel computes with by name, exactly as
+Lean declares them), which the bundle check compares against:
+
+```sh
+dotnet run scripts/pin-kernel-declarations.cs   # writes src/Warrant.Engine/PinnedDeclarations.ndjson.gz
 ```
 
 The attribute sidecar that tactics read is exported from the same library and
@@ -480,7 +516,11 @@ a library consumed by an application, and code that needs the SDK's regex
 source generator, which the CLI runs. From M5b they also build a green sample
 three times (the second from the cache, the third with `WarrantRecheck=true`),
 check that `dotnet clean` deletes the cache and nothing else, and that the IDE
-analyzer runs only in design-time builds.
+analyzer runs only in design-time builds. From M6 they build a contract-bearing
+sample (a division under its precondition, and the payment flow through a
+dependency with a contract class) that verifies, and its refuted twin, which
+fails at the division, under each of the three MSBuilds. On Windows
+(2026-11-11) all 65 pass.
 
 How Visual Studio's Error List shows a multi-line WRT0001 is checked by hand,
 in the IDE; that check has not been done yet.
@@ -523,6 +563,30 @@ warrant import init.ndjson tests/data/warrant-semantics.ndjson.gz --store init-s
 warrant check-store init-semantics --quiet      # accepted 57,944, rejected 0; 59,374 constants
 ```
 
+### 7e. M6's exit criterion
+
+```sh
+dotnet test --filter M6Exit
+warrant verify tests/corpus/m6/accepted --server off --report report   # exit 0
+warrant verify tests/corpus/m6/refuted --server off                    # exit 1, WRT0001
+```
+
+Each Success Criterion of the M6 plan but the private-codebase one is one
+fact in a class `M6ExitTests`, in `Warrant.Cli.Tests` (the pure parts of the
+payment example; `ProcessPayment` with its store as a hypothesis, and its
+certificate), `Warrant.Engine.Tests` (differential tests with
+contract-satisfying mocks) and `Warrant.Semantics.Tests` (CLR agreement of
+every new model); all 4 pass
+([docs/m6/08](docs/m6/08-reports-and-testing.md#the-exit-criterion-as-tests)).
+On `accepted/` the verify ends with
+`Warrant: 53 verified units, 0 theorems proved, 0 not proved.`: a method whose
+contract is proved is listed as `translated`, and the summary counts theorems
+only (GitHub #225). `report/report.md` holds `ProcessPayment`'s block as
+`tests/corpus/m6/ProcessPayment.report.txt` shows it, with the real kernel and
+bundle names in its first line. Use `verify`, not
+`translate`, for contracts: `translate` loads no attribute sidecar and cannot
+prove them (GitHub #220).
+
 ### 8. Cross-check against Lean's own kernel
 
 ```sh
@@ -555,14 +619,28 @@ C# fixtures                  -         accept    accept         ok
 M4 corpus                    -         accept    accept         ok
 M5a corpus                   -         accept    accept         ok
 M5a tampered                 -         reject    reject         ok
+M6 corpus                    -         accept    accept         ok
+M6 refuted                   -         reject    accept         ok
+M6 rejected                  -         reject    accept         ok
+M6 checked-project           -         reject    accept         ok
+M6 tampered                  -         reject    reject         ok
 
 all verdicts agree
 ```
 
-The last two rows are M5a's: `warrant verify tests/corpus/m5a/accepted --out`
+The two M5a rows: `warrant verify tests/corpus/m5a/accepted --out`
 must exit 0 and Lean must accept its certificate, and a copy whose last
 theorem's proof is swapped for the one before it must be rejected by both
 kernels. On Windows (Git Bash, 2026-11-07) every row agrees.
+
+The M6 rows (M6 R13): `warrant verify tests/corpus/m6/accepted --out` must exit
+0, its certificate must hold `ProcessPayment`'s contract theorem, and Lean must
+accept it, bundle with its Std closure included. The refuted and rejected
+compilations must fail to verify, and Lean must accept what Warrant admitted
+from them; the overflow-checking file is translated with `--check-overflow`. A
+copy of the accepted certificate with `ProcessPayment`'s proof swapped for the
+one before it must be rejected by both kernels. On Windows (Git Bash,
+2026-11-11) every row agrees.
 
 Lean declines the original `Nat.add_succ` only because its parser reads format
 3.1.0. Warrant's export of it is 3.1.0, and Lean accepts that. With the full
@@ -659,13 +737,13 @@ Mathlib import took 139 s.
 | `src/Warrant.Cic` | CIC terms: names, levels, expressions, constants, declarations |
 | `src/Warrant.Lean4Export` | lean4export reader (3.0.0, 3.1.0) and writer (3.1.0) |
 | `src/Warrant.Kernel` | the type-checking kernel and the export checker |
-| `src/Warrant` | the user package: `[Verified]`, `[Theorem]`, `[Closed]`, `Prove`, `Spec`, `Tactic`, `Lean`, and the WRT0011 check in `build/` |
+| `src/Warrant` | the user package: `[Verified]`, `[Theorem]`, `[Closed]`, `[ContractFor]`, `[ProofFor]`, `Prove`, `Spec`, `Tactic`, `Lean`, and the WRT0011 check in `build/` |
 | `src/Warrant.Vir` | VIR: the model, its canonical JSON encoding and its hashes |
 | `src/Warrant.Frontend` | the Roslyn compilation that extraction reads |
 | `src/Warrant.Extraction` | C# (Roslyn `IOperation`) to VIR, and the M4 subset checks |
 | `src/Warrant.Semantics` | VIR to CIC: types, definitions and theorem statements |
 | `src/Warrant.Meta` | the untrusted Meta layer: metavariables, reduction and unification, the attribute sidecar, the tactics, `simp` and `omega` |
-| `src/Warrant.Engine` | admission, proofs, proof scripts, counterexamples, read-back, assumption reports and NDJSON output; the `VerificationService`, its worker pool and the result cache (`Service/`) |
+| `src/Warrant.Engine` | admission, proofs, proof scripts, the contract VC walker (`Contracts/`), counterexamples, read-back, assumption reports and NDJSON output; the `VerificationService`, its worker pool and the result cache (`Service/`) |
 | `src/Warrant.Server` | `warrant-server`: the endpoint, the JSON-RPC methods, the lifecycle and the log |
 | `src/Warrant.Store` | store v1: the writer, the reader and the kernel's lazy constant source |
 | `src/Warrant.Analyzers` | the IDE analyzer, which compiles in the Extraction and Vir sources |
@@ -674,6 +752,6 @@ Mathlib import took 139 s.
 | `lean/` | the semantics library, proved in Lean, and the bundle roots |
 | `tools/lean-replay` | Lean program: check an NDJSON file with Lean's own kernel |
 | `tools/warrant-attrs` | Lean program: export the attribute sidecar |
-| `tests/` | unit, corpus and soundness tests; `tests/data` is the kernel corpus, the semantics bundle and the attribute sidecar, `tests/corpus/m4` and `tests/corpus/m5a` the C# corpora |
+| `tests/` | unit, corpus and soundness tests; `tests/data` is the kernel corpus, the semantics bundle and the attribute sidecar, `tests/corpus/m4`, `tests/corpus/m5a` and `tests/corpus/m6` the C# corpora |
 | `scripts/` | `export-lean-library.sh`, `export-semantics.sh`, `export-attributes.sh`, `cross-check.sh`, `cross-kernel.sh`, `measure-m5b.sh`, `count-export.py`, shared `lib/lean-toolchain.sh` and `lib/arena.sh` |
 | `docs/` | design, kernel notes, conversation history |

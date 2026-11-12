@@ -142,14 +142,18 @@ internal static class TranslateCommand
                         output.WriteLine($"  Values: {OutcomeText.Values(f.Sides, engineUnits[unit.Key].Spans, sources.Text)}");
                     }
                     break;
-                case NotProvedOutcome n:
-                    errors++;
-                    var spans = engineUnits[unit.Key].Spans;
-                    output.WriteLine(sources.Format(
-                        OutcomeText.SpanOf(spans, n.TacticNode) ?? location, "error", NotProvedOutcome.Code, OutcomeText.NotProvedMessage(theorem, n, spans, sources.Text)));
-                    foreach (var line in OutcomeText.NotProvedDetails(n))
+                case NotProvedOutcome notProved:
+                    // A contract obligation reports every VC that failed, each at its node (M6 U11, #90).
+                    foreach (var n in notProved.EachFailure())
                     {
-                        output.WriteLine(line.Length == 0 ? "" : $"  {line}");
+                        errors++;
+                        var spans = engineUnits[unit.Key].Spans;
+                        output.WriteLine(sources.Format(
+                            OutcomeText.SpanOf(spans, n.TacticNode) ?? location, "error", NotProvedOutcome.Code, OutcomeText.NotProvedMessage(theorem, n, spans, sources.Text)));
+                        foreach (var line in OutcomeText.NotProvedDetails(n))
+                        {
+                            output.WriteLine(line.Length == 0 ? "" : $"  {line}");
+                        }
                     }
                     break;
                 case UndecidedOutcome u:

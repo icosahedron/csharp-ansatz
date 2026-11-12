@@ -114,9 +114,10 @@ public static partial class Pipeline
         private bool Admits(string key) => Recheck || _needed.Contains(key);
 
         /// <summary>
-        /// A cached recursive definition, translated afresh and admitted with the decrease proofs and equation lemma of its
-        /// certificate, each checked by the kernel (KTD15, KTD16). One the kernel rejects is proved again, or under recheck
-        /// fails the unit; a unit that ran is stored again.
+        /// A cached recursive definition, or a function with a contract obligation (M6 U10), translated afresh and admitted
+        /// with the decrease proofs and equation lemma, or the contract's proofs, of its certificate, each checked by the
+        /// kernel (KTD15, KTD16). One the kernel rejects is proved again, or under recheck fails the unit; a unit that ran
+        /// is stored again.
         /// </summary>
         private void AdmitFromCertificate(TranslatedUnit unit, UnitOutcome hit)
         {
@@ -125,6 +126,14 @@ public static partial class Pipeline
             Scope? scope = null;
             var proofs = hit.Declarations.OfType<TheoremDecl>().ToDictionary(d => d.Value.Name, d => d.Value.Proof);
             var outcome = Cancelled(engineUnit) ?? Skip(engineUnit) ?? (scope = new Scope(this, Env, Attributes) { CachedProofs = proofs }).Admit(unit);
+            if (scope is not null && (!scope.FellBack || (unit.Contract is { } contract && scope.FromCertificate.Contains(contract.Theorem.Name)))
+                && outcome is TranslatedOutcome translated)
+            {
+                // The assumptions the default procedure found (M6 U11, KTD20) come from its walk, which a cached proof skips:
+                // whenever $contract itself came from the certificate, even if another of the unit's proofs fell back (#231).
+                var found = hit.Assumptions.Where(a => a.Assumption.Kind is VirAssumptionKind.MayThrow or VirAssumptionKind.CalleeContract && !translated.Assumptions.Contains(a));
+                outcome = translated with { Assumptions = [.. translated.Assumptions, .. found] };
+            }
             outcome = SettleCancel(engineUnit, outcome);
             Outcomes.Add(unit.Key, outcome);
             Elapsed.Add(unit.Key, stopwatch.Elapsed);
@@ -228,6 +237,18 @@ public static partial class Pipeline
                 }
                 _owners.TryAdd(recursion.Equation.Name, unit.Key);
             }
+            if (unit.Contract is { } contract)
+            {
+                foreach (var wd in contract.WellDefinedness)
+                {
+                    _owners.TryAdd(wd.Theorem.Name, unit.Key);
+                }
+                _owners.TryAdd(contract.Theorem.Name, unit.Key);
+                if (contract.Spec is { } spec)
+                {
+                    _owners.TryAdd(spec.Name, unit.Key);
+                }
+            }
         }
     }
 
@@ -244,6 +265,9 @@ public static partial class Pipeline
 
         /// <summary>Whether, under recheck, the kernel rejected a cached proof, which failed the unit (KTD16).</summary>
         public bool Rejected { get; private set; }
+
+        /// <summary>The theorems admitted with their proofs from the certificate, not proved again.</summary>
+        public HashSet<Name> FromCertificate { get; } = [];
 
         /// <summary>
         /// One theorem of a cached recursive definition, a decrease theorem or the equation lemma (KTD15, KTD16): the
@@ -267,6 +291,7 @@ public static partial class Pipeline
                 try
                 {
                     AddDeclaration(unit.Unit.Key, shell.WithProof(proof), admitted, budget);
+                    FromCertificate.Add(shell.Name);
                     return null;
                 }
                 catch (KernelResourceException ex) when (budget.StopsCachedCheck(run.Recheck, ex, options.CancellationToken))

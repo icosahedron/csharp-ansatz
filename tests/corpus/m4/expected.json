@@ -102,9 +102,6 @@
       "M:Corpus.Refuted.Increments.WrongSum": { "outcome": "false" }
     },
     "rejected": {
-      "M:Corpus.Rejected.Arithmetic.Halve(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "division" }] },
-      "M:Corpus.Rejected.Arithmetic.Remainder(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "remainder" }] },
-      "M:Corpus.Rejected.Arithmetic.CheckedAdd(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "checked arithmetic" }] },
       "M:Corpus.Rejected.Arithmetic.And(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "integer bitwise operator" }] },
       "M:Corpus.Rejected.Arithmetic.Or(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "integer bitwise operator" }] },
       "M:Corpus.Rejected.Arithmetic.Xor(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "integer bitwise operator" }] },
@@ -120,7 +117,6 @@
       "M:Corpus.Rejected.Statements.ForLoop(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "loop" }] },
       "M:Corpus.Rejected.Statements.WhileLoop(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "loop" }] },
       "M:Corpus.Rejected.Statements.DoLoop(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "loop" }] },
-      "M:Corpus.Rejected.Statements.Throws(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "throw" }] },
       "M:Corpus.Rejected.Statements.TryCatch(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "try" }] },
       "M:Corpus.Rejected.Statements.LocalFunction(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "local function" }] },
       "M:Corpus.Rejected.Statements.Unreachable(System.Boolean)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "unreachable code" }] },
@@ -128,9 +124,8 @@
       "M:Corpus.Rejected.Statements.Strings(System.String)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "string" }] },
       "M:Corpus.Rejected.Statements.RefLocal(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "ref local" }] },
       "M:Corpus.Rejected.Statements.RefReadonlyLocal(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "ref local" }] },
-      "M:Corpus.Rejected.Statements.Decimals(System.Decimal)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "decimal" }] },
       "M:Corpus.Rejected.Statements.Doubles(System.Double)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "floating point" }] },
-      "M:Corpus.Rejected.Statements.CallsUnverified(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0005", "construct": "M:System.Math.Abs(System.Int32)" }] },
+      "M:Corpus.Rejected.Statements.CallsUnmodelled(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0005", "construct": "M:System.Math.Sign(System.Int32)" }] },
 
       "M:Corpus.Rejected.Specs.Id(System.Int32)": { "outcome": "translated" },
       "M:Corpus.Rejected.Specs.ImpliesInCode(System.Boolean,System.Boolean)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0004", "construct": "Spec.Implies outside a theorem statement" }] },
@@ -181,21 +176,16 @@
       "T:Corpus.Rejected.Left": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "cyclic record types" }] },
       "T:Corpus.Rejected.Right": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "cyclic record types" }] },
       "T:Corpus.Rejected.Reserved": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "reserved member name" }] },
-      "M:Corpus.Rejected.Counter.Next": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "instance member of a class" }] },
+      "P:Corpus.Rejected.Tally.Current": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "instance member of a class" }] },
       "M:Corpus.Rejected.Types.UsesUnsealed(Corpus.Rejected.Unsealed)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.UsesOwnEquality(Corpus.Rejected.OwnEquality,Corpus.Rejected.OwnEquality)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.UsesExtraState(Corpus.Rejected.ExtraState)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.UsesRecordStruct(Corpus.Rejected.Pair)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.UsesCyclicRecords(Corpus.Rejected.Left)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
       "M:Corpus.Rejected.Types.UsesReservedName(Corpus.Rejected.Reserved)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "depends on a rejected unit" }] },
-      "M:Corpus.Rejected.Types.NullableParameter(Corpus.Rejected.Point)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "nullable type" }] },
-      "M:Corpus.Rejected.Types.ReturnsNull": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "nullable type" }] },
       "M:Corpus.Rejected.Types.ComparesWithNull(Corpus.Rejected.Point)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "null" }] }
     },
     "checked-project": {
-      "M:Corpus.Rejected.CheckedProject.Checked.Add(System.Int32,System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "checked arithmetic" }] },
-      "M:Corpus.Rejected.CheckedProject.Checked.Negate(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "checked arithmetic" }] },
-      "M:Corpus.Rejected.CheckedProject.Checked.Narrow(System.Int64)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "checked arithmetic" }] },
       "M:Corpus.Rejected.CheckedProject.Checked.Widen(System.Int32)": { "outcome": "translated" }
     }
   }

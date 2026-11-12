@@ -33,6 +33,12 @@ internal sealed partial class Walker
     /// <summary>The next local ID: locals and bound variables share one numbering, unique within the unit.</summary>
     private int _nextLocal;
 
+    /// <summary>The VIR type of each nullable local, by local ID: its declared type, or for <c>var</c> its initializer's.</summary>
+    private readonly Dictionary<int, VirType> _nullableLocals = [];
+
+    /// <summary>The member's declared return type and whether it is annotated nullable; null for a theorem.</summary>
+    private (ITypeSymbol Type, bool Annotated)? _returns;
+
     public Walker(ExtractionContext context, bool inTheorem)
     {
         _context = context;
@@ -53,6 +59,22 @@ internal sealed partial class Walker
 
     public void AddParameter(IParameterSymbol parameter, int index) => _parameters.Add(parameter, index);
 
+    /// <summary>
+    /// Sets the member's declared return type, which a returned value must fit (KTD5). An <c>async</c> method returns the
+    /// value its <c>Task&lt;T&gt;</c> or <c>ValueTask&lt;T&gt;</c> carries, so that is the type its returns fit (KTD22).
+    /// </summary>
+    public void SetReturns(ITypeSymbol type, bool annotated, bool isAsync = false) =>
+        _returns = isAsync && IsTask(type) is { TypeArguments.Length: 1 } task
+            ? (task.TypeArguments[0], task.TypeArgumentNullableAnnotations[0] == NullableAnnotation.Annotated)
+            : (type, annotated);
+
+    /// <summary>A returned value: an expression body's, or a <c>return</c> statement's, fitted to the declared return type.</summary>
+    public VirExpr Returned(IOperation value)
+    {
+        var e = Expr(value);
+        return _returns is { } returns ? FitDeclared(e, returns.Type, returns.Annotated, value.Syntax) : e;
+    }
+
     /// <summary>Maps a declared type (a parameter, return, local or field type) to VIR, recording the type units it uses.</summary>
     public VirType MapType(ITypeSymbol? type, bool annotated, SyntaxNode? at)
     {
@@ -60,9 +82,24 @@ internal sealed partial class Walker
         {
             throw Reject("null", at);
         }
-        if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } || (annotated && type.IsReferenceType))
+        // T? is a value or null (M6 KTD5): Nullable<T> of bool, int, long or decimal, and an annotated reference to a record
+        // class or closed class. The annotation is the declaration's, never Roslyn's flow state.
+        if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
         {
-            throw Reject("nullable type", at, Symbols.Display(type));
+            var value = nullable.TypeArguments[0];
+            if (Symbols.Primitive(value) is null && value.SpecialType != SpecialType.System_Decimal)
+            {
+                throw Reject("nullable type", at, Symbols.Display(type));
+            }
+            return VirType.Nullable(MapType(value, annotated: false, at));
+        }
+        if (annotated && type.IsReferenceType)
+        {
+            if (!Symbols.IsNullableReference(type))
+            {
+                throw Reject("nullable type", at, Symbols.Display(type));
+            }
+            return VirType.Nullable(MapType(type, annotated: false, at));
         }
         if (Symbols.Primitive(type) is { } p)
         {
@@ -73,7 +110,7 @@ internal sealed partial class Walker
             case SpecialType.System_String:
                 throw Reject("string", at);
             case SpecialType.System_Decimal:
-                throw Reject("decimal", at);
+                return VirType.Decimal;
             case SpecialType.System_Single or SpecialType.System_Double:
                 throw Reject("floating point", at);
         }
@@ -113,31 +150,41 @@ internal sealed partial class Walker
 
     public BlockStmt Block(IBlockOperation block) => Track(new BlockStmt(Statements(block.Operations)), block.Syntax);
 
-    /// <summary>A member's block body, whose first statement may be <c>Spec.Decreases</c>.</summary>
-    public BlockStmt Body(IBlockOperation block) => Track(new BlockStmt(Statements(block.Operations, measureFirst: true)), block.Syntax);
+    /// <summary>
+    /// A member's block body, which may start with the leading <c>Spec</c> statements (M6 KTD8): <c>Spec.Decreases</c> if
+    /// any, then <c>Spec.Requires</c>, then <c>Spec.Ensures</c>.
+    /// </summary>
+    public BlockStmt Body(IBlockOperation block) => Track(new BlockStmt(Statements(block.Operations, leading: true)), block.Syntax);
 
-    private VirList<VirStmt> Statements(IEnumerable<IOperation> operations, bool measureFirst = false)
+    private VirList<VirStmt> Statements(IEnumerable<IOperation> operations, bool leading = false)
     {
         var result = new List<VirStmt>();
         bool ended = false;
-        bool first = true;
+
+        // The rank of the last leading Spec statement read; -1 before the first. Leading ends at the first other statement.
+        int last = -1;
         foreach (var op in operations)
         {
             if (op is IEmptyOperation)
             {
                 continue;
             }
-            if (op is IExpressionStatementOperation { Operation: IInvocationOperation call } && IsDecreases(call))
+            if (op is IExpressionStatementOperation { Operation: IInvocationOperation call } && LeadingRank(call) is { } rank)
             {
-                if (!(measureFirst && first))
-                {
-                    throw DecreasesNotFirst(op.Syntax);
-                }
-                result.Add(Track(new DecreasesStmt(Measure(call)), op.Syntax));
-                first = false;
+                result.Add(Leading(call, rank, leading, last, op.Syntax));
+                last = rank;
                 continue;
             }
-            first = false;
+            leading = false;
+            if (op is IExpressionStatementOperation { Operation: IInvocationOperation assert } && IsSpec(assert, "Assert"))
+            {
+                if (ended)
+                {
+                    throw Reject("unreachable code", op.Syntax);
+                }
+                result.Add(Assert(assert, op.Syntax));
+                continue;
+            }
             if (op is ILocalFunctionOperation)
             {
                 throw Reject("local function", op.Syntax);
@@ -156,7 +203,7 @@ internal sealed partial class Walker
     private static bool Terminates(IOperation op) =>
         op switch
         {
-            IReturnOperation => true,
+            IReturnOperation or IThrowOperation or IExpressionStatementOperation { Operation: IThrowOperation } => true,
             IBlockOperation b => b.Operations.Any(Terminates),
             IConditionalOperation { WhenFalse: { } e } c => Terminates(c.WhenTrue) && Terminates(e),
             ISwitchOperation s => s.Cases.Any(c => c.Clauses.Any(cl => cl is IDefaultCaseClauseOperation || cl is IPatternCaseClauseOperation { Pattern: IDiscardPatternOperation }))
@@ -175,7 +222,10 @@ internal sealed partial class Walker
             case IExpressionStatementOperation e:
                 return [ExpressionStatement(e)];
             case IReturnOperation { ReturnedValue: { } value } r:
-                return [Track(new ReturnStmt(Expr(value)), r.Syntax)];
+                return [Track(new ReturnStmt(Returned(value)), r.Syntax)];
+            case IReturnOperation r:
+                // VIR's return carries a value; a method without one ends by reaching its end (M6 U18).
+                throw Reject("return without a value", r.Syntax, "a method that returns no value ends by reaching the end of its body");
             case IConditionalOperation c:
                 {
                     var cond = Expr(c.Condition);
@@ -189,8 +239,8 @@ internal sealed partial class Walker
                 throw Reject("loop", op.Syntax);
             case ITryOperation:
                 throw Reject("try", op.Syntax);
-            case IThrowOperation:
-                throw Reject("throw", op.Syntax);
+            case IThrowOperation t:
+                return [Track(new ThrowStmt(Thrown(t)), t.Syntax)];
             case IBranchOperation or ILabeledOperation:
                 throw Reject("jump statement", op.Syntax);
             default:
@@ -217,20 +267,39 @@ internal sealed partial class Walker
             {
                 var init = declarator.Initializer?.Value ?? declaration.Initializer?.Value
                     ?? throw Reject("local without an initializer", declarator.Syntax);
-                if (declaration.Syntax is VariableDeclarationSyntax { Type: NullableTypeSyntax })
-                {
-                    throw Reject("nullable type", declaration.Syntax);
-                }
                 // #133: a ref local is another name for a variable, so a write through either is seen through both. The
                 // model has no aliases; as a copy it would lose the write, and it would get around "assignment to a parameter".
                 if (declarator.Symbol.RefKind != RefKind.None)
                 {
                     throw Reject("ref local", declarator.Syntax);
                 }
-                MapType(declarator.Symbol.Type, annotated: false, declarator.Syntax);
+                // `var` declares a reference-typed local nullable whatever its initializer, so such a local takes its
+                // initializer's type; an explicitly typed one takes its declared type, which the initializer must fit (KTD5).
+                bool isVar = declaration.Syntax is VariableDeclarationSyntax { Type.IsVar: true };
+
+                // A stored task (KTD22): its call is rejected as not awaited, which says what to write, before its type is.
+                if (IsTask(declarator.Symbol.Type) is not null)
+                {
+                    Expr(init);
+                }
+                var declared = MapType(
+                    declarator.Symbol.Type, !isVar && declarator.Symbol.NullableAnnotation == NullableAnnotation.Annotated, declarator.Syntax);
                 var value = Expr(init);
+                var type = declared;
+                if (isVar)
+                {
+                    type = value.Type is NullableType ? value.Type : declared;
+                }
+                else
+                {
+                    value = FitTo(value, declared, init.Syntax);
+                }
                 int id = _nextLocal++;
                 _locals.Add(declarator.Symbol, id);
+                if (type is NullableType)
+                {
+                    _nullableLocals.Add(id, type);
+                }
                 result.Add(Track(new DeclStmt(id, declarator.Symbol.Name, value), declarator.Syntax));
             }
         }
@@ -250,11 +319,15 @@ internal sealed partial class Walker
         }
     }
 
-    private AssignStmt ExpressionStatement(IExpressionStatementOperation statement)
+    private VirStmt ExpressionStatement(IExpressionStatementOperation statement)
     {
         var syntax = statement.Syntax;
         switch (statement.Operation)
         {
+            case IAwaitOperation or IInvocationOperation:
+                return Track(new EvalStmt(Discarded(statement.Operation)), syntax);
+            case ISimpleAssignmentOperation { Target: IDiscardOperation } discard:
+                return Track(new EvalStmt(Discarded(discard.Value)), syntax);
             case ISimpleAssignmentOperation a:
                 {
                     if (a.IsRef)
@@ -262,7 +335,9 @@ internal sealed partial class Walker
                         throw Reject("ref local", syntax);
                     }
                     int id = Local(a.Target, syntax);
-                    return Track(new AssignStmt(id, Expr(a.Value)), syntax);
+                    var value = Expr(a.Value);
+                    var type = _nullableLocals.TryGetValue(id, out var nullable) ? nullable : MapType(a.Target.Type, annotated: false, syntax);
+                    return Track(new AssignStmt(id, FitTo(value, type, a.Value.Syntax)), syntax);
                 }
             case ICompoundAssignmentOperation a:
                 {
@@ -289,11 +364,7 @@ internal sealed partial class Walker
                     }
                     if (inc.IsLifted)
                     {
-                        throw Reject("nullable type", syntax);
-                    }
-                    if (inc.IsChecked)
-                    {
-                        throw Reject("checked arithmetic", syntax);
+                        throw Reject("lifted arithmetic", syntax);
                     }
                     var type = MapType(inc.Target.Type, annotated: false, syntax);
                     if (type is not PrimitiveType { Kind: VirPrimitive.Int32 or VirPrimitive.Int64 })
@@ -302,11 +373,12 @@ internal sealed partial class Walker
                     }
                     var one = Track(new LitExpr(type, 1), syntax);
                     var op = inc.Kind == OperationKind.Increment ? BinaryOp.Add : BinaryOp.Sub;
-                    var value = Track(new BinaryExpr(type, op, VirOverflow.Wrap, Track(new LocalExpr(type, id), inc.Target.Syntax), one), syntax);
+                    var overflow = inc.IsChecked ? VirOverflow.Checked : VirOverflow.Wrap;
+                    var value = Track(new BinaryExpr(type, op, overflow, Track(new LocalExpr(type, id), inc.Target.Syntax), one), syntax);
                     return Track(new AssignStmt(id, value), syntax);
                 }
-            case IThrowOperation:
-                throw Reject("throw", syntax);
+            case IThrowOperation t:
+                return Track(new ThrowStmt(Thrown(t)), syntax);
             case { } other:
                 // Walk it to report what it is (a call to a theorem, an unverified member), then reject the statement itself.
                 Expr(other);
@@ -316,9 +388,19 @@ internal sealed partial class Walker
         }
     }
 
+    /// <summary>
+    /// An expression whose value is discarded, run for its effects (M6 KTD22): a call to a verified method or a dependency
+    /// member, or an awaited one. Anything else as a statement is rejected.
+    /// </summary>
+    public VirExpr Discarded(IOperation operation)
+    {
+        var value = Expr(operation);
+        return value is CallExpr or ExternalCallExpr or AwaitExpr ? value : throw Reject("expression statement", operation.Syntax);
+    }
+
     private SwitchStmt SwitchStatement(ISwitchOperation s)
     {
-        var scrutinee = Expr(s.Value);
+        var scrutinee = NotNullableScrutinee(Expr(s.Value), s.Syntax);
         var sections = new List<SwitchSection>();
         foreach (var section in s.Cases)
         {
@@ -356,6 +438,12 @@ internal sealed partial class Walker
     {
         var syntax = op.Syntax;
 
+        // `x!` is not an operation: it only silences the compiler, and a value it forgives can still be null (KTD5).
+        if (Forgiving(syntax) is { } forgiving)
+        {
+            throw Reject("null-forgiving operator", forgiving);
+        }
+
         // Closed enums: the cast, unboxing and default checks run on the original node, before constants (KTD13).
         if (Symbols.IsClosedEnum(op.Type))
         {
@@ -369,7 +457,11 @@ internal sealed partial class Walker
             }
         }
 
-        // Constants of int, long and bool are what the IL contains (KTD13).
+        // Constants of int, long, bool and decimal are what the IL contains (KTD13); a decimal keeps its scale (KTD7).
+        if (op.ConstantValue is { HasValue: true, Value: decimal dec } && op.Type?.SpecialType == SpecialType.System_Decimal)
+        {
+            return Track(DecimalLitExpr.Of(dec), syntax);
+        }
         if (op.ConstantValue.HasValue && op.Type is { } ctype && Symbols.Primitive(ctype) is { } prim)
         {
             var value = op.ConstantValue.Value!;
@@ -383,12 +475,22 @@ internal sealed partial class Walker
 
         switch (op)
         {
+            // A variable's type is its declaration's, not the flow state Roslyn gives the reference (KTD5).
             case IParameterReferenceOperation p when _parameters.TryGetValue(p.Parameter, out int index):
-                return Track(new ParamExpr(MapType(p.Type, annotated: false, syntax), index), syntax);
+                return Track(new ParamExpr(MapType(p.Parameter.Type, Annotated(p.Parameter), syntax), index), syntax);
             case ILocalReferenceOperation l when _locals.TryGetValue(l.Local, out int id):
-                return Track(new LocalExpr(MapType(l.Type, annotated: false, syntax), id), syntax);
+                {
+                    var type = MapType(l.Type, annotated: false, syntax);
+                    return Track(new LocalExpr(_nullableLocals.TryGetValue(id, out var nullable) ? nullable : type, id), syntax);
+                }
             case IParameterReferenceOperation p when _bound.TryGetValue(p.Parameter, out int bound):
-                return Track(new LocalExpr(MapType(p.Type, annotated: false, syntax), bound), syntax);
+                return Track(new LocalExpr(MapType(p.Parameter.Type, Annotated(p.Parameter), syntax), bound), syntax);
+            case IParameterReferenceOperation p when IsPrimaryConstructorParameter(p.Parameter):
+                throw NotACall(p, "dependency used other than to call a member");
+            case IInstanceReferenceOperation { Type: { } self } when Symbols.Shape(self) != TypeShape.Record:
+                throw MemberAccessOnThis(self, syntax);
+            case IAwaitOperation a:
+                return Await(a);
             case IInstanceReferenceOperation i:
                 return Track(new SelfExpr(MapType(i.Type, annotated: false, syntax)), syntax);
             case IBinaryOperation b:
@@ -404,8 +506,16 @@ internal sealed partial class Walker
                         throw Reject("ref conditional", syntax);
                     }
                     var type = MapType(c.Type, annotated: false, syntax);
-                    return Track(new CondExpr(type, Expr(c.Condition), Expr(c.WhenTrue), Expr(whenFalse)), syntax);
+                    var condition = Expr(c.Condition);
+                    var then = Expr(c.WhenTrue);
+                    var @else = Expr(whenFalse);
+                    type = Join(type, [then, @else]);
+                    return Track(new CondExpr(type, condition, FitTo(then, type, c.WhenTrue.Syntax), FitTo(@else, type, whenFalse.Syntax)), syntax);
                 }
+            case IIsPatternOperation isPattern when NullPattern(isPattern.Pattern) is { } nullPattern:
+                return NullTest(Expr(isPattern.Value), nullPattern.Negated, nullPattern.Null, syntax);
+            case ICoalesceOperation coalesce:
+                return Coalesce(coalesce);
             case IInvocationOperation call:
                 return Invocation(call);
             case IPropertyReferenceOperation prop:
@@ -418,6 +528,8 @@ internal sealed partial class Walker
                 return With(with);
             case ISwitchExpressionOperation sw:
                 return SwitchExpression(sw);
+            case IThrowOperation { Type: { } throwType } t:
+                return ThrowExpression(t, MapType(throwType, annotated: false, syntax));
             case IThrowOperation:
                 throw Reject("throw", syntax);
             case ILiteralOperation { Type: null } or IDefaultValueOperation:
@@ -467,16 +579,22 @@ internal sealed partial class Walker
     private VirExpr Binary(IBinaryOperation b)
     {
         var syntax = b.Syntax;
+        bool equality = b.OperatorKind is BinaryOperatorKind.Equals or BinaryOperatorKind.NotEquals;
+        if (equality && (IsNullLiteral(b.LeftOperand) || IsNullLiteral(b.RightOperand)))
+        {
+            // `x == null` on a nullable value, whatever operator Roslyn picked (a record's ==, a lifted ==, object ==).
+            var (nullOp, other) = IsNullLiteral(b.LeftOperand) ? (b.LeftOperand, b.RightOperand) : (b.RightOperand, b.LeftOperand);
+            return NullTest(Expr(Unwrapped(other) ?? other), b.OperatorKind == BinaryOperatorKind.NotEquals, nullOp.Syntax, syntax);
+        }
         if (b.IsLifted)
         {
-            throw Reject("nullable type", syntax);
+            // With null operands these follow neither Option's order nor its equality (#76), so M6 leaves them out.
+            bool comparison = equality || b.OperatorKind is BinaryOperatorKind.LessThan or BinaryOperatorKind.LessThanOrEqual
+                or BinaryOperatorKind.GreaterThan or BinaryOperatorKind.GreaterThanOrEqual;
+            throw Reject(comparison ? "lifted comparison" : "lifted arithmetic", syntax);
         }
         switch (b.OperatorKind)
         {
-            case BinaryOperatorKind.Divide:
-                throw Reject("division", syntax);
-            case BinaryOperatorKind.Remainder:
-                throw Reject("remainder", syntax);
             case BinaryOperatorKind.LeftShift or BinaryOperatorKind.RightShift or BinaryOperatorKind.UnsignedRightShift:
                 throw Reject("shift", syntax);
         }
@@ -488,7 +606,8 @@ internal sealed partial class Walker
         var right = b.RightOperand;
         switch (b.OperatorKind)
         {
-            case BinaryOperatorKind.Add or BinaryOperatorKind.Subtract or BinaryOperatorKind.Multiply:
+            case BinaryOperatorKind.Add or BinaryOperatorKind.Subtract or BinaryOperatorKind.Multiply
+                or BinaryOperatorKind.Divide or BinaryOperatorKind.Remainder:
                 {
                     var type = MapType(b.Type, annotated: false, syntax);
                     return Arithmetic(b.OperatorKind, b.IsChecked, isLifted: false, type, b.Type, Expr(left), right, syntax);
@@ -523,14 +642,10 @@ internal sealed partial class Walker
     {
         if (isLifted)
         {
-            throw Reject("nullable type", syntax);
+            throw Reject("lifted arithmetic", syntax);
         }
         switch (kind)
         {
-            case BinaryOperatorKind.Divide:
-                throw Reject("division", syntax);
-            case BinaryOperatorKind.Remainder:
-                throw Reject("remainder", syntax);
             case BinaryOperatorKind.LeftShift or BinaryOperatorKind.RightShift or BinaryOperatorKind.UnsignedRightShift:
                 throw Reject("shift", syntax);
             case BinaryOperatorKind.And or BinaryOperatorKind.Or or BinaryOperatorKind.ExclusiveOr:
@@ -551,8 +666,14 @@ internal sealed partial class Walker
             BinaryOperatorKind.Add => BinaryOp.Add,
             BinaryOperatorKind.Subtract => BinaryOp.Sub,
             BinaryOperatorKind.Multiply => BinaryOp.Mul,
+            BinaryOperatorKind.Divide => BinaryOp.Div,
+            BinaryOperatorKind.Remainder => BinaryOp.Rem,
             _ => throw Reject("unsupported operator", syntax, kind.ToString()),
         };
+        if (type == VirType.Decimal)
+        {
+            return DecimalArithmetic(op, left, rightOp, syntax);
+        }
         if (type is not PrimitiveType { Kind: VirPrimitive.Int32 or VirPrimitive.Int64 })
         {
             throw Reject(clrType?.TypeKind == TypeKind.Enum ? "enum arithmetic" : "unsupported operator", syntax, kind.ToString());
@@ -562,11 +683,29 @@ internal sealed partial class Walker
         {
             throw Reject("enum arithmetic", syntax);
         }
-        if (isChecked)
+        // `/` and `%` throw on a zero divisor and on MinValue / -1 in any context (KTD6), so their node is always `wrap`.
+        // A theorem statement is a Prop: a raising `/` or `%` there is rejected through effect inference (KTD11), and one by
+        // a constant other than 0 and -1 cannot raise, so it is pure and translates as Lean's `/` and `%` (M6 U9).
+        var overflow = isChecked && op is not (BinaryOp.Div or BinaryOp.Rem) ? VirOverflow.Checked : VirOverflow.Wrap;
+        return Track(new BinaryExpr(type, op, overflow, left, right), syntax);
+    }
+
+    /// <summary>
+    /// <c>+</c> and <c>-</c> on <c>decimal</c>, which throw <c>OverflowException</c> in any context, so their node is always
+    /// <c>checked</c> (KTD7). Multiplication, division and remainder wait for M7.
+    /// </summary>
+    private BinaryExpr DecimalArithmetic(BinaryOp op, VirExpr left, IOperation rightOp, SyntaxNode syntax)
+    {
+        if (op is not (BinaryOp.Add or BinaryOp.Sub))
         {
-            throw Reject("checked arithmetic", syntax);
+            throw Reject("decimal operator other than + and -", syntax, op.ToString());
         }
-        return Track(new BinaryExpr(type, op, VirOverflow.Wrap, left, right), syntax);
+        var right = Expr(rightOp);
+        if (left.Type != VirType.Decimal || right.Type != VirType.Decimal)
+        {
+            throw Reject("unsupported operator", syntax);
+        }
+        return Track(new BinaryExpr(VirType.Decimal, op, VirOverflow.Checked, left, right), syntax);
     }
 
     private static CompareOp CompareOpOf(BinaryOperatorKind kind) =>
@@ -592,7 +731,7 @@ internal sealed partial class Walker
         if (equality && Unwrapped(left) is { } l && Unwrapped(right) is { } r
             && Symbols.Shape(l.Type!) == TypeShape.ClosedClass && SymbolEqualityComparer.Default.Equals(l.Type, r.Type))
         {
-            return Track(new CompareExpr(op, CompareKind.Closed, Expr(l), Expr(r)), syntax);
+            return Compared(op, CompareKind.Closed, Expr(l), Expr(r), syntax);
         }
         if (left is ILiteralOperation { Type: null } || right is ILiteralOperation { Type: null }
             || left is IConversionOperation { Operand: ILiteralOperation { Type: null } } || right is IConversionOperation { Operand: ILiteralOperation { Type: null } })
@@ -626,6 +765,10 @@ internal sealed partial class Walker
                     case VirPrimitive.Bool when equality:
                         kind = CompareKind.Bool;
                         break;
+                    case null when type.SpecialType == SpecialType.System_Decimal:
+                        // Numeric: 1.0m == 1.00m (KTD7).
+                        kind = CompareKind.Decimal;
+                        break;
                     default:
                         MapType(type, annotated: false, syntax);
                         throw Reject("unsupported comparison", syntax, Symbols.Display(type));
@@ -641,6 +784,19 @@ internal sealed partial class Walker
         return Track(new CompareExpr(op, kind, lv, rv), syntax);
     }
 
+    /// <summary>
+    /// A comparison of two values, rejected when either may be null: comparing with <c>null</c> is a null test, and any
+    /// other equality on a nullable value is left out like a lifted one (#76).
+    /// </summary>
+    private CompareExpr Compared(CompareOp op, CompareKind kind, VirExpr l, VirExpr r, SyntaxNode syntax)
+    {
+        if (l.Type is NullableType || r.Type is NullableType)
+        {
+            throw Reject("lifted comparison", syntax);
+        }
+        return Track(new CompareExpr(op, kind, l, r), syntax);
+    }
+
     /// <summary>The operand of an implicit reference conversion to <c>object</c>, as Roslyn writes reference equality.</summary>
     private static IOperation? Unwrapped(IOperation op) =>
         op is IConversionOperation { IsImplicit: true, Conversion.IsReference: true, Operand: { Type: not null } inner } ? inner : null;
@@ -653,18 +809,18 @@ internal sealed partial class Walker
         var op = CompareOpOf(b.OperatorKind);
         if (equality && Symbols.Shape(type) == TypeShape.Record && method.IsImplicitlyDeclared)
         {
-            return Track(new CompareExpr(op, CompareKind.Record, Expr(b.LeftOperand), Expr(b.RightOperand)), syntax);
+            return Compared(op, CompareKind.Record, Expr(b.LeftOperand), Expr(b.RightOperand), syntax);
         }
         if (equality && Symbols.Shape(type) == TypeShape.ClosedClass)
         {
             // Modelled by identity; the type unit records that its own equality agrees (KTD11).
-            return Track(new CompareExpr(op, CompareKind.Closed, Expr(b.LeftOperand), Expr(b.RightOperand)), syntax);
+            return Compared(op, CompareKind.Closed, Expr(b.LeftOperand), Expr(b.RightOperand), syntax);
         }
         if (equality && InheritedClosedOperands(b, type) is var (left, right))
         {
             // A base class's operator on two instances of one closed class (#32): modelled by identity like the class's
             // own, with the same assumption, since HasOwnEquality counts base classes.
-            return Track(new CompareExpr(op, CompareKind.Closed, Expr(left), Expr(right)), syntax);
+            return Compared(op, CompareKind.Closed, Expr(left), Expr(right), syntax);
         }
         throw Reject("user-defined operator", syntax, Symbols.Display(method));
     }
@@ -705,7 +861,7 @@ internal sealed partial class Walker
         }
         if (u.IsLifted)
         {
-            throw Reject("nullable type", syntax);
+            throw Reject("lifted arithmetic", syntax);
         }
         switch (u.OperatorKind)
         {
@@ -716,17 +872,20 @@ internal sealed partial class Walker
             case UnaryOperatorKind.Minus or UnaryOperatorKind.Plus:
                 {
                     var type = MapType(u.Type, annotated: false, syntax);
-                    if (type is not PrimitiveType { Kind: VirPrimitive.Int32 or VirPrimitive.Int64 })
+                    if (type is not PrimitiveType { Kind: VirPrimitive.Int32 or VirPrimitive.Int64 or VirPrimitive.Decimal })
                     {
                         throw Reject("unsupported operator", syntax, u.OperatorKind.ToString());
                     }
-                    if (u.OperatorKind == UnaryOperatorKind.Minus && u.IsChecked)
+                    var overflow = VirOverflow.Wrap;
+
+                    // Negating a decimal flips its sign bit, which cannot overflow (KTD7).
+                    if (u.OperatorKind == UnaryOperatorKind.Minus && u.IsChecked && type != VirType.Decimal)
                     {
-                        throw Reject("checked arithmetic", syntax);
+                        overflow = VirOverflow.Checked;
                     }
                     var operand = Expr(u.Operand);
                     var op = u.OperatorKind == UnaryOperatorKind.Minus ? UnaryOp.Neg : UnaryOp.Plus;
-                    return Track(new UnaryExpr(type, op, VirOverflow.Wrap, operand), syntax);
+                    return Track(new UnaryExpr(type, op, overflow, operand), syntax);
                 }
             default:
                 throw Reject("unsupported operator", syntax, u.OperatorKind.ToString());
@@ -736,9 +895,13 @@ internal sealed partial class Walker
     private VirExpr Conversion(IConversionOperation c)
     {
         var syntax = c.Syntax;
-        if (c.Operand is IThrowOperation)
+        if (c.Operand is IThrowOperation t)
         {
-            throw Reject("throw", syntax);
+            return ThrowExpression(t, MapType(c.Type, annotated: false, syntax));
+        }
+        if (c.Operand.Type is null && IsNullLiteral(c.Operand))
+        {
+            return NullLiteral(c);
         }
         if (c.Operand.Type is null)
         {
@@ -752,10 +915,32 @@ internal sealed partial class Walker
         {
             return Expr(c.Operand);
         }
+
+        // A target-typed `b ? a : null` or switch expression: its branches carry the conversions.
+        if (c.IsImplicit && c.Operand is IConditionalOperation or ISwitchExpressionOperation
+            && SymbolEqualityComparer.Default.Equals(c.Type, c.Operand.Type))
+        {
+            return Expr(c.Operand);
+        }
         var to = MapType(c.Type, annotated: false, syntax);
         var fromType = c.Operand.Type;
         var from = MapType(fromType, annotated: false, c.Operand.Syntax);
         var toType = c.Type!;
+        if (c.Conversion.IsNullable)
+        {
+            // T to T? wraps the value; (T)x on a T? reads x.Value, which throws on null (#76). Anything else changes the
+            // value type too, which M6 leaves out.
+            if (to is NullableType wrapped && wrapped.Value == from)
+            {
+                return Track(new ConvertExpr(from, to, VirOverflow.Wrap, Expr(c.Operand)), syntax);
+            }
+            if (from is NullableType read && read.Value == to)
+            {
+                var operand = Expr(c.Operand);
+                return Unwrap(to, UnwrapKind.Value, operand, syntax);
+            }
+            throw Reject("unsupported conversion", syntax, $"{Symbols.Display(fromType)} to {Symbols.Display(toType)}");
+        }
         if (from == VirType.Int32 && to == VirType.Int64)
         {
             // Widening cannot overflow, so a checked widening is accepted (KTD15).
@@ -763,11 +948,8 @@ internal sealed partial class Walker
         }
         if (from == VirType.Int64 && to == VirType.Int32)
         {
-            if (c.IsChecked)
-            {
-                throw Reject("checked arithmetic", syntax);
-            }
-            return Track(new ConvertExpr(from, to, VirOverflow.Wrap, Expr(c.Operand)), syntax);
+            var overflow = c.IsChecked ? VirOverflow.Checked : VirOverflow.Wrap;
+            return Track(new ConvertExpr(from, to, overflow, Expr(c.Operand)), syntax);
         }
         if (Symbols.Shape(fromType) == TypeShape.OpenEnum && IsUnderlying(fromType, toType))
         {
@@ -792,17 +974,29 @@ internal sealed partial class Walker
             {
                 throw Reject("params argument", argument.Syntax);
             }
-            byOrdinal[argument.Parameter.Ordinal] = Expr(argument.Value);
+            // A nullable argument for a non-nullable parameter is a checked unwrap (KTD5).
+            var parameter = argument.Parameter;
+            byOrdinal[parameter.Ordinal] = FitDeclared(Expr(argument.Value), parameter.Type, Annotated(parameter), argument.Value.Syntax);
         }
         if (byOrdinal.Any(a => a is null))
         {
             throw Reject("unsupported call", at);
         }
-        // Arguments are pure, so putting them in parameter order changes nothing.
+        // An awaited or external call changes the world, so it must run in the order written (M6 KTD4, U18).
+        if (Reordered(arguments, byOrdinal))
+        {
+            throw Unsupported(
+                "named arguments out of order with a dependency call",
+                at,
+                "An argument awaits or calls a dependency, and the named arguments are not in parameter order: write them in parameter order, so they run in the order the model runs them.");
+        }
+        // Other arguments cannot change the world, so putting them in parameter order changes nothing.
         return new VirList<VirExpr>(byOrdinal.Select(a => a!));
     }
 
-    private VirExpr Invocation(IInvocationOperation call)
+    /// <param name="call">The call.</param>
+    /// <param name="awaited">Whether the call is the direct operand of <c>await</c>, the one place a task may be made (KTD22).</param>
+    private VirExpr Invocation(IInvocationOperation call, bool awaited = false)
     {
         var syntax = call.Syntax;
         var target = call.TargetMethod;
@@ -829,7 +1023,11 @@ internal sealed partial class Walker
         }
         if (IsDecreases(call))
         {
-            throw DecreasesNotFirst(syntax);
+            throw DecreasesNotFirst(syntax, outOfOrder: false);
+        }
+        if (IsSpec(call, "Requires") || IsSpec(call, "Ensures") || IsSpec(call, "Assert"))
+        {
+            throw ContractNotAStatement(call);
         }
         if (IsScriptMember(target))
         {
@@ -840,6 +1038,33 @@ internal sealed partial class Walker
             throw new RejectedException(new Rejection(
                 DiagnosticIds.CallsTheorem, Symbols.Key(target), syntax.GetLocation(), $"A [Theorem] cannot be called: {Symbols.Display(target)}."));
         }
+        if (IsTaskMember(target))
+        {
+            throw TaskMember(target, syntax);
+        }
+        if (call.Instance is { } receiver && IsState(receiver))
+        {
+            return Awaited(External(call, receiver), awaited, syntax);
+        }
+        if (call.Instance is IInstanceReferenceOperation { Type: { } self } && Symbols.Shape(self) != TypeShape.Record)
+        {
+            throw MemberAccessOnThis(target, syntax);
+        }
+        if (!InSource(target) && ModelledMembers.Contains(Symbols.Key(target)))
+        {
+            return Modelled(call);
+        }
+        if (target is { Name: "GetValueOrDefault", Parameters.Length: 0, IsStatic: false }
+            && target.ContainingType.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
+        {
+            // x.GetValueOrDefault() is x ?? default(T).
+            var value = Expr(call.Instance ?? throw Reject("unsupported call", syntax));
+            if (value.Type is not NullableType { Value: var valueType })
+            {
+                throw Reject("unsupported call", syntax);
+            }
+            return Track(new CoalesceExpr(valueType, value, Track(DefaultOf(valueType), syntax)), syntax);
+        }
         if (!Symbols.IsVerified(target) || !InSource(target))
         {
             throw NotVerified(target, syntax);
@@ -848,17 +1073,167 @@ internal sealed partial class Walker
         {
             throw Reject("generic member", syntax);
         }
+        if (!target.IsStatic && target.ContainingType.TypeKind == TypeKind.Class && Symbols.Shape(target.ContainingType) == TypeShape.Other)
+        {
+            // A class's verified instance method has no receiver in its unit: only its dependencies, which the caller has none of.
+            throw Reject("call to an instance method of a class", syntax, Symbols.Display(target));
+        }
         var key = Symbols.Key(target);
         var parts = new List<VirExpr>();
         if (!target.IsStatic)
         {
-            parts.Add(Expr(call.Instance ?? throw Reject("unsupported call", syntax)));
+            parts.Add(Dereferenced(call.Instance ?? throw Reject("unsupported call", syntax)));
         }
         parts.AddRange(Arguments(target, call.Arguments, syntax));
-        var type = MapType(target.ReturnType, annotated: false, syntax);
+        var type = MapReturn(target.ReturnType, target.ReturnNullableAnnotation == NullableAnnotation.Annotated, syntax);
         Deps.Add(key);
         Calls.Add(key);
-        return Track(new CallExpr(type, key, new VirList<VirExpr>(parts)), syntax);
+        return Awaited(Track(new CallExpr(type, key, new VirList<VirExpr>(parts)), syntax), awaited, syntax);
+    }
+
+    /// <summary>
+    /// A call to a modelled BCL member (KTD23). One that can throw (<see cref="Effects.ThrowingModelledMembers"/>) makes
+    /// the unit raising, and a theorem statement with one is rejected through effect inference (KTD11).
+    /// </summary>
+    private ModelledCallExpr Modelled(IInvocationOperation call)
+    {
+        var syntax = call.Syntax;
+        var target = call.TargetMethod;
+        var key = Symbols.Key(target);
+        var type = MapType(target.ReturnType, annotated: false, syntax);
+        return Track(new ModelledCallExpr(type, key, Arguments(target, call.Arguments, syntax)), syntax);
+    }
+
+    /// <summary>
+    /// The thrown type's key for <c>throw new T(...)</c> (KTD4). The exception's arguments are not modelled, so each must be
+    /// a constant or a parameter, which cannot raise; and <c>T</c> must be a <c>System</c> exception type or a plain
+    /// subclass of one (<see cref="IsPlainSubclass"/>), so building it throws nothing but itself.
+    /// </summary>
+    private string Thrown(IThrowOperation t)
+    {
+        var syntax = t.Syntax;
+        var value = t.Exception;
+        if (value is null)
+        {
+            throw Reject("rethrow", syntax);
+        }
+        while (value is IConversionOperation { IsImplicit: true, OperatorMethod: null, Conversion.IsReference: true } conversion)
+        {
+            value = conversion.Operand;
+        }
+        if (value is not IObjectCreationOperation { Constructor: { } constructor, Type: INamedTypeSymbol type, Initializer: null } create)
+        {
+            throw Reject("throw of a value other than a new exception", syntax);
+        }
+        foreach (var argument in create.Arguments)
+        {
+            if (argument.Syntax.DescendantNodesAndSelf().FirstOrDefault(IsForgiving) is { } forgiving)
+            {
+                throw Reject("null-forgiving operator", forgiving);
+            }
+            if (!ConstantOrParameter(argument.Value, _parameters.Keys))
+            {
+                throw Reject("exception argument that is not a constant or a parameter", argument.Syntax);
+            }
+        }
+        if (type.IsGenericType || !(IsSystemException(type) || IsPlainSubclass(constructor)))
+        {
+            throw Reject("exception type that is not a System exception or a plain subclass of one", syntax, Symbols.Display(type));
+        }
+        return Symbols.Key(type);
+    }
+
+    /// <summary>A throw expression, of the type its context expects.</summary>
+    public ThrowExpr ThrowExpression(IThrowOperation t, VirType type) => Track(new ThrowExpr(type, Thrown(t)), t.Syntax);
+
+    /// <summary>A constant, or a reference to one of <paramref name="parameters"/>, under implicit built-in conversions.</summary>
+    private static bool ConstantOrParameter(IOperation value, IEnumerable<IParameterSymbol> parameters)
+    {
+        while (value is IConversionOperation { IsImplicit: true, OperatorMethod: null } conversion)
+        {
+            value = conversion.Operand;
+        }
+        return value.ConstantValue.HasValue
+            || (value is IParameterReferenceOperation p && parameters.Contains(p.Parameter, SymbolEqualityComparer.Default));
+    }
+
+    /// <summary>
+    /// An exception type of the framework: in a <c>System</c> namespace, from a framework assembly rather than this
+    /// compilation or a referenced project, and derived from <c>System.Exception</c>.
+    /// </summary>
+    private bool IsSystemException(INamedTypeSymbol type)
+    {
+        var ns = type.ContainingNamespace?.ToDisplayString() ?? "";
+        var assembly = type.ContainingAssembly?.Name ?? "";
+        bool framework = assembly is "mscorlib" or "netstandard" or "System" || assembly.StartsWith("System.", StringComparison.Ordinal);
+        return (ns == "System" || ns.StartsWith("System.", StringComparison.Ordinal))
+            && framework
+            && !InSource(type)
+            && DerivesFromException(type);
+    }
+
+    private static bool DerivesFromException(INamedTypeSymbol type)
+    {
+        for (var t = type; t is not null; t = t.BaseType)
+        {
+            if (t.ToDisplayString() == "System.Exception")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// A constructor of an exception type declared in this compilation whose body is empty and which chains, with constants
+    /// and its own parameters, to a constructor of its base class, a <c>System</c> exception. The type has no primary
+    /// constructor, field or property initializer and static constructor, which would also run when it is built.
+    /// </summary>
+    private bool IsPlainSubclass(IMethodSymbol constructor)
+    {
+        var type = constructor.ContainingType;
+        if (!InSource(type) || type.BaseType is not { } baseType || !IsSystemException(baseType))
+        {
+            return false;
+        }
+        if (type.StaticConstructors.Any(c => !c.IsImplicitlyDeclared))
+        {
+            return false;
+        }
+        foreach (var declaration in type.DeclaringSyntaxReferences.Select(r => r.GetSyntax()))
+        {
+            if (declaration is TypeDeclarationSyntax { ParameterList: not null })
+            {
+                return false;
+            }
+            if (declaration is TypeDeclarationSyntax typeSyntax && typeSyntax.Members.Any(m =>
+                (m is FieldDeclarationSyntax f
+                    && !f.Modifiers.Any(Microsoft.CodeAnalysis.CSharp.SyntaxKind.ConstKeyword)
+                    && f.Declaration.Variables.Any(v => v.Initializer is not null))
+                || m is PropertyDeclarationSyntax { Initializer: not null }))
+            {
+                return false;
+            }
+        }
+        if (constructor.DeclaringSyntaxReferences.Select(r => r.GetSyntax()).SingleOrDefault() is not ConstructorDeclarationSyntax
+            {
+                Body.Statements.Count: 0,
+                ExpressionBody: null,
+                Initializer: { } initializer,
+            } syntax
+            || !initializer.ThisOrBaseKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.BaseKeyword))
+        {
+            return false;
+        }
+        if (_context.Model(syntax.SyntaxTree).GetOperation(syntax) is not IConstructorBodyOperation
+            {
+                Initializer: IExpressionStatementOperation { Operation: IInvocationOperation chained },
+            }
+            || !SymbolEqualityComparer.Default.Equals(chained.TargetMethod.ContainingType, baseType))
+        {
+            return false;
+        }
+        return chained.Arguments.All(a => ConstantOrParameter(a.Value, constructor.Parameters));
     }
 
     private bool InSource(ISymbol symbol) =>
@@ -880,15 +1255,40 @@ internal sealed partial class Walker
         {
             throw Reject("indexer", syntax);
         }
+        if (prop.Instance is { } state && IsState(state))
+        {
+            throw NotACall(state, "property of a dependency");
+        }
+        if (prop.Instance is IInstanceReferenceOperation { Type: { } self } && Symbols.Shape(self) != TypeShape.Record)
+        {
+            throw MemberAccessOnThis(property, syntax);
+        }
+        if (IsTaskMember(property))
+        {
+            throw TaskMember(property, syntax);
+        }
+        if (owner.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T && !property.IsStatic
+            && property.Name is "HasValue" or "Value")
+        {
+            // x.HasValue is not (x is null); x.Value throws InvalidOperationException on null (KTD5).
+            var value = Expr(prop.Instance ?? throw Reject("unsupported property read", syntax));
+            if (value.Type is not NullableType nullable)
+            {
+                throw Reject("unsupported property read", syntax);
+            }
+            return property.Name == "HasValue"
+                ? NullTest(value, negated: true, nullSyntax: syntax, syntax)
+                : Unwrap(nullable.Value, UnwrapKind.Value, value, syntax);
+        }
         if (Symbols.IsVerified(property) && InSource(property))
         {
             var key = Symbols.Key(property);
             var parts = new List<VirExpr>();
             if (!property.IsStatic)
             {
-                parts.Add(Expr(prop.Instance ?? throw Reject("unsupported call", syntax)));
+                parts.Add(Dereferenced(prop.Instance ?? throw Reject("unsupported call", syntax)));
             }
-            var type = MapType(property.Type, annotated: false, syntax);
+            var type = MapType(property.Type, Annotated(property), syntax);
             Deps.Add(key);
             Calls.Add(key);
             return Track(new CallExpr(type, key, new VirList<VirExpr>(parts)), syntax);
@@ -906,8 +1306,8 @@ internal sealed partial class Walker
         }
         if (Symbols.Shape(owner) == TypeShape.Record && !property.IsStatic && Symbols.IsPositional(property))
         {
-            var target = Expr(prop.Instance ?? throw Reject("unsupported property read", syntax));
-            var type = MapType(property.Type, property.NullableAnnotation == NullableAnnotation.Annotated, syntax);
+            var target = Dereferenced(prop.Instance ?? throw Reject("unsupported property read", syntax));
+            var type = MapType(property.Type, Annotated(property), syntax);
             return Track(new GetExpr(type, property.Name, target), syntax);
         }
         throw NotVerified(property, syntax);
@@ -928,6 +1328,10 @@ internal sealed partial class Walker
             {
                 throw Reject("closed class instance member", syntax, Symbols.Display(field));
             }
+        }
+        if (IsState(f))
+        {
+            throw NotACall(f, "dependency used other than to call a member");
         }
         throw NotVerified(field, syntax);
     }
@@ -959,7 +1363,7 @@ internal sealed partial class Walker
             throw Reject("with on a type that is not a record", syntax);
         }
         var type = MapType(with.Type, annotated: false, syntax);
-        var @base = Expr(with.Operand);
+        var @base = Dereferenced(with.Operand);
         var updates = new List<WithUpdate>();
         foreach (var init in with.Initializer.Initializers)
         {
@@ -968,7 +1372,7 @@ internal sealed partial class Walker
             {
                 throw Reject("with on a property that is not positional", init.Syntax);
             }
-            var value = Expr(assign.Value);
+            var value = FitDeclared(Expr(assign.Value), p.Type, Annotated(p), assign.Value.Syntax);
             updates.Add(new WithUpdate(p.Name, value));
         }
         return Track(new WithExpr(type, @base, new VirList<WithUpdate>(updates)), syntax);
@@ -978,7 +1382,7 @@ internal sealed partial class Walker
     {
         var syntax = sw.Syntax;
         var type = MapType(sw.Type, annotated: false, syntax);
-        var scrutinee = Expr(sw.Value);
+        var scrutinee = NotNullableScrutinee(Expr(sw.Value), syntax);
         var arms = new List<SwitchArm>();
         foreach (var arm in sw.Arms)
         {
@@ -987,6 +1391,11 @@ internal sealed partial class Walker
                 throw Reject("switch arm guard", arm.Syntax);
             }
             arms.Add(new SwitchArm(Pattern(arm.Pattern), Expr(arm.Value)));
+        }
+        type = Join(type, arms.Select(a => a.Value));
+        for (int i = 0; i < arms.Count; i++)
+        {
+            arms[i] = new SwitchArm(arms[i].Pattern, FitTo(arms[i].Value, type, sw.Arms[i].Value.Syntax));
         }
 
         // Without exceptions, a switch expression must match every value (KTD15).

@@ -11,7 +11,7 @@ namespace Warrant.Extraction;
 /// <summary>
 /// Turns a compilation into VIR units and diagnostics, enforcing the M4 subset (docs/m4/03).
 /// </summary>
-public static class Extractor
+public static partial class Extractor
 {
     /// <summary>The extractor version recorded in every unit's <c>facts</c>.</summary>
     public const string Version = "0.1.0";
@@ -290,6 +290,12 @@ public static class Extractor
 
         public ISymbol Symbol { get; }
 
+        /// <summary>
+        /// The symbol the unit is shown as, when not <see cref="Symbol"/>: a contract unit is the interface member whose
+        /// contract it states (M6 U20), so reports name <c>IPaymentStore.GetPayment</c>, not the contract class.
+        /// </summary>
+        public ISymbol? DisplaySymbol { get; init; }
+
         public VirUnitKind Kind { get; }
 
         public Walker? Walker { get; set; }
@@ -320,7 +326,7 @@ public static class Extractor
     }
 
     /// <summary>One extraction: the whole compilation (<see cref="Execute"/>), or one member's closure (<see cref="ExecuteFor"/>).</summary>
-    internal sealed class Run
+    internal sealed partial class Run
     {
         private readonly CSharpCompilation _compilation;
         private readonly CancellationToken _cancellationToken;
@@ -328,6 +334,8 @@ public static class Extractor
         private readonly Dictionary<string, Candidate> _candidates = new(StringComparer.Ordinal);
         private readonly List<ExtractionDiagnostic> _diagnostics = [];
         private readonly Lazy<CompilationScan> _scan;
+        private readonly Lazy<ProofIndex> _proofs;
+        private readonly Lazy<ContractIndex> _contracts;
 
         /// <param name="compilation">The compilation.</param>
         /// <param name="cancellationToken">Cancels the run.</param>
@@ -337,17 +345,26 @@ public static class Extractor
         /// Whether a closed class from another assembly is accepted unchecked, with no type unit: the analyzer's setting,
         /// since only the build has the referenced projects' source and checks such classes.
         /// </param>
+        /// <param name="proofs">The compilation's <c>[ProofFor]</c> methods, shared by runs on the same compilation; null to index them when needed.</param>
+        /// <param name="contracts">The compilation's <c>[ContractFor]</c> classes, shared by runs on the same compilation; null to index them when needed.</param>
         public Run(
             CSharpCompilation compilation,
             CancellationToken cancellationToken,
             Lazy<CompilationScan>? scan = null,
             Func<string, CSharpCompilation?>? referencedSource = null,
-            bool deferReferenced = false)
+            bool deferReferenced = false,
+            Lazy<ProofIndex>? proofs = null,
+            Lazy<ContractIndex>? contracts = null)
         {
             _compilation = compilation;
             _cancellationToken = cancellationToken;
             _context = new ExtractionContext(compilation, Facts(compilation), referencedSource, deferReferenced);
             _scan = scan ?? new Lazy<CompilationScan>(() => CompilationScan.Run(_context, _cancellationToken), LazyThreadSafetyMode.None);
+            _proofs = proofs ?? new Lazy<ProofIndex>(
+                () => ProofIndex.Build(compilation, SortedSourceTypes(compilation), _cancellationToken), LazyThreadSafetyMode.None);
+            _contracts = contracts ?? new Lazy<ContractIndex>(
+                () => ContractIndex.Build(compilation, SortedSourceTypes(compilation), _cancellationToken), LazyThreadSafetyMode.None);
+            _context.Contracts = _contracts;
         }
 
         public static VirFacts Facts(CSharpCompilation compilation) => new(
@@ -366,6 +383,12 @@ public static class Extractor
                 _candidates.Add(candidate.Key, candidate);
             }
 
+            // A contract unit for every interface member a verified method calls through a dependency (KTD10).
+            foreach (var candidate in _candidates.Values.OrderBy(c => c.Key, StringComparer.Ordinal).ToList())
+            {
+                AddContracts(candidate);
+            }
+
             // Type units for every type a unit uses, then the shape checks for every [Closed] type, used or not.
             AddUsedTypes();
             foreach (var type in types.Where(t => Symbols.IsClosed(t) && !_context.IsUsed(Symbols.Key(t))))
@@ -377,15 +400,26 @@ public static class Extractor
                 }
             }
 
+            // The shape of every [ContractFor] class, used or not (KTD10).
+            foreach (var contractClass in _contracts.Value.Classes)
+            {
+                ReportContractClass(contractClass);
+            }
+
             // WRT0008 anywhere in the compilation (KTD18).
             _diagnostics.AddRange(UnnamedClosedValues(_scan.Value, types));
 
             RejectCycles();
+            RejectEffects();
             RejectDependents();
 
             foreach (var c in _candidates.Values.Where(c => c.Rejection is not null).OrderBy(c => c.Key, StringComparer.Ordinal))
             {
                 Report(c.Key, c.Rejection!);
+            }
+            foreach (var proof in _proofs.Value.Methods)
+            {
+                ReportProof(proof);
             }
 
             var accepted = _candidates.Values.Where(c => c.Rejection is null).ToDictionary(c => c.Key, StringComparer.Ordinal);
@@ -405,6 +439,15 @@ public static class Extractor
         /// <returns>The diagnostics, keyed by the members and types they are about.</returns>
         public List<ExtractionDiagnostic> ExecuteFor(ISymbol root, IReadOnlyDictionary<string, ISymbol> attributed)
         {
+            // A [ProofFor] method is not a unit: what can be wrong with it is in the compilation's index (KTD16).
+            if (ProofIndex.IsProofFor(root))
+            {
+                ReportProof((IMethodSymbol)root);
+                if (!attributed.ContainsKey(Symbols.Key(root)))
+                {
+                    return Sort(_diagnostics);
+                }
+            }
             if (root is INamedTypeSymbol type)
             {
                 _context.UseType(type);
@@ -424,7 +467,9 @@ public static class Extractor
                     }
                     var candidate = BuildMember(member);
                     _candidates.Add(key, candidate);
-                    foreach (var reached in candidate.Deps.Concat(candidate.Calls))
+                    var reachedFrom = new List<Candidate> { candidate };
+                    reachedFrom.AddRange(AddContracts(candidate));
+                    foreach (var reached in reachedFrom.SelectMany(c => c.Deps.Concat(c.Calls)))
                     {
                         if (!_candidates.ContainsKey(reached) && attributed.TryGetValue(reached, out var next))
                         {
@@ -435,12 +480,116 @@ public static class Extractor
             }
             AddUsedTypes();
             RejectCycles();
+            RejectEffects();
             RejectDependents();
             foreach (var c in _candidates.Values.Where(c => c.Rejection is not null).OrderBy(c => c.Key, StringComparer.Ordinal))
             {
                 Report(c.Key, c.Rejection!);
             }
             return Sort(_diagnostics);
+        }
+
+        /// <summary>The diagnostic about a <c>[ContractFor]</c> class's shape, if it has not the contract shape (KTD10).</summary>
+        /// <param name="contractClass">The class.</param>
+        /// <returns>The diagnostics, keyed by the class.</returns>
+        public List<ExtractionDiagnostic> ExecuteForContractClass(INamedTypeSymbol contractClass)
+        {
+            ReportContractClass(contractClass);
+            return Sort(_diagnostics);
+        }
+
+        private void ReportContractClass(INamedTypeSymbol contractClass)
+        {
+            var key = Symbols.Key(contractClass);
+            if (_contracts.Value.ProblemOf(key) is { } problem)
+            {
+                Report(key, problem);
+            }
+        }
+
+        /// <summary>
+        /// Builds the contract units of the interface members a candidate calls through its dependencies, those not built yet.
+        /// </summary>
+        /// <returns>The contract candidates built.</returns>
+        private List<Candidate> AddContracts(Candidate candidate)
+        {
+            var added = new List<Candidate>();
+            if (candidate.Rejection is not null)
+            {
+                // A rejected walk stopped part-way; the units it reached are not used by any unit that is kept.
+                return added;
+            }
+            foreach (var pair in candidate.Walker?.ContractMembers ?? new Dictionary<string, Walker.ContractMember>())
+            {
+                if (!_candidates.ContainsKey(pair.Key))
+                {
+                    var contract = BuildContract(pair.Key, pair.Value);
+                    _candidates.Add(pair.Key, contract);
+                    added.Add(contract);
+                }
+            }
+            return added;
+        }
+
+        /// <summary>
+        /// The contract unit of an interface member (KTD10): its contract class member's parameters, result and leading
+        /// <c>Spec.Requires</c> and <c>Spec.Ensures</c>, keyed by the interface member. It is rejected when another
+        /// contract class's interface also has the member, which would give it two contracts.
+        /// </summary>
+        private Candidate BuildContract(string key, Walker.ContractMember contract)
+        {
+            var member = contract.Member;
+            var implementation = contract.ContractClass.FindImplementationForInterfaceMember(member) as IMethodSymbol;
+            var walker = new Walker(_context, inTheorem: false);
+            var candidate = new Candidate(key, (ISymbol?)implementation ?? member, VirUnitKind.Contract)
+            {
+                DisplaySymbol = member,
+                Walker = walker,
+                Deps = walker.Deps,
+                Calls = walker.Calls,
+            };
+            try
+            {
+                var covering = _contracts.Value.ClassesCovering(member);
+                if (covering.Count > 1)
+                {
+                    throw new RejectedException(new Rejection(
+                        DiagnosticIds.Unsupported,
+                        "interface member with two contract classes",
+                        Symbols.FirstLocation(covering[1]),
+                        $"{Symbols.Display(member)} is a member of the interfaces of both {Symbols.Display(covering[0])} and {Symbols.Display(covering[1])}, so which contract it keeps is ambiguous."));
+                }
+                if (implementation is null || !SymbolEqualityComparer.Default.Equals(implementation.ContainingType, contract.ContractClass))
+                {
+                    throw new RejectedException(new Rejection(
+                        DiagnosticIds.Unsupported,
+                        "interface member without a contract member",
+                        Symbols.FirstLocation(contract.ContractClass),
+                        $"{Symbols.Display(contract.ContractClass)} has no member for {Symbols.Display(member)}, so nothing states what it is assumed to do."));
+                }
+                Parameters(candidate, walker, implementation, implementation.Parameters);
+                bool annotated = implementation.ReturnNullableAnnotation == NullableAnnotation.Annotated;
+                candidate.Returns = walker.MapReturn(implementation.ReturnType, annotated, ReturnTypeSyntax(implementation));
+                walker.SetReturns(implementation.ReturnType, annotated);
+                var declaration = implementation.DeclaringSyntaxReferences.First().GetSyntax(_cancellationToken);
+                candidate.Body = walker.ContractBody(Body(implementation) as IMethodBodyOperation, declaration);
+            }
+            catch (RejectedException e)
+            {
+                candidate.Rejection = e.Rejection;
+            }
+            candidate.Deps.Remove(key);
+            return candidate;
+        }
+
+        /// <summary>Reports why a <c>[ProofFor]</c> method supplies no script, if it supplies none.</summary>
+        private void ReportProof(IMethodSymbol proof)
+        {
+            var key = Symbols.Key(proof);
+            if (_proofs.Value.ProblemOf(key) is { } problem)
+            {
+                Report(key, problem);
+            }
         }
 
         private void AddUsedTypes()
@@ -666,9 +815,17 @@ public static class Extractor
             {
                 throw Reject(member, "property setter");
             }
-            if (!member.IsStatic && !(Symbols.Shape(type) == TypeShape.Record && type.IsReferenceType))
+            // A verified instance method of a plain class may call its dependencies (M6 KTD9); its class is not a value the
+            // model has, so it has no receiver. A record's instance members read the record.
+            bool record = Symbols.Shape(type) == TypeShape.Record && type.IsReferenceType;
+            bool service = member is IMethodSymbol && type.TypeKind == TypeKind.Class && Symbols.Shape(type) == TypeShape.Other;
+            if (!member.IsStatic && !record && !service)
             {
                 throw Reject(member, "instance member of a class");
+            }
+            if (member is IMethodSymbol { IsAsync: true, ReturnsVoid: true })
+            {
+                throw Reject(member, "async void method");
             }
 
             Parameters(candidate, walker, member, member is IMethodSymbol m ? m.Parameters : ImmutableArray<IParameterSymbol>.Empty);
@@ -682,20 +839,31 @@ public static class Extractor
             {
                 throw Reject(member, "ref return");
             }
-            candidate.Returns = walker.MapType(returnType, annotated, ReturnTypeSyntax(member));
-            if (!member.IsStatic)
+            candidate.Returns = walker.MapReturn(returnType, annotated, ReturnTypeSyntax(member));
+            walker.SetReturns(returnType, annotated, member is IMethodSymbol { IsAsync: true });
+            if (!member.IsStatic && record)
             {
                 candidate.Self = ((RefType)walker.MapType(type, annotated: false, null)).Key;
+            }
+            else if (!member.IsStatic)
+            {
+                walker.SetOwner(type);
             }
 
             var body = Body(member) ?? throw Reject(member, "member without a body");
             candidate.Body = body switch
             {
-                IMethodBodyOperation { ExpressionBody: { } e } => ExpressionBody(walker, member, e),
+                IMethodBodyOperation { ExpressionBody: { } e } => ExpressionBody(walker, member, e, candidate.Returns),
                 IMethodBodyOperation { BlockBody: { } b } => walker.Body(b),
-                IBlockOperation b when IsArrow(b) => ExpressionBody(walker, member, b),
+                IBlockOperation b when IsArrow(b) => ExpressionBody(walker, member, b, candidate.Returns),
                 _ => throw Reject(member, "member without a body"),
             };
+
+            // A [ProofFor(nameof(M))] method's script proves M's contract obligation (KTD16); a malformed step rejects M.
+            if (_proofs.Value.ScriptFor(candidate.Key) is { } by)
+            {
+                candidate.Script = walker.ContractScript(by, candidate.Key);
+            }
         }
 
         private static bool IsArrow(IBlockOperation block) => block.Syntax is ArrowExpressionClauseSyntax;
@@ -708,11 +876,23 @@ public static class Extractor
                 var other => other,
             };
 
-        private static VirExpr ExpressionBody(Walker walker, ISymbol member, IBlockOperation block)
+        private static VirExpr ExpressionBody(Walker walker, ISymbol member, IBlockOperation block, VirType returns)
         {
             if (block.Operations.Length == 1 && block.Operations[0] is IReturnOperation { ReturnedValue: { } value })
             {
-                return walker.Expr(value);
+                return walker.Returned(value);
+            }
+            // `=> throw new E(...)`: the body is the throw statement, of the member's return type.
+            if (block.Operations.Length == 1
+                && (block.Operations[0] is IExpressionStatementOperation { Operation: IThrowOperation } s ? s.Operation : block.Operations[0]) is IThrowOperation t)
+            {
+                return walker.ThrowExpression(t, returns);
+            }
+            // `=> F(x)` or `=> await store.Save(p)` in a member that returns no value: a call run for its effects (M6 KTD22).
+            if (block.Operations.Length == 1 && block.Operations[0] is IExpressionStatementOperation { Operation: var effect }
+                && (returns == VirType.Unit || returns == VirType.Task(VirType.Unit)))
+            {
+                return walker.Discarded(effect);
             }
             throw Reject(member, "member without a body");
         }
@@ -897,15 +1077,23 @@ public static class Extractor
             var deps = new VirList<string>(c.Deps);
             var unit = c.Kind switch
             {
-                VirUnitKind.Function => VirUnit.Function(c.Key, new VirList<VirParam>(c.Params), c.Returns!, c.Body!, assumptions, _context.Facts, deps, c.Self),
+                // A function's script is its [ProofFor] method's (KTD16). The constructor, not `with`: an init accessor's
+                // signature differs between Warrant.Vir's netstandard2.0 build, which this assembly compiles against, and
+                // its net10.0 build.
+                VirUnitKind.Function => new VirUnit(
+                    VirUnit.CurrentVersion, c.Key, VirUnitKind.Function, c.Self, new VirList<VirParam>(c.Params), c.Returns!, c.Body!, null, c.Script,
+                    null, null, assumptions, _context.Facts, deps, c.Walker!.Dependencies),
                 VirUnitKind.Theorem => VirUnit.Theorem(
                     c.Key, c.Statement!, assumptions, _context.Facts, deps, new VirList<VirParam>(c.Params), c.Script, c.Budget),
-                _ => VirUnit.TypeUnit(c.Key, c.Type!.Definition!, assumptions, _context.Facts, deps),
+                VirUnitKind.Type => VirUnit.TypeUnit(c.Key, c.Type!.Definition!, assumptions, _context.Facts, deps),
+                VirUnitKind.Contract => VirUnit.Contract(
+                    c.Key, new VirList<VirParam>(c.Params), c.Returns!, (BlockStmt)c.Body!, assumptions, _context.Facts, deps),
+                _ => throw new InvalidOperationException($"Extraction makes no {c.Kind} units."),
             };
             var walker = c.Walker;
             var spans = SpanTable.Build(unit, node => walker?.SyntaxOf(node) is { } s ? Symbols.Span(s) : null);
             var location = Symbols.FirstLocation(c.Symbol);
-            return new ExtractedUnit(unit, spans, Symbols.Display(c.Symbol), location is null ? null : Symbols.Span(location));
+            return new ExtractedUnit(unit, spans, Symbols.Display(c.DisplaySymbol ?? c.Symbol), location is null ? null : Symbols.Span(location));
         }
 
         /// <summary>
@@ -918,7 +1106,8 @@ public static class Extractor
             var result = new List<VirAssumption>();
             foreach (var p in c.ParameterSymbols.Concat(c.Walker?.Universals ?? []))
             {
-                if (Symbols.IsNullableReference(p.Type))
+                // A value declared nullable (`Payment? p`) may be null, which the model says (M6 KTD5); nothing assumes otherwise.
+                if (Symbols.IsNullableReference(p.Type) && p.NullableAnnotation != NullableAnnotation.Annotated)
                 {
                     result.Add(new VirAssumption(VirAssumptionKind.NonNull, p.Name));
                     NonNullFields(p.Name, p.Type, [], result);
@@ -927,6 +1116,16 @@ public static class Extractor
             if (c.Kind != VirUnitKind.Type && !c.Symbol.IsStatic)
             {
                 NonNullFields("this", c.Symbol.ContainingType, [], result);
+            }
+            if (c.Kind == VirUnitKind.Function && c.Walker is { } walker)
+            {
+                DependencyAssumptions(walker, result);
+            }
+            // M6 KTD20 (#89): the method's own Spec.Requires, which a verified caller proves at its call, but which nothing
+            // checks at run time or at a call from code Warrant does not verify.
+            if (c.Kind == VirUnitKind.Function && c.Body is BlockStmt body && body.Stmts.Any(s => s is RequiresStmt))
+            {
+                result.Add(new VirAssumption(VirAssumptionKind.CallerPrecondition, c.Key));
             }
 
             var closed = new List<string>(c.Deps.Where(d => _candidates.TryGetValue(d, out var dep) && dep.Type is not null && Symbols.IsClosed((ITypeSymbol)dep.Symbol)));
@@ -950,6 +1149,58 @@ public static class Extractor
             return new VirList<VirAssumption>(result);
         }
 
+        /// <summary>
+        /// What a method with dependencies assumes of them (KTD9, KTD20, #71): each dependency it calls through is not null,
+        /// and neither is each non-nullable reference a member it calls returns, the <c>Task</c> included (as
+        /// <c>store.Get()</c>, and the awaited value as <c>await store.Get()</c>), nor any record field reachable from one;
+        /// and each member does what its contract unit says.
+        /// </summary>
+        private static void DependencyAssumptions(Walker walker, List<VirAssumption> result)
+        {
+            foreach (var use in walker.DependencyUses)
+            {
+                result.Add(new VirAssumption(VirAssumptionKind.NonNull, use.Name));
+            }
+            foreach (var use in walker.DependencyUses)
+            {
+                foreach (var member in use.Members.Values)
+                {
+                    var called = $"{use.Name}.{member.Name}()";
+                    if (Walker.IsTask(member.ReturnType) is { } task)
+                    {
+                        if (task.IsReferenceType)
+                        {
+                            NonNullResult(called, task, NullableAnnotation.NotAnnotated, result);
+                        }
+                        if (task.TypeArguments.Length == 1)
+                        {
+                            NonNullResult("await " + called, task.TypeArguments[0], task.TypeArgumentNullableAnnotations[0], result);
+                        }
+                    }
+                    else
+                    {
+                        NonNullResult(called, member.ReturnType, member.ReturnNullableAnnotation, result);
+                    }
+                }
+            }
+            foreach (var key in walker.ContractMembers.Keys)
+            {
+                result.Add(new VirAssumption(VirAssumptionKind.ExternalContract, key));
+            }
+        }
+
+        /// <summary>A returned reference that is assumed present, unless it is declared nullable or cannot be null.</summary>
+        private static void NonNullResult(string subject, ITypeSymbol type, NullableAnnotation annotation, List<VirAssumption> result)
+        {
+            bool reference = Walker.IsTask(type) is not null || Symbols.IsNullableReference(type);
+            var assumption = new VirAssumption(VirAssumptionKind.NonNull, subject);
+            if (reference && annotation != NullableAnnotation.Annotated && !result.Contains(assumption))
+            {
+                result.Add(assumption);
+                NonNullFields(subject, type, [], result);
+            }
+        }
+
         private static void NonNullFields(string prefix, ITypeSymbol type, HashSet<string> path, List<VirAssumption> result)
         {
             if (type is not INamedTypeSymbol record || Symbols.Shape(record) != TypeShape.Record
@@ -961,7 +1212,7 @@ public static class Extractor
             }
             foreach (var field in fields)
             {
-                if (Symbols.IsNullableReference(field.Type))
+                if (Symbols.IsNullableReference(field.Type) && field.NullableAnnotation != NullableAnnotation.Annotated)
                 {
                     var subject = prefix + "." + field.Name;
                     result.Add(new VirAssumption(VirAssumptionKind.NonNull, subject));

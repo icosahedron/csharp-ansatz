@@ -10,16 +10,19 @@ namespace Warrant.Semantics;
 /// </summary>
 internal sealed partial class BodyTranslator
 {
-    /// <summary>A switch expression.</summary>
-    private Expr Switch(SwitchExpr s, Env env)
+    /// <summary>
+    /// A switch expression over the scrutinee's value <paramref name="scrutinee"/>, of type <paramref name="type"/>, with
+    /// <paramref name="arm"/> translating each arm's value: <c>Value</c>, or, in a method that can raise, the arm's
+    /// <c>ClrM</c> program (M6 U9).
+    /// </summary>
+    private Expr Switch(SwitchExpr s, Expr scrutinee, Expr type, Func<VirExpr, Expr> arm)
     {
-        var scrutinee = Value(s.Scrutinee, env);
-        var type = _types.Cic(s.Type);
+        var env = Env.Empty; // the patterns are constants
         if (_types.IsClosed(s.Scrutinee.Type))
         {
             // Each constructor takes the value of the first arm that covers it; an arm covering several is copied.
             var members = _types.Closed(s.Scrutinee.Type).Members;
-            var values = s.Arms.Select(a => Value(a.Value, env)).ToList();
+            var values = s.Arms.Select(a => arm(a.Value)).ToList();
             var minors = members.Select(m =>
             {
                 int arm = FirstIndex(s.Arms, a => Covers(a.Pattern, m.Name, members));
@@ -37,8 +40,8 @@ internal sealed partial class BodyTranslator
         var prim = _types.Underlying(s.Scrutinee.Type);
         var tests = s.Arms.Take(discard).Select(a => Matches(a.Pattern, scrutinee, prim, env)).ToList();
         var hyps = ChainHypotheses(tests);
-        var arms = tests.Select((_, i) => InScope(ChainScope(hyps, i), () => Value(s.Arms[i].Value, env))).ToList();
-        var fallback = InScope(ChainScope(hyps, discard), () => Value(s.Arms[discard].Value, env));
+        var arms = tests.Select((_, i) => InScope(ChainScope(hyps, i), () => arm(s.Arms[i].Value))).ToList();
+        var fallback = InScope(ChainScope(hyps, discard), () => arm(s.Arms[discard].Value));
         return Chain(type, tests, arms, fallback, hyps);
     }
 
@@ -46,9 +49,14 @@ internal sealed partial class BodyTranslator
     /// A switch statement: one branch per section, plus an empty branch for the values no section matches when there is no
     /// default. A section ends in <c>return</c> or falls through to <paramref name="k"/> (extraction dropped its <c>break</c>).
     /// </summary>
-    private Expr SwitchStatement(SwitchStmt s, Env env, Continuation k)
+    private Expr SwitchStatement(SwitchStmt s, Env env, Continuation k) =>
+        _sigma is null
+            ? SwitchStatement(s, Value(s.Scrutinee, env), env, k)
+            : Discriminant(s.Scrutinee, env, k.ResultType, scrutinee => SwitchStatement(s, scrutinee, env, k));
+
+    /// <summary>A switch statement over the scrutinee's value <paramref name="scrutinee"/>.</summary>
+    private Expr SwitchStatement(SwitchStmt s, Expr scrutinee, Env env, Continuation k)
     {
-        var scrutinee = Value(s.Scrutinee, env);
         var sections = s.Sections;
         int @default = FirstIndex(sections, IsDefault);
         var branches = sections.Select(section => (VirStmt)new BlockStmt(section.Body)).ToList();

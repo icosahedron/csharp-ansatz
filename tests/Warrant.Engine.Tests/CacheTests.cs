@@ -418,6 +418,127 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
     }
 
     [Fact]
+    public void AContractObligationIsCachedAsADecreaseProofIsAndAChangedEnsuresMissesIt()
+    {
+        // M6 U10: a method's contract obligation is admitted after its definition and cached with it, as a recursive
+        // method's decrease proofs are; its Spec.Ensures is in the unit's VIR, so editing it changes the unit's key.
+        const string source = """
+            public static class S
+            {
+                [Verified]
+                public static int NonNegative(int x)
+                {
+                    Spec.Ensures<int>(r => r >= 0);
+                    return x < 0 ? 0 : x;
+                }
+
+                [ProofFor(nameof(NonNegative))]
+                static Proof NonNegativeProof() =>
+                    Prove.Contract().By(
+                        Tactic.Apply(Lean.Const("Std.Do.Triple.pure")),
+                        Tactic.Unfold(nameof(NonNegative)),
+                        Tactic.Simp(Lean.Const("Std.Do.SPred.entails_1"), Lean.Const("Std.Do.SPred.apply_pure_cons"), Lean.Const("Std.Do.SPred.down_pure_nil")),
+                        Tactic.Omega());
+
+                [Theorem]
+                static Proof NeverNegative(int x) =>
+                    Prove.That(NonNegative(x) >= 0).By(Tactic.Apply(Lean.Const("Cs.S.«NonNegative(System.Int32)».$contract_spec")));
+            }
+            """;
+        const string nonNegative = "M:S.NonNegative(System.Int32)";
+        const string neverNegative = "M:S.NeverNegative(System.Int32)";
+        var units = Units(source);
+        var cold = NewService().Verify(Request(units));
+        Assert.Equal(OutcomeKind.Proved, Result(cold, neverNegative).Outcome.Kind);
+
+        var entry = new FileResultCache().Read(Dir, KeyOf(units, nonNegative))!;
+        Assert.Collection(
+            Assert.IsType<TranslatedOutcome>(entry.Outcome).Declarations,
+            d => Assert.Equal("Cs.S.«NonNegative(System.Int32)»", Assert.IsType<DefinitionDecl>(d).Value.Name.ToString()),
+            d => Assert.Equal("Cs.S.«NonNegative(System.Int32)».$contract", Assert.IsType<TheoremDecl>(d).Value.Name.ToString()),
+            d => Assert.Equal("Cs.S.«NonNegative(System.Int32)».$contract_spec", Assert.IsType<TheoremDecl>(d).Value.Name.ToString()));
+
+        // A theorem that misses next to the cached method uses its spec lemma, admitted from the method's certificate.
+        const string renamed = "M:S.StillNeverNegative(System.Int32)";
+        var lemma = NewService().Verify(Request(Units(source.Replace("static Proof NeverNegative(", "static Proof StillNeverNegative(", StringComparison.Ordinal))));
+        Assert.True(Result(lemma, nonNegative).FromCache);
+        Assert.False(Result(lemma, renamed).FromCache);
+        Assert.Equal(OutcomeKind.Proved, Result(lemma, renamed).Outcome.Kind);
+
+        var weaker = Units(source.Replace("r => r >= 0", "r => r >= -1", StringComparison.Ordinal));
+        Assert.NotEqual(KeyOf(units, nonNegative), KeyOf(weaker, nonNegative));
+        var changed = NewService().Verify(Request(weaker));
+        Assert.False(Result(changed, nonNegative).FromCache);
+        Assert.Equal(OutcomeKind.Translated, Result(changed, nonNegative).Outcome.Kind);
+        Assert.Equal(Texts(cold).Count, Texts(changed).Count);
+    }
+
+    [Fact]
+    public void AnEditedContractClassMemberInvalidatesTheCachedObligationOfEveryMethodThatCallsIt()
+    {
+        // M6 U19, #166: a method that calls a dependency member depends on its contract unit, whose Spec calls are the
+        // hypothesis its obligation is proved from, so changing or removing them must never leave a cached verdict.
+        const string source = """
+            public interface ICounter { int Count(); }
+
+            [ContractFor(typeof(ICounter))]
+            internal abstract class CounterContract : ICounter
+            {
+                public int Count() { Spec.Ensures<int>(r => r >= 0); return default!; }
+            }
+
+            public sealed class S(ICounter counter)
+            {
+                [Verified]
+                public int Size()
+                {
+                    Spec.Ensures<int>(r => r >= 0);
+                    return counter.Count();
+                }
+
+                [ProofFor(nameof(Size))]
+                static Proof SizeProof() => Prove.Contract().By(Tactic.Unfold(nameof(Size)), Tactic.Exact("counter_Count_spec"));
+
+                [Verified]
+                public int Again()
+                {
+                    Spec.Ensures<int>(r => r >= 0);
+                    return counter.Count();
+                }
+
+                [ProofFor(nameof(Again))]
+                static Proof AgainProof() => Prove.Contract().By(Tactic.Unfold(nameof(Again)), Tactic.Exact("counter_Count_spec"));
+            }
+            """;
+        const string size = "M:S.Size";
+        const string again = "M:S.Again";
+        var units = Units(source);
+        var cold = NewService().Verify(Request(units));
+        Assert.Equal(OutcomeKind.Translated, Result(cold, size).Outcome.Kind);
+        Assert.Equal(OutcomeKind.Translated, Result(cold, again).Outcome.Kind);
+        var warm = NewService().Verify(Request(units));
+        Assert.True(Result(warm, size).FromCache);
+        Assert.True(Result(warm, again).FromCache);
+
+        foreach (var edited in new[] { "Spec.Ensures<int>(r => r >= -1); return default!;", "return default!;" })
+        {
+            var changed = Units(source.Replace("Spec.Ensures<int>(r => r >= 0); return default!;", edited, StringComparison.Ordinal));
+            foreach (var key in new[] { size, again })
+            {
+                Assert.NotEqual(KeyOf(units, key), KeyOf(changed, key));
+            }
+            var response = NewService().Verify(Request(changed));
+            foreach (var key in new[] { size, again })
+            {
+                // Proved again from the weaker contract, which no longer gives r >= 0: a stale entry would say it holds.
+                var result = Result(response, key);
+                Assert.False(result.FromCache, key);
+                Assert.Equal(OutcomeKind.NotProved, result.Outcome.Kind);
+            }
+        }
+    }
+
+    [Fact]
     public void ATheoremThatMissesNextToTheCachedLemmaItNamesIsProvedAsInAColdRun()
     {
         const string source = """

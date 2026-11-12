@@ -8,9 +8,10 @@ namespace Warrant.Engine.Tests.Differential;
 
 /// <summary>
 /// .NET values as CIC terms (docs/m4/07): an <c>int</c>, <c>long</c> or <c>bool</c> is its literal; an open enum is the
-/// literal of its underlying value, typed at the enum by the theorem; a closed enum or closed-class value is the member
+/// literal of its underlying value, typed at the enum by the theorem; a <c>decimal</c> (M6) is <c>Warrant.Decimal.lit</c>
+/// of its sign, mantissa and scale, so the kernel's check compares representations, not values; a closed enum or closed-class value is the member
 /// constant (a closed-class instance found by reference identity among the static instances); a record is <c>$mk</c>
-/// applied to its fields.
+/// applied to its fields; a nullable value (M6) is <c>Option.none</c> or <c>Option.some</c> of its value.
 /// </summary>
 internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string, VirDefinition> definitions)
 {
@@ -23,13 +24,36 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
     {
         PrimitiveType p => Literals.Type(p.Kind),
         RefType r => Expr.Const(LeanNames.ForKey(r.Key)),
+        NullableType n => Expr.App(Option, CicType(n.Value)),
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
     };
 
-    /// <summary>The term for a .NET value of a VIR type.</summary>
-    /// <exception cref="ModelGapException">The value has no counterpart in the model: null, or an unnamed closed value.</exception>
+    /// <summary><c>Option.{0}</c>: a nullable value <c>T?</c> is <c>Option T</c> (M6 KTD5).</summary>
+    private static readonly Expr Option = Expr.Const(Name.Parse("Option"), Level.Zero);
+
+    private static readonly Name OptionNone = Name.Parse("Option.none");
+
+    private static readonly Name OptionSome = Name.Parse("Option.some");
+
+    /// <summary>
+    /// The term for a .NET value of a VIR type; for a nullable type, <c>@Option.none T</c> for null and
+    /// <c>@Option.some T v</c> otherwise.
+    /// </summary>
+    /// <exception cref="ModelGapException">The value has no counterpart in the model: null of a non-nullable type, or an unnamed closed value.</exception>
     public Expr Term(VirType type, object? value)
     {
+        if (type is PrimitiveType { Kind: VirPrimitive.Unit })
+        {
+            // What a void, Task or ValueTask method returns (M6 KTD22): the CLR gives nothing back.
+            return Expr.Const(Name.Parse("Unit.unit"));
+        }
+        if (type is NullableType nullable)
+        {
+            var valueType = CicType(nullable.Value);
+            return value is null
+                ? Expr.App(Expr.Const(OptionNone, Level.Zero), valueType)
+                : Expr.App(Expr.Const(OptionSome, Level.Zero), valueType, Term(nullable.Value, value));
+        }
         if (value is null)
         {
             throw new ModelGapException($"null has no counterpart of type {Describe(type)} in the model");
@@ -42,6 +66,9 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
                 return Literals.Int64((long)value);
             case PrimitiveType { Kind: VirPrimitive.Bool }:
                 return Literals.Bool((bool)value);
+            case PrimitiveType { Kind: VirPrimitive.Decimal }:
+                // Sign, mantissa and scale, as Semantics writes a literal (M6 KTD7): 1.0m and 1.00m are different terms.
+                return Literals.Decimal(DecimalLitExpr.Of((decimal)value));
         }
         var key = ((RefType)type).Key;
         switch (definitions[key])
@@ -64,6 +91,10 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
     /// <summary>A .NET value as C# would write it, for messages.</summary>
     public string Display(VirType type, object? value)
     {
+        if (type is PrimitiveType { Kind: VirPrimitive.Unit })
+        {
+            return "()";
+        }
         if (value is null)
         {
             return "null";
@@ -72,8 +103,12 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
         {
             case PrimitiveType { Kind: VirPrimitive.Bool }:
                 return (bool)value ? "true" : "false";
+            case PrimitiveType { Kind: VirPrimitive.Decimal }:
+                return DisplayDecimal((decimal)value);
             case PrimitiveType:
                 return Convert.ToString(value, CultureInfo.InvariantCulture)!;
+            case NullableType n:
+                return Display(n.Value, value);
         }
         var key = ((RefType)type).Key;
         var name = key[(key.LastIndexOf('.') + 1)..];
@@ -112,9 +147,29 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
     /// </summary>
     public string ReadBackDisplay(KernelEnvironment env, VirType type, Expr term, KernelLimits limits)
     {
+        if (type is PrimitiveType { Kind: VirPrimitive.Decimal })
+        {
+            return ReadBackDecimal(env, term, limits) is { } d ? DisplayDecimal(d) : "unknown";
+        }
         if (type is PrimitiveType p)
         {
             return ReadBack.Value(env, term, Literals.Type(p.Kind), limits).ToString()!;
+        }
+        if (type is NullableType nullable)
+        {
+            try
+            {
+                var whnf = new TypeChecker(env, limits: limits).Whnf(term);
+                return whnf.GetAppFn() is ConstExpr { Name: var ctor } && ctor == OptionNone
+                    ? "null"
+                    : whnf.GetAppFn() is ConstExpr { Name: var some } && some == OptionSome
+                        ? ReadBackDisplay(env, nullable.Value, whnf.GetAppArgs()[1], limits)
+                        : "unknown";
+            }
+            catch (KernelException)
+            {
+                return "unknown";
+            }
         }
         var key = ((RefType)type).Key;
         var name = key[(key.LastIndexOf('.') + 1)..];
@@ -148,6 +203,56 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
             default:
                 throw new InvalidOperationException($"unknown definition for {key}");
         }
+    }
+
+    private static readonly Name DecimalName = Name.Parse("Warrant.Decimal");
+
+    /// <summary>
+    /// The model's <c>Warrant.Decimal</c> value of <paramref name="term"/>, keeping its sign (negative zero included),
+    /// mantissa and scale: its <c>negative</c>, <c>mantissa</c> and <c>scale</c> fields reduced to <c>Bool</c> and
+    /// numerals; null when they do not reduce or are out of range. Must run on a kernel thread.
+    /// </summary>
+    public static decimal? ReadBackDecimal(KernelEnvironment env, Expr term, KernelLimits limits)
+    {
+        try
+        {
+            var checker = new TypeChecker(env, limits: limits);
+            var negative = checker.Whnf(Expr.Proj(DecimalName, 0, term)) switch
+            {
+                ConstExpr { Name: var b } when b == Name.Parse("Bool.true") => (bool?)true,
+                ConstExpr { Name: var b } when b == Name.Parse("Bool.false") => false,
+                _ => null,
+            };
+            var mantissa = Natural(checker.Whnf(Expr.Proj(DecimalName, 1, term)));
+            var scale = Natural(checker.Whnf(Expr.Proj(DecimalName, 2, term)));
+            if (negative is null || mantissa is null || scale is null || scale > DecimalLitExpr.MaxScale)
+            {
+                return null;
+            }
+            var literal = new DecimalLitExpr(negative.Value, mantissa.Value, (int)scale.Value);
+            return literal.IsValid ? literal.ToDecimal() : null;
+        }
+        catch (KernelException)
+        {
+            return null;
+        }
+    }
+
+    private static System.Numerics.BigInteger? Natural(Expr whnf) => whnf switch
+    {
+        NatLitExpr n => n.Value,
+        ConstExpr { Name: var z } when z == Name.Parse("Nat.zero") => System.Numerics.BigInteger.Zero,
+        _ => null,
+    };
+
+    /// <summary>
+    /// A <c>decimal</c> as C# would write it, with its scale (<c>1.00m</c>) and the sign of a negative zero (<c>-0.0m</c>),
+    /// so that a disagreement in representation shows.
+    /// </summary>
+    public static string DisplayDecimal(decimal value)
+    {
+        var text = value.ToString(CultureInfo.InvariantCulture);
+        return (decimal.IsNegative(value) && !text.StartsWith('-') ? "-" + text : text) + "m";
     }
 
     private string ClosedMember(string key, ClosedDefinition closed, object value)

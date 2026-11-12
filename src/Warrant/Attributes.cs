@@ -43,7 +43,7 @@ public sealed class ClosedAttribute : Attribute
 }
 
 /// <summary>
-/// The return type of a <see cref="TheoremAttribute"/> method.
+/// The return type of a <see cref="TheoremAttribute"/> or <see cref="ProofForAttribute"/> method.
 /// No instance is ever created; it exists only so a theorem has a type to return.
 /// </summary>
 public sealed class Proof
@@ -53,8 +53,9 @@ public sealed class Proof
     }
 
     /// <summary>
-    /// The proof script: tactics run in order on the theorem's goal, after its parameters are introduced.
-    /// Warrant reads the script from source; the call never runs, because <see cref="Prove.That(bool)"/> throws first.
+    /// The proof script: tactics run in order on the theorem's goal, after its parameters are introduced, or on a
+    /// contract obligation (<see cref="Prove.Contract"/>). Warrant reads the script from source; the call never runs,
+    /// because <see cref="Prove.That(bool)"/> and <see cref="Prove.Contract"/> throw first.
     /// </summary>
     /// <param name="steps">The tactics, in order.</param>
     /// <returns>This proof.</returns>

@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Warrant.Vir;
 
 /// <summary><c>lit{type, value}</c>: a <c>bool</c>, <c>int32</c> or <c>int64</c> constant.</summary>
@@ -38,14 +40,14 @@ public sealed record SelfExpr(VirType Type) : VirExpr(Type);
 /// <summary><c>unary{op, overflow}</c>.</summary>
 /// <param name="Type">The result type, equal to the operand's.</param>
 /// <param name="Op">The operator.</param>
-/// <param name="Overflow">Overflow behaviour; always <see cref="VirOverflow.Wrap"/> in M4.</param>
+/// <param name="Overflow">Overflow behaviour; always <see cref="VirOverflow.Wrap"/> in M4 and M5a.</param>
 /// <param name="Operand">The operand.</param>
 public sealed record UnaryExpr(VirType Type, UnaryOp Op, VirOverflow Overflow, VirExpr Operand) : VirExpr(Type);
 
 /// <summary><c>binary{op, overflow}</c>.</summary>
 /// <param name="Type">The result type, equal to the operands'.</param>
 /// <param name="Op">The operator.</param>
-/// <param name="Overflow">Overflow behaviour; always <see cref="VirOverflow.Wrap"/> in M4.</param>
+/// <param name="Overflow">Overflow behaviour; always <see cref="VirOverflow.Wrap"/> in M4 and M5a.</param>
 /// <param name="L">The left operand.</param>
 /// <param name="R">The right operand.</param>
 public sealed record BinaryExpr(VirType Type, BinaryOp Op, VirOverflow Overflow, VirExpr L, VirExpr R) : VirExpr(Type);
@@ -149,3 +151,108 @@ public sealed record ForAllExpr(int Local, string Name, VirType Domain, VirExpr 
 /// <param name="Domain">The type quantified over.</param>
 /// <param name="Body">The claim.</param>
 public sealed record ExistsExpr(int Local, string Name, VirType Domain, VirExpr Body) : VirExpr(VirType.Bool);
+
+/// <summary>
+/// <c>decimal{type, negative, mantissa, scale}</c>: a <c>decimal</c> constant, exactly as the CLR stores it (M6, KTD7):
+/// <c>(-1)^negative × mantissa × 10^-scale</c>, so <c>1.0m</c> and <c>1.00m</c> are different literals of equal value.
+/// Its type is <c>decimal</c>.
+/// </summary>
+/// <param name="Negative">The sign bit, which a negative zero also sets.</param>
+/// <param name="Mantissa">The 96-bit unsigned mantissa, below 2^96.</param>
+/// <param name="Scale">The power of ten the mantissa is divided by, 0 to 28.</param>
+public sealed record DecimalLitExpr(bool Negative, BigInteger Mantissa, int Scale) : VirExpr(VirType.Decimal)
+{
+    /// <summary>The largest scale a <c>decimal</c> has.</summary>
+    public const int MaxScale = 28;
+
+    /// <summary>One more than the largest mantissa: 2^96.</summary>
+    public static BigInteger MantissaLimit { get; } = BigInteger.One << 96;
+
+    /// <summary>Whether the mantissa and scale are in the ranges a <c>decimal</c> has.</summary>
+    public bool IsValid => Mantissa.Sign >= 0 && Mantissa < MantissaLimit && Scale >= 0 && Scale <= MaxScale;
+
+    /// <summary>The literal of a <c>decimal</c> value, keeping its sign, mantissa and scale.</summary>
+    /// <param name="value">The value.</param>
+    /// <returns>The literal.</returns>
+    public static DecimalLitExpr Of(decimal value)
+    {
+        var bits = decimal.GetBits(value);
+        var mantissa = (new BigInteger((uint)bits[2]) << 64) | (new BigInteger((uint)bits[1]) << 32) | new BigInteger((uint)bits[0]);
+        return new DecimalLitExpr(bits[3] < 0, mantissa, (bits[3] >> 16) & 0xFF);
+    }
+
+    /// <summary>The <c>decimal</c> value with this sign, mantissa and scale.</summary>
+    /// <returns>The value.</returns>
+    /// <exception cref="InvalidOperationException">The literal is not <see cref="IsValid"/>.</exception>
+    public decimal ToDecimal()
+    {
+        if (!IsValid)
+        {
+            throw new InvalidOperationException($"Not a decimal: mantissa {Mantissa}, scale {Scale}.");
+        }
+        int Word(int i) => unchecked((int)(uint)((Mantissa >> (32 * i)) & uint.MaxValue));
+        return new decimal(Word(0), Word(1), Word(2), Negative, (byte)Scale);
+    }
+}
+
+/// <summary><c>null{type}</c>: the null value of a nullable type (M6, KTD5).</summary>
+/// <param name="Type">The nullable type, a <see cref="NullableType"/>.</param>
+public sealed record NullExpr(VirType Type) : VirExpr(Type);
+
+/// <summary>
+/// <c>isnull{operand}</c>: whether a nullable value is null (M6, KTD5): <c>x is null</c> and <c>x == null</c>, and, under a
+/// <see cref="NotExpr"/>, <c>x is not null</c>, <c>x != null</c> and <c>x.HasValue</c>. Its type is <c>bool</c>.
+/// </summary>
+/// <param name="Operand">The nullable value.</param>
+public sealed record IsNullExpr(VirExpr Operand) : VirExpr(VirType.Bool);
+
+/// <summary>
+/// <c>unwrap{type, kind, operand}</c>: the value inside a nullable value, which throws on null (M6, KTD5). The walker must
+/// prove the operand non-null where the node stands.
+/// </summary>
+/// <param name="Type">The value's type: the operand's type without the nullable.</param>
+/// <param name="Kind">What is read, which decides the exception.</param>
+/// <param name="Operand">The nullable value.</param>
+public sealed record UnwrapExpr(VirType Type, UnwrapKind Kind, VirExpr Operand) : VirExpr(Type);
+
+/// <summary>
+/// <c>coalesce{type, l, r}</c>: <c>l ?? r</c>, the value inside <paramref name="L"/> or, when it is null, <paramref name="R"/>,
+/// which is evaluated only then (M6, KTD5). <c>x.GetValueOrDefault()</c> is this with the default value as
+/// <paramref name="R"/>. It never throws itself.
+/// </summary>
+/// <param name="Type">The result type.</param>
+/// <param name="L">The nullable value.</param>
+/// <param name="R">The value when <paramref name="L"/> is null.</param>
+public sealed record CoalesceExpr(VirType Type, VirExpr L, VirExpr R) : VirExpr(Type);
+
+/// <summary>
+/// <c>throw{type, exception}</c>: a throw expression, as in <c>x ?? throw new ArgumentException()</c> (M6, KTD4). It never
+/// produces a value; its type is the one the context expects.
+/// </summary>
+/// <param name="Type">The type the context expects.</param>
+/// <param name="Exception">The thrown exception type's key, e.g. <c>T:System.ArgumentException</c>.</param>
+public sealed record ThrowExpr(VirType Type, string Exception) : VirExpr(Type);
+
+/// <summary><c>await{type, operand}</c>: <c>await</c> of a call that returns a task (M6, KTD22).</summary>
+/// <param name="Type">The awaited type; <c>unit</c> for a non-generic task.</param>
+/// <param name="Operand">The awaited call, an <see cref="ExternalCallExpr"/> or a <see cref="CallExpr"/> of a <see cref="TaskType"/>.</param>
+public sealed record AwaitExpr(VirType Type, VirExpr Operand) : VirExpr(Type);
+
+/// <summary>
+/// <c>external{type, dependency, member, args}</c>: a call to a member of a contracted interface through one of the unit's
+/// dependencies (M6, KTD9). Its contract is the contract unit whose key is <paramref name="Member"/>.
+/// </summary>
+/// <param name="Type">The member's return type.</param>
+/// <param name="Dependency">Zero-based index into the unit's <c>dependencies</c>.</param>
+/// <param name="Member">The interface member's key, e.g. <c>M:Payments.IPaymentStore.GetPayment(System.Int32)</c>.</param>
+/// <param name="Args">The arguments, in parameter order.</param>
+public sealed record ExternalCallExpr(VirType Type, int Dependency, string Member, VirList<VirExpr> Args) : VirExpr(Type);
+
+/// <summary>
+/// <c>modelled{type, member, args}</c>: a call to a modelled BCL member, such as <c>Math.Max</c>, which translates to a
+/// Warrant library definition (M6, KTD23).
+/// </summary>
+/// <param name="Type">The member's return type.</param>
+/// <param name="Member">The member's key, e.g. <c>M:System.Math.Max(System.Int32,System.Int32)</c>.</param>
+/// <param name="Args">The arguments, in parameter order.</param>
+public sealed record ModelledCallExpr(VirType Type, string Member, VirList<VirExpr> Args) : VirExpr(Type);

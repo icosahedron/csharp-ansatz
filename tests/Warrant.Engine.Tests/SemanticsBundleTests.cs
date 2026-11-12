@@ -103,15 +103,16 @@ public sealed class SemanticsBundleTests
     [Fact]
     public void AKernelReducedNameLeansBundleDoesNotDeclareIsRejected()
     {
-        // The kernel computes Nat.lor on literals, and the committed bundle does not declare it, so a bundle may not.
-        Assert.DoesNotContain(Committed.Value.Declarations.SelectMany(d => d.Constants), c => c.Name.ToString() == "Nat.lor");
+        // The kernel treats Lean.reduceBool by name, and the committed bundle does not declare it, so a bundle may not.
+        // (Nat.lor served here until M6 U2's division roots brought it into the bundle.)
+        Assert.DoesNotContain(Committed.Value.Declarations.SelectMany(d => d.Constants), c => c.Name.ToString() == "Lean.reduceBool");
         var nat = Expr.Const(Name.Parse("Nat"));
-        var lor = new ConstantDeclaration(new DefinitionInfo(
-            Name.Parse("Nat.lor"), EquatableArray<Name>.Empty, nat, Expr.NatLit(0), ReducibilityHints.Abbrev,
-            DefinitionSafety.Safe, [Name.Parse("Nat.lor")]));
+        var reduceBool = new ConstantDeclaration(new DefinitionInfo(
+            Name.Parse("Lean.reduceBool"), EquatableArray<Name>.Empty, nat, Expr.NatLit(0), ReducibilityHints.Abbrev,
+            DefinitionSafety.Safe, [Name.Parse("Lean.reduceBool")]));
         Assert.Equal(
-            "declares Nat.lor, which the kernel computes with by name and Lean 4.35.0's bundle does not declare.",
-            SemanticsBundle.AxiomProblem(Committed.Value.Declarations.Append(lor)));
+            "declares Lean.reduceBool, which the kernel computes with by name and Lean 4.35.0's bundle does not declare.",
+            SemanticsBundle.AxiomProblem(Committed.Value.Declarations.Append(reduceBool)));
     }
 
     [Fact]

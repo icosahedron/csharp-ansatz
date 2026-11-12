@@ -172,7 +172,7 @@ Each unit collects the assumptions its translation relies on, for the assumption
 - **Non-null values.** A record or closed-class parameter whose type is not annotated nullable is assumed non-null, and so is every record or closed-class field reachable from it.
   The CLR does not enforce either.
   A record parameter that the method reads throws `NullReferenceException` at the first member access; a closed-class value is only ever compared, so `null` simply behaves as one more value the model does not have.
-  A parameter annotated nullable (`Payment?`) is rejected until M6 brings `Option`.
+  A parameter annotated nullable (`Payment?`) was rejected in M4; M6 extracts it as a value that may be null, with no such assumption.
 - **Closed values.** For each `[Closed]` type the unit uses: only its named members exist, and for a class with its own equality, that equality agrees with identity.
   For a class from a referenced project, also that the referenced assembly is the one built from the source Warrant checked (`referenced-source`).
 - **Global.** The semantics bundle, the overflow setting the unit was translated under, and that the only axioms are Lean's standard three (chapter 1).

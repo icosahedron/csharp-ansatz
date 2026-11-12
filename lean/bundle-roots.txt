@@ -386,6 +386,20 @@ Int64.toInt_ofNat
 Int64.toInt_ofNat_of_lt
 Int64.le_toInt
 Int64.toInt_lt
+# Division and remainder (M6 U2, M6 KTD6, lean/Warrant/Checked.lean): Init's `Int.tdiv`/`Int.tmod` statements,
+# which the bridges are proved from, and the bridges, which state them with `Int.ediv`/`Int.emod` and `if`s.
+# Int.emod_neg (with Int.ediv_neg, an omega root above) moves a negative literal divisor's sign out, where omega reads it.
+Int.emod_neg
+Int32.toInt_div_of_ne_left
+Int32.toInt_div_of_ne_right
+Int32.toInt_mod
+Int64.toInt_div_of_ne_left
+Int64.toInt_div_of_ne_right
+Int64.toInt_mod
+Warrant.Int32.toInt_div
+Warrant.Int32.toInt_mod
+Warrant.Int64.toInt_div
+Warrant.Int64.toInt_mod
 
 # Well-founded recursion (M5a U15, KTD14): `WellFounded.Nat.fix` with a measure through
 # `Int.toNat` of `Int32.toInt`/`Int64.toInt`, parameters packed in `PSigma`, `dite` on recursive branches.
@@ -504,3 +518,209 @@ Std.Do.PredTrans.apply_pushArg
 Std.Do.PredTrans.apply_pushExcept
 Std.Do.PredTrans.apply_dite
 Std.Do.PredTrans.apply_ite
+
+# The effect core (M6 U3; plan M6 KTD4, lean/Warrant/Effect.lean): the effect monad, its exceptions with each
+# constructor the monadic translation emits (U9), and throw with its spec (Std.Do.Spec.throw_ExceptT does not unify
+# with ClrM's WP instance).
+Warrant.ClrExn
+Warrant.ClrExn.overflow
+Warrant.ClrExn.divideByZero
+Warrant.ClrExn.nullReference
+Warrant.ClrExn.invalidOperation
+Warrant.ClrExn.assertFailed
+Warrant.ClrExn.thrown
+Warrant.ClrExn.external
+Warrant.ClrM
+Warrant.ClrM.throw
+Warrant.ClrM.throw_spec
+# The exceptions a contract's exception postcondition allows (KTD12), and its equations for the VC simp set (KTD14):
+Warrant.ClrExn.Allowed
+Warrant.ClrExn.allowed_overflow
+Warrant.ClrExn.allowed_divideByZero
+Warrant.ClrExn.allowed_nullReference
+Warrant.ClrExn.allowed_invalidOperation
+Warrant.ClrExn.allowed_assertFailed
+Warrant.ClrExn.allowed_thrown
+Warrant.ClrExn.allowed_external
+# The VC walker's branch rules, which Std.Do lacks, and the consequence rule's postcondition half (KTD13):
+Warrant.Triple.ite
+Warrant.Triple.dite
+Std.Do.PostCond.entails.mk
+# The raising integer models and their @[spec] lemmas (KTD6, KTD15, lean/Warrant/Checked.lean):
+Warrant.Int32.addChecked
+Warrant.Int32.addChecked_spec
+Warrant.Int32.subChecked
+Warrant.Int32.subChecked_spec
+Warrant.Int32.mulChecked
+Warrant.Int32.mulChecked_spec
+Warrant.Int32.negChecked
+Warrant.Int32.negChecked_spec
+Warrant.Int32.div
+Warrant.Int32.div_spec
+Warrant.Int32.rem
+Warrant.Int32.rem_spec
+Warrant.Int64.addChecked
+Warrant.Int64.addChecked_spec
+Warrant.Int64.subChecked
+Warrant.Int64.subChecked_spec
+Warrant.Int64.mulChecked
+Warrant.Int64.mulChecked_spec
+Warrant.Int64.negChecked
+Warrant.Int64.negChecked_spec
+Warrant.Int64.div
+Warrant.Int64.div_spec
+Warrant.Int64.rem
+Warrant.Int64.rem_spec
+Warrant.Int64.toInt32Checked
+Warrant.Int64.toInt32Checked_spec
+
+# Nullable values and Math on int and long (M6 U16; plan M6 KTD5, KTD23, lean/Warrant/Nullable.lean and Math.lean):
+# a nullable value is an Option (null is none, a T converted to T? is some), the raising reads with their @[spec]
+# lemmas, ?? and GetValueOrDefault with their equations, Math.Min and Math.Max with their equations, and Math.Abs
+# with its @[spec] lemma.
+Option
+Option.some
+Option.none
+Warrant.Nullable.value
+Warrant.Nullable.value_spec
+Warrant.Nullable.nonNull
+Warrant.Nullable.nonNull_spec
+Warrant.Nullable.coalesce
+Warrant.Nullable.coalesce_some
+Warrant.Nullable.coalesce_none
+Warrant.Int32.min
+Warrant.Int32.min_def
+Warrant.Int32.max
+Warrant.Int32.max_def
+Warrant.Int32.abs
+Warrant.Int32.abs_spec
+Warrant.Int64.min
+Warrant.Int64.min_def
+Warrant.Int64.max
+Warrant.Int64.max_def
+Warrant.Int64.abs
+Warrant.Int64.abs_spec
+
+# decimal (M6 U4; plan M6 KTD7, lean/Warrant/Decimal.lean and Math.lean): the type with its fields, the literal
+# constructor, value, equality and order with their decision procedures, unary minus, the raising + and - with their
+# @[spec] lemmas, Math.Min, Max and Abs, and the lemmas a VC needs (equivalence, total order, exact sums).
+Warrant.Decimal
+Warrant.Decimal.mk
+Warrant.Decimal.negative
+Warrant.Decimal.mantissa
+Warrant.Decimal.scale
+Warrant.Decimal.mantissa_lt
+Warrant.Decimal.scale_le
+Warrant.Decimal.lit
+Warrant.Decimal.num
+Warrant.Decimal.units
+Warrant.Decimal.eq
+Warrant.Decimal.decEq
+Warrant.Decimal.instLT
+Warrant.Decimal.instLE
+Warrant.Decimal.decLt
+Warrant.Decimal.decLe
+Warrant.Decimal.neg
+Warrant.Decimal.roundHalfEven
+Warrant.Decimal.fit
+Warrant.Decimal.exact
+Warrant.Decimal.zeroSign
+Warrant.Decimal.sum
+Warrant.Decimal.add
+Warrant.Decimal.add_spec
+Warrant.Decimal.sub
+Warrant.Decimal.sub_spec
+Warrant.Decimal.min
+Warrant.Decimal.min_def
+Warrant.Decimal.max
+Warrant.Decimal.max_def
+Warrant.Decimal.abs
+Warrant.Decimal.eq_iff
+Warrant.Decimal.lt_iff
+Warrant.Decimal.le_iff
+Warrant.Decimal.eq_refl
+Warrant.Decimal.eq_symm
+Warrant.Decimal.eq_trans
+Warrant.Decimal.eq_equivalence
+Warrant.Decimal.lt_irrefl
+Warrant.Decimal.lt_trans
+Warrant.Decimal.le_refl
+Warrant.Decimal.le_trans
+Warrant.Decimal.le_antisymm
+Warrant.Decimal.le_total
+Warrant.Decimal.lt_trichotomy
+Warrant.Decimal.not_lt
+Warrant.Decimal.not_le
+Warrant.Decimal.lt_of_le_of_lt
+Warrant.Decimal.lt_of_lt_of_le
+Warrant.Decimal.num_neg
+Warrant.Decimal.units_neg
+Warrant.Decimal.units_abs
+Warrant.Decimal.exact_mul
+Warrant.Decimal.fit_self
+Warrant.Decimal.num_of_sign
+Warrant.Decimal.sum_of_fits
+Warrant.Decimal.sub_lt_of_fits
+
+# The monadic translation (M6 U9; plan M6 KTD4, KTD11): pure and >>= in ClrM σ through its Monad instance, as Lean
+# elaborates them in lean/Warrant/Checked.lean; a null test (Option.isNone, the one new constant) and a match on a
+# nullable value (Option.rec); Spec.Assert's Unit; and / and % by a constant other than 0 and -1, which stay pure.
+Pure.pure
+Bind.bind
+Applicative.toPure
+Monad.toApplicative
+Monad.toBind
+ExceptT.instMonad
+StateT.instMonad
+StateM
+Id
+Id.instMonad
+Unit
+Unit.unit
+Option.isNone
+Option.rec
+HDiv.hDiv
+HMod.hMod
+instHDiv
+instHMod
+instDivInt32
+instModInt32
+instDivInt64
+instModInt64
+
+# Contract obligations (M6 U10; plan M6 KTD12): the Std.Do triple over ClrM σ, its post-shape, its WP instance (the one
+# instance resolution finds: ExceptT.instWP over State.instWP, both above), the one-state assertion ⌜p⌝ and the
+# postcondition's exception conditions, which end in PUnit.unit. All are in the closure already.
+Std.Do.Triple
+Std.Do.PostShape.except
+Std.Do.PostShape.arg
+Std.Do.PostShape.pure
+Std.Do.PostShape.args
+Std.Do.SPred.pure
+Std.Do.Assertion
+Std.Do.ExceptConds
+PUnit.unit
+
+# The VC walker's rules (M6 U11; plan M6 KTD13, lean/Warrant/Vc.lean): Std.Do's bind, pure and consequence rules and
+# U3's throw rule re-stated at ClrM σ with the precondition ⌜True⌝, so every fact the walk learns is a hypothesis.
+Warrant.Vc.Post
+Warrant.Vc.pre
+Warrant.Vc.spec
+Warrant.Vc.resume
+Warrant.Vc.bind
+Warrant.Vc.pure
+Warrant.Vc.throw
+Warrant.Vc.assert
+Warrant.Vc.optionRec
+Warrant.Vc.call
+# And.intro splits a model operation's precondition into its cases; False.elim closes an unreachable throw (#92).
+And.intro
+
+# External calls in the walker (M6 U20, KTD14): a dependency's Spec.Ensures over a nullable result, such as design
+# §5.2's `r is null || r.Id == id`, is a hypothesis about a value the walk later learns is some v. The VC simp set reads
+# null tests and ?? on a constructor with these, and an impossible case `some v = none` as False.
+Option.isNone_some
+Option.isNone_none
+Warrant.Nullable.some_eq_none
+Bool.false_eq_true
+Bool.true_eq_false

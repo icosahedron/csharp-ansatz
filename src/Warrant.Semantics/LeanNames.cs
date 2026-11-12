@@ -84,6 +84,43 @@ public static class LeanNames
     /// <returns>The name.</returns>
     public static Name EquationLemma(string key) => ForKey(key).Append(EquationLemmaComponent);
 
+    /// <summary>The component that names a method's contract obligation, <c>$contract</c>.</summary>
+    public const string ContractComponent = "$contract";
+
+    /// <summary>
+    /// A method's contract obligation, <c>f.$contract : ∀ σ params, ⦃⌜Requires⌝⦄ program ⦃⇓r => ⌜Ensures r⌝, allowed⦄</c>
+    /// (M6 KTD12): once proved, the lemma its call sites use.
+    /// </summary>
+    /// <param name="key">The method's key.</param>
+    /// <returns>The name.</returns>
+    public static Name Contract(string key) => ForKey(key).Append(ContractComponent);
+
+    /// <summary>
+    /// A pure method's contract as a proposition, <c>f.$contract_spec : ∀ params, Requires → Ensures (f params)</c> (M6
+    /// KTD12), derived from <see cref="Contract"/>: what a leftover VC that applies <c>f</c> may assume.
+    /// </summary>
+    /// <param name="key">The method's key.</param>
+    /// <returns>The name.</returns>
+    public static Name ContractSpec(string key) => ForKey(key).Append("$contract_spec");
+
+    /// <summary>
+    /// The <paramref name="index"/>-th well-definedness obligation of a method's <c>Spec</c> expressions, <c>f.$wd_k</c>
+    /// (M6 KTD26), in source order.
+    /// </summary>
+    /// <param name="key">The method's key.</param>
+    /// <param name="index">The obligation's number, from 1.</param>
+    /// <returns>The name.</returns>
+    public static Name WellDefined(string key, int index) => ForKey(key).Append(string.Create(CultureInfo.InvariantCulture, $"$wd_{index}"));
+
+    /// <summary>
+    /// The refutation of a method's first <paramref name="index"/> <c>Spec.Requires</c>, <c>f.$vacuous_k : ∀ params,
+    /// R₁ → … → Rₖ → False</c> (M6 KTD25): proving it shows the contract unsatisfiable, which is an error.
+    /// </summary>
+    /// <param name="key">The method's key.</param>
+    /// <param name="index">The <c>Spec.Requires</c>'s number, from 1.</param>
+    /// <returns>The name.</returns>
+    public static Name Vacuity(string key, int index) => ForKey(key).Append(string.Create(CultureInfo.InvariantCulture, $"$vacuous_{index}"));
+
     /// <summary>The display name used when no display name is supplied: the key without its kind prefix.</summary>
     /// <param name="key">The documentation-comment ID.</param>
     /// <returns>The fallback display name.</returns>

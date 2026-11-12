@@ -54,6 +54,24 @@ public static class VirWriter
             }
             w.CloseArray();
         }
+        if (unit.Dependencies is { } dependencies)
+        {
+            w.Name("dependencies").OpenArray();
+            foreach (var d in dependencies)
+            {
+                w.Open();
+                w.Name("name").String(d.Name);
+                w.Name("interface").String(d.Interface);
+                w.Name("members").OpenArray();
+                foreach (var m in d.Members)
+                {
+                    w.String(m);
+                }
+                w.CloseArray();
+                w.Close();
+            }
+            w.CloseArray();
+        }
         if (unit.Returns is { } returns)
         {
             w.Name("returns");
@@ -136,6 +154,18 @@ public static class VirWriter
             case RefType r:
                 w.Open();
                 w.Name("ref").String(r.Key);
+                w.Close();
+                break;
+            case NullableType n:
+                w.Open();
+                w.Name("nullable");
+                Type(w, n.Value);
+                w.Close();
+                break;
+            case TaskType t:
+                w.Open();
+                w.Name("task");
+                Type(w, t.Result);
                 w.Close();
                 break;
             default:
@@ -260,6 +290,46 @@ public static class VirWriter
             case DecreasesStmt s:
                 w.Name("decreases");
                 Expr(w, s.Measure);
+                break;
+            case ThrowStmt s:
+                w.Name("throw").Open();
+                w.Name("exception").String(s.Exception);
+                w.Close();
+                break;
+            case EvalStmt s:
+                w.Name("eval");
+                Expr(w, s.Value);
+                break;
+            case RequiresStmt s:
+                w.Name("requires");
+                Expr(w, s.Condition);
+                break;
+            case EnsuresStmt s:
+                w.Name("ensures").Open();
+                if ((s.Local is null) != (s.Name is null))
+                {
+                    throw new ArgumentException("An ensures binds both a local and a name, or neither.", nameof(stmt));
+                }
+                if (s.Local is { } local)
+                {
+                    w.Name("local").Number(local);
+                    w.Name("name").String(s.Name!);
+                }
+                w.Name("c");
+                Expr(w, s.Condition);
+                w.Close();
+                break;
+            case AssertStmt s:
+                w.Name("assert").Open();
+                w.Name("c");
+                Expr(w, s.Condition);
+                w.Name("script").OpenArray();
+                foreach (var tactic in s.Script)
+                {
+                    Tactic(w, tactic);
+                }
+                w.CloseArray();
+                w.Close();
                 break;
             default:
                 throw new ArgumentException($"Unknown VIR statement {stmt.GetType().Name}.", nameof(stmt));
@@ -414,6 +484,50 @@ public static class VirWriter
             case ExistsExpr e:
                 Binder(w, e.Local, e.Name, e.Domain, e.Body);
                 break;
+            case DecimalLitExpr e:
+                if (!e.IsValid)
+                {
+                    throw new ArgumentException($"A decimal literal has a mantissa below 2^96 and a scale of 0 to 28, not {e.Mantissa} and {Decimal(e.Scale)}.", nameof(expr));
+                }
+                w.Name("negative").String(e.Negative ? "true" : "false");
+                w.Name("mantissa").String(e.Mantissa.ToString(CultureInfo.InvariantCulture));
+                w.Name("scale").String(Decimal(e.Scale));
+                break;
+            case NullExpr:
+                break;
+            case IsNullExpr e:
+                w.Name("operand");
+                Expr(w, e.Operand);
+                break;
+            case UnwrapExpr e:
+                w.Name("kind").String(VirSpelling.Of(e.Kind));
+                w.Name("operand");
+                Expr(w, e.Operand);
+                break;
+            case CoalesceExpr e:
+                w.Name("l");
+                Expr(w, e.L);
+                w.Name("r");
+                Expr(w, e.R);
+                break;
+            case ThrowExpr e:
+                w.Name("exception").String(e.Exception);
+                break;
+            case AwaitExpr e:
+                w.Name("operand");
+                Expr(w, e.Operand);
+                break;
+            case ExternalCallExpr e:
+                w.Name("dependency").Number(e.Dependency);
+                w.Name("member").String(e.Member);
+                w.Name("args");
+                Exprs(w, e.Args);
+                break;
+            case ModelledCallExpr e:
+                w.Name("member").String(e.Member);
+                w.Name("args");
+                Exprs(w, e.Args);
+                break;
         }
         w.Close();
         w.Close();
@@ -441,6 +555,15 @@ public static class VirWriter
         ImpliesExpr => "implies",
         ForAllExpr => "forall",
         ExistsExpr => "exists",
+        DecimalLitExpr => "decimal",
+        NullExpr => "null",
+        IsNullExpr => "isnull",
+        UnwrapExpr => "unwrap",
+        CoalesceExpr => "coalesce",
+        ThrowExpr => "throw",
+        AwaitExpr => "await",
+        ExternalCallExpr => "external",
+        ModelledCallExpr => "modelled",
         _ => throw new ArgumentException($"Unknown VIR expression {expr.GetType().Name}.", nameof(expr)),
     };
 

@@ -11,11 +11,18 @@ public enum VirUnitKind
 
     /// <summary><c>type</c>: a record, open enum or closed type.</summary>
     Type,
+
+    /// <summary>
+    /// <c>contract</c>: what a member of a contracted interface is assumed to do, from its <c>[ContractFor]</c> class (M6,
+    /// KTD10). Its key is the interface member's key, its body the member's leading <c>Spec</c> statements.
+    /// </summary>
+    Contract,
 }
 
 /// <summary>
-/// A VIR unit: a member, a theorem or a type (KTD21). Fields are in encoding order.
-/// Prefer the factories <see cref="Function"/>, <see cref="Theorem"/> and <see cref="TypeUnit"/>,
+/// A VIR unit: a member, a theorem, a type or a contract (KTD21). Fields are in encoding order, except
+/// <paramref name="Dependencies"/>, which is encoded after <paramref name="Params"/>.
+/// Prefer the factories <see cref="Function"/>, <see cref="Theorem"/>, <see cref="TypeUnit"/> and <see cref="Contract"/>,
 /// which fill the fields each kind has and leave the others null.
 /// </summary>
 /// <param name="Vir">The schema version; <see cref="CurrentVersion"/> for units written now.</param>
@@ -32,6 +39,10 @@ public enum VirUnitKind
 /// <param name="Assumptions">The assumptions the translation relies on (docs/m4/03).</param>
 /// <param name="Facts">What changes the unit's meaning beyond its text.</param>
 /// <param name="Deps">Keys of the units this one calls or whose types it mentions; stored sorted ordinally, without duplicates.</param>
+/// <param name="Dependencies">
+/// A function's external dependencies, the fields and primary-constructor parameters it calls contracted interfaces through
+/// (M6, KTD9), kept apart from <paramref name="Params"/> so parameter indices do not change; null when it has none.
+/// </param>
 public sealed record VirUnit(
     int Vir,
     string Key,
@@ -46,21 +57,45 @@ public sealed record VirUnit(
     VirDefinition? Definition,
     VirList<VirAssumption> Assumptions,
     VirFacts Facts,
-    VirList<string> Deps)
+    VirList<string> Deps,
+    VirList<VirDependency>? Dependencies = null)
 {
     /// <summary>
     /// The VIR schema version this library writes. Version 2 (M5a) added theorem parameters, quantifiers, measures,
     /// scripts and budgets; a unit that uses none of them encodes as in version 1 apart from this field (plan KTD18).
+    /// Version 3 (M6, KTD19) added decimal, nullable, task and unit types, division and remainder, checked nodes, effect,
+    /// nullable and contract nodes, dependencies, contract units and four assumption kinds; a unit that uses none of them
+    /// encodes as in version 2 apart from this field.
     /// </summary>
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
-    private readonly VirList<string> _deps = Normalize(Deps);
+    private readonly VirList<VirDependency>? _dependencies = Dependencies;
 
-    /// <summary>Keys of the units this one calls or whose types it mentions, sorted ordinally, without duplicates.</summary>
+    private readonly VirList<string> _deps = Normalize(Deps, Dependencies);
+
+    /// <summary>
+    /// Keys of the units this one calls or whose types it mentions, sorted ordinally, without duplicates. They always
+    /// include every member key of <see cref="Dependencies"/>, the keys of the contract units those members name, so the
+    /// closure hash covers each contract the unit relies on (#166).
+    /// </summary>
     public VirList<string> Deps
     {
         get => _deps;
-        init => _deps = Normalize(value);
+        init => _deps = Normalize(value, _dependencies);
+    }
+
+    /// <summary>
+    /// A function's external dependencies (M6, KTD9); null when it has none. Setting it adds its member keys to
+    /// <see cref="Deps"/>.
+    /// </summary>
+    public VirList<VirDependency>? Dependencies
+    {
+        get => _dependencies;
+        init
+        {
+            _dependencies = value;
+            _deps = Normalize(_deps, value);
+        }
     }
 
     /// <summary>A function unit.</summary>
@@ -72,6 +107,7 @@ public sealed record VirUnit(
     /// <param name="facts">The facts.</param>
     /// <param name="deps">The dependency keys, in any order.</param>
     /// <param name="self">For an instance member of a record, the record's type key.</param>
+    /// <param name="dependencies">The external dependencies (M6), if it has any.</param>
     /// <returns>The unit.</returns>
     public static VirUnit Function(
         string key,
@@ -81,8 +117,9 @@ public sealed record VirUnit(
         VirList<VirAssumption> assumptions,
         VirFacts facts,
         VirList<string> deps,
-        string? self = null) =>
-        new(CurrentVersion, key, VirUnitKind.Function, self, parameters, returns, body, null, null, null, null, assumptions, facts, deps);
+        string? self = null,
+        VirList<VirDependency>? dependencies = null) =>
+        new(CurrentVersion, key, VirUnitKind.Function, self, parameters, returns, body, null, null, null, null, assumptions, facts, deps, dependencies);
 
     /// <summary>A theorem unit. Its parameters are universally quantified.</summary>
     /// <param name="key">The documentation-comment ID.</param>
@@ -120,9 +157,58 @@ public sealed record VirUnit(
         VirList<string> deps) =>
         new(CurrentVersion, key, VirUnitKind.Type, null, null, null, null, null, null, null, definition, assumptions, facts, deps);
 
-    private static VirList<string> Normalize(VirList<string> deps)
+    /// <summary>A contract unit (M6, KTD10): what an interface member is assumed to do.</summary>
+    /// <param name="key">The interface member's documentation-comment ID.</param>
+    /// <param name="parameters">The member's parameters.</param>
+    /// <param name="returns">The member's return type.</param>
+    /// <param name="body">The member's leading <see cref="RequiresStmt"/> and <see cref="EnsuresStmt"/>; empty when it assumes nothing.</param>
+    /// <param name="assumptions">The assumptions.</param>
+    /// <param name="facts">The facts.</param>
+    /// <param name="deps">The dependency keys, in any order.</param>
+    /// <returns>The unit.</returns>
+    public static VirUnit Contract(
+        string key,
+        VirList<VirParam> parameters,
+        VirType returns,
+        BlockStmt body,
+        VirList<VirAssumption> assumptions,
+        VirFacts facts,
+        VirList<string> deps) =>
+        new(CurrentVersion, key, VirUnitKind.Contract, null, parameters, returns, body, null, null, null, null, assumptions, facts, deps);
+
+    private static VirList<string> Normalize(VirList<string> deps, VirList<VirDependency>? dependencies)
     {
-        var sorted = deps.Distinct(StringComparer.Ordinal).ToList();
+        var all = dependencies is null ? deps : deps.Concat(dependencies.SelectMany(d => d.Members));
+        var sorted = all.Distinct(StringComparer.Ordinal).ToList();
+        sorted.Sort(StringComparer.Ordinal);
+        return new VirList<string>(sorted);
+    }
+}
+
+/// <summary>
+/// An external dependency of a function (M6, KTD9): a <c>readonly</c> field or never-assigned primary-constructor
+/// parameter of a contracted interface type, and the interface members the function calls through it.
+/// </summary>
+/// <param name="Name">The field's or parameter's source name.</param>
+/// <param name="Interface">The interface's type key, e.g. <c>T:Payments.IPaymentStore</c>.</param>
+/// <param name="Members">
+/// The keys of the members the function calls, which are also the keys of their contract units; stored sorted ordinally,
+/// without duplicates.
+/// </param>
+public sealed record VirDependency(string Name, string Interface, VirList<string> Members)
+{
+    private readonly VirList<string> _members = Sorted(Members);
+
+    /// <summary>The keys of the members the function calls, sorted ordinally, without duplicates.</summary>
+    public VirList<string> Members
+    {
+        get => _members;
+        init => _members = Sorted(value);
+    }
+
+    private static VirList<string> Sorted(VirList<string> members)
+    {
+        var sorted = members.Distinct(StringComparer.Ordinal).ToList();
         sorted.Sort(StringComparer.Ordinal);
         return new VirList<string>(sorted);
     }
@@ -135,7 +221,10 @@ public sealed record VirParam(string Name, VirType Type);
 
 /// <summary>An assumption the translation relies on (docs/m4/03, "Assumptions").</summary>
 /// <param name="Kind">What is assumed.</param>
-/// <param name="Subject">What it is assumed of: a parameter name for <see cref="VirAssumptionKind.NonNull"/>, a type key otherwise.</param>
+/// <param name="Subject">
+/// What it is assumed of: a parameter, field or dependency name for <see cref="VirAssumptionKind.NonNull"/>, a type key for
+/// the type kinds, and for the M6 kinds the contract, callee, thrown type or method key the kind names.
+/// </param>
 public sealed record VirAssumption(VirAssumptionKind Kind, string Subject);
 
 /// <summary>Kinds of assumption.</summary>
@@ -155,6 +244,24 @@ public enum VirAssumptionKind
     /// checked from the source its project's build recorded; that assembly is assumed to be built from that source (#32).
     /// </summary>
     ReferencedSource,
+
+    /// <summary><c>external-contract</c>: a dependency member does what its contract unit says (M6, KTD20); the subject is the member's key.</summary>
+    ExternalContract,
+
+    /// <summary><c>callee-contract</c>: a verified callee's proved contract, used at a call site (M6, KTD20); the subject is the callee's key.</summary>
+    CalleeContract,
+
+    /// <summary>
+    /// <c>may-throw</c>: an explicit <c>throw</c> or a propagated external exception that the contract allows, so
+    /// <c>Ensures</c> is not claimed on that path (M6, KTD20).
+    /// </summary>
+    MayThrow,
+
+    /// <summary>
+    /// <c>caller-precondition</c>: the method's own <c>Requires</c>, which nothing checks at run time or at unverified call
+    /// sites (M6, KTD20); the subject is the method's key.
+    /// </summary>
+    CallerPrecondition,
 }
 
 /// <summary>The <c>facts</c> of a unit.</summary>

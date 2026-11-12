@@ -2,8 +2,8 @@
 
 > Status: **partly written ahead of the implementation.** These pages
 > describe the target surface in [design §5](../design.md#5-the-c-surface).
-> The M4, M5a and M5b parts run today (see [What runs today](#what-runs-today));
-> M6 and later do not. Each feature is marked with the milestone that delivers
+> The M4 to M6 parts run today (see [What runs today](#what-runs-today));
+> M7 and later do not. Each feature is marked with the milestone that delivers
 > it (§11), and anything marked *proposed* is not in the design yet; it is
 > tracked in §12. When the implementation and these pages disagree, the
 > implementation wins and these pages get fixed.
@@ -35,13 +35,13 @@ know why, start with [Reading a failed proof](how-to.md#read-a-failed-proof).
 | M4 | mark pure methods over `int`/`long`/`bool`, enums and records `[Verified]`, and prove facts about concrete inputs, with `warrant translate` |
 | M5a | prove theorems for **all** inputs with tactics, see failed proofs as build errors, use self-recursion with `Spec.Decreases` |
 | M5b | rebuild without re-proving (a result cache, re-checked by the kernel with `WarrantRecheck`), keep the checked library loaded in a verification server, cancel a long verification, step through a failed proof with `warrant explain`, see unsupported code in the IDE as you type |
-| M6 | write `Spec.Requires`/`Spec.Ensures`, verify methods that call databases and services through contract classes, use `/`, `%`, checked arithmetic and basic `decimal` |
+| M6 | write `Spec.Requires`/`Spec.Ensures`, proved with no script by default, verify methods that throw, use `/`, `%`, checked arithmetic, nullable values and basic `decimal`, and call databases and services through contract classes, with `async`/`await` |
 | M7 | verify loops, mutable objects, regions inside unverified methods, full `decimal` and strings |
 
 ## What runs today
 
-What runs is M4, M5a ([docs/m5a/](../m5a/README.md)) and M5b
-([docs/m5b/](../m5b/README.md)):
+What runs is M4, M5a ([docs/m5a/](../m5a/README.md)), M5b
+([docs/m5b/](../m5b/README.md)) and M6 ([docs/m6/](../m6/README.md)):
 
 - **The build.** A project that references the `Warrant` and `Warrant.Build`
   packages is verified by `dotnet build` and by Visual Studio's MSBuild after
@@ -76,6 +76,11 @@ A theorem with parameters states a fact about every value of them and needs a
 proof script, `.By(...)`, with the tactics in the
 [reference](reference.md#tactic-proof-scripts). A theorem without parameters
 can still be proved by computation, as in M4. Recursion works when the method
-states a measure with `Spec.Decreases`. Contracts (`Spec.Requires`,
-`Spec.Ensures`), external calls, `/`, `%`, `decimal` and strings need M6 or
-later.
+states a measure with `Spec.Decreases`. From M6, a method may state
+`Spec.Requires` and `Spec.Ensures`, throw, divide, use checked arithmetic,
+nullable values and `decimal` `+` and `-`, and call an interface that has a
+`[ContractFor]` class; the build proves its contract with no script and
+reports each failing condition at its line
+([proofs that work](proofs-that-work.md#contracts-proved-with-no-script-m6)).
+Loops, mutable objects, strings and full `decimal` need M7; `try`/`catch` and
+collections are not scheduled.

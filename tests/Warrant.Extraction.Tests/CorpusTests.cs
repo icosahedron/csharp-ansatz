@@ -6,8 +6,8 @@ using Warrant.Vir;
 namespace Warrant.Extraction.Tests;
 
 /// <summary>
-/// Every member of every compilation of the M4 and M5a corpora gets the outcome expected.json gives it, as far as
-/// extraction decides it (docs/m4/02, docs/m5a/01).
+/// Every member of every compilation of the M4, M5a and M6 corpora gets the outcome expected.json gives it, as far as
+/// extraction decides it (docs/m4/02, docs/m5a/01, tests/corpus/m6/README.md).
 /// </summary>
 public class CorpusTests
 {
@@ -66,10 +66,12 @@ public class CorpusTests
         var diagnostics = result.DiagnosticsFor(key);
         switch (outcome)
         {
-            case "translated" or "proved" or "false" or "unproved":
+            case "translated" or "proved" or "false" or "unproved" or "skipped":
                 Assert.Empty(diagnostics);
                 Assert.NotNull(unit);
-                if (outcome != "translated" && !expected.TryGetProperty("recursive", out _))
+                // A proof outcome is a theorem's, a recursive method's decrease obligation's, or in the M6 corpus a method's
+                // contract obligation's (plan M6 U11).
+                if (outcome != "translated" && !expected.TryGetProperty("recursive", out _) && corpus != "m6")
                 {
                     Assert.Equal(VirUnitKind.Theorem, unit.Unit.Kind);
                 }
@@ -157,6 +159,24 @@ public class CorpusTests
         }
         var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString())));
         Assert.Equal(M4VirAtVersion1, hash);
+    }
+
+    // The M5a corpus's VIR at version 2 (M5a), pinned before VIR version 3 (M6 U6, KTD19) so a change shows here.
+    private const string M5aVirAtVersion2 = "d20be30369777df2ca1c4f9e607bc2303a2e26c8714699e5433da4feba1d5525";
+
+    [Fact]
+    public void EveryM5aUnitsVirIsUnchangedApartFromTheVersion()
+    {
+        var text = new System.Text.StringBuilder();
+        foreach (var name in CorpusSet.M5a.Names)
+        {
+            foreach (var unit in Corpus.Extract(CorpusSet.M5a, name).Units)
+            {
+                text.Append(VirWriter.WriteString(unit.Unit with { Vir = 2, Facts = unit.Unit.Facts with { Roslyn = "5.0.0" } })).Append('\n');
+            }
+        }
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString())));
+        Assert.Equal(M5aVirAtVersion2, hash);
     }
 
     private static List<string> Strings(JsonElement member, string property) =>

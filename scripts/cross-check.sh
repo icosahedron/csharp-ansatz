@@ -14,7 +14,9 @@
 # Last, `warrant translate` translates the M4 corpus (tests/corpus/m4/accepted) and must succeed, and Lean's
 # kernel must accept what it wrote: the semantics bundle plus every translated definition and proved theorem.
 # Then `warrant verify` proves the M5a corpus (tests/corpus/m5a/accepted) by its scripts, and Lean's kernel must
-# accept the certificate it wrote; a copy with one proof replaced must be rejected by both kernels.
+# accept the certificate it wrote; a copy with one proof replaced must be rejected by both kernels. The same is done for
+# the M6 corpus (tests/corpus/m6): its accepted members' certificate, ProcessPayment's contract among them, what Warrant
+# admits from its refuted and rejected members, and a tampered copy.
 #
 # Set WARRANT_INIT_EXPORT to a full-Init export (scripts/export-lean-library.sh) to include it.
 set -euo pipefail
@@ -107,6 +109,67 @@ if [ "$ls" != reject ] || [ "$lean" != reject ] || cmp -s "$OUT/m5a.ndjson" "$ta
   result="TAMPERED CERTIFICATE NOT REJECTED"; failures=$((failures + 1))
 fi
 row "M5a tampered" "-" "$ls" "$lean" "$result"
+
+# The M6 corpus (plan M6 U14, R13): `warrant verify` proves the accepted members' contract obligations by the default
+# procedure, design §5.2's ProcessPayment among them with its store as a hypothesis, and writes the certificate: the
+# bundle with its Std closure plus every admitted definition and contract theorem, which Lean's kernel re-checks. The
+# refuted and rejected compilations fail to verify, as they must, but what Warrant admitted from them (the definitions,
+# and the contracts it did prove) must pass Lean's kernel too. Their checked-project members need overflow checking
+# (#111), which only `warrant translate` sets for a directory, so they are translated with --check-overflow: their
+# contracts are refuted either way, so the certificate is their definitions.
+m6_row() { # name, expected Warrant verdict, Warrant's exit code, certificate
+  local name="$1" want="$2" ls lean result=ok
+  ls=$(verdict "$3")
+  set +e
+  "$LEAN" "$4" > "$4.lean.txt" 2>&1; lean=$(verdict $?)
+  set -e
+  if [ "$ls" != "$want" ] || [ "$lean" != accept ]; then result="M6 CORPUS FAILED"; failures=$((failures + 1)); fi
+  row "$name" "-" "$ls" "$lean" "$result"
+}
+set +e
+"${WARRANT[@]}" verify tests/corpus/m6/accepted --server off --out "$OUT/m6.ndjson" > "$OUT/m6.verify.txt" 2>&1; code=$?
+set -e
+# The exit criterion's certificate: ProcessPayment's contract theorem (the name …ProcessPayment(System.Int32).$contract)
+# must be in it.
+pp="$(grep -oE '^\{"in":[0-9]+,"str":\{"pre":[0-9]+,"str":"ProcessPayment\(System\.Int32\)"\}\}' "$OUT/m6.ndjson" | sed -E 's/^\{"in":([0-9]+).*/\1/' || true)"
+contract="$(grep -oE "^\\{\"in\":[0-9]+,\"str\":\\{\"pre\":${pp:-none},\"str\":\"\\\$contract\"\\}\\}" "$OUT/m6.ndjson" | sed -E 's/^\{"in":([0-9]+).*/\1/' || true)"
+if [ -z "$contract" ] || ! grep -qE "^\\{\"thm\":\\{.*\"name\":$contract," "$OUT/m6.ndjson"; then
+  echo "the M6 certificate has no contract theorem for ProcessPayment" >&2; code=3
+fi
+m6_row "M6 corpus" accept "$code" "$OUT/m6.ndjson"
+for sample in refuted rejected; do
+  set +e
+  "${WARRANT[@]}" verify "tests/corpus/m6/$sample" --server off --out "$OUT/m6-$sample.ndjson" > "$OUT/m6-$sample.verify.txt" 2>&1; code=$?
+  set -e
+  m6_row "M6 $sample" reject "$code" "$OUT/m6-$sample.ndjson"
+done
+rm -rf "$OUT/m6-checked" && mkdir -p "$OUT/m6-checked"
+cp tests/corpus/m6/refuted/CheckedProject.cs "$OUT/m6-checked/"
+set +e
+"${WARRANT[@]}" translate "$OUT/m6-checked" --check-overflow --out "$OUT/m6-checked.ndjson" > "$OUT/m6-checked.translate.txt" 2>&1; code=$?
+set -e
+m6_row "M6 checked-project" reject "$code" "$OUT/m6-checked.ndjson"
+
+# A tampered M6 certificate, as for M5a: ProcessPayment's contract theorem's proof is replaced with the proof of the
+# theorem before it. Both kernels must reject the file.
+tampered="$OUT/m6.tampered.ndjson"
+thms="$(grep -n '^{"thm":' "$OUT/m6.ndjson" | grep -B1 -E "\"name\":${contract:-none}," | tail -2 || true)"
+last_line="$(echo "$thms" | tail -1 | cut -d: -f1)"
+proof="$(echo "$thms" | head -1 | sed -E 's/.*"value":([0-9]+).*/\1/')"
+set +e
+if [ "$(echo "$thms" | wc -l)" -eq 2 ]; then
+  sed -E "${last_line}s/\"value\":[0-9]+/\"value\":$proof/" "$OUT/m6.ndjson" > "$tampered"
+  "${WARRANT[@]}" check "$tampered" --quiet > "$OUT/m6.tampered.warrant.txt" 2>&1; ls=$(verdict $?)
+  "$LEAN" "$tampered" > "$OUT/m6.tampered.lean.txt" 2>&1; lean=$(verdict $?)
+else
+  ls=missing; lean=missing
+fi
+set -e
+result=ok
+if [ "$ls" != reject ] || [ "$lean" != reject ] || cmp -s "$OUT/m6.ndjson" "$tampered"; then
+  result="TAMPERED CERTIFICATE NOT REJECTED"; failures=$((failures + 1))
+fi
+row "M6 tampered" "-" "$ls" "$lean" "$result"
 
 echo
 echo "details in $OUT"

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text.Json;
 
 namespace Warrant.Vir;
@@ -12,7 +13,7 @@ public static class VirReader
     /// <summary>Reads a unit from its UTF-8 encoding.</summary>
     /// <param name="utf8">The encoded unit.</param>
     /// <returns>The unit.</returns>
-    /// <exception cref="FormatException">The input is not a VIR unit.</exception>
+    /// <exception cref="FormatException">The input is not a VIR unit, or its version is newer than <see cref="VirUnit.CurrentVersion"/>.</exception>
     public static VirUnit Read(ReadOnlyMemory<byte> utf8)
     {
         try
@@ -28,6 +29,11 @@ public static class VirReader
 
     private static VirUnit Unit(JsonElement e)
     {
+        int version = e.GetProperty("vir").GetInt32();
+        if (version > VirUnit.CurrentVersion)
+        {
+            throw new FormatException($"VIR version {version} is newer than this reader's version {VirUnit.CurrentVersion}.");
+        }
         var kind = Parse<VirUnitKind>(Str(e, "kind"), VirSpelling.Of);
         VirNode? body = null;
         if (e.TryGetProperty("body", out var b))
@@ -35,7 +41,7 @@ public static class VirReader
             body = Kind(b).Name == "block" ? Stmt(b) : Expr(b);
         }
         return new VirUnit(
-            e.GetProperty("vir").GetInt32(),
+            version,
             Str(e, "key"),
             kind,
             e.TryGetProperty("self", out var self) ? self.GetString()! : null,
@@ -50,8 +56,12 @@ public static class VirReader
                 Parse<VirAssumptionKind>(Str(a, "kind"), VirSpelling.Of),
                 Str(a, "subject"))),
             Facts(e.GetProperty("facts")),
-            List(e.GetProperty("deps"), x => x.GetString()!));
+            List(e.GetProperty("deps"), x => x.GetString()!),
+            e.TryGetProperty("dependencies", out var ds) ? List(ds, Dependency) : null);
     }
+
+    private static VirDependency Dependency(JsonElement e) =>
+        new(Str(e, "name"), Str(e, "interface"), List(e.GetProperty("members"), m => m.GetString()!));
 
     private static VirBudget Budget(JsonElement e) => new(
         checked((int)Long(Str(e, "timeoutSeconds"))),
@@ -100,7 +110,13 @@ public static class VirReader
             return new PrimitiveType(Parse<VirPrimitive>(e.GetString()!, VirSpelling.Of));
         }
         var (name, value) = Kind(e);
-        return name == "ref" ? new RefType(value.GetString()!) : throw new FormatException($"Unknown VIR type '{name}'.");
+        return name switch
+        {
+            "ref" => new RefType(value.GetString()!),
+            "nullable" => new NullableType(Type(value)),
+            "task" => new TaskType(Type(value)),
+            _ => throw new FormatException($"Unknown VIR type '{name}'."),
+        };
     }
 
     private static VirDefinition Definition(JsonElement e)
@@ -138,8 +154,24 @@ public static class VirReader
             "return" => new ReturnStmt(Expr(v)),
             "block" => new BlockStmt(List(v, Stmt)),
             "decreases" => new DecreasesStmt(Expr(v)),
+            "throw" => new ThrowStmt(Str(v, "exception")),
+            "eval" => new EvalStmt(Expr(v)),
+            "requires" => new RequiresStmt(Expr(v)),
+            "ensures" => Ensures(v),
+            "assert" => new AssertStmt(Expr(v.GetProperty("c")), List(v.GetProperty("script"), Tactic)),
             _ => throw new FormatException($"Unknown VIR statement '{name}'."),
         };
+    }
+
+    private static EnsuresStmt Ensures(JsonElement v)
+    {
+        bool hasLocal = v.TryGetProperty("local", out var local);
+        bool hasName = v.TryGetProperty("name", out var name);
+        if (hasLocal != hasName)
+        {
+            throw new FormatException("An ensures binds both a local and a name, or neither.");
+        }
+        return new EnsuresStmt(hasLocal ? local.GetInt32() : null, hasName ? name.GetString()! : null, Expr(v.GetProperty("c")));
     }
 
     private static VirExpr Expr(JsonElement e)
@@ -196,6 +228,15 @@ public static class VirReader
                 v.GetProperty("local").GetInt32(), Str(v, "name"), Type(v.GetProperty("domain")), Expr(v.GetProperty("body")))),
             "exists" => Typed(type, new ExistsExpr(
                 v.GetProperty("local").GetInt32(), Str(v, "name"), Type(v.GetProperty("domain")), Expr(v.GetProperty("body")))),
+            "decimal" => Typed(type, DecimalLiteral(v)),
+            "null" => new NullExpr(type),
+            "isnull" => Typed(type, new IsNullExpr(Expr(v.GetProperty("operand")))),
+            "unwrap" => new UnwrapExpr(type, Parse<UnwrapKind>(Str(v, "kind"), VirSpelling.Of), Expr(v.GetProperty("operand"))),
+            "coalesce" => new CoalesceExpr(type, Expr(v.GetProperty("l")), Expr(v.GetProperty("r"))),
+            "throw" => new ThrowExpr(type, Str(v, "exception")),
+            "await" => new AwaitExpr(type, Expr(v.GetProperty("operand"))),
+            "external" => new ExternalCallExpr(type, v.GetProperty("dependency").GetInt32(), Str(v, "member"), List(v.GetProperty("args"), Expr)),
+            "modelled" => new ModelledCallExpr(type, Str(v, "member"), List(v.GetProperty("args"), Expr)),
             _ => throw new FormatException($"Unknown VIR expression '{name}'."),
         };
     }
@@ -218,6 +259,21 @@ public static class VirReader
     /// <summary>A node kind whose type is fixed by its constructor must agree with the encoded <c>type</c>.</summary>
     private static VirExpr Typed(VirType encoded, VirExpr expr) =>
         expr.Type == encoded ? expr : throw new FormatException($"A {expr.GetType().Name} cannot have type {encoded}.");
+
+    private static DecimalLitExpr DecimalLiteral(JsonElement v)
+    {
+        var negative = Str(v, "negative") switch
+        {
+            "false" => false,
+            "true" => true,
+            var text => throw new FormatException($"Not a sign: '{text}'."),
+        };
+        var literal = new DecimalLitExpr(
+            negative,
+            BigInteger.Parse(Str(v, "mantissa"), NumberStyles.None, CultureInfo.InvariantCulture),
+            checked((int)Long(Str(v, "scale"))));
+        return literal.IsValid ? literal : throw new FormatException($"Not a decimal: mantissa {literal.Mantissa}, scale {literal.Scale}.");
+    }
 
     private static VirOverflow Overflow(JsonElement e) => Parse<VirOverflow>(Str(e, "overflow"), VirSpelling.Of);
 

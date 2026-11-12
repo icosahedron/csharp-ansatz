@@ -27,7 +27,13 @@ public sealed class CorpusSet
     /// <summary>The M5a corpus (docs/m5a/01).</summary>
     public static CorpusSet M5a { get; } = new("m5a");
 
-    /// <summary>The directory name, <c>m4</c> or <c>m5a</c>.</summary>
+    /// <summary>
+    /// The M6 corpus (plan M6 KTD24), the milestone's exit criterion: extraction, the analyzers, translation, the engine,
+    /// the differential tests, the CLI, the exit tests and <c>scripts/cross-check.sh</c> read it (tests/corpus/m6/README.md).
+    /// </summary>
+    public static CorpusSet M6 { get; } = new("m6");
+
+    /// <summary>The directory name, <c>m4</c>, <c>m5a</c> or <c>m6</c>.</summary>
     public string Name { get; }
 
     /// <summary>The copied corpus directory.</summary>

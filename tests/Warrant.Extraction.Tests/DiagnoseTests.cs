@@ -17,7 +17,7 @@ public sealed class DiagnoseTests
     public static TheoryData<string, string> Compilations()
     {
         var data = new TheoryData<string, string>();
-        foreach (var set in new[] { CorpusSet.M4, CorpusSet.M5a })
+        foreach (var set in new[] { CorpusSet.M4, CorpusSet.M5a, CorpusSet.M6 })
         {
             foreach (var name in set.Names)
             {
@@ -27,7 +27,7 @@ public sealed class DiagnoseTests
         return data;
     }
 
-    private static CorpusSet Set(string set) => set == "m4" ? CorpusSet.M4 : CorpusSet.M5a;
+    private static CorpusSet Set(string set) => set switch { "m4" => CorpusSet.M4, "m5a" => CorpusSet.M5a, _ => CorpusSet.M6 };
 
     [Theory]
     [MemberData(nameof(Compilations))]
@@ -58,6 +58,7 @@ public sealed class DiagnoseTests
 
         var reported = diagnoser.Members().SelectMany(m => diagnoser.Member(m))
             .Concat(diagnoser.ClosedTypes().SelectMany(t => diagnoser.ClosedType(t)))
+            .Concat(diagnoser.ContractClasses().SelectMany(t => diagnoser.ContractClass(t)))
             .Concat(diagnoser.UnnamedClosedValues())
             .ToHashSet();
 
@@ -72,7 +73,7 @@ public sealed class DiagnoseTests
             using Warrant;
             public static class S
             {
-                [Verified] public static int Half(int x) => x / 2;
+                [Verified] public static int Half(int x) => x << 1;
                 [Verified] public static int Fine(int x) => x + 1;
                 public static int Broken() => undefinedName;
             }
@@ -84,7 +85,7 @@ public sealed class DiagnoseTests
         var half = diagnoser.Members().Single(m => m.Name == "Half");
         var diagnostic = Assert.Single(diagnoser.Member(half));
         Assert.Equal(DiagnosticIds.Unsupported, diagnostic.Id);
-        Assert.Equal("division", diagnostic.Construct);
+        Assert.Equal("shift", diagnostic.Construct);
         Assert.Empty(diagnoser.Member(diagnoser.Members().Single(m => m.Name == "Fine")));
     }
 
@@ -96,13 +97,13 @@ public sealed class DiagnoseTests
             public static class S
             {
                 [Verified] public static int Bad(int x) => x / undefinedName;
-                [Verified] public static int Caller(int x) => x % 3;
+                [Verified] public static int Caller(int x) => x & 3;
             }
             """);
         var diagnoser = new Diagnoser(compilation);
 
         Assert.Empty(diagnoser.Member(diagnoser.Members().Single(m => m.Name == "Bad")));
-        Assert.Equal("remainder", Assert.Single(diagnoser.Member(diagnoser.Members().Single(m => m.Name == "Caller"))).Construct);
+        Assert.Equal("integer bitwise operator", Assert.Single(diagnoser.Member(diagnoser.Members().Single(m => m.Name == "Caller"))).Construct);
     }
 
     [Fact]
@@ -115,7 +116,7 @@ public sealed class DiagnoseTests
                 [Verified] public static int Even(int n) { Spec.Decreases(n); return n <= 0 ? 1 : Odd(n - 1); }
                 [Verified] public static int Odd(int n) { Spec.Decreases(n); return n <= 0 ? 0 : Even(n - 1); }
                 [Verified] public static int UsesHalf(int x) => Half(x) + 1;
-                [Verified] public static int Half(int x) => x / 2;
+                [Verified] public static int Half(int x) => x << 1;
             }
             """);
         var diagnoser = new Diagnoser(compilation);

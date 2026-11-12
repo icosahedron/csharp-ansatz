@@ -148,7 +148,7 @@ There is one rejected member for each construct in KTD15 (all WRT0002) and for e
   A unit that uses a rejected type is rejected too, with the construct `depends on a rejected unit`.
 - **WRT0003:** a call to a `[Theorem]` method.
 - **WRT0004:** `Spec.Implies` outside a theorem statement.
-- **WRT0005:** a call to a member that is neither verified nor modelled, such as `Math.Abs`.
+- **WRT0005:** a call to a member that is neither verified nor modelled, such as `Math.Sign` (`Math.Abs` until M6 modelled it).
 - **WRT0008:** an integer cast and an unboxing conversion to a `[Closed]` enum in unverified methods, and a `[Closed]` enum with no member valued 0 (warnings; a cast inside a verified method is also WRT0002).
 - **WRT0009:** a `[Closed]` class that fails each step of the closed shape, one member per step.
 
@@ -189,3 +189,6 @@ An excerpt:
 
 The construct names are the ones extraction puts in its messages, so `expected.json` is also the list of names a developer sees.
 The `checked-project` compilation is the one case that needs its own options: `rejected/CheckedProject.cs` is compiled with overflow checking on, its `+`, unary `-` and narrowing cast are rejected as `checked arithmetic`, and its widening cast, which cannot overflow, translates.
+
+M6 supports `/`, `%`, `throw`, checked arithmetic and `Math.Abs` (plan M6 U7), so the members that used them, `Halve` in the excerpt above among them, moved to `tests/corpus/m6`; the M4 corpus README's flip list records each move, and `checked-project` keeps only the widening cast.
+U17 moved the members with a nullable parameter or return value and with a `decimal` the same way; `ComparesWithNull` stays, since its parameter is not declared nullable.

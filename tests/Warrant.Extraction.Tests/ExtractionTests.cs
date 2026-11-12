@@ -85,7 +85,7 @@ public class ExtractionTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public void OverflowCheckingRejectsAdditionButNotWidening(bool checkOverflow)
+    public void OverflowCheckingMakesAdditionCheckedButNotWidening(bool checkOverflow)
     {
         var result = Extract("""
             public static class C
@@ -94,14 +94,9 @@ public class ExtractionTests
                 [Verified] public static long Widen(int a) => (long)a;
             }
             """, checkOverflow);
-        if (checkOverflow)
-        {
-            Assert.Equal("WRT0002 | checked arithmetic", Only(result, "M:C.Add(System.Int32,System.Int32)"));
-        }
-        else
-        {
-            Assert.Empty(result.DiagnosticsFor("M:C.Add(System.Int32,System.Int32)"));
-        }
+        // M6 U7: a checked project's `+` is checked arithmetic (R1); a widening cannot overflow, so it wraps.
+        var add = Assert.IsType<BinaryExpr>(Unit(result, "M:C.Add(System.Int32,System.Int32)").Body);
+        Assert.Equal(checkOverflow ? VirOverflow.Checked : VirOverflow.Wrap, add.Overflow);
         var widen = Unit(result, "M:C.Widen(System.Int32)");
         Assert.Equal(new ConvertExpr(VirType.Int32, VirType.Int64, VirOverflow.Wrap, new ParamExpr(VirType.Int32, 0)), widen.Body);
         Assert.Equal(checkOverflow ? VirOverflow.Checked : VirOverflow.Wrap, widen.Facts.Overflow);
@@ -491,7 +486,8 @@ public class ExtractionTests
         Assert.Equal(["p"], NonNull(Unit(result, "M:C.Validate(Payment)")));
         Assert.Equal(["o", "o.Inner", "o.Inner.Payment", "o.Outcome"], NonNull(Unit(result, "M:C.Deep(Outer,System.Int32)")));
         Assert.Equal(["this.Inner", "this.Inner.Payment", "this.Outcome"], NonNull(Unit(result, "P:Outer.Amount")));
-        Assert.Equal("WRT0002 | nullable type", Only(result, "M:C.Maybe(Payment)"));
+        // A parameter declared nullable may be null (M6 U17), so nothing assumes it is not.
+        Assert.Empty(NonNull(Unit(result, "M:C.Maybe(Payment)")));
     }
 
     [Fact]

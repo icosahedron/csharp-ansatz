@@ -84,6 +84,10 @@ public sealed class Notation
         [Name.Parse("Int.toNat")] = "toNat",
     };
 
+    private static readonly Name TripleName = Name.Parse("Std.Do.Triple");
+    private static readonly Name SPredPureName = Name.Parse("Std.Do.SPred.pure");
+    private static readonly Name PredTransApplyName = Name.Parse("Std.Do.PredTrans.apply");
+    private static readonly Name WpName = Name.Parse("Std.Do.WP.wp");
     private static readonly Name NotName = Name.Parse("Not");
     private static readonly Name NegName = Name.Parse("Neg.neg");
     private static readonly Name NatCastName = Name.Parse("Nat.cast");
@@ -247,6 +251,20 @@ public sealed class Notation
             var (rhsText, rhsRight) = Slot(rhs, op.Rhs, followedBy: null);
             var text = Slot(lhs, op.Lhs, followedBy: op.Prec).Text + op.Op + rhsText;
             return (new(text, op.Prec, Math.Min(op.Rhs, rhsRight)), op.Arity);
+        }
+        // Std.Do's notations (M6 U11): a triple ⦃P⦄ x ⦃Q⦄, an assertion ⌜p⌝, and a weakest precondition wp⟦x⟧ Q.
+        if (name == TripleName && args.Length >= 7)
+        {
+            var text = $"⦃{Pp(args[5]).Text}⦄ {Closed_(Pp(args[4]), ArgPrec)} ⦃{Pp(args[6]).Text}⦄";
+            return (new(text, LeadPrec, Closed), 7);
+        }
+        if (name == SPredPureName && args.Length >= 2)
+        {
+            return (Atom($"⌜{Pp(args[1]).Text}⌝"), 2);
+        }
+        if (name == PredTransApplyName && args.Length >= 4 && args[2].GetAppFn() is ConstExpr { Name: var wp } && wp == WpName && args[2].GetAppArgs() is { Length: > 0 } wpArgs)
+        {
+            return (new($"wp⟦{Pp(wpArgs[^1]).Text}⟧ {Closed_(Pp(args[3]), ArgPrec)}", LeadPrec, Closed), 4);
         }
         if (name == NotName && args.Length >= 1)
         {

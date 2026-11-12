@@ -23,26 +23,52 @@ internal sealed partial class BodyTranslator
         var rest = i + 1 == stmts.Count ? k : new Rest(this, stmts, i + 1, k);
         return stmts[i] switch
         {
-            // `return e` is `e`; extraction rejects anything after it as unreachable.
-            ReturnStmt r => Value(r.Value, env),
-            DeclStmt d => Let(d.Local, Value(d.Init, env), env, rest),
-            AssignStmt a => Let(a.Local, Value(a.Value, env), env, rest),
+            // `return e` is `e`, or in a method that can raise, `e`'s program; extraction rejects anything after it as
+            // unreachable.
+            ReturnStmt r => _sigma is null ? Value(r.Value, env) : Bound(r.Value, env, null),
+            DeclStmt d => Assign(d.Local, d.Init, env, rest),
+            AssignStmt a => Assign(a.Local, a.Value, env, rest),
             BlockStmt b => Statements(b.Stmts, 0, env, rest),
             IfStmt s => If(s, env, rest),
             SwitchStmt s => SwitchStatement(s, env, rest),
             // The measure is read on entry; it is the recursion's, not a statement of the body (M5a KTD14).
-            DecreasesStmt => rest.Invoke(env),
+            DecreasesStmt when _sigma is null => rest.Invoke(env),
+            // `throw new E(…)` raises `thrown "T:E"` (M6 KTD4); control does not reach the rest.
+            ThrowStmt t when _sigma is not null => Site(t, Monadic.Throw(_sigma, Monadic.ValueType(k.ResultType), Monadic.Thrown(t.Exception))),
+            AssertStmt a when _sigma is not null => Assert(a, env, rest),
+            // A call run for its effects (M6 U19): its program bound and its value dropped. A call that cannot raise has
+            // no effect to keep.
+            EvalStmt e when _sigma is not null => Bound(e.Value, env, new Next(rest.ResultType, _ => rest.Invoke(env))),
+            EvalStmt e when IsPure(e.Value) => rest.Invoke(env),
+            // Claims, never run: the contract obligation states them (M6 KTD12, Contracts.cs).
+            RequiresStmt or EnsuresStmt when Contracted => rest.Invoke(env),
+            RequiresStmt or EnsuresStmt => throw new TranslationException(null, "a contract would be dropped unread: the unit's obligation is not being stated."),
             var other => throw new TranslationException(null, $"unsupported statement {other.GetType().Name}."),
         };
     }
 
     /// <summary>
-    /// An <c>if</c> statement: <c>ite</c>, or, on the way to a recursive call, <c>dite</c>, whose hypotheses are in scope in
-    /// the branches (M5a KTD15).
+    /// <c>x = e</c> or <c>var x = e</c>, then <paramref name="k"/>: <c>let x := e; k</c>, or, when <c>e</c> can raise,
+    /// <c>e</c>'s program bound to <c>x</c> (M6 U9).
     /// </summary>
-    private Expr If(IfStmt s, Env env, Continuation k)
+    private Expr Assign(int local, VirExpr value, Env env, Continuation k)
     {
-        var c = Cond(s.C, env);
+        if (_sigma is null || IsPure(value))
+        {
+            return Let(local, Value(value, env), env, k);
+        }
+        return Bound(value, env, new Next(k.ResultType, v => IsBound(v) ? k.Invoke(env.Set(local, v)) : Let(local, v, env, k), Name.From(Local(local).Name)));
+    }
+
+    /// <summary>
+    /// An <c>if</c> statement: <c>ite</c>, or, on the way to a recursive call, <c>dite</c>, whose hypotheses are in scope in
+    /// the branches (M5a KTD15). In a method that can raise, a condition that can raise is bound first (M6 U9).
+    /// </summary>
+    private Expr If(IfStmt s, Env env, Continuation k) =>
+        _sigma is null || IsPure(s.C) ? If(s, Cond(s.C, env), env, k) : CondBound(s.C, env, k.ResultType, c => If(s, c, env, k));
+
+    private Expr If(IfStmt s, Condition c, Env env, Continuation k)
+    {
         var (hThen, hElse) = Hypotheses(c);
         return Branches(
             [s.Then, s.Else ?? EmptyBlock],
@@ -75,7 +101,9 @@ internal sealed partial class BodyTranslator
     /// 4. neither contains a <c>return</c> or a call of the recursive method being translated, and they change no local
     ///    <paramref name="k"/> reads: <paramref name="k"/> alone (a skipped call would leave its decrease unchecked);
     /// 5. otherwise a join point over the locals <paramref name="k"/> reads and some branch changes.
-    /// Each branch is translated with its <paramref name="hypotheses"/> in scope, when there are any.
+    /// Each branch is translated with its <paramref name="hypotheses"/> in scope, when there are any. In a method that can
+    /// raise, rules 3 and 4 do not apply: a branch that can raise can be neither dropped nor reduced to a value, so the
+    /// monadic translation keeps the join points and drops the shortcuts (docs/m4/05, M6 U9).
     /// </summary>
     private Expr Branches(
         IReadOnlyList<VirStmt> branches,
@@ -100,6 +128,10 @@ internal sealed partial class BodyTranslator
             .Order()
             .ToList();
         bool recurses = _selfKey is { } selfKey && branches.Any(b => Nodes(b).Any(n => n is CallExpr c && string.Equals(c.Target, selfKey, StringComparison.Ordinal)));
+        if (_sigma is not null)
+        {
+            return JoinPoint(branches, Branch, combine, live, env, k);
+        }
         if (!returns && !recurses && live.Count == 0)
         {
             return k.Invoke(env);
@@ -144,7 +176,7 @@ internal sealed partial class BodyTranslator
     /// <summary>Whether control can reach the end of a statement, as extraction's reachability check decides it.</summary>
     private static bool FallsThrough(VirStmt s) => s switch
     {
-        ReturnStmt => false,
+        ReturnStmt or ThrowStmt => false,
         BlockStmt b => b.Stmts.All(FallsThrough),
         IfStmt i => i.Else is null || FallsThrough(i.Then) || FallsThrough(i.Else),
         SwitchStmt sw => !sw.Sections.Any(IsDefault) || sw.Sections.Any(section => section.Body.All(FallsThrough)),
@@ -221,6 +253,24 @@ internal sealed partial class BodyTranslator
         public override IReadOnlySet<int> Reads { get; } = locals.ToHashSet();
 
         public override Expr Invoke(Env env) => Expr.App(joinPoint, [.. locals.Select(env.Get)]);
+    }
+
+    /// <summary>
+    /// What control reaching the end of a method body means: returning nothing, <c>()</c> or <c>pure ()</c>, for a method
+    /// that returns no value (M6 KTD22, U19), and otherwise a translation error, since extraction rejects a body that can
+    /// fall off its end.
+    /// </summary>
+    private Continuation End(VirUnit unit, Expr returns) =>
+        !ReturnsNothing(unit) ? new Unreachable(returns)
+        : _sigma is null ? new Returns(returns, Init.UnitUnit)
+        : new Returns(returns, Monadic.Pure(_sigma, Init.Unit, Init.UnitUnit));
+
+    /// <summary>The end of a method that returns no value: its fixed result, a leaf that may be copied.</summary>
+    private sealed class Returns(Expr type, Expr value) : Continuation(type)
+    {
+        public override IReadOnlySet<int> Reads { get; } = new HashSet<int>();
+
+        public override Expr Invoke(Env env) => value;
     }
 
     /// <summary>The end of a method body or of a branch that returns on every path; reaching it is a translation error.</summary>

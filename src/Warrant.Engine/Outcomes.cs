@@ -137,6 +137,21 @@ public sealed record NotProvedOutcome(
     /// The goals are that obligation's, and <see cref="TacticNode"/> is the call's node.
     /// </summary>
     public DecreaseFailure? Decrease { get; init; }
+
+    /// <summary>
+    /// For a contract obligation the default procedure did not prove (M6 U11, #90), every VC that failed, in the order the
+    /// walk met them, each reported at its own node; the first is the one <see cref="UnitOutcome"/>'s message and goals
+    /// show. Empty for every other failure.
+    /// </summary>
+    public ImmutableArray<Contracts.VcFailure> Vcs { get; init; } = [];
+
+    /// <summary>
+    /// The outcome once per failing VC, each with that VC's message, goals and node, as the diagnostics report them (#90);
+    /// the outcome itself when it has no VCs.
+    /// </summary>
+    /// <returns>The outcomes, in order.</returns>
+    public IEnumerable<NotProvedOutcome> EachFailure() =>
+        Vcs.IsDefaultOrEmpty ? [this] : Vcs.Select(v => this with { Message = v.Message, Goals = v.Goals, TacticNode = v.Node, Vcs = [] });
 }
 
 /// <summary>A recursive call whose decrease obligation <c>f.$dec_k</c> was not proved (M5a KTD15, docs/m5a/03).</summary>

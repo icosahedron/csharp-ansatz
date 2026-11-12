@@ -13,6 +13,15 @@ internal sealed partial class Walker
 {
     private const string TacticType = "Warrant.Tactic";
 
+    /// <summary>The VIR name of <c>Tactic.VcGen()</c>, Warrant's own VC generator (M6 KTD13), which Lean has no name for.</summary>
+    private const string VcGenName = "vcgen";
+
+    /// <summary>Whether the script being read is a contract obligation's or a <c>Spec.Assert</c>'s, where <c>Tactic.VcGen()</c> is a step.</summary>
+    private bool _contractScript;
+
+    /// <summary>The key of the method a <c>[ProofFor]</c> script being read proves; null otherwise.</summary>
+    private string? _scriptSelf;
+
     /// <summary>Lean's names for the <c>Tactic</c> factories (docs/m5a/04).</summary>
     private static readonly Dictionary<string, string> TacticNames = new(StringComparer.Ordinal)
     {
@@ -52,12 +61,18 @@ internal sealed partial class Walker
     private static bool IsScriptMember(IMethodSymbol target) =>
         target.ContainingType?.ToDisplayString() is TacticType or "Warrant.Lean" || Symbols.IsNamed(target, "Warrant.Proof", "By");
 
-    private static RejectedException DecreasesNotFirst(SyntaxNode at) =>
+    /// <summary>
+    /// <c>Spec.Decreases</c> anywhere but first in the body's leading <c>Spec</c> statements (M6 KTD8); out of order when it
+    /// follows a <c>Spec.Requires</c> or <c>Spec.Ensures</c> of that prefix.
+    /// </summary>
+    private static RejectedException DecreasesNotFirst(SyntaxNode at, bool outOfOrder) =>
         new(new Rejection(
             DiagnosticIds.Unsupported,
             "Spec.Decreases not first",
             at.GetLocation(),
-            "Spec.Decreases must be the first statement of the method's body, because the measure is read on entry."));
+            outOfOrder
+                ? "Spec.Decreases is out of order: it must come before Spec.Requires and Spec.Ensures, as the first statement of the method's body, because the measure is read on entry."
+                : "Spec.Decreases must be the first statement of the method's body, because the measure is read on entry."));
 
     private static RejectedException MalformedScript(string construct, SyntaxNode at, string detail) =>
         new(new Rejection(DiagnosticIds.MalformedSpec, construct, at.GetLocation(), $"Malformed proof script: {detail}."));
@@ -113,11 +128,48 @@ internal sealed partial class Walker
         return Track(result, syntax);
     }
 
-    /// <summary>The tactics of <c>.By(...)</c>, in order.</summary>
-    public VirList<TacticNode> Script(IInvocationOperation by)
+    /// <summary>The tactics of a theorem's <c>.By(...)</c>, in order.</summary>
+    public VirList<TacticNode> Script(IInvocationOperation by) => Steps(by.Arguments);
+
+    /// <summary>
+    /// The tactics of a <c>[ProofFor]</c> method's <c>Prove.Contract().By(...)</c>, in order (M6 KTD16). They may start
+    /// with <c>Tactic.VcGen()</c>, and naming the method they prove, as <c>Tactic.Unfold(nameof(M))</c> does, is not a call.
+    /// </summary>
+    /// <param name="by">The <c>.By(...)</c> call.</param>
+    /// <param name="self">The key of the method whose contract obligation the script proves.</param>
+    public VirList<TacticNode> ContractScript(IInvocationOperation by, string self)
+    {
+        _contractScript = true;
+        _scriptSelf = self;
+        try
+        {
+            return Steps(by.Arguments);
+        }
+        finally
+        {
+            _contractScript = false;
+            _scriptSelf = null;
+        }
+    }
+
+    /// <summary>The tactics of <c>Spec.Assert</c>'s script, which may use <c>Tactic.VcGen()</c> (M6 KTD16).</summary>
+    private VirList<TacticNode> AssertScript(IEnumerable<IArgumentOperation> arguments)
+    {
+        _contractScript = true;
+        try
+        {
+            return Steps(arguments);
+        }
+        finally
+        {
+            _contractScript = false;
+        }
+    }
+
+    private VirList<TacticNode> Steps(IEnumerable<IArgumentOperation> arguments)
     {
         var steps = new List<TacticNode>();
-        foreach (var argument in by.Arguments)
+        foreach (var argument in arguments)
         {
             foreach (var element in Elements(argument))
             {
@@ -170,6 +222,11 @@ internal sealed partial class Walker
                 }
             }
             return Track(new TacticNode(inner.Name, new VirList<VirTacticArg>(options)), syntax);
+        }
+        // Warrant's VC generator runs on a contract obligation, which a theorem's script never starts at (KTD16).
+        if (method.Name == "VcGen" && _contractScript)
+        {
+            return Track(new TacticNode(VcGenName, VirList<VirTacticArg>.Empty), syntax);
         }
         if (!TacticNames.TryGetValue(method.Name, out var name))
         {
@@ -263,7 +320,10 @@ internal sealed partial class Walker
         }
         var key = Symbols.Key(member);
         Deps.Add(key);
-        Calls.Add(key);
+        if (!string.Equals(key, _scriptSelf, StringComparison.Ordinal))
+        {
+            Calls.Add(key);
+        }
         return new UnitRefArg(key);
     }
 }

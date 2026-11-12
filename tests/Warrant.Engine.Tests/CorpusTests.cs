@@ -9,6 +9,46 @@ namespace Warrant.Engine.Tests;
 /// </summary>
 public sealed class CorpusTests(EngineFixture engine) : IClassFixture<EngineFixture>
 {
+    /// <summary>
+    /// Every M6 corpus member (plan M6 U11, as amended by #167, and U19) gets its expected.json outcome from extraction
+    /// through the default procedure: <c>accepted/</c> proves (a proved contract is a translated unit with its
+    /// <c>$contract</c>), and <c>refuted/</c> fails with WRT0001 with the expected VC kind at the expected line. A method
+    /// with dependencies is proved with its members' contracts as hypotheses (U20).
+    /// </summary>
+    [Fact]
+    public void EveryM6MemberGetsItsExpectedOutcome()
+    {
+        var set = CorpusSet.M6;
+        var mismatches = new List<string>();
+        int members = 0;
+        foreach (var compilation in set.Names)
+        {
+            var extraction = Extractor.Extract(set.Compile(compilation));
+            var result = engine.Run($"m6/{compilation}");
+            var expected = set.Expected.GetProperty("members").GetProperty(compilation);
+            foreach (var member in expected.EnumerateObject())
+            {
+                members++;
+                var actual = result.Find(member.Name);
+                mismatches.AddRange(Compare(member.Name, member.Value, actual, extraction.DiagnosticsFor(member.Name)));
+                if (actual is NotProvedOutcome notProved && member.Value.TryGetProperty("vc", out var vc))
+                {
+                    var line = Reports.OutcomeText.SpanOf(engine.Spans($"m6/{compilation}", member.Name), notProved.TacticNode) is { } span
+                        ? $"{Path.GetFileName(span.Path)}:{span.StartLine}"
+                        : "no line";
+                    var kind = notProved.Vcs.IsDefaultOrEmpty ? "none" : notProved.Vcs[0].Kind.ToString();
+                    var wanted = $"{vc.GetProperty("kind").GetString()} at {vc.GetProperty("at").GetString()} of {vc.GetProperty("count").GetInt32()}";
+                    if (wanted != $"{kind} at {line} of {notProved.Vcs.Length}")
+                    {
+                        mismatches.Add($"{member.Name}: expected the VC {wanted}, got {kind} at {line} of {notProved.Vcs.Length}");
+                    }
+                }
+            }
+        }
+        Assert.True(mismatches.Count == 0, string.Join("\n", mismatches));
+        Assert.Equal(147, members);
+    }
+
     [Fact]
     public void EveryM5aMemberGetsItsExpectedOutcome()
     {

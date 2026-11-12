@@ -25,7 +25,7 @@ internal static class TypeDeclarations
             case EnumDefinition e:
                 {
                     var prim = types.Underlying(e.Underlying);
-                    if (prim == VirPrimitive.Bool)
+                    if (prim is not (VirPrimitive.Int32 or VirPrimitive.Int64))
                     {
                         throw new TranslationException(unit.Key, "an enum's underlying type must be int or long.");
                     }
@@ -60,7 +60,9 @@ internal static class TypeDeclarations
     /// <summary>
     /// <c>R.$eq a b</c>: the fields compared in order and joined with <c>Bool.and</c>, as the compiler-generated
     /// <c>Equals</c> does. An integer, <c>bool</c> or open-enum field is <c>decide (a.f = b.f)</c> at its underlying type, a
-    /// record field uses that record's <c>$eq</c>, and a closed field compares <c>$index</c> values with <c>Nat.beq</c>.
+    /// <c>decimal</c> field compares values, <c>decide (Warrant.Decimal.eq a.f b.f)</c> (M6 KTD7, so <c>1.0m</c> and
+    /// <c>1.00m</c> fields are equal, as <c>decimal.Equals</c> makes them), a record field uses that record's <c>$eq</c>, and
+    /// a closed field compares <c>$index</c> values with <c>Nat.beq</c>.
     /// </summary>
     private static DefinitionDecl Equality(string key, RecordDefinition record, TypeTable types, Func<Expr, ReducibilityHints> regular)
     {

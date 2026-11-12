@@ -88,9 +88,16 @@ internal sealed class ModelCheck(KernelEnvironment env, Values values, KernelLim
     /// The fuel and wall-clock time of the checks <see cref="Kernel.Kernel.Add"/> makes for this theorem (type, proof,
     /// definitional equality), measured on a fresh checker. Must run on a kernel thread.
     /// </summary>
-    public (long Fuel, TimeSpan Elapsed) Measure(VirType type, Expr model, object? result)
+    public (long Fuel, TimeSpan Elapsed) Measure(VirType type, Expr model, object? result) =>
+        Measure(Theorem(Values.CicType(type), model, Values.Term(type, result)));
+
+    /// <summary>
+    /// The fuel and wall-clock time of the checks <see cref="Kernel.Kernel.Add"/> makes for a theorem, measured on a fresh
+    /// checker. Must run on a kernel thread.
+    /// </summary>
+    public (long Fuel, TimeSpan Elapsed) Measure(TheoremDecl declaration)
     {
-        var theorem = Theorem(Values.CicType(type), model, Values.Term(type, result)).Value;
+        var theorem = declaration.Value;
         var watch = Stopwatch.StartNew();
         var checker = new TypeChecker(Env.Fork(), limits: limits);
         checker.Check(theorem.Type, theorem.LevelParams);
@@ -99,9 +106,255 @@ internal sealed class ModelCheck(KernelEnvironment env, Values values, KernelLim
         return (checker.FuelUsed, watch.Elapsed);
     }
 
+    // ---- Units that can raise (plan M6 U13, KTD21, #110) ----
+
+    private static readonly Name ClrM = Name.Parse("Warrant.ClrM");
+
+    /// <summary><c>Eq.{2}</c>: a run <c>∀ σ : Type, σ → Except ClrExn R</c> lives in <c>Type 1</c>.</summary>
+    private static readonly Expr Eq2 = Expr.Const(Name.Parse("Eq"), Level.Succ(Level.One));
+
+    private static readonly Expr EqRefl2 = Expr.Const(Name.Parse("Eq.refl"), Level.Succ(Level.One));
+
+    private static readonly Expr TypeSort = Expr.Sort(Level.One);
+
+    private static readonly Expr ClrExnType = Expr.Const(ClrExceptions.Type);
+
+    private static Expr C(string dotted) => Expr.Const(Name.Parse(dotted), Level.Zero, Level.Zero);
+
+    /// <summary>
+    /// Whether a translated function is a <c>ClrM</c> program, <c>∀ {σ : Type} params, ClrM σ R</c> (plan M6 U9), rather
+    /// than a pure function.
+    /// </summary>
+    public bool IsRaising(VirUnit unit) =>
+        Env.Get(LeanNames.ForKey(unit.Key)).Type is ForallExpr { BinderInfo: BinderInfo.Implicit } type
+        && ExprOps.Find(type, (e, _) => e is ConstExpr { Name: var n } && n == ClrM) is not null;
+
+    /// <summary><c>Except ClrExn R</c>.</summary>
+    public static Expr Except(Expr returns) => Expr.App(C("Except"), ClrExnType, returns);
+
+    /// <summary>What a function returns once awaited: a task's result type (M6 KTD22), any other type itself.</summary>
+    public static VirType Returned(VirUnit unit) => unit.Returns is TaskType t ? t.Result : unit.Returns!;
+
+    /// <summary><c>@Except.ok ClrExn R v</c>.</summary>
+    public static Expr Ok(Expr returns, Expr value) => Expr.App(C("Except.ok"), ClrExnType, returns, value);
+
+    /// <summary><c>@Except.error ClrExn R e</c>.</summary>
+    public static Expr Error(Expr returns, Expr exception) => Expr.App(C("Except.error"), ClrExnType, returns, exception);
+
+    /// <summary>
+    /// A raising unit run from an arbitrary world, keeping the <c>Except</c> part (#110):
+    /// <c>fun (σ : Type) (s : σ) =&gt; (StateT.run (ExceptT.run (f σ a₁ … aₙ)) s).1</c>.
+    /// </summary>
+    public Expr Run(VirUnit unit, IReadOnlyList<object?> args)
+    {
+        var types = ParameterTypes(unit);
+        var returns = Values.CicType(Returned(unit));
+        var sigma = Expr.BVar(1);
+        var except = Except(returns);
+        var stateM = Expr.App(Expr.Const(Name.Parse("StateM"), Level.Zero), sigma);
+        var program = Expr.App(Expr.Const(LeanNames.ForKey(unit.Key)), [sigma, .. types.Select((t, i) => Values.Term(t, args[i]))]);
+        var run = Expr.App(C("StateT.run"), sigma, Expr.Const(Name.Parse("Id"), Level.Zero), except,
+            Expr.App(C("ExceptT.run"), ClrExnType, stateM, returns, program),
+            Expr.BVar(0));
+        return Expr.Lam(Name.Parse("σ"), TypeSort, Expr.Lam(Name.Parse("s"), Expr.BVar(0),
+            Expr.App(C("Prod.fst"), except, sigma, run)));
+    }
+
+    /// <summary>The same outcome from every world: <c>fun (σ : Type) (s : σ) =&gt; outcome</c>.</summary>
+    public static Expr Everywhere(Expr outcome) =>
+        Expr.Lam(Name.Parse("σ"), TypeSort, Expr.Lam(Name.Parse("s"), Expr.BVar(0), outcome));
+
+    /// <summary>The theorem <c>@Eq.{2} (∀ σ : Type, σ → Except ClrExn R) run (fun σ s =&gt; outcome)</c>, proved by <c>Eq.refl</c>.</summary>
+    public static TheoremDecl RunTheorem(Expr returns, Expr run, Expr outcome)
+    {
+        var type = Expr.Forall(Name.Parse("σ"), TypeSort, Expr.Forall(Name.Parse("s"), Expr.BVar(0), Except(returns)));
+        return new TheoremDecl(new TheoremInfo(
+            TheoremName,
+            EquatableArray<Name>.Empty,
+            Expr.App(Eq2, type, run, Everywhere(outcome)),
+            Expr.App(EqRefl2, type, run),
+            EquatableArray.Create(TheoremName)));
+    }
+
+    /// <summary>
+    /// Whether the kernel admits <c>@Eq.{2} (∀ σ : Type, σ → Except ClrExn R) run (fun σ s =&gt; outcome)</c> by
+    /// <c>Eq.refl</c>. Running out of fuel throws. Must run on a kernel thread.
+    /// </summary>
+    public bool RunsTo(Expr returns, Expr run, Expr outcome)
+    {
+        try
+        {
+            Kernel.Kernel.Add(Env.Fork(), RunTheorem(returns, run, outcome), limits);
+            return true;
+        }
+        catch (KernelException ex) when (ex is not KernelResourceException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether a raising unit's run agrees with the CLR's outcome (<paramref name="thrown"/>, or else
+    /// <paramref name="result"/>): <see cref="InputCheck.Agrees"/>, <see cref="InputCheck.Skipped"/> when the model
+    /// fails a <c>Spec.Assert</c> (#186), or a message with both outcomes. Must run on a kernel thread.
+    /// </summary>
+    public InputCheck CheckRaising(string description, VirType returns, Expr run, object? result, Exception? thrown) =>
+        CheckOutcome(description, returns, o => RunsTo(Values.CicType(returns), run, o), () => Outcome(returns, run), result, thrown);
+
+    /// <summary>
+    /// <see cref="CheckRaising"/> for any run: <paramref name="runsTo"/> decides whether the model's run ends in an outcome
+    /// (<c>Except.ok v</c> or <c>Except.error e</c>), and <paramref name="outcome"/> describes the model's outcome for
+    /// messages. Must run on a kernel thread.
+    /// </summary>
+    public InputCheck CheckOutcome(string description, VirType returns, Func<Expr, bool> runsTo, Func<string> outcome, object? result, Exception? thrown)
+    {
+        var r = Values.CicType(returns);
+        string clr;
+        if (thrown is null)
+        {
+            Expr value;
+            try
+            {
+                value = Values.Term(returns, result);
+            }
+            catch (ModelGapException ex)
+            {
+                return InputCheck.Disagrees($"{description}: the CLR returned {Values.Display(returns, result)}, which the model cannot produce ({ex.Message}); the model computes {outcome()}");
+            }
+            if (runsTo(Ok(r, value)))
+            {
+                return InputCheck.Agrees;
+            }
+            clr = $"returned {Values.Display(returns, result)}";
+        }
+        else
+        {
+            if (ClrExceptions.ModelErrors(thrown).Any(e => runsTo(Error(r, e))))
+            {
+                return InputCheck.Agrees;
+            }
+            clr = $"threw {thrown.GetType().Name}";
+        }
+        return runsTo(Error(r, ClrExceptions.Constructor(ClrExceptions.AssertFailed)))
+            ? InputCheck.Skipped
+            : InputCheck.Disagrees($"{description}: the CLR {clr} but the model computes {outcome()}");
+    }
+
+    /// <summary>
+    /// The model's outcome in one world (<c>Unit</c>), for messages only: <c>ok v</c> with <c>v</c> read back, or
+    /// <c>error c</c>. Must run on a kernel thread.
+    /// </summary>
+    public string Outcome(VirType returns, Expr run) =>
+        OutcomeOf(returns, Expr.App(run, Expr.Const(Name.Parse("Unit")), Expr.Const(Name.Parse("Unit.unit"))));
+
+    /// <summary>
+    /// An <c>Except ClrExn R</c> term's value, for messages only: <c>ok v</c> with <c>v</c> read back, or <c>error c</c>.
+    /// Must run on a kernel thread.
+    /// </summary>
+    public string OutcomeOf(VirType returns, Expr except)
+    {
+        try
+        {
+            var checker = new TypeChecker(Env, limits: limits);
+            var outcome = checker.Whnf(except);
+            var args = outcome.GetAppArgs();
+            switch (outcome.GetAppFn())
+            {
+                case ConstExpr { Name: var n } when n == Name.Parse("Except.ok"):
+                    return $"ok {Values.ReadBackDisplay(Env, returns, args[2], limits)}";
+                case ConstExpr { Name: var n } when n == Name.Parse("Except.error"):
+                    {
+                        var e = checker.Whnf(args[2]);
+                        return e.GetAppFn() is ConstExpr { Name: var c }
+                            ? $"error {c.StringComponent}{string.Concat(e.GetAppArgs().Select(a => " " + checker.Whnf(a)))}"
+                            : $"error {e}";
+                    }
+                default:
+                    return "unknown";
+            }
+        }
+        catch (KernelException)
+        {
+            return "unknown";
+        }
+    }
+
+    // ---- Units with dependencies, run against reply tapes (plan M6 U22, KTD21) ----
+
+    /// <summary><c>Nat</c>: the world of a run against a reply tape is the index of the next external call.</summary>
+    public static readonly Expr Nat = Expr.Const(Name.Parse("Nat"));
+
+    /// <summary>
+    /// A unit run in the world <c>Nat</c> with the given operations, from <paramref name="world"/>:
+    /// <c>StateT.run (ExceptT.run (f Nat op₁ … opₖ a₁ … aₙ)) world : Except ClrExn R × Nat</c>.
+    /// </summary>
+    public Expr WorldRun(VirUnit unit, IReadOnlyList<Expr> operations, IReadOnlyList<object?> args, Expr world)
+    {
+        var types = ParameterTypes(unit);
+        var returns = Values.CicType(Returned(unit));
+        var stateM = Expr.App(Expr.Const(Name.Parse("StateM"), Level.Zero), Nat);
+        var program = Expr.App(Expr.Const(LeanNames.ForKey(unit.Key)), [Nat, .. operations, .. types.Select((t, i) => Values.Term(t, args[i]))]);
+        return Expr.App(C("StateT.run"), Nat, Expr.Const(Name.Parse("Id"), Level.Zero), Except(returns),
+            Expr.App(C("ExceptT.run"), ClrExnType, stateM, returns, program),
+            world);
+    }
+
+    /// <summary>A world run's outcome, <c>Prod.fst</c>.</summary>
+    public static Expr OutcomeOfRun(Expr returns, Expr pair) => Expr.App(C("Prod.fst"), Except(returns), Nat, pair);
+
+    /// <summary>A world run's final world, <c>Prod.snd</c>: the number of external calls made so far.</summary>
+    public static Expr WorldAfter(Expr returns, Expr pair) => Expr.App(C("Prod.snd"), Except(returns), Nat, pair);
+
+    /// <summary>
+    /// Whether the kernel admits <c>@Eq.{1} type lhs rhs</c> by <c>Eq.refl</c>. Running out of fuel throws. Must run on a
+    /// kernel thread.
+    /// </summary>
+    public bool Equal(Expr type, Expr lhs, Expr rhs)
+    {
+        try
+        {
+            Kernel.Kernel.Add(Env.Fork(), Theorem(type, lhs, rhs), limits);
+            return true;
+        }
+        catch (KernelException ex) when (ex is not KernelResourceException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>A closed <c>Nat</c> term's value, for messages only. Must run on a kernel thread.</summary>
+    public string NatOf(Expr term)
+    {
+        try
+        {
+            return new TypeChecker(Env, limits: limits).Whnf(term) switch
+            {
+                NatLitExpr n => n.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ConstExpr { Name: var z } when z == Name.Parse("Nat.zero") => "0",
+                var other => other.ToString(),
+            };
+        }
+        catch (KernelException)
+        {
+            return "unknown";
+        }
+    }
+
     private static string FirstLine(string message)
     {
         var newline = message.IndexOfAny(['\r', '\n']);
         return newline < 0 ? message : message[..newline];
     }
+}
+
+/// <summary>The check of one input of an M6 function: agreement, a skip (the model failed a <c>Spec.Assert</c>), or a disagreement.</summary>
+/// <param name="Disagreement">The message, when the two sides disagree.</param>
+/// <param name="IsSkipped">Whether the model failed a <c>Spec.Assert</c>, which does nothing on the CLR (#186).</param>
+internal sealed record InputCheck(string? Disagreement, bool IsSkipped)
+{
+    public static InputCheck Agrees { get; } = new(null, false);
+
+    public static InputCheck Skipped { get; } = new(null, true);
+
+    public static InputCheck Disagrees(string message) => new(message, false);
 }

@@ -5,7 +5,8 @@ namespace Warrant.Semantics;
 
 /// <summary>
 /// The type units being translated, by key, and the mapping of VIR types to CIC (docs/m4/05, "Types"):
-/// <c>int</c>, <c>long</c> and <c>bool</c> are Init's types, and a type unit is its own constant.
+/// <c>int</c>, <c>long</c> and <c>bool</c> are Init's types, <c>decimal</c> is <c>Warrant.Decimal</c> (M6 KTD7), a type unit
+/// is its own constant, and <c>T?</c> is <c>Option T</c> (M6 KTD5).
 /// </summary>
 internal sealed class TypeTable
 {
@@ -23,6 +24,10 @@ internal sealed class TypeTable
     {
         PrimitiveType p => Literals.Type(p.Kind),
         RefType r => Expr.Const(LeanNames.ForKey(Known(r.Key))),
+        // T? is Option T (M6 KTD5).
+        NullableType n => Nullables.Option(Cic(n.Value)),
+        // A task is not a value: a call returning one is awaited where it is made, and its result is the value (M6 KTD22).
+        TaskType => throw new TranslationException(null, $"a {type} is not a value; only its awaited result is."),
         _ => throw new TranslationException(null, $"unknown type {type}."),
     };
 

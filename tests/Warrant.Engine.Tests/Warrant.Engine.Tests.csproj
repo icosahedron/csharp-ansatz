@@ -25,5 +25,7 @@
     <!-- The corpora are compiled in memory from these copies (docs/m4/02, docs/m5a/01). -->
     <None Include="..\corpus\m4\**\*" LinkBase="corpus\m4" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\corpus\m5a\**\*" LinkBase="corpus\m5a" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Read only by the differential tests until plan M6 U11 adds the engine's M6 corpus runs (Differential/README.md). -->
+    <None Include="..\corpus\m6\**\*" LinkBase="corpus\m6" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

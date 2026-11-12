@@ -134,9 +134,9 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
         var (exitCode, log) = host.Build(dir);
         Report(host, dir, log);
 
-        // The CLI reports the division once, in its own format, and still proves the theorem (M5b R19, KTD23).
+        // The CLI reports the shift once, in its own format, and still proves the theorem (M5b R19, KTD23).
         Assert.Equal(1, exitCode);
-        Assert.Equal(["Mixed.cs(9,49,9,54): error WRT0002: M4 does not support division."], Samples.Diagnostics(log, dir));
+        Assert.Equal(["Mixed.cs(9,49,9,55): error WRT0002: M4 does not support shift."], Samples.Diagnostics(log, dir));
         Assert.Contains("1 theorems proved, 0 not proved.", log, StringComparison.Ordinal);
         Assert.DoesNotContain("Warrant.Analyzers", File.ReadAllText(Path.Combine(dir, "obj", "analyzers-build.txt")), StringComparison.Ordinal);
 
@@ -509,6 +509,56 @@ public sealed class BuildIntegrationTests(PackedPackages packages, ITestOutputHe
     }
 
     /// <summary>
+    /// M6 U14 (#106): a project with contracts, a dependency through a contract class and an async method verifies with
+    /// <c>dotnet build</c>, and its twin, whose division keeps only <c>Spec.Requires(b != 0)</c>, fails at the division.
+    /// </summary>
+    [HostFact(BuildHost.Dotnet)]
+    public void AContractBearingProjectVerifiesWithDotnetBuildAndItsRefutedTwinFailsAtTheDivision() =>
+        AssertContractSamples(BuildHost.Dotnet, "Dotnet", Samples.Net10);
+
+    [HostFact(BuildHost.VisualStudio2026)]
+    public void AContractBearingProjectVerifiesWithVisualStudio2026MSBuildAndItsRefutedTwinFailsAtTheDivision() =>
+        AssertContractSamples(BuildHost.VisualStudio2026, "Vs2026", Samples.Net10);
+
+    /// <summary>As with <c>dotnet build</c>, on SDK 9 and .NET 8, which MSBuild 17.14 can load.</summary>
+    [HostFact(BuildHost.VisualStudio2022)]
+    public void AContractBearingProjectOnSdk9AndNet8VerifiesWithVisualStudio2022MSBuildAndItsRefutedTwinFailsAtTheDivision() =>
+        AssertContractSamples(BuildHost.VisualStudio2022, "Vs2022", "net8.0", sdk: "9.0.320");
+
+    private void AssertContractSamples(string hostName, string suffix, string targetFramework, string? sdk = null)
+    {
+        var host = BuildHost.Find(hostName).Host!;
+        var project = Samples.Project($"<TargetFramework>{targetFramework}</TargetFramework><Nullable>enable</Nullable>");
+
+        var proved = packages.Sample("Contracts" + suffix, project, Samples.Contracts(refuted: false), sdk);
+        var (exitCode, log) = host.Build(proved);
+        Report(host, proved, log);
+        if (sdk is not null)
+        {
+            Assert.StartsWith("9.0.", Versions(host, proved).Sdk, StringComparison.Ordinal);
+        }
+        Assert.True(exitCode == 0, log);
+        Assert.Empty(Samples.Diagnostics(log, proved));
+        Assert.Contains("Warrant: 6 verified units, 0 theorems proved, 0 not proved.", log, StringComparison.Ordinal);
+
+        var refuted = packages.Sample("ContractsRefuted" + suffix, project, Samples.Contracts(refuted: true), sdk);
+        (exitCode, log) = host.Build(refuted);
+        Report(host, refuted, log);
+        Assert.Equal(1, exitCode);
+        // int.MinValue / -1 overflows, which b != 0 does not rule out: WRT0001 at a / b, with its kind and goal, as one
+        // error event whose lines the loggers print each with the location.
+        var diagnostics = Samples.Diagnostics(log, refuted);
+        Assert.Equal(
+            "Payments.cs(34,16,34,21): error WRT0001: The contract of 'Payments.Ratio(int, int)' could not be proved: overflow in a checked operation: omega could not prove the goal:",
+            diagnostics[0]);
+        Assert.All(diagnostics, d => Assert.StartsWith("Payments.cs(34,16,34,21): error WRT0001: ", d, StringComparison.Ordinal));
+        Assert.Contains("Payments.cs(34,16,34,21): error WRT0001: h : a = Int32.minValue ∧ b = -1", diagnostics);
+        Assert.Contains("1 Error(s)", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("MSB6006", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("WRT0010", log, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Both theorems fail at their own location with WRT0001, the goal and the counterexample; the third, with a <c>≤</c>,
     /// shows that the goal's Unicode reaches the log intact.
     /// </summary>
@@ -615,6 +665,64 @@ internal static class Samples
             """,
     };
 
+    /// <summary>
+    /// Contracts (M6): a division under its precondition, and design §5.2's payment flow through a dependency whose contract
+    /// class states what it is assumed to do. The refuted twin's precondition rules out a zero divisor only.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> Contracts(bool refuted) => new Dictionary<string, string>
+    {
+        ["Payments.cs"] = $$"""
+            using System.Threading.Tasks;
+            using Warrant;
+
+            namespace Sample;
+
+            public enum Result { Success, InvalidId, NotFound }
+
+            public sealed record Payment(int Id, decimal Amount);
+
+            public interface IPaymentStore
+            {
+                Task<Payment?> GetPayment(int id);
+                Task SavePayment(Payment p);
+            }
+
+            [ContractFor(typeof(IPaymentStore))]
+            file abstract class PaymentStoreContract : IPaymentStore
+            {
+                public Task<Payment?> GetPayment(int id)
+                {
+                    Spec.Ensures<Payment?>(r => r is null || r.Id == id);
+                    return default!;
+                }
+
+                public Task SavePayment(Payment p) => default!;
+            }
+
+            public sealed class Payments(IPaymentStore store)
+            {
+                [Verified]
+                public static int Ratio(int a, int b)
+                {
+                    Spec.Requires({{(refuted ? "b != 0" : "b != 0 && b != -1")}});
+                    return a / b;
+                }
+
+                [Verified]
+                public async Task<Result> Process(int id)
+                {
+                    Spec.Ensures<Result>(r => r != Result.Success || id > 0);
+                    if (id <= 0) return Result.InvalidId;
+                    var payment = await store.GetPayment(id);
+                    if (payment is null) return Result.NotFound;
+                    await store.SavePayment(payment);
+                    return Result.Success;
+                }
+            }
+
+            """,
+    };
+
     /// <summary>A provable theorem beside a member outside the subset.</summary>
     public static readonly IReadOnlyDictionary<string, string> Mixed = new Dictionary<string, string>
     {
@@ -627,7 +735,7 @@ internal static class Samples
             {
                 [Verified]
                 public static int Same(int x) => x;
-                [Verified] public static int Half(int x) => x / 2;
+                [Verified] public static int Half(int x) => x << 1;
 
                 [Theorem]
                 static Proof SameIsIdentity(int x) =>

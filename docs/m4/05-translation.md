@@ -286,6 +286,7 @@ The alternative is a `DecidableEq` instance per type, so that `r = s` itself wou
 `$eq` won for a reason that goes beyond M4 (KTD10): C# `==` on a record is whatever the generated `Equals` computes, and that is not always structural equality of the model.
 Once M6 adds `decimal`, a record holding `1.0m` equals one holding `1.00m` in C#, while the model keeps mantissa and scale, so the two values are different terms.
 `$eq` stays faithful there; `DecidableEq` would not.
+M6 U21 does this: a `decimal` field compares values, as `decide (Warrant.Decimal.eq a.f b.f)`.
 The cost is small in M4: Lean's derived instance is a matcher with nested `dite` and rewriting proofs for a structure (a constructor-index comparison for an enum-like type), the kernel generates none of it, and nothing in M4 needs `r = s` as a proposition.
 M5a, whose tactics will want `r = s`, can generate the bridge lemma `R.$eq r s = true ↔ r = s`, but only for records whose fields all have lawful equality, which records with `decimal` fields will not.
 

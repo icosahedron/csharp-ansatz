@@ -50,7 +50,7 @@ public class NetstandardWriterTests
         {
             case null:
                 return null;
-            case string or int or long or bool:
+            case string or int or long or bool or System.Numerics.BigInteger:
                 return value;
         }
         var type = value.GetType();

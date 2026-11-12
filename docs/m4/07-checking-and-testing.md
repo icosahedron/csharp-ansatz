@@ -117,7 +117,7 @@ Units are listed in extraction order: each unit comes after the units it depends
 On `rejected/` the same command prints the extraction diagnostics, for example:
 
 ```text
-tests/corpus/m4/rejected/Arithmetic.cs(11,39): error WRT0002: M4 does not support division.
+tests/corpus/m4/rejected/Arithmetic.cs(11,44): error WRT0002: M4 does not support integer bitwise operator.
 tests/corpus/m4/rejected/ClosedClasses.cs(9,14): error WRT0009: Corpus.Rejected.NotSealed is [Closed] but does not have the closed shape: not sealed.
 tests/corpus/m4/rejected/Enums.cs(17,13): warning WRT0008: Corpus.Rejected.Starting: closed enum without a member valued 0 can give a [Closed] enum a value the model says cannot exist.
 ```

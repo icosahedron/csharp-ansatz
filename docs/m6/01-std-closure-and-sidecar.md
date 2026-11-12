@@ -45,6 +45,7 @@ How the bundle grew, unit by unit (counts from `scripts/count-export.py`, `tests
 | U10 | | 4,099 | the triple's constants, all already in the closure |
 | U11 | | 4,109 | the walker's rules in `lean/Warrant/Vc.lean` |
 | U20 | 630 | 4,112 | three simp lemmas for a nullable `Spec.Ensures` meeting a constructor |
+| #182 | 641 | 4,125 | `Spec.NoThrow`: `ClrExn.External`, its equations, `ClrExn.allowed_of_external`, `Vc.callExternal`, `Vc.callPure` |
 
 No unit added an axiom.
 
@@ -103,9 +104,11 @@ It cannot relate `a / b` to `a` and `b` for a symbolic `b`, so a contract that n
 
 M5b KTD19 deferred to M6 the choice between loading the bundle verified, re-checking every declaration when the server
 starts, and a trusted store base.
-KTD3 keeps the verified load unless server start crosses 5 seconds on the reference workstation of docs/m5b/08 (a
+KTD3 keeps the verified load unless server start crosses 10 seconds on the reference workstation of docs/m5b/08 (a
 32-core Windows 11 machine whose M5b start was 2.9 s), because a trusted base widens the trusted computing base (design
 §9).
+The threshold was 5 seconds until the owner raised it to 10 on 2026-11-11 (#178): a slower start is better than giving
+up a verified load over a limit that is, for now, arbitrary. The measurements below were made against 5 seconds.
 Every unit that grew the bundle measured again: seven alternating cold starts of Release CLIs carrying the two bundles
 compared, `warrant verify tests/corpus/m5a/rejected --server auto --timings` ("started the server and connected in").
 
@@ -118,7 +121,7 @@ compared, `warrant verify tests/corpus/m5a/rejected --server auto --timings` ("s
 | complete (U14) | 4,112 | 4,053 ms | M5b's 2,835: 2,807 ms |
 
 The complete M6 bundle starts 1.25 s (44%) slower than M5b's in the same session and adds about 10 MB of GC heap, and
-it stays under the threshold by about 0.95 s.
+it stays under the threshold by about 0.95 s against the 5 seconds then in force, and by about 5.95 s against 10.
 The run-to-run noise on that machine is a few hundred milliseconds (U16's bundle measured 3,936 and 4,286 ms in two
 sessions), so the units that added a handful of constants (U9, U11, U20) were not measured separately.
 The bundle stays a verified load. The full tables are in `tests/data/README.md`.

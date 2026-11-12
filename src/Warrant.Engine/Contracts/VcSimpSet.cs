@@ -5,7 +5,7 @@ namespace Warrant.Engine.Contracts;
 
 /// <summary>
 /// The VC simp set (plan M6 KTD14): the one-state assertion lemmas, the predicate transformers' equations and the
-/// equations of <c>ClrExn.Allowed</c>, besides Warrant's default set. It is kept apart from <c>Tactic.Simp()</c>'s default
+/// equations of <c>ClrExn.Allowed</c> and <c>ClrExn.External</c>, besides Warrant's default set. It is kept apart from <c>Tactic.Simp()</c>'s default
 /// set, as omega-prep is, so existing scripts do not change. U3's checkpoint used exactly this list
 /// (<c>EffectCheckpointTests.VcSimpLemmas</c>).
 /// </summary>
@@ -25,6 +25,10 @@ internal static class VcSimpSet
             "Warrant.ClrExn.allowed_overflow", "Warrant.ClrExn.allowed_divideByZero", "Warrant.ClrExn.allowed_nullReference",
             "Warrant.ClrExn.allowed_invalidOperation", "Warrant.ClrExn.allowed_assertFailed", "Warrant.ClrExn.allowed_thrown",
             "Warrant.ClrExn.allowed_external",
+            // ClrExn.External, Spec.NoThrow's exception postcondition (#182).
+            "Warrant.ClrExn.external_overflow", "Warrant.ClrExn.external_divideByZero", "Warrant.ClrExn.external_nullReference",
+            "Warrant.ClrExn.external_invalidOperation", "Warrant.ClrExn.external_assertFailed", "Warrant.ClrExn.external_thrown",
+            "Warrant.ClrExn.external_external",
             // A dependency's Spec.Ensures over a nullable result (M6 U20) meets the walk's case `r = some v`: a null test
             // and ?? on a constructor, and the impossible case `some v = none`.
             "Option.isNone_some", "Option.isNone_none", "Warrant.Nullable.some_eq_none", "Bool.false_eq_true", "Bool.true_eq_false",

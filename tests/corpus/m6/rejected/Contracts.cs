@@ -141,4 +141,12 @@ public static class Contracts
 
     [ProofFor(nameof(Plain))]
     static Proof PlainProof() => Prove.Contract().By(Tactic.Omega());
+
+    [Verified]
+    public static int NoThrowAfterEnsures(int x)
+    {
+        Spec.Ensures<int>(r => r == x);
+        Spec.NoThrow();
+        return x;
+    }
 }

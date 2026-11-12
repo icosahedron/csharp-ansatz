@@ -43,6 +43,25 @@ public class VersionThreeTests
         Assert.StartsWith(J("""{`vir`:3,`key`:`M:Payments.IStore.Save(System.Decimal)`,`kind`:`contract`,`params`:[{`name`:`amount`,`type`:`decimal`}],`returns`:{`task`:`unit`},`body`:{`block`:[{`ensures`:{`c`:"""), VirWriter.WriteString(Samples.SaveContract()), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void NoThrowIsAnEmptyObjectBetweenRequiresAndEnsures()
+    {
+        // #182: Spec.NoThrow() is `nothrow{}`, new in version 3 like the other contract statements.
+        var json = VirWriter.WriteString(Samples.Guard());
+
+        Assert.Contains(J("""}},{`nothrow`:{}},{`ensures`:{`local`:0,`name`:`r`,"""), json, StringComparison.Ordinal);
+        Assert.Equal(Samples.Guard(), VirReader.Read(Encoding.UTF8.GetBytes(json)));
+        Assert.Equal(3, Samples.Guard().Vir);
+
+        // Anything inside it is malformed.
+        var forged = json.Replace(J("{`nothrow`:{}}"), J("{`nothrow`:{`c`:1}}"), StringComparison.Ordinal);
+        Assert.Throws<FormatException>(() => VirReader.Read(Encoding.UTF8.GetBytes(forged)));
+
+        // It is part of the unit's hash, so of the closure hash the cache keys on.
+        var without = Samples.Guard() with { Body = new BlockStmt(VirList.Of(((BlockStmt)Samples.Guard().Body!).Stmts.Where(s => s is not NoThrowStmt).ToArray())) };
+        Assert.NotEqual(VirHash.OfUnit(Samples.Guard()), VirHash.OfUnit(without));
+    }
+
     [Theory]
     [InlineData("0.0000000000000000000000000001")]
     [InlineData("7.9228162514264337593543950335")]

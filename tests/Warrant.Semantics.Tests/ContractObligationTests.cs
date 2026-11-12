@@ -134,6 +134,91 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
         AssertPropositions(env, contract);
     }
 
+    // ---- Spec.NoThrow (#182) ----
+
+    /// <summary><paramref name="e"/> with every <c>ClrExn.External</c> replaced by <c>ClrExn.Allowed</c>.</summary>
+    private static Expr AllowedFor(Expr e) =>
+        ExprOps.Replace(e, (x, _) => x is ConstExpr { Name: var n } && n == N("Warrant.ClrExn.External") ? C("Warrant.ClrExn.Allowed") : null);
+
+    [Fact]
+    public void NoThrowStatesTheExternalExceptionPostconditionAndChangesNothingElse()
+    {
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Guard(int a, int b)
+                {
+                    Spec.Requires(b != 0);
+                    Spec.NoThrow();
+                    Spec.Ensures<int>(r => r == a);
+                    if (b == 0)
+                    {
+                        throw new ArgumentException("b");
+                    }
+                    return a;
+                }
+
+                [Verified]
+                public static int Plain(int a, int b)
+                {
+                    Spec.Requires(b != 0);
+                    Spec.Ensures<int>(r => r == a);
+                    if (b == 0)
+                    {
+                        throw new ArgumentException("b");
+                    }
+                    return a;
+                }
+            }
+            """);
+        var guard = Contract(translation, "M:S.Guard(System.Int32,System.Int32)");
+        var plain = Contract(translation, "M:S.Plain(System.Int32,System.Int32)");
+        Assert.True(guard.Raising);
+        var (_, _, _, exceptions) = Triple(Under(guard.Theorem.Type, guard.Binders));
+        var parts = exceptions.GetAppArgs();
+        Assert.Equal(Expr.App(C("Warrant.ClrExn.External"), Expr.BVar(0)), Assertion(Assert.IsType<LamExpr>(parts[2]).Body));
+        AssertOnlyExplicitAndExternalExceptionsAllowed(Triple(Under(plain.Theorem.Type, plain.Binders)).Exceptions);
+        // Only the exception postcondition differs: with Allowed in place of External, the two statements are the same
+        // up to the function's name.
+        var guardName = translation.Find("M:S.Guard(System.Int32,System.Int32)")!.Name;
+        var plainName = translation.Find("M:S.Plain(System.Int32,System.Int32)")!.Name;
+        var renamed = ExprOps.Replace(AllowedFor(guard.Theorem.Type), (x, _) => x is ConstExpr c && c.Name == guardName ? Expr.Const(plainName) : null);
+        Assert.Equal(plain.Theorem.Type, renamed);
+        Assert.Equal(guard.Binders, plain.Binders);
+        AssertPropositions(env, guard);
+    }
+
+    [Fact]
+    public void NoThrowOnAPureMethodChangesNothing()
+    {
+        // A pure method raises nothing, so NoThrow holds of it already and its obligation is the one without (#182).
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Half(int x)
+                {
+                    Spec.Requires(x >= 0);
+                    Spec.NoThrow();
+                    return x / 2;
+                }
+
+                [Verified]
+                public static int Same(int x)
+                {
+                    Spec.NoThrow();
+                    return x;
+                }
+            }
+            """);
+        var half = Contract(translation, "M:S.Half(System.Int32)");
+        Assert.False(half.Raising);
+        AssertOnlyExplicitAndExternalExceptionsAllowed(Triple(Under(half.Theorem.Type, half.Binders)).Exceptions);
+        Assert.Null(translation.Find("M:S.Same(System.Int32)")!.Contract);
+        AssertPropositions(env, half);
+    }
+
     [Fact]
     public void AContractFreeMethodThatDividesHasATrueTrueObligationOverItsProgram()
     {
@@ -340,6 +425,70 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
         Assert.Equal(C("True"), Ensures(ok));
         AssertOnlyExplicitAndExternalExceptionsAllowed(exceptions);
         AssertPropositions(env, contract);
+    }
+
+    [Fact]
+    public void WrappingArithmeticInEnsuresHasAnOverflowObligation()
+    {
+        // #183: + - * and unary - on int and long in a Spec expression must not overflow, even where C# would wrap.
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Add(int a, int b)
+                {
+                    Spec.Ensures<int>(r => r == a + b);
+                    return a + b;
+                }
+
+                [Verified]
+                public static long Negate(long a)
+                {
+                    Spec.Requires(a > 0 || -a > 0);
+                    return a;
+                }
+            }
+            """);
+        var add = Contract(translation, "M:S.Add(System.Int32,System.Int32)");
+        var wd = Assert.Single(add.WellDefinedness);
+        Assert.Equal(SpecObligationKind.WellDefinedOperation, wd.Kind);
+        Assert.Equal("Cs.S.«Add(System.Int32,System.Int32)».$wd_1", wd.Theorem.Name.ToString());
+        Assert.IsType<BinaryExpr>(wd.Node);
+        // ∀ σ a b r, ⦃⌜True⌝⦄ Warrant.Int32.addChecked σ a b ⦃⇓_ => ⌜True⌝, allowed⦄
+        Assert.Equal(4, wd.Binders);
+        var (program, pre, ok, exceptions) = Triple(Under(wd.Theorem.Type, 4));
+        Assert.Equal(Expr.App(C("Warrant.Int32.addChecked"), Expr.BVar(3), Expr.BVar(2), Expr.BVar(1)), program);
+        Assert.Equal(C("True"), Assertion(pre));
+        Assert.Equal(C("True"), Ensures(ok));
+        AssertOnlyExplicitAndExternalExceptionsAllowed(exceptions);
+        AssertPropositions(env, add);
+
+        // The negation is under the guard ¬(a > 0) of the || that encloses it.
+        var negate = Contract(translation, "M:S.Negate(System.Int64)");
+        wd = Assert.Single(negate.WellDefinedness);
+        Assert.IsType<UnaryExpr>(wd.Node);
+        Assert.Equal(3, wd.Binders);
+        (program, _, _, _) = Triple(Under(wd.Theorem.Type, 3));
+        Assert.Equal(Expr.App(C("Warrant.Int64.negChecked"), Expr.BVar(2), Expr.BVar(1)), program);
+        AssertPropositions(env, negate);
+    }
+
+    [Fact]
+    public void AnUncheckedCastInASpecExpressionHasNoObligation()
+    {
+        // #183 leaves an explicit unchecked narrowing as written: it is a deliberate C# truncation.
+        var (translation, _) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static long Narrow(long l)
+                {
+                    Spec.Requires(unchecked((int)l) > 0);
+                    return l;
+                }
+            }
+            """);
+        Assert.Empty(Contract(translation, "M:S.Narrow(System.Int64)").WellDefinedness);
     }
 
     [Fact]

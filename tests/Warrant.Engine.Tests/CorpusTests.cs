@@ -46,7 +46,7 @@ public sealed class CorpusTests(EngineFixture engine) : IClassFixture<EngineFixt
             }
         }
         Assert.True(mismatches.Count == 0, string.Join("\n", mismatches));
-        Assert.Equal(147, members);
+        Assert.Equal(153, members);
     }
 
     [Fact]

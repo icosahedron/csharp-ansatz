@@ -284,6 +284,27 @@ public static int Bounded(int a, int b)
 Proved: the bounds keep the sum inside `int`. With only the upper bounds, `checked(a + b)` can still overflow below
 `int.MinValue`, and the build fails at `a + b` (`CheckedAddProvesWithBothBoundsAndFailsAtThePlusWithOnlyTheUpperOnes`).
 
+### Arithmetic in a contract
+
+```csharp
+[Verified]
+public static int Sum(int a, int b)
+{
+    Spec.Requires(a > -1000 && a < 1000 && b > -1000 && b < 1000);
+    Spec.Ensures<int>(r => r == a + b);
+    return a + b;
+}
+```
+
+Proved (`Sum` in `tests/corpus/m6/accepted/Contracts.cs`). `+`, `-`, `*` and unary `-` on `int` and `long` in a
+`Spec.Requires` or `Spec.Ensures` must not overflow, even though the method's own `a + b` wraps (GitHub #183): an
+overflowing spec almost always states something its author did not mean. Each one is a well-definedness condition, proved
+under the `Spec.Requires` before it, and here the bounds keep `a + b` inside `int`. Without the `Spec.Requires` the build
+fails at the `a + b` in `Spec.Ensures` with `well-definedness of a Spec expression` (`SumUnbounded` in
+`tests/corpus/m6/refuted/Contracts.cs`, `ArithmeticInEnsuresThatCanOverflowFailsAtTheEnsuresLineAndProvesWhenBounded`).
+Specs keep C#'s `int` and `long`: there is no unbounded integer, so bound the operands rather than widening them. An
+explicit `(int)` cast still truncates as in C#, and a `Spec.Assert` condition still wraps.
+
 ### A null guard
 
 ```csharp
@@ -318,6 +339,39 @@ public static int Average(int a, int b)
 Proved (`tests/corpus/m6/accepted/Contracts.cs`): the asserted fact is a condition at the `Spec.Assert`, proved by its
 script, and the code after it may use it. `Spec.Assert(b != 0); return a / b;` with no `Spec.Requires` fails at the
 `Spec.Assert` line with `Spec.Assert` (`AFailingAssertFailsAtItsLineAndTheDivisionAfterItUsesTheAssertedFact`).
+
+### No reachable throw: `Spec.NoThrow`
+
+```csharp
+[Verified]
+public static int NonZero(int b)
+{
+    Spec.Requires(b != 0);
+    Spec.NoThrow();
+    if (b == 0)
+    {
+        throw new ArgumentException("b must not be zero");
+    }
+    return b;
+}
+```
+
+Proved, and its report lists no "Assumed (exceptions)": `Spec.NoThrow` makes the proof show that the throw is
+unreachable under the `Spec.Requires`, rather than allow it (#182). The guard still protects callers Warrant does not
+verify, which can pass 0. The same method without the `Spec.Requires` fails at the `throw`
+(`TheGuideExampleProvesAndItsTwinWithoutTheRequiresFailsAtTheThrow` in `tests/Warrant.Engine.Tests/NoThrowTests.cs`,
+whose class is `S`; here it is in a class `Guards`):
+
+```text
+Guards.cs(24,13): error WRT0001: The contract of 'Guards.NonZeroOfAny(int)' could not be proved: an explicit throw is reachable under the Requires (Spec.NoThrow): omega could not prove the goal:
+  case ht
+  b : Int32
+  h : b = 0
+  ⊢ False
+```
+
+The path condition `b = 0` is the branch that throws; nothing contradicts it. In the M6 corpus, `Quotient` in
+`accepted/Contracts.cs` proves and its twin `QuotientOfAny` in `refuted/Contracts.cs` fails at its `throw`.
 
 ## A contract proved by a script (M6)
 
@@ -487,3 +541,41 @@ exception: a `[Closed]` class from a referenced project that imports `Warrant.Bu
 is checked from the source that project recorded, and the assumption report says so. Source generators run as in the compiler, and a call that a generated
 interceptor replaces is rejected ([docs/m5a/07](../m5a/07-verify-and-build.md)). The known gap in what a build
 verifies is that `dotnet build -f` for a framework other than the first does not verify.
+
+## Two calls of a method that can throw (M6)
+
+```csharp
+[Verified]
+public static int Scale(int x)
+{
+    Spec.Requires(x >= -1000 && x <= 1000);
+    Spec.Ensures<int>(r => r == x + x);
+    if (x < 0)
+    {
+        throw new System.ArgumentException("x");
+    }
+    return checked(x + x);
+}
+
+[Verified]
+public static bool Monotone(int x, int y)
+{
+    Spec.Requires(0 <= x && x <= y && y <= 1000);
+    Spec.Ensures<bool>(r => r);
+    return Scale(x) <= Scale(y);
+}
+
+[Theorem]
+static Proof DoubleIsMonotone(int x, int y) =>
+    Prove.That(Spec.Implies(0 <= x && x <= y && y <= 1000, x + x <= y + y)).By(Tactic.Simp(), Tactic.Omega());
+```
+
+All three are proved; `Scale` and `Monotone` with no script. `Scale` can throw, so a theorem that calls it, such as
+`Prove.That(Spec.Implies(0 <= x && x <= y && y <= 1000, Scale(x) <= Scale(y)))`, is WRT0002
+`theorem calling a raising method`. `Monotone` is the wrapper route: it makes both calls and states the relation as its
+`Spec.Ensures`, and the VC walker uses `Scale`'s proved contract at each call, so with the two results
+rewritten by those `Spec.Ensures` the goal it leaves is `x + x ≤ y + y` under the bounds, which `omega` closes. `DoubleIsMonotone` is the other route:
+`Scale`'s `Spec.Ensures` pins its result, so the relation is a theorem about `x + x`. With `x * 3` in place of `x + x`,
+neither is proved: `int` multiplication wraps, and `omega` (Lean's too, which has no dark shadow) cannot use the bounds
+to rule the wrap out. `tests/Warrant.Engine.Tests/RelationalPropertyTests.cs` runs this example, in a class `S`, and
+pins the `x * 3` limit (`dotnet test tests/Warrant.Engine.Tests --filter RelationalPropertyTests`).

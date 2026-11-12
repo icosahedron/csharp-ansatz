@@ -141,6 +141,11 @@ internal sealed partial class BodyTranslator
                 ? SpecPartial(e, env, construct)
                 : throw new TranslationException(null, $"the {construct} can raise an exception, so it is translated only in a method that can raise.");
         }
+        if (_spec is not null && SpecOverflows(e))
+        {
+            // In a Spec expression, int and long arithmetic must not overflow, even where C# would wrap (#183).
+            return SpecPartial(e, env, "arithmetic");
+        }
         if (_spec is not null && SpecGuarded(e, env) is { } guarded)
         {
             return guarded;

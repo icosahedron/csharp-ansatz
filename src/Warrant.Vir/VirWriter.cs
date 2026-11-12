@@ -304,6 +304,10 @@ public static class VirWriter
                 w.Name("requires");
                 Expr(w, s.Condition);
                 break;
+            case NoThrowStmt:
+                w.Name("nothrow").Open();
+                w.Close();
+                break;
             case EnsuresStmt s:
                 w.Name("ensures").Open();
                 if ((s.Local is null) != (s.Name is null))

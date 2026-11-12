@@ -152,7 +152,7 @@ internal sealed partial class Walker
 
     /// <summary>
     /// A member's block body, which may start with the leading <c>Spec</c> statements (M6 KTD8): <c>Spec.Decreases</c> if
-    /// any, then <c>Spec.Requires</c>, then <c>Spec.Ensures</c>.
+    /// any, then <c>Spec.Requires</c>, then <c>Spec.NoThrow</c> (#182), then <c>Spec.Ensures</c>.
     /// </summary>
     public BlockStmt Body(IBlockOperation block) => Track(new BlockStmt(Statements(block.Operations, leading: true)), block.Syntax);
 
@@ -1025,7 +1025,7 @@ internal sealed partial class Walker
         {
             throw DecreasesNotFirst(syntax, outOfOrder: false);
         }
-        if (IsSpec(call, "Requires") || IsSpec(call, "Ensures") || IsSpec(call, "Assert"))
+        if (IsSpec(call, "Requires") || IsSpec(call, "NoThrow") || IsSpec(call, "Ensures") || IsSpec(call, "Assert"))
         {
             throw ContractNotAStatement(call);
         }

@@ -26,7 +26,8 @@ f.$contract : ∀ (σ : Type) params,
   and `int.MinValue / -1` never happens.
 - The exception postcondition is `ClrExn.Allowed`: an explicit `throw` and an exception propagated from a dependency.
   Every implicit runtime exception (overflow, a zero divisor, a null read or unwrap, a failed `Spec.Assert`) is
-  excluded, so the proof must show none can happen under `Requires`.
+  excluded, so the proof must show none can happen under `Requires`. With `Spec.NoThrow` it is `ClrExn.External`,
+  which excludes the explicit throws too (below).
 - The `WP` instance is the one instance resolution finds for `ClrM σ`.
 
 A pure unit without a contract gets no obligation, so M4's and M5a's declarations are unchanged.
@@ -36,8 +37,43 @@ Contracts are total about implicit exceptions and partial about explicit ones.
 satisfies the triple without saying anything.
 So a method that throws on every path proves any `Ensures` (`Closed` in `tests/corpus/m6/accepted/Effects.cs`), and the
 report lists each such path (KTD20, chapter 8).
-Making a reachable explicit throw fail the build would reject ordinary argument validation; whether to offer an opt-in
-way to state that no explicit throw is reachable under `Requires` is the owner's open decision #182.
+Making every reachable explicit throw fail the build would reject ordinary argument validation, so that is opt-in.
+
+## `Spec.NoThrow`: no explicit throw under `Requires` (#182)
+
+`Spec.NoThrow()` states that none of the method's explicit throws is reachable under its `Requires`.
+It is a leading `Spec` statement, after every `Spec.Requires` and before any `Spec.Ensures`, at most once (chapter 4).
+For a method that can raise, the exception postcondition becomes `ClrExn.External`, which allows only `ClrExn.external`,
+an exception propagated from a dependency:
+
+```text
+f.$contract : ∀ (σ : Type) params,
+  ⦃⌜Requires⌝⦄ prog ⦃⇓r => ⌜Ensures r⌝; fun e => ⌜ClrExn.External e⌝⦄
+```
+
+Nothing else in the statement changes, and a method without `Spec.NoThrow` translates as before (`TheM6CorpusTranslates`
+checks that no other obligation of the M6 corpus mentions `ClrExn.External`;
+`NoThrowStatesTheExternalExceptionPostconditionAndChangesNothingElse` compares a method with its twin without it).
+So the proof must show every `throw` statement and `throw` expression unreachable under `Requires`, and one that is not
+fails the build at the `throw` (chapter 7) instead of being listed as a `MayThrow` (chapter 8).
+`Quotient` in `accepted/Contracts.cs` proves; its twin `QuotientOfAny` in `refuted/Contracts.cs`, without `b != 0` in its
+`Requires`, fails at its `throw`.
+
+- A pure method raises nothing, so `Spec.NoThrow` holds of it already: it is accepted and its obligation is the one
+  without (`NoThrowOnAPureMethodChangesNothing`).
+- A method with dependencies still allows their exceptions, and its hypotheses about them say so: under `Spec.NoThrow`
+  each contract hypothesis's exception postcondition is `ClrExn.External` too, since an exception from a dependency is
+  `ClrExn.external` (KTD12). With `ClrExn.Allowed` there, a dependency's contract would allow it an explicit throw that
+  the method's own contract does not, and no method with dependencies could prove `Spec.NoThrow`. This narrows the
+  premises of that one method's theorem only; no other theorem uses them.
+- A caller without `Spec.NoThrow` uses a NoThrow callee's contract by consequence, through
+  `ClrExn.allowed_of_external : ClrExn.External e → ClrExn.Allowed e`. A caller with `Spec.NoThrow` needs the same of
+  every raising verified callee: a callee without it may throw explicitly, which fails at the call.
+- `Spec.NoThrow` in a `[ContractFor]` class member is rejected: it is for a verified method's own body, and a
+  dependency's exceptions are always allowed.
+
+`ClrExn.External` and its equations are in `lean/Warrant/Effect.lean`, and the walker's rules for a NoThrow callee
+(`Vc.callExternal`) and for a pure callee under a NoThrow caller (`Vc.callPure`) in `lean/Warrant/Vc.lean`.
 
 ## With dependencies: the D9 shape
 
@@ -105,10 +141,21 @@ A call in a `Spec` expression to a pure method that has a `Spec.Requires` adds t
 obligation under the same guards, so a contract never speaks about a callee outside the callee's own precondition.
 A call to a raising method, or to a dependency, in a `Spec` expression is rejected at extraction (chapter 4).
 
-Arithmetic in a `Spec` expression has C#'s meaning: `int` and `long` wrap.
-`Spec.Ensures<int>(r => r == a + b)` wraps on both sides and says nothing about overflow, and "`a + b` fits in an `int`"
-has no direct form; preconditions bound each operand instead.
-Whether specs get an unbounded integer is the owner's open decision #183 (#160).
+Arithmetic in a `Spec` expression must not overflow (owner decision #183): `+`, `-` and `*` on `int` and `long`, and
+unary `-`, are partial there even where C# would wrap, since an overflowing spec is almost always a wrong one.
+Each adds a well-definedness obligation whose program is the checked model (`Warrant.Int32.addChecked` and so on), under
+the same guards as the other partial operations; the value the spec reads is the wrapped one, which agrees with the
+mathematical one wherever the obligation holds.
+So `Spec.Ensures<int>(r => r == a + b)` fails at its `a + b` with nothing bounding `a` and `b`, and proves with
+`Spec.Requires(a < 1000 && a > -1000 && b < 1000 && b > -1000)`
+(`ArithmeticInEnsuresThatCanOverflowFailsAtTheEnsuresLineAndProvesWhenBounded`; in the corpus, `SumUnbounded` in
+`refuted/Contracts.cs`).
+Specs keep C#'s bounded types: there is no unbounded integer and no widening to `long`.
+An explicit unchecked cast such as `(int)l` is left as written, since a narrowing cast is a deliberate truncation.
+The rule covers `Spec.Requires` and `Spec.Ensures`, in a method and in a contract-class member; `Spec.Assert` is a
+statement in the body and its condition still wraps.
+A callee's `Spec.Requires`, stated at a call site in a caller's `Spec` expression, adds no obligation of its own there:
+the callee's own `$wd` obligations cover it.
 
 ## Unsatisfiable contracts
 

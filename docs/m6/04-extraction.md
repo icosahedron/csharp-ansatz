@@ -16,6 +16,7 @@ The build and the IDE analyzer run the same rules (docs/m5b/06), so everything b
 | Member | Meaning |
 |---|---|
 | `Spec.Requires(bool)` | The method's precondition. |
+| `Spec.NoThrow()` | No explicit `throw` of the method is reachable under its `Requires` (#182, chapter 6). |
 | `Spec.Ensures<T>(Func<T, bool>)` | Its postcondition on normal return; the lambda's parameter is the result. |
 | `Spec.Ensures(Func<bool>)` | The same for a method with no result: `void`, `Task`, `ValueTask`. |
 | `Spec.Assert(bool, params Tactic[])` | A fact to prove at this point, with an optional script (KTD16). |
@@ -24,7 +25,7 @@ The build and the IDE analyzer run the same rules (docs/m5b/06), so everything b
 | `Prove.Contract()` | What a `[ProofFor]` method's body attaches its script to: `Prove.Contract().By(...)`. |
 | `Tactic.VcGen()` | A script step that runs the VC walker (chapter 7). |
 
-The four `Spec` methods are `[Conditional("WARRANT_CONTRACTS")]`, as `Spec.Decreases` is (KTD8): a normal build leaves
+The five `Spec` methods are `[Conditional("WARRANT_CONTRACTS")]`, as `Spec.Decreases` is (KTD8): a normal build leaves
 no call in the IL (a test checks this), so contracts cost nothing at run time, and nothing checks a `Spec.Requires` at
 run time either (chapter 8).
 
@@ -33,8 +34,8 @@ run time either (chapter 8).
 VIR goes to version 3, additively (KTD19, U6): new types (`decimal`, `unit`, `nullable{T}`, `task{T}`), operators (`div`,
 `rem`, a `checked` flag on arithmetic and narrowing, a decimal comparison kind), expressions (`DecimalLitExpr` with sign,
 96-bit mantissa and scale, `NullExpr`, `IsNullExpr`, `UnwrapExpr` with a value or non-null kind, `CoalesceExpr`,
-`ThrowExpr`, `AwaitExpr`, `ExternalCallExpr`, `ModelledCallExpr`), statements (`throw`, `eval`, `requires`, `ensures`,
-`assert`), a function's optional dependencies, a contract unit kind and four assumption kinds.
+`ThrowExpr`, `AwaitExpr`, `ExternalCallExpr`, `ModelledCallExpr`), statements (`throw`, `eval`, `requires`, `nothrow`
+(#182), `ensures`, `assert`), a function's optional dependencies, a contract unit kind and four assumption kinds.
 A unit that uses no version-3 form encodes as in version 2 apart from its `vir` field, which every unit's bytes contain,
 so every unit and closure hash changed once and every M5b cache entry was invalidated, as U1's new bundle hash did
 anyway.
@@ -69,7 +70,7 @@ From that analysis come KTD11's rejections, all WRT0002, naming the construct an
 |---|---|
 | `recursion with effects` | A recursive call inside a `bind` is out of reach of M5a's decrease obligations. |
 | `contract on a recursive method` | Its recursive call cannot use its own unproved triple. |
-| `theorem calling a raising method` | A theorem is a `Prop`, not a program. The message says to state the property as a `Spec.Ensures`. |
+| `theorem calling a raising method` | A theorem is a `Prop`, not a program. The message says to state the property as a `Spec.Ensures`, or, for a property relating two calls, as the `Spec.Ensures` of a verified method that makes both calls (#181). |
 | the raising operation itself (`division`, `nullable read`, `checked arithmetic`, `decimal arithmetic`, …) in a theorem statement | Lean's total operations would make `a / 0 == 0` provable. Same advice. |
 | `Spec expression calling a raising method` | A `ClrM` program cannot sit inside a `Prop` (#165). |
 
@@ -111,7 +112,9 @@ either of which is nullable, #76), `switch on a nullable value`, and in a theore
 ## Contracts (U8)
 
 A block body may start with `Spec` statements in a fixed order: `Spec.Decreases` if any, then `Spec.Requires`, then
-`Spec.Ensures` (KTD8, #88).
+`Spec.NoThrow` at most once (#182), then `Spec.Ensures` (KTD8, #88).
+`Spec.NoThrow` takes no argument and becomes the VIR statement `nothrow{}`; it is rejected in a `[ContractFor]` class
+member ("Spec.NoThrow in a contract member"), whose dependency's exceptions are always allowed.
 Anything out of order or after another statement is WRT0002 saying what to do.
 An expression-bodied member takes no contract (design Q17); the message says to use a block body, and the code fix that
 would rewrite it is deferred.

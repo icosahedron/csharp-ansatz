@@ -65,6 +65,14 @@ internal static partial class TypeChecks
             {
                 return NotContractShape(type, "contract member whose nullability differs from its interface", member);
             }
+            if (NoThrowIn(compilation, member, cancellationToken) is { } noThrow)
+            {
+                return new Rejection(
+                    DiagnosticIds.Unsupported,
+                    "Spec.NoThrow in a contract member",
+                    noThrow,
+                    $"{Symbols.Display(member)} calls Spec.NoThrow, which a [ContractFor] class does not take: Spec.NoThrow is for a verified method's own body, where it states that no explicit throw is reachable under the Requires, and an exception from a dependency is always allowed (#182).");
+            }
             if (!ContractBody(compilation, member, cancellationToken))
             {
                 return NotContractShape(type, "contract member body other than Spec calls and return default!", member);
@@ -134,6 +142,21 @@ internal static partial class TypeChecks
             default:
                 return false;
         }
+    }
+
+    /// <summary>The location of a <c>Spec.NoThrow()</c> statement in a contract member's block body; null when it has none (#182).</summary>
+    private static Location? NoThrowIn(Compilation compilation, ISymbol member, CancellationToken cancellationToken)
+    {
+        if (member.DeclaringSyntaxReferences.Select(r => r.GetSyntax(cancellationToken)).FirstOrDefault() is not MethodDeclarationSyntax { Body: { } block })
+        {
+            return null;
+        }
+        var model = compilation.GetSemanticModel(block.SyntaxTree);
+        return block.Statements
+            .FirstOrDefault(s => s is ExpressionStatementSyntax { Expression: InvocationExpressionSyntax call }
+                && model.GetSymbolInfo(call, cancellationToken).Symbol is IMethodSymbol target
+                && Symbols.IsNamed(target, "Warrant.Spec", "NoThrow"))
+            ?.GetLocation();
     }
 
     /// <summary>A statement <c>Spec.Requires(...)</c> or <c>Spec.Ensures(...)</c>.</summary>

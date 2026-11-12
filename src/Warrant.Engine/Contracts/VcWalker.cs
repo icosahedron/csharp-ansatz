@@ -40,6 +40,15 @@ public enum VcKind
 
     /// <summary>A dependency member's <c>Spec.Requires</c> at its call (M6 U20, KTD9), as its contract class states it.</summary>
     DependencyPrecondition,
+
+    /// <summary>An explicit <c>throw</c> of a method with <c>Spec.NoThrow</c> that the walk could not show unreachable (#182).</summary>
+    ReachableThrow,
+
+    /// <summary>
+    /// A call, in a method with <c>Spec.NoThrow</c>, to a verified callee that may throw explicitly: one without
+    /// <c>Spec.NoThrow</c> (#182).
+    /// </summary>
+    CalleeMayThrow,
 }
 
 /// <summary>A verification condition the default procedure did not prove (#90): WRT0001 at its node.</summary>
@@ -67,6 +76,8 @@ public static class VcKinds
         VcKind.WellDefinedness => "well-definedness of a Spec expression",
         VcKind.Unsupported => "a program shape the VC walker has no rule for",
         VcKind.DependencyPrecondition => "precondition of a dependency member at this call",
+        VcKind.ReachableThrow => "an explicit throw is reachable under the Requires (Spec.NoThrow)",
+        VcKind.CalleeMayThrow => "a callee without Spec.NoThrow may throw explicitly at this call (Spec.NoThrow)",
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 }
@@ -115,6 +126,7 @@ internal sealed class VcWalker
     private static readonly Name AndName = Name.Parse("And");
     private static readonly Name EqName = Name.Parse("Eq");
     private static readonly Name AllowedName = Name.Parse("Warrant.ClrExn.Allowed");
+    private static readonly Name ExternalName = Name.Parse("Warrant.ClrExn.External");
     private static readonly Name ClrExnName = Name.Parse("Warrant.ClrExn");
     private static readonly Name H = Name.From("h");
     private static readonly Name S = Name.From("s");
@@ -130,6 +142,14 @@ internal sealed class VcWalker
     private readonly int? _node;
     private readonly Name? _self;
     private readonly SimpContext _light;
+
+    /// <summary>
+    /// Whether the obligation is a contract of a method with <c>Spec.NoThrow</c> (#182), whose exception postcondition is
+    /// <c>ClrExn.External</c>: an explicit throw it cannot show unreachable is a VC, not a <see cref="VcThrow"/>. A pure
+    /// method's contract keeps <c>ClrExn.Allowed</c>, but its walk meets no throw and no dependency, and a pure callee's
+    /// <c>Vc.callPure</c> uses no exception postcondition, so the flag changes nothing there.
+    /// </summary>
+    private readonly bool _noThrow;
 
     /// <summary>
     /// The bound operations of the method's dependencies (M6 U19, U20, KTD9), by their free variable once introduced: the
@@ -167,7 +187,11 @@ internal sealed class VcWalker
         _node = node;
         _self = self;
         _light = VcSimpSet.Light(m);
+        _noThrow = kind != VcKind.WellDefinedness && HasNoThrow(unit);
     }
+
+    /// <summary>Whether a function's body has <c>Spec.NoThrow</c> (#182).</summary>
+    public static bool HasNoThrow(VirUnit unit) => unit.Body is BlockStmt block && block.Stmts.Any(s => s is NoThrowStmt);
 
     /// <summary>The goals left to the VC simp set and omega, in the order the walk met them.</summary>
     public List<VcLeftover> Leftovers { get; } = [];
@@ -310,7 +334,7 @@ internal sealed class VcWalker
             case var n when n == PureName && a.Length == 4:
                 if (CalleeContract(node, a[3]) is { } pureCallee && SigmaOf(a[0]) is { } sigma)
                 {
-                    Call(g, pureCallee, [sigma, .. a[3].GetAppArgs()], node);
+                    Call(g, pureCallee, [sigma, .. a[3].GetAppArgs()], node, pure: true);
                     return;
                 }
                 Each(Rule(g, () => _m.ApplyConst(g, SpecTable.Pure)), g, node, h => Leaf(h, null));
@@ -490,7 +514,7 @@ internal sealed class VcWalker
     /// <summary>
     /// An explicit <c>throw</c>, or an exception the walker raises itself: the exception postcondition at <c>e</c>. An
     /// allowed exception (KTD12) is first tried for an unreachable path (#92), and is a <see cref="VcThrow"/> when it is not
-    /// shown so; any other is a VC.
+    /// shown so; any other is a VC. Under <c>Spec.NoThrow</c> an explicit throw not shown unreachable is a VC too (#182).
     /// </summary>
     private void Throw(MVarId g, Expr e, int? node)
     {
@@ -509,6 +533,16 @@ internal sealed class VcWalker
         var g1 = _m.Intro1(h, S).Goal;
         if (Unreachable(g1))
         {
+            return;
+        }
+        if (_noThrow && ctor.ToString() == "Warrant.ClrExn.thrown")
+        {
+            // ClrExn.External (thrown T) is False: the VC is that the path conditions are contradictory, stated without
+            // the world, so the failure shows only them.
+            if (_m.SimpTarget(g1, VcSimpSet.Context(_m)) is { } reachable)
+            {
+                Leftovers.Add(new(reachable, VcKind.ReachableThrow, node));
+            }
             return;
         }
         Throws.Add(new(node, e.GetAppArgs() is [StrLitExpr key] ? key.Value : "external"));
@@ -541,14 +575,20 @@ internal sealed class VcWalker
     /// A verified callee whose contract is proved (KTD12): <c>Vc.call</c> with <c>f.$contract σ args</c>; its
     /// <c>Requires</c> is a VC at the call, and the rest is walked with its <c>Ensures</c> as a hypothesis.
     /// </summary>
-    private void Call(MVarId g, Name contract, Expr[] args, int? node) =>
-        Consequence(g, ExprOps.MkApp(Expr.Const(contract), args), contract.ToString(), VcKind.CalleePrecondition, node, () =>
+    private void Call(MVarId g, Name contract, Expr[] args, int? node, bool pure = false)
+    {
+        // A callee with Spec.NoThrow states ClrExn.External as its exception postcondition (#182).
+        bool external = _m.Env.Find(contract)?.Type is { } type
+            && ExprOps.Find(type, (x, _) => x is ConstExpr { Name: var n } && n == ExternalName) is not null;
+        var rule = pure && _noThrow ? SpecTable.CallPure : external ? SpecTable.CallExternal : SpecTable.Call;
+        Consequence(g, rule, ExprOps.MkApp(Expr.Const(contract), args), contract.ToString(), VcKind.CalleePrecondition, node, () =>
         {
             if (NodeAt(node) is CallExpr site)
             {
                 Calls.Add((site.Target, node));
             }
         });
+    }
 
     /// <summary>
     /// A call to a dependency member (M6 U20, KTD9, design D9): <c>Vc.call</c> with the member's contract hypothesis at the
@@ -557,18 +597,22 @@ internal sealed class VcWalker
     /// propagated from the dependency (KTD12, KTD20).
     /// </summary>
     private void External(MVarId g, FVarExpr hypothesis, string member, Expr[] args, int? node) =>
-        Consequence(g, ExprOps.MkApp(hypothesis, args), member, VcKind.DependencyPrecondition, node, () => ExternalCalls.Add((member, node)));
+        // Under Spec.NoThrow the hypothesis states ClrExn.External as its exception postcondition, as the method does (#182).
+        Consequence(g, _noThrow ? SpecTable.CallExternal : SpecTable.Call, ExprOps.MkApp(hypothesis, args), member, VcKind.DependencyPrecondition, node, () => ExternalCalls.Add((member, node)));
 
     /// <summary>
     /// <c>Vc.call</c>, the consequence rule, with <paramref name="triple"/>, a proof of the call's triple: its precondition
     /// is a VC of kind <paramref name="pre"/> at <paramref name="node"/>, <paramref name="used"/> records the contract, the
     /// rest is walked knowing its postcondition, and an exception it allows is allowed in the caller's contract too.
+    /// <paramref name="rule"/> is <c>Vc.call</c>, <c>Vc.callExternal</c> for a contract with <c>Spec.NoThrow</c>, or
+    /// <c>Vc.callPure</c> for a pure callee under a caller's <c>Spec.NoThrow</c>, which needs nothing of its exceptions
+    /// (#182) and so leaves no exception goal.
     /// </summary>
-    private void Consequence(MVarId g, Expr triple, string what, VcKind pre, int? node, Action used)
+    private void Consequence(MVarId g, Name rule, Expr triple, string what, VcKind pre, int? node, Action used)
     {
         var goals = Rule(g, () =>
         {
-            var gs = _m.ApplyConst(g, SpecTable.Call);
+            var gs = _m.ApplyConst(g, rule);
             var hx = gs.First(x => !_m.IsAssigned(x) && _m.InstantiateMVars(_m.GetMVarType(x)).HeadIs(TripleName));
             if (_m.Apply(hx, triple, what).Any(x => !_m.IsAssigned(x)))
             {
@@ -576,6 +620,13 @@ internal sealed class VcWalker
             }
             return gs;
         });
+        if (rule == SpecTable.CallPure && goals is [var p, var o])
+        {
+            Leftovers.Add(new(p, pre, node));
+            used();
+            Leaf(o, null);
+            return;
+        }
         if (goals is not [var precondition, var ok, var raised])
         {
             Unsupported(g, node);
@@ -585,19 +636,42 @@ internal sealed class VcWalker
         used();
         Leaf(ok, null);
         // An exception the callee may raise is allowed in the caller's contract too: the caller's postcondition has the same
-        // exception half (KTD12).
+        // exception half (KTD12), or a wider one than a NoThrow callee's (ClrExn.allowed_of_external, #182).
         var (_, rest) = _m.IntroN(raised, 3, [Name.From("e"), H, S]);
-        if (_m.SimpTarget(rest, _light) is { } allowed)
+        if (_m.SimpTarget(rest, _light) is not { } allowed)
         {
-            try
-            {
-                _m.Assumption(allowed);
-            }
-            catch (MetaException ex) when (ex is not MetaResourceException)
-            {
-                Unsupported(allowed, node);
-            }
+            return;
         }
+        var saved = _m.SaveState();
+        try
+        {
+            _m.Assumption(allowed);
+            return;
+        }
+        catch (MetaException ex) when (ex is not MetaResourceException)
+        {
+            _m.Restore(saved);
+        }
+        try
+        {
+            foreach (var h in _m.ApplyConst(allowed, SpecTable.AllowedOfExternal).Where(x => !_m.IsAssigned(x)))
+            {
+                _m.Assumption(h);
+            }
+            return;
+        }
+        catch (MetaException ex) when (ex is not MetaResourceException)
+        {
+            _m.Restore(saved);
+        }
+        if (_noThrow)
+        {
+            // The callee's contract allows an explicit throw, which this method's does not.
+            Leftovers.Add(new(allowed, VcKind.CalleeMayThrow, node,
+                $"the contract of {what} allows an explicit throw, which this method's Spec.NoThrow does not; give the callee Spec.NoThrow too"));
+            return;
+        }
+        Unsupported(allowed, node);
     }
 
     /// <summary>
@@ -716,13 +790,16 @@ internal sealed class VcWalker
         }
     }
 
-    /// <summary>The <c>ClrExn</c> constructor a goal <c>ClrExn.Allowed e</c> names, as its last name component; null when the goal is not one.</summary>
+    /// <summary>
+    /// The <c>ClrExn</c> constructor a goal <c>ClrExn.Allowed e</c>, or <c>ClrExn.External e</c> under <c>Spec.NoThrow</c>
+    /// (#182), names, as its last name component; null when the goal is not one.
+    /// </summary>
     private static string? Exception(Expr target)
     {
         string? found = null;
         ExprOps.Replace(target, (x, _) =>
         {
-            if (found is null && x.HeadIs(AllowedName) && x.GetAppArgs() is [var e] && e.GetAppFn() is ConstExpr c && c.Name.Prefix == ClrExnName)
+            if (found is null && (x.HeadIs(AllowedName) || x.HeadIs(ExternalName)) && x.GetAppArgs() is [var e] && e.GetAppFn() is ConstExpr c && c.Name.Prefix == ClrExnName)
             {
                 found = c.Name.ToString()[(ClrExnName.ToString().Length + 1)..];
             }

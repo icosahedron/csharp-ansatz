@@ -55,7 +55,8 @@ public sealed class ParityTests : IDisposable
                 var (localCode, localOutput) = server.Verify([.. args, "--server", "off"], inProcess: inProcess);
 
                 Assert.DoesNotContain("verification server unavailable", serverOutput, StringComparison.Ordinal);
-                Assert.Contains("not proved. [server]", serverOutput, StringComparison.Ordinal);
+                // #225: a run with methods that were not verified counts them after the theorems.
+                Assert.Matches(@"not proved(; \d+ other units not verified)?\. \[server\]", serverOutput);
                 Assert.Equal(localCode, serverCode);
                 Assert.True(Comparable(localOutput) == Comparable(serverOutput), $"run {run}, {input}:\n--- in-process\n{localOutput}\n--- server\n{serverOutput}");
             }

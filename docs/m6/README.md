@@ -98,7 +98,8 @@ Warrant: 53 verified units, 0 theorems proved, 0 not proved.
 ```
 
 A method's line says `translated` when its definition and its contract obligation are admitted: the CLI's words for
-proof outcomes name theorems only, and the summary counts theorems only (#225, chapter 8).
+proof outcomes name theorems only, and the summary's proved and not-proved figures count theorems; a method whose
+contract fails is counted after them, as `; n other units not verified` (#225, chapter 8).
 The report says what the proof rests on (`tests/corpus/m6/ProcessPayment.report.txt`, chapter 8):
 
 ```text
@@ -153,7 +154,7 @@ false one pass.
 | #217 | `simp` does not compute a `decimal` literal's `units`, so `omega` cannot use it (chapter 3). |
 | #218 | A record with a nullable field fails translation (chapter 5). |
 | #220 | `warrant translate` passes no attribute sidecar, so it cannot prove contracts (chapter 7). |
-| #225 | The CLI summary counts only theorems as "not proved" (chapter 8). |
+| #225 | The CLI summary counts only theorems as "not proved" (chapter 8). Fixed after M6: other units not verified are counted. |
 
 Decided after M6's exit (owner, 2026-11-11):
 

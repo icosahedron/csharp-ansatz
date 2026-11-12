@@ -209,6 +209,12 @@ internal sealed class VcWalker
     public List<(string Member, int? Node)> ExternalCalls { get; } = [];
 
     /// <summary>
+    /// The pure verified callees, by constant, whose <c>f.$contract_spec</c> <see cref="Prepare"/> made a hypothesis of a
+    /// leftover (#173): the proof may rest on their contracts, so the report lists them (KTD20, #223).
+    /// </summary>
+    public HashSet<Name> PureCallees { get; } = [];
+
+    /// <summary>
     /// The model operations' rules: each <c>@[spec]</c> triple of the sidecar by the head constant of its program (KTD15),
     /// the highest priority first.
     /// </summary>
@@ -783,7 +789,7 @@ internal sealed class VcWalker
                 "invalidOperation" => (VcKind.NullRead, site),
                 "nullReference" => (NullKind(site), site),
                 "assertFailed" => (VcKind.Assert, site),
-                _ => (VcKind.Unsupported, site),
+                _ => (VcKind.Unsupported, site ?? _lastNode),
             };
             Leftovers.Add(new(g, _kind == VcKind.WellDefinedness ? VcKind.WellDefinedness : kind, _kind == VcKind.WellDefinedness ? _node : node));
             return;
@@ -857,6 +863,7 @@ internal sealed class VcWalker
                     {
                         var value = ExprOps.MkApp(Expr.Const(spec.Name), x.GetAppArgs());
                         facts.Add((Name.From("hspec"), _m.InferType(value), value));
+                        PureCallees.Add(callee);
                     }
                     return null;
                 });

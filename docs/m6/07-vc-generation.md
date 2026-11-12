@@ -73,7 +73,8 @@ For each:
 
 1. If the obligation's program is `pure (f params)`, the pure unit under proof is unfolded, as `Tactic.Unfold` does, and
    for each application of a pure verified callee with `Spec.Ensures` the instance of its `$contract_spec` is added as a
-   hypothesis; the callee's body is not unfolded (#173).
+   hypothesis; the callee's body is not unfolded (#173). Each such callee is recorded as a `CalleeContract`, since the
+   proof may rest on its contract (#223).
 2. The VC simp set runs (KTD14, `VcSimpSet.cs`): Warrant's default set plus `Std.Do`'s one-state assertion lemmas
    (`SPred.entails_1`, `apply_pure_cons`, `down_pure_nil`, `and_cons`/`and_nil`, `or_cons`/`or_nil`), the
    `PredTrans.apply_*` equations, the equations of `ClrExn.Allowed` and `ClrExn.External`, and for a nullable `Spec.Ensures` meeting a

@@ -105,12 +105,15 @@ public static partial class Pipeline
 
         /// <summary>
         /// The assumptions a walk relied on (KTD20, U12's <see cref="MayThrowSubject"/>): each verified callee's contract,
+        /// whether the walk used it at the call or a leftover assumed a pure callee's <c>$contract_spec</c> (#173, #223),
         /// each explicit throw it did not show unreachable (#92), each throw a verified callee it calls may raise, and an
         /// exception from each dependency member it calls, at the call (M6 U20). The members' contracts themselves are
         /// extraction's <c>ExternalContract</c> assumptions (KTD9), listed whether or not the walk reached the call (#223).
         /// </summary>
         private void Record(EngineUnit unit, VcWalker walker) =>
-            Record(unit, walker.Throws.Select(t => (t.Type, t.Node)), walker.ExternalCalls, walker.Calls);
+            Record(
+                unit, walker.Throws.Select(t => (t.Type, t.Node)), walker.ExternalCalls,
+                walker.Calls.Concat(walker.PureCallees.Select(c => run.KeyOfConstant(c)).OfType<string>().Select(k => (k, (int?)null))));
 
         private void Record(
             EngineUnit unit, IEnumerable<(string Type, int? Node)> throws, IEnumerable<(string Member, int? Node)> externalCalls,
@@ -250,6 +253,11 @@ public static partial class Pipeline
                 TacticFuelUsed = Math.Max(TacticFuelUsed, meta.Budget.FuelUsed);
                 if (!walker.Leftovers.Any(l => l.Kind == VcKind.Unsupported))
                 {
+                    // Readying the leftovers names the pure callees whose contracts they would assume (#173, #223).
+                    foreach (var leftover in walker.Leftovers)
+                    {
+                        walker.Prepare(leftover);
+                    }
                     Record(unit, walker);
                     return;
                 }

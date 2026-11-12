@@ -271,6 +271,27 @@ public static partial class Pipeline
 
         public Dictionary<string, EngineUnit> Units => units;
 
+        /// <summary>The run's units by the Lean name of their constant (<see cref="LeanNames.ForKey"/>), built on first use.</summary>
+        private readonly Lazy<Dictionary<Name, string>> _byConstant = new(() =>
+        {
+            var map = new Dictionary<Name, string>();
+            foreach (var key in units.Keys)
+            {
+                try
+                {
+                    map.TryAdd(LeanNames.ForKey(key), key);
+                }
+                catch (TranslationException)
+                {
+                    // Not a documentation-comment ID: no constant of the run is named after it.
+                }
+            }
+            return map;
+        });
+
+        /// <summary>The key of the unit whose constant is <paramref name="constant"/>; null when no unit of the run has it.</summary>
+        public string? KeyOfConstant(Name constant) => _byConstant.Value.TryGetValue(constant, out var key) ? key : null;
+
         public EngineOptions Options => options;
 
         public NotationNames Names { get; private set; } = new();

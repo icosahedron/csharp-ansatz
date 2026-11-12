@@ -151,5 +151,6 @@ In a theorem's script it is `unsupported script argument`.
   shape with `c.Id` and the contract's `c.Id == id` proves.
 - #227: a `bool` postcondition that needs a case split on a `bool` parameter (`r => !flagged || r`) is left to `omega`,
   which does not split `Bool`s, and fails; stated as `r == (…)` it proves.
-- #220: `warrant translate` loads no attribute sidecar, so it cannot run the default procedure, and reports a contract
-  that `warrant verify` proves as not proved. Use `warrant verify`.
+- #220 (fixed after M6): `warrant translate` loaded no attribute sidecar, so it could not run the default procedure and
+  reported a contract that `warrant verify` proves as not proved. It now loads the sidecar beside the bundle, as
+  `verify` does.

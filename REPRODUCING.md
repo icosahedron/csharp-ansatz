@@ -585,9 +585,8 @@ not-proved figures count theorems. On `refuted/` it ends with
 `Warrant: 36 verified units, 0 theorems proved, 0 not proved; 26 other units not verified.`:
 the methods whose contracts fail are counted after the theorems (GitHub #225). `report/report.md` holds `ProcessPayment`'s block as
 `tests/corpus/m6/ProcessPayment.report.txt` shows it, with the real kernel and
-bundle names in its first line. Use `verify`, not
-`translate`, for contracts: `translate` loads no attribute sidecar and cannot
-prove them (GitHub #220).
+bundle names in its first line. `translate` loads the same attribute sidecar
+and proves the same contracts (GitHub #220).
 
 ### 8. Cross-check against Lean's own kernel
 

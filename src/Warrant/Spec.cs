@@ -61,6 +61,19 @@ public static class Spec
     }
 
     /// <summary>
+    /// States that no explicit <c>throw</c> of the method is reachable under its <c>Requires</c>: Warrant proves it, and a
+    /// reachable throw fails the build at the <c>throw</c> rather than being listed as a may-throw assumption (#182). An
+    /// exception propagated from a dependency is still allowed, and a verified callee must have <c>Spec.NoThrow</c> too.
+    /// At most one; it must lead the method's block body, after any <c>Requires</c> and before any <c>Ensures</c>. Not
+    /// valid in a <c>[ContractFor]</c> class. The compiler removes the call unless <c>WARRANT_CONTRACTS</c> is defined, and
+    /// a call that is kept does nothing.
+    /// </summary>
+    [Conditional("WARRANT_CONTRACTS")]
+    public static void NoThrow()
+    {
+    }
+
+    /// <summary>
     /// The method's postcondition on a normal return, for a method that returns a value: <paramref name="condition"/>
     /// holds of the returned value. Warrant proves it for the method and assumes it at verified call sites (milestone
     /// M6). It must lead the method's block body, after any <c>Requires</c>. The compiler removes the call unless

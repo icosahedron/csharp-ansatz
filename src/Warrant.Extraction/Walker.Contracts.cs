@@ -6,22 +6,31 @@ using Warrant.Vir;
 namespace Warrant.Extraction;
 
 /// <summary>
-/// Contracts (plan M6 U8, KTD8, KTD16): the leading <c>Spec.Decreases</c>, <c>Spec.Requires</c> and <c>Spec.Ensures</c>
-/// statements of a block body, in that order, and <c>Spec.Assert</c> wherever a statement may stand.
+/// Contracts (plan M6 U8, KTD8, KTD16): the leading <c>Spec.Decreases</c>, <c>Spec.Requires</c>, <c>Spec.NoThrow</c> (#182)
+/// and <c>Spec.Ensures</c> statements of a block body, in that order, and <c>Spec.Assert</c> wherever a statement may stand.
 /// </summary>
 internal sealed partial class Walker
 {
     private const string SpecType = "Warrant.Spec";
 
+    /// <summary>The leading <c>Spec</c> statements by rank.</summary>
+    private static readonly string[] LeadingNames = ["Spec.Decreases", "Spec.Requires", "Spec.NoThrow", "Spec.Ensures"];
+
+    private const string LeadingOrder = "the leading Spec statements are Spec.Decreases, then Spec.Requires, then Spec.NoThrow, then Spec.Ensures.";
+
     private static bool IsSpec(IInvocationOperation call, string name) => Symbols.IsNamed(call.TargetMethod, SpecType, name);
 
-    /// <summary>The rank of a leading <c>Spec</c> statement: 0 for <c>Decreases</c>, 1 for <c>Requires</c>, 2 for <c>Ensures</c>.</summary>
+    /// <summary>
+    /// The rank of a leading <c>Spec</c> statement: 0 for <c>Decreases</c>, 1 for <c>Requires</c>, 2 for <c>NoThrow</c>, 3
+    /// for <c>Ensures</c>.
+    /// </summary>
     private static int? LeadingRank(IInvocationOperation call) =>
-        IsDecreases(call) ? 0 : IsSpec(call, "Requires") ? 1 : IsSpec(call, "Ensures") ? 2 : null;
+        IsDecreases(call) ? 0 : IsSpec(call, "Requires") ? 1 : IsSpec(call, "NoThrow") ? 2 : IsSpec(call, "Ensures") ? 3 : null;
 
     /// <summary>
     /// One leading <c>Spec</c> statement, checked against its place: it must be in the body's prefix of such statements
-    /// (<paramref name="leading"/>), and its rank must not be below the previous one's (<paramref name="last"/>).
+    /// (<paramref name="leading"/>), and its rank must not be below the previous one's (<paramref name="last"/>);
+    /// <c>Spec.NoThrow</c> comes at most once.
     /// </summary>
     private VirStmt Leading(IInvocationOperation call, int rank, bool leading, int last, SyntaxNode at)
     {
@@ -33,23 +42,40 @@ internal sealed partial class Walker
             }
             return Track(new DecreasesStmt(Measure(call)), at);
         }
-        var name = rank == 1 ? "Spec.Requires" : "Spec.Ensures";
+        var name = LeadingNames[rank];
         if (!leading)
         {
+            var before = rank switch
+            {
+                1 => "after any Spec.Decreases",
+                2 => "after any Spec.Decreases and Spec.Requires",
+                _ => "after any Spec.Decreases, Spec.Requires and Spec.NoThrow",
+            };
             throw new RejectedException(new Rejection(
                 DiagnosticIds.Unsupported,
                 $"{name} not leading the body",
                 at.GetLocation(),
-                $"{name} must lead the body: it goes at the start of the method's block body, after any Spec.Decreases"
-                    + (rank == 2 ? " and Spec.Requires" : "") + " and before any other statement."));
+                $"{name} must lead the body: it goes at the start of the method's block body, {before} and before any other statement."));
         }
         if (rank < last)
         {
             throw new RejectedException(new Rejection(
                 DiagnosticIds.Unsupported,
-                "Spec.Requires after Spec.Ensures",
+                $"{name} after {LeadingNames[last]}",
                 at.GetLocation(),
-                "Spec.Requires is out of order: the leading Spec statements are Spec.Decreases, then Spec.Requires, then Spec.Ensures."));
+                $"{name} is out of order: {LeadingOrder}"));
+        }
+        if (rank == 2)
+        {
+            if (last == 2)
+            {
+                throw new RejectedException(new Rejection(
+                    DiagnosticIds.Unsupported,
+                    "second Spec.NoThrow",
+                    at.GetLocation(),
+                    "Spec.NoThrow states that no explicit throw is reachable under the Requires; write it at most once."));
+            }
+            return Track(new NoThrowStmt(), at);
         }
         _claims++;
         try
@@ -175,7 +201,7 @@ internal sealed partial class Walker
     }
 
     /// <summary>
-    /// A <c>Spec.Requires</c>, <c>Spec.Ensures</c> or <c>Spec.Assert</c> call that is not a statement of a block body:
+    /// A <c>Spec.Requires</c>, <c>Spec.NoThrow</c>, <c>Spec.Ensures</c> or <c>Spec.Assert</c> call that is not a statement of a block body:
     /// an expression-bodied member's body, which takes no contract in M6 (design Q17), or a nested expression.
     /// </summary>
     private static RejectedException ContractNotAStatement(IInvocationOperation call)

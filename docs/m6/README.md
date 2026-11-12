@@ -155,14 +155,17 @@ false one pass.
 | #220 | `warrant translate` passes no attribute sidecar, so it cannot prove contracts (chapter 7). |
 | #225 | The CLI summary counts only theorems as "not proved" (chapter 8). |
 
+Decided after M6's exit (owner, 2026-11-11):
+
+- #180: overtaken; U9 already built the pure `Math` and constant-divisor forms.
+- #181: a property relating two calls of a method that can raise is stated as the `Spec.Ensures` of a verified method that makes both calls ([proofs that work](../proving/proofs-that-work.md)).
+- #182: `Spec.NoThrow()` proves that no explicit `throw` is reachable under the `Spec.Requires` (chapter 6).
+- #183: arithmetic in a `Spec` expression must not overflow; specs keep `int` and `long` and get no unbounded integer (chapter 6).
+
 Decisions that are the owner's, still open:
 
 | Ticket | Question |
 |---|---|
-| #180 | A pure unit for `Math.Min`/`Max` and constant-divisor `/` and `%` right after U7 (a question of unit order; U9 built these pure forms). |
-| #181 | Properties relating two calls of a raising method (a `[Theorem]` cannot call one; chapter 4). |
-| #182 | A way to fail the build when an explicit `throw` is reachable (chapter 6). |
-| #183 | Unbounded integers in specs, or record the limit (#160; chapter 6). |
 | #213 | `Spec.Implies` inside `Spec.Requires` and `Spec.Ensures` (still WRT0004 there; chapter 4). |
 | #219 | A caller of a method whose contract is not proved is skipped, even when it needs only the definition (chapter 6). |
 | #221 | After a failed `Spec.Assert`, later VCs are proved from the asserted fact (chapter 7). |
@@ -182,5 +185,5 @@ Design Q14 (collections) and Q19 (spec sidecars) are open too; design §12 recor
 | Operation | A bound variable of a dependency method's obligation that stands for one (dependency, member) pair (KTD9). |
 | VC | A verification condition: a goal the walker leaves, reported at the VIR node that produced it (KTD18). |
 | Default procedure | The VC walker, then the VC simp set, then `omega` (KTD13, KTD14). |
-| Allowed exception | An explicit `throw` (`ClrExn.thrown`) or one propagated from a dependency (`ClrExn.external`) (KTD12). |
+| Allowed exception | An explicit `throw` (`ClrExn.thrown`) or one propagated from a dependency (`ClrExn.external`) (KTD12); under `Spec.NoThrow`, only the latter (#182). |
 | Spec lemma | A Lean theorem marked `@[spec]` that states a model operation's triple; the sidecar carries the attribute (KTD15). |

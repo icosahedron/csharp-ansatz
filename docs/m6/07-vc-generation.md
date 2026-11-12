@@ -38,8 +38,8 @@ program's head:
 | `Option.rec` on a nullable value | `Vc.optionRec` | the `none` and `some v` cases, each with its equation |
 | a closed-enum recursor on a variable | `Cases`, then reduction | one goal per member |
 | a model operation | `Vc.spec` with its `@[spec]` lemma from the sidecar, by head constant (KTD15) | its precondition at every world, split into one goal per conjunct (`And.intro`); `Vc.resume` turns the part that reaches the rest of the program back into a triple |
-| a verified callee | `Vc.call` with the callee's `$contract` | its `Requires` as a VC at the call; its `Ensures` a hypothesis for the rest |
-| a dependency operation | `Vc.call` with its contract hypothesis at the call's arguments and the current world | its `Requires` as a VC at the call; its `Ensures` a hypothesis for the rest; its exception allowed, and recorded |
+| a verified callee | `Vc.call` with the callee's `$contract`; `Vc.callExternal` for a callee with `Spec.NoThrow`, and `Vc.callPure` for a pure callee under a caller's `Spec.NoThrow` (#182) | its `Requires` as a VC at the call; its `Ensures` a hypothesis for the rest; its exceptions allowed by the caller's contract (`ClrExn.allowed_of_external` for a NoThrow callee of a caller without), or under a caller's `Spec.NoThrow` a VC at the call for a raising callee without it |
+| a dependency operation | `Vc.call` with its contract hypothesis at the call's arguments and the current world (`Vc.callExternal` under `Spec.NoThrow`) | its `Requires` as a VC at the call; its `Ensures` a hypothesis for the rest; its exception allowed, and recorded |
 | anything else | none | a leftover |
 
 Between rules the walker does a light reduction: β, projections, `let`s (a join point among them) and
@@ -60,6 +60,8 @@ At a `throw` whose exception is allowed, the walker first tries to show the path
 set and `omega` over the path conditions (#92).
 If that works, the throw is not reported. Otherwise it is closed by `ClrExn.Allowed` and recorded as a `MayThrow`
 (chapter 8).
+Under `Spec.NoThrow` (#182, chapter 6) the exception postcondition at an explicit throw is `ClrExn.External (thrown T)`,
+which is `False`: a throw not shown unreachable is a `ReachableThrow` VC at the `throw`, never a `MayThrow`.
 A verified callee whose triple was used is recorded as a `CalleeContract`, and each dependency call as a possible
 external exception.
 
@@ -74,7 +76,7 @@ For each:
    hypothesis; the callee's body is not unfolded (#173).
 2. The VC simp set runs (KTD14, `VcSimpSet.cs`): Warrant's default set plus `Std.Do`'s one-state assertion lemmas
    (`SPred.entails_1`, `apply_pure_cons`, `down_pure_nil`, `and_cons`/`and_nil`, `or_cons`/`or_nil`), the
-   `PredTrans.apply_*` equations, the equations of `ClrExn.Allowed`, and for a nullable `Spec.Ensures` meeting a
+   `PredTrans.apply_*` equations, the equations of `ClrExn.Allowed` and `ClrExn.External`, and for a nullable `Spec.Ensures` meeting a
    constructor `Option.isNone_some`/`_none`, `Bool.false_eq_true`/`true_eq_false`, `Nullable.coalesce_some`/`_none` and
    `Nullable.some_eq_none` (U20). `SPred.entails_nil` alone never matches a one-state assertion, which is why the
    `_1` and `_cons` forms are listed. The set is kept apart from `Tactic.Simp()`'s default set, as omega-prep is, so
@@ -110,6 +112,8 @@ hypotheses and its goal after the VC simp set:
 | `Assert` | Spec.Assert |
 | `WellDefinedness` | well-definedness of a Spec expression |
 | `Unsupported` | a program shape the VC walker has no rule for (reported where the walk last was, #223) |
+| `ReachableThrow` | an explicit throw is reachable under the Requires (Spec.NoThrow) (reported at the `throw`, #182) |
+| `CalleeMayThrow` | a callee without Spec.NoThrow may throw explicitly at this call (Spec.NoThrow) (#182) |
 
 From the M6 corpus (*ran*, as `docs/proving/proofs-that-work.md` shows it):
 

@@ -52,7 +52,7 @@ public static partial class Extractor
                 return null;
             }
             var name = Symbols.Display(c.Symbol);
-            const string advice = "a theorem is a claim, not code that runs, so state the property as a Spec.Ensures on the method instead";
+            const string advice = "a theorem is a claim, not code that runs, so state the property as a Spec.Ensures on the method instead, or, for a property relating two calls, on a verified method that makes both calls";
             if (string.Equals(cause.Unit, c.Key, StringComparison.Ordinal))
             {
                 return new Rejection(

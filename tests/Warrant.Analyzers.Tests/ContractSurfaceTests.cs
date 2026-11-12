@@ -45,6 +45,7 @@ public sealed class ContractSurfaceTests
             public static int Clamp(int x)
             {
                 Spec.Requires(x >= 0);
+                Spec.NoThrow();
                 Spec.Ensures<int>(r => r <= x);
                 Spec.Assert(x >= 0, Tactic.VcGen());
                 return x;
@@ -62,7 +63,7 @@ public sealed class ContractSurfaceTests
         """;
 
     /// <summary>The members whose calls the compiler removes without <c>WARRANT_CONTRACTS</c>.</summary>
-    private static readonly string[] Conditional = ["Requires", "Ensures", "Assert"];
+    private static readonly string[] Conditional = ["Requires", "NoThrow", "Ensures", "Assert"];
 
     [Fact]
     public void WithoutWarrantContractsNoSpecCallIsInTheIl()

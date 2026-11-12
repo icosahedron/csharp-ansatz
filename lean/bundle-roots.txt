@@ -724,3 +724,18 @@ Option.isNone_none
 Warrant.Nullable.some_eq_none
 Bool.false_eq_true
 Bool.true_eq_false
+
+# Spec.NoThrow (#182, lean/Warrant/Effect.lean, lean/Warrant/Vc.lean): the exceptions a NoThrow contract allows, only
+# one propagated from a dependency, with its equations for the VC simp set (KTD14); the consequence from it to
+# ClrExn.Allowed; and the call rules for a NoThrow callee and for a pure callee under a NoThrow caller.
+Warrant.ClrExn.External
+Warrant.ClrExn.external_overflow
+Warrant.ClrExn.external_divideByZero
+Warrant.ClrExn.external_nullReference
+Warrant.ClrExn.external_invalidOperation
+Warrant.ClrExn.external_assertFailed
+Warrant.ClrExn.external_thrown
+Warrant.ClrExn.external_external
+Warrant.ClrExn.allowed_of_external
+Warrant.Vc.callExternal
+Warrant.Vc.callPure

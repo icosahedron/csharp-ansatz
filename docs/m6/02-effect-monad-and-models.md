@@ -38,6 +38,9 @@ calls to agree is refuted for that reason (`tests/corpus/m6/refuted/Dependencies
 allowed, every other constructor is an implicit runtime exception and is not.
 It has one equation per constructor (`ClrExn.allowed_overflow : ClrExn.Allowed .overflow = False`, …) for the VC simp
 set.
+`ClrExn.External` is the exception postcondition of a contract with `Spec.NoThrow` (#182, chapter 6): only `external`
+is allowed. It has the same equations (`ClrExn.external_thrown : ClrExn.External (.thrown t) = False`, …), and
+`ClrExn.allowed_of_external` states that every exception it allows `ClrExn.Allowed` allows too.
 
 `ClrM.throw e` is `MonadExceptOf.throw e`, and `ClrM.throw_spec` is its triple.
 `Std.Do.Spec.throw_ExceptT` states the same for every `ExceptT`, but at the `WP` instance a `WPMonad` instance gives,

@@ -194,7 +194,7 @@ and the design is explained chapter by chapter in [docs/m6/](docs/m6/README.md).
    the models and the walker use joined the bundle, which stays a verified
    load: each unit that grew it measured server start against the plan's 5 s
    threshold, and the complete bundle starts in 4.05 s on the reference
-   workstation.
+   workstation. The owner raised the threshold to 10 s on 2026-11-11 (#178).
 2. **Prove the route before building on it.** A go/no-go checkpoint proved
    three hand-built contract triples, one with a dependency, with Warrant's
    own `apply`, simp and `omega` before any contract was extracted.
@@ -382,7 +382,7 @@ scripts/export-semantics.sh /tmp/bundle.ndjson.gz   # or anywhere else
 
 The script uses the same Lean 4.35.0 toolchain and lean4export `5a9a355` as
 step 5 (on Windows, see `scripts/lib/lean-toolchain.sh` for how the toolchain
-is found), builds the library with `lake build`, and exports the 630 roots in
+is found), builds the library with `lake build`, and exports the 641 roots in
 `lean/bundle-roots.txt` with their dependency closure. It exports with
 `--export-mdata`, so the `no_index` markers simp needs survive. It fails if a
 root does not exist or if anything depends on `sorryAx`. The output is
@@ -390,7 +390,7 @@ deterministic: with an unchanged `lean/`, it is byte-identical to the
 committed file. Check the counts independently with:
 
 ```sh
-python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 4,112 constants
+python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 4,125 constants
 ```
 
 After the bundle, regenerate the pinned declarations the engine embeds (the

@@ -30,9 +30,9 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal(2, Sidecar.SimpEntries.Count(e => e.Name == N("Nat.not_lt_zero")));
         Assert.Equal(3, Sidecar.CongrEntries.Count);
         Assert.Equal(204, Sidecar.Instances.Count());
-        Assert.Equal(736, Sidecar.ReducibilityStatuses.Count());
-        Assert.Equal(96, Sidecar.DefEqNames.Count());
-        Assert.Equal(400, Sidecar.Matchers.Count());
+        Assert.Equal(738, Sidecar.ReducibilityStatuses.Count());
+        Assert.Equal(103, Sidecar.DefEqNames.Count());
+        Assert.Equal(401, Sidecar.Matchers.Count());
         Assert.Equal(77, Sidecar.Classes.Count());
         Assert.Equal(33, Sidecar.SpecEntries.Count);
     }
@@ -112,8 +112,8 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal(
             new Dictionary<ReducibilityStatus, int>
             {
-                [ReducibilityStatus.Reducible] = 301,
-                [ReducibilityStatus.InstanceReducible] = 294,
+                [ReducibilityStatus.Reducible] = 302,
+                [ReducibilityStatus.InstanceReducible] = 295,
                 [ReducibilityStatus.ImplicitReducible] = 136,
                 [ReducibilityStatus.Irreducible] = 5,
             },
@@ -256,7 +256,7 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal((inst, 1000), (added.Name, added.Priority));
         Assert.True(fork.IsInstance(inst));
         Assert.Equal(baseSidecar.GetInstances(N("DecidableEq")).Count + 1, fork.GetInstances(N("DecidableEq")).Count);
-        Assert.Equal(737, fork.ReducibilityStatuses.Count(kv => kv.Value != ReducibilityStatus.Semireducible));
+        Assert.Equal(739, fork.ReducibilityStatuses.Count(kv => kv.Value != ReducibilityStatus.Semireducible));
         Assert.Same(baseSidecar.Header, fork.Header);
         Assert.Equal(baseSidecar.SimpEntries, fork.SimpEntries);
 

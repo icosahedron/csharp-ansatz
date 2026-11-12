@@ -71,6 +71,29 @@ theorem ClrExn.allowed_assertFailed : ClrExn.Allowed .assertFailed = False := rf
 theorem ClrExn.allowed_thrown (type : String) : ClrExn.Allowed (.thrown type) = True := rfl
 theorem ClrExn.allowed_external : ClrExn.Allowed .external = True := rfl
 
+/-- The exceptions the contract of a method with `Spec.NoThrow` allows (#182): only an exception propagated from a
+dependency. An explicit `throw` is excluded too, so the proof must show none is reachable under `Requires`. -/
+def ClrExn.External : ClrExn → Prop
+  | .external => True
+  | _ => False
+
+/-! `ClrExn.External` at each constructor, for the VC simp set (KTD14). -/
+
+theorem ClrExn.external_overflow : ClrExn.External .overflow = False := rfl
+theorem ClrExn.external_divideByZero : ClrExn.External .divideByZero = False := rfl
+theorem ClrExn.external_nullReference : ClrExn.External .nullReference = False := rfl
+theorem ClrExn.external_invalidOperation : ClrExn.External .invalidOperation = False := rfl
+theorem ClrExn.external_assertFailed : ClrExn.External .assertFailed = False := rfl
+theorem ClrExn.external_thrown (type : String) : ClrExn.External (.thrown type) = False := rfl
+theorem ClrExn.external_external : ClrExn.External .external = True := rfl
+
+/-- An exception a `Spec.NoThrow` contract allows is one every contract allows: a caller without `Spec.NoThrow` uses
+the contract of a callee with it by consequence (#182). -/
+theorem ClrExn.allowed_of_external {e : ClrExn} (h : ClrExn.External e) : ClrExn.Allowed e := by
+  cases e with
+  | external => exact True.intro
+  | _ => exact h.elim
+
 /-! Triple rules for branches (KTD13): `Std.Do` has none. The walker applies them at `ite` and `dite` and gets one
 goal per branch, with the condition or its negation as a hypothesis. -/
 

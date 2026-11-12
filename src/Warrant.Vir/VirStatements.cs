@@ -65,6 +65,13 @@ public sealed record EvalStmt(VirExpr Value) : VirStmt;
 public sealed record RequiresStmt(VirExpr Condition) : VirStmt;
 
 /// <summary>
+/// <c>nothrow{}</c>: <c>Spec.NoThrow()</c>, among the leading <c>Spec</c> statements of a function's body, after its
+/// <c>Spec.Requires</c> and before its <c>Spec.Ensures</c> (#182). It is a claim, not a step: no explicit <c>throw</c> is
+/// reachable under the precondition, so the contract allows only an exception propagated from a dependency.
+/// </summary>
+public sealed record NoThrowStmt : VirStmt;
+
+/// <summary>
 /// <c>ensures{local?, name?, condition}</c>: <c>Spec.Ensures&lt;T&gt;(r =&gt; condition)</c>, which binds the result to a local,
 /// or <c>Spec.Ensures(() =&gt; condition)</c>, which binds nothing (M6, KTD8). It is a claim, not a step: it is never run.
 /// </summary>

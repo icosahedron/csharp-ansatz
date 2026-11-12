@@ -101,9 +101,11 @@ internal sealed partial class BodyTranslator
     /// The contract of an operation as a hypothesis (KTD9): <c>∀ args, ⦃⌜Req args⌝⦄ op args ⦃post⟨fun r =&gt; ⌜Ens args
     /// r⌝, allowed⟩⦄</c>, the member's <c>Spec.Requires</c> and <c>Spec.Ensures</c> as its contract unit states them, at every
     /// world, since the triple holds from every state. A missing one is <c>True</c>. The contract unit's own obligations
-    /// are its own (<see cref="MemberContract"/>).
+    /// are its own (<see cref="MemberContract"/>). Under <c>Spec.NoThrow</c> (<paramref name="noThrow"/>, #182) the
+    /// exception half is <c>ClrExn.External</c>, as the method's own is: an exception from a dependency is
+    /// <c>ClrExn.external</c> (KTD12), and the method's contract allows only that.
     /// </summary>
-    private Expr Hypothesis(Operation op, Expr sigma)
+    private Expr Hypothesis(Operation op, Expr sigma, bool noThrow)
     {
         var contract = op.Contract;
         var nested = new BodyTranslator(_types, _callees, _lctx, _ngen) { _quantified = true };
@@ -124,7 +126,7 @@ internal sealed partial class BodyTranslator
         spec.Result = r;
         var post = Triples.Conjunction([.. ensures.Select(e => nested.Cond(e.Condition, e.Local is { } l ? Env.Empty.Set(l, r) : Env.Empty).Prop)]);
         var triple = Triples.Triple(sigma, returns, Expr.App(op.Op, [.. args]), Triples.Pure(sigma, pre),
-            Triples.Post(sigma, returns, _lctx.MkLambda([r], Triples.Pure(sigma, post))));
+            Triples.Post(sigma, returns, _lctx.MkLambda([r], Triples.Pure(sigma, post)), noThrow));
         return _lctx.MkPi([.. args], triple);
     }
 

@@ -25,7 +25,8 @@ M6 adds four kinds (KTD20), rendered by `src/Warrant.Engine/Reports/` under two 
   Spec.Requires at each call" when the member has one.
 - `MayThrow` is each explicit `throw` the walker could not show unreachable, each call to a dependency (whose exception
   the contract allows), and each call to a verified callee that may throw, naming the call and the callee's throw site
-  (#70). A throw proved unreachable is not listed (#92). Its subject carries VIR node IDs, not lines
+  (#70). A throw proved unreachable is not listed (#92), and neither is any explicit throw of a method with
+  `Spec.NoThrow`, whose proof shows them all unreachable (#182); its dependency calls are still listed. Its subject carries VIR node IDs, not lines
   (`MayThrowSubject`), so a cached outcome renders at the current lines.
   The list does not depend on how the contract was proved (#229): for a `[ProofFor]` script it comes from every walk the
   script's `Tactic.VcGen()` steps ran, and for a script that ran none from the walk the default procedure would make,
@@ -106,7 +107,7 @@ the same type in the same method would be missed; no corpus method has one.
 `tests/corpus/m6/` is the exit criterion as files (KTD24), in the M4 corpus's layout: `accepted/`, `refuted/` and
 `rejected/`, and `expected.json` with each member's outcome and each compilation, five of them (`accepted`, `refuted`,
 `refuted-dependencies`, `rejected`, `checked-project`).
-It holds 147 members.
+It holds 153 members (147 at M6's exit; #182 added `Quotient`, `Half`, `QuotientOfAny` and `NoThrowAfterEnsures`, #183 `Sum` and `SumUnbounded`).
 `tests/corpus/m6/README.md` lists every file, what each member is for, and the members that moved from the M4 corpus
 (chapter 4).
 
@@ -176,6 +177,7 @@ The private-codebase criterion (its blocked candidates that need only R1 to R4 t
 ## Start time
 
 U14 measured server start with the complete M6 bundle against M5b's in one session, as KTD3 requires: 4,053 ms against
-2,807 ms on the reference workstation, under the 5 s threshold (chapter 1, `tests/data/README.md`).
+2,807 ms on the reference workstation, under the threshold: 5 s when measured, 10 s since the owner raised it on
+2026-11-11 (#178; chapter 1, `tests/data/README.md`).
 Warm, cached and rechecked requests are measured by `scripts/measure-m5b.sh` as in M5b; M6 did not set new baselines
 for them.

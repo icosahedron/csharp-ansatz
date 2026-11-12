@@ -84,6 +84,26 @@ theorem call {x : ClrM σ α} {p : Prop} {ok : α → Prop} {Q : Post σ α}
       exact hok r h s
     · exact ⟨fun e s h => he e h s, True.intro⟩
 
+/-- `call` for a callee with `Spec.NoThrow` (#182), whose contract allows only an exception from a dependency. -/
+theorem callExternal {x : ClrM σ α} {p : Prop} {ok : α → Prop} {Q : Post σ α}
+    (hx : ⦃⌜p⌝⦄ x ⦃(fun r => ⌜ok r⌝, fun e => ⌜ClrExn.External e⌝, ())⦄) (hp : p)
+    (hok : ∀ r, ok r → ∀ s, (Q.1 r s).down) (he : ∀ e, ClrExn.External e → ∀ s, (Q.2.1 e s).down) :
+    ⦃⌜True⌝⦄ x ⦃Q⦄ := by
+  apply Triple.entails_wp_of_pre_post hx
+  · intro _ _
+    exact hp
+  · apply PostCond.entails.mk
+    · intro r s h
+      exact hok r h s
+    · exact ⟨fun e s h => he e h s, True.intro⟩
+
+/-- `call` for a pure callee, `pure a`, which raises nothing: its exception postcondition is not used, so a caller with
+`Spec.NoThrow` uses it as well as any other (#182). -/
+theorem callPure {a : α} {p : Prop} {ok : α → Prop} {Q : Post σ α}
+    (hx : ⦃⌜p⌝⦄ (Pure.pure a : ClrM σ α) ⦃(fun r => ⌜ok r⌝, fun e => ⌜ClrExn.Allowed e⌝, ())⦄) (hp : p)
+    (hok : ∀ r, ok r → ∀ s, (Q.1 r s).down) : ⦃⌜True⌝⦄ (Pure.pure a : ClrM σ α) ⦃Q⦄ :=
+  Vc.pure fun s => hok a (hx s hp) s
+
 end Vc
 
 end Warrant

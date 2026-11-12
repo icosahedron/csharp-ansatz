@@ -261,15 +261,17 @@ public static partial class Pipeline
             }
             var throws = new List<(string Type, int? Node)>();
             var external = new List<(string Member, int? Node)>();
+            // Under Spec.NoThrow the proof showed the method's own explicit throws unreachable (#182).
+            bool own = !(contract.Raising && VcWalker.HasNoThrow(unit.Unit));
             var calls = new List<(string Callee, int? Node)>();
             foreach (var node in VirTree.PreOrder(unit.Unit))
             {
                 switch (node)
                 {
-                    case ThrowStmt t:
+                    case ThrowStmt t when own:
                         throws.Add((t.Exception, VirTree.IdOf(unit.Unit, node)));
                         break;
-                    case ThrowExpr t:
+                    case ThrowExpr t when own:
                         throws.Add((t.Exception, VirTree.IdOf(unit.Unit, node)));
                         break;
                     case ExternalCallExpr x:

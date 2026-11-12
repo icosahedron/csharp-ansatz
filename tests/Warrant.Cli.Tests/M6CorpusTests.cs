@@ -81,11 +81,15 @@ public sealed class M6CorpusTests
         Assert.Matches($@"(?m)^{contracts}\(15,\d+\): error WRT0001: The contract of 'Contracts\.Ratio\(int, int\)' could not be proved: overflow in a checked operation: ", output);
         Assert.Matches($@"(?m)^{contracts}\(20,\d+\): error WRT0001: The contract of 'Contracts\.Neg\(int\)' could not be proved: overflow in a checked operation: ", output);
         Assert.Matches($@"(?m)^{contracts}\(30,\d+\): error WRT0001: The contract of 'Contracts\.ShareOfNothing\(\)' could not be proved: precondition of a callee at this call: ", output);
-        Assert.Matches($@"(?m)^{contracts}\(35,\d+\): error WRT0001: The contract of 'Contracts\.Twice\(int\)' could not be proved: postcondition of the method: ", output);
-        Assert.Matches($@"(?m)^{contracts}\(52,\d+\): error WRT0001: The contract of 'Contracts\.Asserted\(int, int\)' could not be proved: Spec\.Assert: ", output);
-        Assert.Matches($@"(?m)^{contracts}\(60,\d+\): error WRT0001: The contract of 'Contracts\.Impossible\(int\)' could not be proved: The contract is unsatisfiable: ", output);
+        Assert.Matches($@"(?m)^{contracts}\(36,\d+\): error WRT0001: The contract of 'Contracts\.Twice\(int\)' could not be proved: postcondition of the method: ", output);
+        Assert.Matches($@"(?m)^{contracts}\(54,\d+\): error WRT0001: The contract of 'Contracts\.Asserted\(int, int\)' could not be proved: Spec\.Assert: ", output);
+        Assert.Matches($@"(?m)^{contracts}\(62,\d+\): error WRT0001: The contract of 'Contracts\.Impossible\(int\)' could not be proved: The contract is unsatisfiable: ", output);
+        // #182: under Spec.NoThrow a reachable explicit throw fails the build at the throw.
+        Assert.Matches($@"(?m)^{contracts}\(74,\d+\): error WRT0001: The contract of 'Contracts\.QuotientOfAny\(int, int\)' could not be proved: an explicit throw is reachable under the Requires \(Spec\.NoThrow\): ", output);
         // A [ProofFor] script that fails is reported at the step that failed, as a theorem's script is.
-        Assert.Matches($@"(?m)^{contracts}\(47,\d+\): error WRT0001: The contract of 'Contracts\.Kept\(int\)' could not be proved: omega could not prove the goal:", output);
+        Assert.Matches($@"(?m)^{contracts}\(49,\d+\): error WRT0001: The contract of 'Contracts\.Kept\(int\)' could not be proved: omega could not prove the goal:", output);
+        // #183: arithmetic in a Spec expression that can overflow is reported at the operation.
+        Assert.Matches($@"(?m)^{contracts}\(83,\d+\): error WRT0001: The contract of 'Contracts\.SumUnbounded\(int, int\)' could not be proved: well-definedness of a Spec expression: ", output);
         var dependencies = Regex.Escape(Path.Combine(dir, "Dependencies.cs"));
         Assert.Matches($@"(?m)^{dependencies}\(35,\d+\): error WRT0001: The contract of 'Lookups\.Neighbour\(int\)' could not be proved: postcondition of the method: ", output);
         Assert.Matches($@"(?m)^{dependencies}\(43,\d+\): error WRT0001: The contract of 'Lookups\.Saved\(Payment\)' could not be proved: postcondition of the method: ", output);

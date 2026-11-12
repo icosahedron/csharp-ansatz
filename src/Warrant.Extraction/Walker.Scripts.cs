@@ -71,7 +71,7 @@ internal sealed partial class Walker
             "Spec.Decreases not first",
             at.GetLocation(),
             outOfOrder
-                ? "Spec.Decreases is out of order: it must come before Spec.Requires and Spec.Ensures, as the first statement of the method's body, because the measure is read on entry."
+                ? "Spec.Decreases is out of order: it must come before Spec.Requires, Spec.NoThrow and Spec.Ensures, as the first statement of the method's body, because the measure is read on entry."
                 : "Spec.Decreases must be the first statement of the method's body, because the measure is read on entry."));
 
     private static RejectedException MalformedScript(string construct, SyntaxNode at, string detail) =>

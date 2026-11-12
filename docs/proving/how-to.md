@@ -332,10 +332,9 @@ raise. Reading a token (`ct.IsCancellationRequested`) or making one
 (`default`, `CancellationToken.None`) is rejected. A bare `return;` in a
 `void` or `Task` method is fine.
 
-Not yet: a field of a nullable result read after
-a null test (`claim.Amount` above, rather than `claim.Id`) is sometimes not
-related to what the walk learned about it, so a true `Spec.Ensures` about it
-fails (GitHub #226).
+Any field of a nullable result may be read after the null test, as often as
+you like: `if (claim is null || claim.Amount < 0) return 0; return
+claim.Amount;` proves `r >= 0` (GitHub #226).
 
 ## Work with enums and closed sets
 

@@ -116,6 +116,55 @@ public sealed class ExternalCallTests(EngineFixture engine) : IClassFixture<Engi
         Proved(result.Find("M:S.Get(System.Int32)"));
     }
 
+    /// <summary>
+    /// #226: each read of a field of the awaited result cases on it anew, so the walk names its value twice; the two names
+    /// are of one value (<c>some v₁ = some v₂</c>), and a fact about the first, from a null test or the contract, is a fact
+    /// about the second.
+    /// </summary>
+    [Fact]
+    public void AFieldOfANullableResultReadAfterANullTestIsRelatedToWhatTheWalkLearned()
+    {
+        var source = WithStore("""
+            [Verified]
+            public async Task<int> AmountOrZero(int id)
+            {
+                Spec.Ensures<int>(r => r >= 0);
+                var p = await store.GetPayment(id);
+                if (p is null || p.Amount < 0) return 0;
+                return p.Amount;
+            }
+
+            [Verified]
+            public async Task<int> IdAfterAmount(int id)
+            {
+                Spec.Ensures<int>(r => r == 0 || r == id);
+                var p = await store.GetPayment(id);
+                if (p is null || p.Amount < 0) return 0;
+                return p.Id;
+            }
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.AmountOrZero(System.Int32)"));
+        Proved(result.Find("M:S.IdAfterAmount(System.Int32)"));
+    }
+
+    [Fact]
+    public void AFieldOfANullableResultThatNothingBoundsStillFails()
+    {
+        var source = WithStore("""
+            [Verified]
+            public async Task<int> AmountOrZero(int id)
+            {
+                Spec.Ensures<int>(r => r >= 0);
+                var p = await store.GetPayment(id);
+                if (p is null || p.Id < 0) return 0;
+                return p.Amount;
+            }
+            """);
+        const string Key = "M:S.AmountOrZero(System.Int32)";
+        Assert.Equal((VcKind.Postcondition, "Spec.Ensures<int>(r => r >= 0);"), Failure(source, Key, Run(source).Find(Key)));
+    }
+
     [Fact]
     public void TheSameEnsuresFailsAtItsLineWhenTheCallAsksForAnotherId()
     {

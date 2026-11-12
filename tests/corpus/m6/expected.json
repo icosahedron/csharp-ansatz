@@ -61,6 +61,7 @@
       "M:Corpus.M6.Payments.IPaymentStore.GetPayment(System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Payments.IPaymentStore.SavePayment(Corpus.M6.Payments.Payment)": { "outcome": "translated", "assumeNonNull": ["p"] },
       "M:Corpus.M6.Payments.PaymentLookup.Found(System.Int32)": { "outcome": "translated", "assumeNonNull": ["store", "store.GetPayment()"] },
+      "M:Corpus.M6.Payments.PaymentLookup.IdIfPending(System.Int32)": { "outcome": "translated", "assumeNonNull": ["store", "store.GetPayment()"] },
 
       "M:Corpus.M6.Dependencies.OrderService.QuantityOf(System.Int32)": { "outcome": "translated", "assumeNonNull": ["orders", "orders.Find()"] },
       "M:Corpus.M6.Dependencies.OrderService.Counted(System.Int32)": { "outcome": "translated", "assumeNonNull": ["orders"] },

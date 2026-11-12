@@ -151,6 +151,7 @@ public sealed class ContractStatementTests(M6DependencyFixture fixture, ITestOut
         "M:Corpus.M6.Nullables.IdOrZero(Corpus.M6.Payment)",
         "M:Corpus.M6.Nullables.ValueWhenKnown(System.Nullable{System.Int32})",
         "M:Corpus.M6.Payments.PaymentLookup.Found(System.Int32)",
+        "M:Corpus.M6.Payments.PaymentLookup.IdIfPending(System.Int32)",
         "M:Corpus.M6.Payments.PaymentService.ProcessPayment(System.Int32)",
         "M:Corpus.M6.Refunds.OriginalIdOrZero(Corpus.M6.Refund)",
         "M:Corpus.M6.Refunds.Waived(Corpus.M6.Fee)",

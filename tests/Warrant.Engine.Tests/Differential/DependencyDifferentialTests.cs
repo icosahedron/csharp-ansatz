@@ -91,6 +91,7 @@ public sealed class DependencyDifferentialTests(M6DependencyFixture fixture, ITe
     [
         ("accepted", ProcessPayment),
         ("accepted", "M:Corpus.M6.Payments.PaymentLookup.Found(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Payments.PaymentLookup.IdIfPending(System.Int32)"),
         ("accepted", "M:Corpus.M6.Dependencies.OrderService.QuantityOf(System.Int32)"),
         ("accepted", "M:Corpus.M6.Dependencies.OrderService.Counted(System.Int32)"),
         ("accepted", "M:Corpus.M6.Dependencies.OrderService.Reserved(System.Int32)"),

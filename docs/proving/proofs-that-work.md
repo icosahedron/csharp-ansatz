@@ -646,6 +646,26 @@ and one that expects two calls to `GetPayment(id)` to agree: each call may see a
 `tests/Warrant.Engine.Tests/ExternalCallTests.cs` (`AnEnsuresThatHoldsOnlyThroughTheMembersContractProves` and the
 three after it).
 
+### Several fields of the result after its null test
+
+```csharp
+[Verified]
+public async Task<int> IdIfPending(int id)
+{
+    Spec.Ensures<int>(r => r == 0 || r == id);
+    var p = await store.GetPayment(id);
+    if (p is null || p.Status != PaymentStatus.Pending) return 0;
+    return p.Id;
+}
+```
+
+Proved with no script. Each read of `p` is checked not to be null on its own, so the walk names `p`'s value once for
+`p.Status` and once for `p.Id`; the two names are of one value (`some v₁ = some v₂` gives `v₁ = v₂`), so what the contract
+says about the first (`v₁.Id == id`) is what the `Spec.Ensures` needs of the second (GitHub #226). The same holds for a
+fact from the null test's `||`: `if (p is null || p.Amount < 0) return 0; return p.Amount;` proves `r >= 0`. The example
+is `PaymentLookup.IdIfPending` in `tests/corpus/m6/accepted/Payments.cs`
+(`AFieldOfANullableResultReadAfterANullTestIsRelatedToWhatTheWalkLearned` in `ExternalCallTests.cs`).
+
 ### The payment example
 
 Design §5.2's `ProcessPayment`, shortened here, is proved with its store as a hypothesis:

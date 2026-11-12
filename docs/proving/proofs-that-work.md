@@ -74,6 +74,38 @@ error WRT0001: Theorem 'Increments.AlwaysLarger(int)' could not be proved: omega
   ⊢ x + 1 > x
 ```
 
+### A bounded theorem
+
+```csharp
+[Theorem]
+static Proof Bounded(int a) =>
+    Prove.That(Spec.Implies(a < 1000 && a > -1000, a + 1 > a))
+         .By(Tactic.Intro("h"), Tactic.Omega());
+```
+
+Proved.A theorem's own `+`, `-`, `*` and unary `-` on `int` and `long` must not overflow (GitHub #236), under the
+`Spec.Implies` that guards them: each is a well-definedness condition the default procedure proves before the script
+runs. Without the bound (`Unbounded` there) the build fails at `a + 1` with `well-definedness of a Spec expression`, whatever the script
+proves (`ArithmeticInATheoremThatCanOverflowFailsAtTheOperationAndProvesWhenBounded` in
+`tests/Warrant.Engine.Tests/DefaultProcedureTests.cs`). `Spec.ForAll<int>(y => y + 0 == y)` needs no bound, since
+`y + 0` cannot overflow.
+
+### Wrapping on purpose
+
+```csharp
+[Verified]
+public static int One() => 1;
+
+[Theorem]
+static Proof Wraps() => Prove.That(unchecked(int.MaxValue + One()) == int.MinValue);
+```
+
+Proved by `decide` (`Wraps` in `ArithmeticInATheoremThatCanOverflowFailsAtTheOperationAndProvesWhenBounded`).
+`unchecked(...)` (or an `unchecked { }` block) says the wrap is intended, so the statement's arithmetic has no
+obligation and wraps as the CLR does. Without `unchecked` the same statement fails at `int.MaxValue + One()`, which
+overflows. (`One()` keeps the compiler from folding the sum, which it rejects as a constant overflow.) Arithmetic inside
+a method's body is the method's own, which these obligations do not cover yet (#244).
+
 ### A guard against `int.MinValue`
 
 ```csharp

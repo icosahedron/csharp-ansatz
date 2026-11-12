@@ -197,12 +197,34 @@ public static partial class Pipeline
             string reason;
             try
             {
-                Kernel.Kernel.Add(env, declaration, budget.Kernel);
-                if (ProofTerms.IsAdmittedAs(env, shell))
+                // #236: the statement's well-definedness theorems first, each the current statement with the cached proof.
+                var proofs = cached.WellDefinedness.ToDictionary(d => d.Value.Name, d => d.Value.Proof);
+                var wellDefined = new List<TheoremDecl>();
+                string? missing = null;
+                foreach (var wd in theorem.WellDefinedness)
                 {
-                    return (cached with { Certificate = declaration }, stopwatch.Elapsed, Source.Cache);
+                    if (!proofs.TryGetValue(wd.Theorem.Name, out var proof))
+                    {
+                        missing = $"it holds no proof of {wd.Theorem.Name}";
+                        break;
+                    }
+                    var admitted = wd.Theorem.WithProof(proof);
+                    Kernel.Kernel.Add(env, admitted, budget.Kernel);
+                    wellDefined.Add(admitted);
                 }
-                reason = $"the kernel admitted {shell.Name} with a type other than its statement";
+                if (missing is not null)
+                {
+                    reason = missing;
+                }
+                else
+                {
+                    Kernel.Kernel.Add(env, declaration, budget.Kernel);
+                    if (ProofTerms.IsAdmittedAs(env, shell))
+                    {
+                        return (cached with { Certificate = declaration, WellDefinedness = [.. wellDefined] }, stopwatch.Elapsed, Source.Cache);
+                    }
+                    reason = $"the kernel admitted {shell.Name} with a type other than its statement";
+                }
             }
             catch (KernelResourceException ex) when (budget.StopsCachedCheck(Recheck, ex, options.CancellationToken))
             {

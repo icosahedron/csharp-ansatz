@@ -29,9 +29,9 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
             [Verified] public static int Twice(int x) => x + x;
 
             [Theorem]
-            static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+            static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
 
-            [Theorem] static Proof User(int a) => Prove.That(Twice(a) == a + a).By(Tactic.Apply(nameof(Lemma)));
+            [Theorem] static Proof User(int a) => Prove.That(Twice(a) == unchecked(a + a)).By(Tactic.Apply(nameof(Lemma)));
         }
         """;
 
@@ -58,7 +58,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
         {
             // Even theorems are proved; odd ones are not, with the counterexample x = 2147483647.
             source.Append(i % 2 == 0
-                ? string.Create(CultureInfo.InvariantCulture, $"    [Theorem] static Proof T{i:00}(int x) => Prove.That(Inc(x) + {i} == x + 1 + {i}).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());\n")
+                ? string.Create(CultureInfo.InvariantCulture, $"    [Theorem] static Proof T{i:00}(int x) => Prove.That(unchecked(Inc(x) + {i} == x + 1 + {i})).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());\n")
                 : string.Create(CultureInfo.InvariantCulture, $"    [Theorem] static Proof T{i:00}(int x) => Prove.That(Inc(x) > x).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());\n"));
         }
         source.Append('}');
@@ -170,7 +170,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
         Assert.Equal(OutcomeKind.Proved, proved["M:S.Lemma"].Kind);
         Assert.Equal(OutcomeKind.Proved, proved["M:S.User(System.Int32)"].Kind);
 
-        var failed = Verify(Lemmas.Replace("Twice(x) == x + x", "Twice(x) == x + x + 1", StringComparison.Ordinal)
+        var failed = Verify(Lemmas.Replace("Twice(x) == unchecked(x + x)", "Twice(x) == unchecked(x + x) + 1", StringComparison.Ordinal)
             .Replace("Tactic.Exact(Lean.Const(\"rfl\"))", "Tactic.Omega()", StringComparison.Ordinal));
         Assert.Equal(OutcomeKind.NotProved, failed["M:S.Lemma"].Kind);
         var user = failed["M:S.User(System.Int32)"];
@@ -188,11 +188,11 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
                 [Verified] public static int Twice(int x) => x + x;
 
                 [Theorem]
-                static Proof First() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+                static Proof First() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
 
-                [Theorem] static Proof Second() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Exact(nameof(First)));
+                [Theorem] static Proof Second() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Exact(nameof(First)));
 
-                [Theorem] static Proof Third() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Exact(nameof(Second)));
+                [Theorem] static Proof Third() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Exact(nameof(Second)));
             }
             """;
         // Requested last first: each theorem still runs after the one it names.
@@ -276,9 +276,9 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
                 [Verified] public static int Twice(int x) => x + x;
 
                 [Theorem]
-                static Proof ViaConst() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+                static Proof ViaConst() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
 
-                [Theorem] static Proof User() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Exact(Lean.Const("Cs.S.ViaConst")));
+                [Theorem] static Proof User() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Exact(Lean.Const("Cs.S.ViaConst")));
             }
             """);
         Assert.Equal(OutcomeKind.Proved, outcomes["M:S.ViaConst"].Kind);
@@ -340,7 +340,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
         // The script fails at once (no hypothesis h); then each of the 343 combinations runs A20 in the kernel until its
         // million steps run out, far longer than the two seconds before the cancel.
         var source = Chain(20) + """
-                [Theorem] static Proof Search(int a, int b, int c) => Prove.That(A20(a) + b + c > a).By(Tactic.Exact("h"));
+                [Theorem] static Proof Search(int a, int b, int c) => Prove.That(unchecked(A20(a) + b + c) > a).By(Tactic.Exact("h"));
             }
             """;
         var inputs = EngineCorpus.Inputs(EngineCorpus.Inline(source));

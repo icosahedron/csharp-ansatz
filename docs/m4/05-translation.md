@@ -85,6 +85,9 @@ The shapes are the ones Lean 4.35.0's elaborator produces for the same Lean sour
 | `(int)a` on a `long` | `Int64.toInt32 a` |
 | `true`, `false` | `Bool.true`, `Bool.false` |
 
+Since the M6 follow-ups (owner decision 2026-11-12), `+`, `-`, `*` and unary `-` in C#'s default context still translate to these wrapping terms, but where Warrant proves something they must not overflow: a theorem statement's (#236) and a `Spec` expression's (#183) get a well-definedness obligation at each such operation (docs/m6/06).
+The same operations inside an explicit `unchecked(...)` or `unchecked { }` translate to the same terms with no obligation: they wrap on purpose (VIR `unchecked`, docs/m4/04).
+
 `int.MinValue` is the literal `-2147483648`, which the table turns into `-(2147483648)`.
 `OfNat` wraps `2147483648` to `int.MinValue`, and negating `int.MinValue` gives `int.MinValue` again, so the result is right; a translation test pins it.
 

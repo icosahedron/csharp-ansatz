@@ -27,8 +27,8 @@ public sealed class CounterexampleTests(EngineFixture engine) : IClassFixture<En
         // Every combination but the one the claim is false at runs A20, which exhausts FuelPerCombination; after two of
         // them TotalFuel is spent. The values are tried in the order 0, 1, -1, int.MaxValue, int.MinValue, ...
         Assert.Equal(2, Counterexample.TotalFuel / Counterexample.FuelPerCombination);
-        Assert.Equal("a = 1", Search("a != 1 && A20(a) > a - 1", Chain(20)));
-        Assert.Equal("", Search("a != int.MinValue && A20(a) > a - 1", Chain(20)));
+        Assert.Equal("a = 1", Search("a != 1 && A20(a) > unchecked(a - 1)", Chain(20)));
+        Assert.Equal("", Search("a != int.MinValue && A20(a) > unchecked(a - 1)", Chain(20)));
     }
 
     /// <summary>The counterexample of a theorem with no script over <paramref name="claim"/>, as <c>p = v, ...</c>.</summary>

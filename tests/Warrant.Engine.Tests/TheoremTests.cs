@@ -941,11 +941,11 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
 
                 [Theorem]
                 static Proof TwiceIsDoubling() =>
-                    Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+                    Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
 
-                [Theorem] static Proof WithIt(int a) => Prove.That(Twice(a) == a + a).By(Tactic.Simp(nameof(TwiceIsDoubling)));
+                [Theorem] static Proof WithIt(int a) => Prove.That(Twice(a) == unchecked(a + a)).By(Tactic.Simp(nameof(TwiceIsDoubling)));
 
-                [Theorem] static Proof WithoutIt(int a) => Prove.That(Twice(a) == a + a).By(Tactic.Simp());
+                [Theorem] static Proof WithoutIt(int a) => Prove.That(Twice(a) == unchecked(a + a)).By(Tactic.Simp());
             }
             """);
         var proved = Assert.IsType<ProvedOutcome>(result.Find("M:S.WithIt(System.Int32)"));

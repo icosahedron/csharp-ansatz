@@ -151,11 +151,27 @@ So `Spec.Ensures<int>(r => r == a + b)` fails at its `a + b` with nothing boundi
 (`ArithmeticInEnsuresThatCanOverflowFailsAtTheEnsuresLineAndProvesWhenBounded`; in the corpus, `SumUnbounded` in
 `refuted/Contracts.cs`).
 Specs keep C#'s bounded types: there is no unbounded integer and no widening to `long`.
+Only C#'s default context has the obligation: arithmetic inside an explicit `unchecked(...)` or `unchecked { }` (VIR
+`unchecked`, chapter 4) wraps on purpose and has none, and `checked` arithmetic is a partial operation as before
+(`ExplicitUncheckedArithmeticInASpecExpressionWrapsWithNoObligation`).
 An explicit unchecked cast such as `(int)l` is left as written, since a narrowing cast is a deliberate truncation.
 The rule covers `Spec.Requires` and `Spec.Ensures`, in a method and in a contract-class member; `Spec.Assert` is a
 statement in the body and its condition still wraps.
 A callee's `Spec.Requires`, stated at a call site in a caller's `Spec` expression, adds no obligation of its own there:
 the callee's own `$wd` obligations cover it.
+
+**Theorem statements (#236).** A `[Theorem]`'s statement follows the same rule, since theorems and code should agree
+(owner decision 2026-11-12): it is translated with a world `σ` and a `SpecState` of its own, so its default-context
+arithmetic and its calls to pure methods with `Spec.Requires` get `T.$wd_k` obligations over `σ`, the theorem's
+parameters and the guards, including `Spec.Implies` and the variable of each enclosing `Spec.ForAll` or `Spec.Exists`
+(the obligation holds for every value of it).
+The statement itself is the same term as before.
+The engine proves each by the default procedure, as a contract's are, before and independently of the theorem's script,
+`rfl` or `decide`; the theorem is proved only when all of them are, its certificate holds them before the theorem, and
+one that fails is the theorem's WRT0001 at the operation with this chapter's wording
+(`ArithmeticInATheoremThatCanOverflowFailsAtTheOperationAndProvesWhenBounded`,
+`ATheoremStatementsArithmeticHasAnOverflowObligationUnderItsGuardsAndBinders`).
+As for contracts, they are not listed in the assumption report.
 
 ## Unsatisfiable contracts
 

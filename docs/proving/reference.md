@@ -152,6 +152,7 @@ exit the block contains.
 | Locals, assigned once or reassigned without loops, including `+=` and `++` | M4 | Parameters cannot be assigned. |
 | Recursion: a method that calls itself, with `Spec.Decreases` as the first statement of a block body | M5a | Mutual recursion, recursion without `Spec.Decreases` and a recursive call inside another's argument are WRT0002. Structural recursion waits for recursive types. |
 | `/`, `%`, `checked` on `int` and `long` | M6 | Division by zero, `MinValue / -1` and checked overflow are exceptions, which a method's contract obligation must rule out. |
+| `+`, `-`, `*`, unary `-` on `int` and `long` in a theorem statement, `Spec.Requires` or `Spec.Ensures` | M6 follow-ups | Must not overflow (GitHub #183, #236): each is a well-definedness condition, under the guards around it, that fails the proof at the operation. `unchecked(...)` wraps on purpose with none. |
 | `throw new T(...)`, nullable values (`int?`, `Payment?`, …) | M6 | See the `throw` and `null` rows below. |
 | `Spec.Requires`, `Spec.Ensures`, `Spec.Assert`, `[ProofFor]` | M6 | See [the M6 contract rejections](#the-m6-contract-rejections). |
 | Calls through an interface with a `[ContractFor]` class; `async`/`await` of verified or contracted calls | M6 | See [the M6 dependency rejections](#the-m6-dependency-rejections). |
@@ -310,6 +311,7 @@ Summary of [design §6.1](../design.md#61-type-mapping).
 | `int`, `long`, `short`, `sbyte` | `Int32`, `Int64`, `Int16`, `Int8`: two's complement, wrapping |
 | `uint`, `ulong`, `ushort`, `byte` | `UInt32` … `UInt8` |
 | `checked(...)` | throws `OverflowException` |
+| `unchecked(...)`, `unchecked { }` | wraps on purpose: no overflow obligation in a statement or spec (GitHub #236) |
 | `BigInteger` | `Int` (not built; specs have no unbounded integer yet, GitHub #160) |
 | `decimal` | 96-bit mantissa and scale; `==` and order by value (M6) |
 | `T?` | `Option T` (M6); non-nullable annotations are assumptions |

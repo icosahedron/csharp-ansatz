@@ -135,6 +135,14 @@ public sealed class TranslatedUnit
     public TheoremShell? Theorem { get; }
 
     /// <summary>
+    /// For a theorem, the well-definedness obligations of its statement (#236), in source order: that its default-context
+    /// <c>int</c> and <c>long</c> arithmetic does not overflow and that a call to a pure method with <c>Spec.Requires</c> is
+    /// within it, as a contract's <see cref="ContractObligation.WellDefinedness"/>. The theorem is proved only when each
+    /// of them is. Empty for other units.
+    /// </summary>
+    public ImmutableArray<SpecObligation> WellDefinedness { get; init; } = [];
+
+    /// <summary>
     /// For a recursive method (M5a KTD14, KTD15), its decrease theorems, to admit before <see cref="Declarations"/>, and its
     /// equation lemma, to admit after them; null for other units.
     /// </summary>

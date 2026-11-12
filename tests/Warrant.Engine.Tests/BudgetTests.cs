@@ -69,8 +69,8 @@ public sealed class BudgetTests(EngineFixture engine) : IClassFixture<EngineFixt
             public static class S
             {
                 [Verified] public static int Inc(int x) => x + 1;
-                [Theorem(KernelFuel = 1000)] static Proof Starved(int x) => Prove.That(Inc(x) == x + 1).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());
-                [Theorem] static Proof Fed(int x) => Prove.That(Inc(x) == x + 1).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());
+                [Theorem(KernelFuel = 1000)] static Proof Starved(int x) => Prove.That(Inc(x) == unchecked(x + 1)).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());
+                [Theorem] static Proof Fed(int x) => Prove.That(Inc(x) == unchecked(x + 1)).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());
             }
             """, engine.Options);
         var outcome = Assert.IsType<UndecidedOutcome>(result.Find("M:S.Starved(System.Int32)"));

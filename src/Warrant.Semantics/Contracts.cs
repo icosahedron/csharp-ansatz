@@ -360,6 +360,28 @@ internal sealed partial class BodyTranslator
     private T InGuard<T>(Expr guard, Func<T> translate) => InGuards([guard], translate);
 
     /// <summary>
+    /// Translates the body of <c>Spec.ForAll</c> or <c>Spec.Exists</c> with its variable <paramref name="x"/> in scope, so
+    /// an obligation recorded in it is stated for every value of the variable (#236); as is outside a <c>Spec</c>
+    /// expression.
+    /// </summary>
+    private T InBound<T>(Expr x, Func<T> translate)
+    {
+        if (_spec is not { } spec)
+        {
+            return translate();
+        }
+        spec.Bound.Add(x);
+        try
+        {
+            return InGuard(x, translate);
+        }
+        finally
+        {
+            spec.Bound.Remove(x);
+        }
+    }
+
+    /// <summary>
     /// A partial operation in a <c>Spec</c> expression (KTD26): its total Lean value, recording that it does not raise.
     /// </summary>
     private Expr SpecPartial(VirExpr e, Env env, string construct)
@@ -543,8 +565,14 @@ internal sealed partial class BodyTranslator
     /// <summary>The state of a <c>Spec</c> expression's translation: its guards, and the obligations it has recorded.</summary>
     private sealed class SpecState(VirUnit unit, Expr? sigma, IReadOnlyList<Expr> binders)
     {
-        /// <summary>The conditions under which the expression being translated is evaluated, outermost first.</summary>
+        /// <summary>
+        /// The conditions under which the expression being translated is evaluated, outermost first, and among them the
+        /// variables of the enclosing <c>Spec.ForAll</c> and <c>Spec.Exists</c> (<see cref="Bound"/>) at the point they are bound.
+        /// </summary>
         public List<Expr> Guards { get; } = [];
+
+        /// <summary>The entries of <see cref="Guards"/> that are bound variables rather than conditions (#236).</summary>
+        public HashSet<Expr> Bound { get; } = [];
 
         /// <summary>The result, while translating a <c>Spec.Ensures</c>; null otherwise.</summary>
         public Expr? Result { get; set; }
@@ -582,7 +610,7 @@ internal sealed partial class BodyTranslator
 
         private void Add(BodyTranslator t, SpecObligationKind kind, VirNode node, IReadOnlyList<Expr> world, Expr claim)
         {
-            var hyps = Guards.Select(g => t._lctx.MkLocalDecl(t._ngen, GuardName, g)).ToList();
+            var hyps = Guards.Select(g => Bound.Contains(g) ? g : t._lctx.MkLocalDecl(t._ngen, GuardName, g)).ToList();
             List<Expr> fvars = [.. world, .. binders, .. Result is { } r ? [r] : Array.Empty<Expr>(), .. hyps];
             int index = WellDefinedness.Count + 1;
             var statement = Closed(t._lctx.MkPi(fvars, claim));

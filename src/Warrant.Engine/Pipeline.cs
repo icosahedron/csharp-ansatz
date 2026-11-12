@@ -455,8 +455,12 @@ public static partial class Pipeline
                 var limits = new TheoremBudget(options, theorem.Theorem!.Budget).Kernel with { Deadline = null, CancellationToken = default };
                 try
                 {
-                    Kernel.Kernel.Add(next, outcome.Certificate, limits);
-                    Admitted.Add(outcome.Certificate);
+                    // #236: its statement's well-definedness theorems, then the theorem.
+                    foreach (var declaration in outcome.Declarations)
+                    {
+                        Kernel.Kernel.Add(next, declaration, limits);
+                        Admitted.Add(declaration);
+                    }
                 }
                 catch (KernelException ex)
                 {
@@ -513,6 +517,10 @@ public static partial class Pipeline
                 if (unit.Theorem is { } shell)
                 {
                     _owners.TryAdd(shell.Name, unit.Key);
+                    foreach (var wd in unit.WellDefinedness)
+                    {
+                        _owners.TryAdd(wd.Theorem.Name, unit.Key);
+                    }
                 }
             }
         }

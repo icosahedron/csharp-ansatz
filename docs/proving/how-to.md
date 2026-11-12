@@ -422,6 +422,15 @@ counterexample near `int.MaxValue` or `int.MinValue`, choose one:
 In a project with `<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>`,
 all arithmetic is checked, and Warrant follows the project setting.
 
+In what you state, overflow is never silent (GitHub #183, #236): `+`, `-`,
+`*` and unary `-` on `int` and `long` in a `Spec.Requires`, a `Spec.Ensures`
+or a `[Theorem]`'s statement must not overflow, and a possible overflow fails
+the proof at that operation with `well-definedness of a Spec expression`.
+Bound the operands (`Spec.Implies(x < 1000 && x > -1000, ...)` in a theorem,
+`Spec.Requires` in a method), or, when the claim is about wrapping, write
+`unchecked(...)`: explicit `unchecked` wraps on purpose and has no obligation
+([proofs that work](proofs-that-work.md#a-bounded-theorem)).
+
 `decimal` (M6) doesn't wrap: `a + b` and `a - b` throw `OverflowException`
 when the result is out of range, even in `unchecked` code. A method that adds
 `decimal`s therefore needs bounds on its inputs in `Spec.Requires`. `simp`

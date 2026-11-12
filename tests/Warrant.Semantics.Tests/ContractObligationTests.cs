@@ -524,6 +524,59 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     }
 
     [Fact]
+    public void ATheoremStatementsArithmeticHasAnOverflowObligationUnderItsGuardsAndBinders()
+    {
+        // #236: a theorem's statement is translated as a Spec expression is: T.$wd_k over σ, the parameters, the
+        // variables of Spec.ForAll and the guards; the statement itself is the same term as without them.
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Half(int x)
+                {
+                    Spec.Requires(x >= 0);
+                    return x / 2;
+                }
+
+                [Theorem]
+                static Proof Guarded(int a) => Prove.That(Spec.Implies(a < 10, Spec.ForAll<int>(y => y * a == a * y)));
+
+                [Theorem]
+                static Proof Calls(int a) => Prove.That(a < 0 || Half(a) <= a);
+
+                [Theorem]
+                static Proof Wraps(int a) => Prove.That(unchecked(a + 1) != a);
+            }
+            """);
+        var guarded = translation.Find("M:S.Guarded(System.Int32)")!;
+        Assert.Equal(2, guarded.WellDefinedness.Length);
+        var wd = guarded.WellDefinedness[0];
+        Assert.Equal(SpecObligationKind.WellDefinedOperation, wd.Kind);
+        Assert.Equal("Cs.S.«Guarded(System.Int32)».$wd_1", wd.Theorem.Name.ToString());
+        Assert.Equal(BinaryOp.Mul, Assert.IsType<BinaryExpr>(wd.Node).Op);
+        // ∀ σ a (h : a < 10) y, ⦃⌜True⌝⦄ Warrant.Int32.mulChecked σ y a ⦃⇓_ => ⌜True⌝, allowed⦄
+        Assert.Equal(4, wd.Binders);
+        var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 4));
+        Assert.Equal(Expr.App(C("Warrant.Int32.mulChecked"), Expr.BVar(3), Expr.BVar(0), Expr.BVar(2)), program);
+        Assert.Equal(Under(guarded.WellDefinedness[1].Theorem.Type, 4).GetAppArgs()[4].GetAppFn(), C("Warrant.Int32.mulChecked"));
+        foreach (var obligation in guarded.WellDefinedness)
+        {
+            AssertProposition(env, obligation.Theorem.Type);
+        }
+        AssertProposition(env, guarded.Theorem!.Type);
+
+        // The call to Half is under ¬(a < 0), the guard of the || that encloses it.
+        var calls = translation.Find("M:S.Calls(System.Int32)")!;
+        var call = Assert.Single(calls.WellDefinedness);
+        Assert.Equal(SpecObligationKind.CalleePrecondition, call.Kind);
+        Assert.IsType<CallExpr>(call.Node);
+        Assert.Equal(2, call.Binders);
+        AssertProposition(env, call.Theorem.Type);
+
+        Assert.Empty(translation.Find("M:S.Wraps(System.Int32)")!.WellDefinedness);
+    }
+
+    [Fact]
     public void ACallToAPureMethodWithRequiresInASpecExpressionHasItsPreconditionAsAnObligation()
     {
         var (translation, env) = Translate("""

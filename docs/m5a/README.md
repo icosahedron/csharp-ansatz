@@ -98,6 +98,17 @@ flowchart TB
   G --> I["certificate: Lean's kernel re-checks it (chapter 8)"]
 ```
 
+## Arithmetic in a statement (since #236)
+
+M5a's statements wrapped like the code.
+Since the M6 follow-ups, a theorem's own `+`, `-`, `*` and unary `-` on `int` and `long` must not overflow, under the
+guards of `&&`, `||`, `?:`, `??` and `Spec.Implies` and for every value of a `Spec.ForAll` or `Spec.Exists` variable
+(docs/m4/06, docs/m6/06): `Prove.That(Spec.ForAll<int>(y => y + 0 == y))` still proves, since `y + 0` never overflows,
+while `Prove.That(x + 1 - 1 == x)` fails at `x + 1` until a `Spec.Implies` bounds `x`.
+`AlwaysLarger` above is unaffected: its statement `Increment(x) > x` has no arithmetic of its own, so it still fails
+with its counterexample; the `x + 1` is in `Increment`'s body (#244).
+Explicit `unchecked(...)` wraps on purpose and has no obligation.
+
 ## What M5a deliberately leaves out
 
 - The server, cache, store, `explain` and analyzers, which M5b built ([docs/m5b/](../m5b/README.md)).

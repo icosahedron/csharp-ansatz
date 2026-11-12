@@ -30,14 +30,14 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
                 return n + Sum(n - 1);
             }
 
-            [Theorem] static Proof IncAddsOne(int x) => Prove.That(Inc(x) == x + 1).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());
+            [Theorem] static Proof IncAddsOne(int x) => Prove.That(Inc(x) == unchecked(x + 1)).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());
 
             [Theorem] static Proof SumOfZero() => Prove.That(Sum(0) == 0).By(Tactic.Unfold(nameof(Sum)), Tactic.Simp());
 
             [Theorem]
-            static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+            static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
 
-            [Theorem] static Proof User(int a) => Prove.That(Twice(a) == a + a).By(Tactic.Apply(nameof(Lemma)));
+            [Theorem] static Proof User(int a) => Prove.That(Twice(a) == unchecked(a + a)).By(Tactic.Apply(nameof(Lemma)));
 
             [Theorem] static Proof Wrong() => Prove.That(Inc(1) == 3);
         }
@@ -96,8 +96,8 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
         var service = NewService();
         service.Verify(Request(Units(Source)));
         var edited = Units(Source.Replace(
-            "Inc(x) == x + 1).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega())",
-            "Inc(x) == x + 1).By(Tactic.Unfold(nameof(Inc)), Tactic.Simp())",
+            "Inc(x) == unchecked(x + 1)).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega())",
+            "Inc(x) == unchecked(x + 1)).By(Tactic.Unfold(nameof(Inc)), Tactic.Simp())",
             StringComparison.Ordinal));
 
         var warm = service.Run(Request(edited));
@@ -199,9 +199,9 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
             {
                 [Verified] public static int Twice(int x) => x + x;
 
-                [Theorem] static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Exact("h"));
+                [Theorem] static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Exact("h"));
 
-                [Theorem] static Proof User(int a) => Prove.That(Twice(a) == a + a).By(Tactic.Apply(nameof(Lemma)));
+                [Theorem] static Proof User(int a) => Prove.That(Twice(a) == unchecked(a + a)).By(Tactic.Apply(nameof(Lemma)));
             }
             """;
         var units = Units(source);
@@ -275,6 +275,30 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Equal(OutcomeKind.Proved, Result(recheck, User).Outcome.Kind);
         // Sum's decrease proof and equation lemma come from its certificate, checked by the kernel.
         Assert.True(Result(recheck, Sum).Rechecked);
+        Assert.Equal(0, recheck.Counters.TacticRuns);
+    }
+
+    [Fact]
+    public void ARecheckedTheoremHasItsWellDefinednessTheoremsCheckedAgainFromItsCertificate()
+    {
+        // #236: the certificate holds the statement's T.$wd_k before the theorem; recheck admits each with its cached proof.
+        const string source = """
+            public static class S
+            {
+                [Theorem] static Proof Bounded(int a) => Prove.That(Spec.Implies(a < 1000 && a > -1000, a + 1 > a)).By(Tactic.Intro("h"), Tactic.Omega());
+            }
+            """;
+        const string key = "M:S.Bounded(System.Int32)";
+        var units = Units(source);
+        var cold = Result(NewService().Verify(Request(units)), key);
+        Assert.Equal(OutcomeKind.Proved, cold.Outcome.Kind);
+        var entry = new FileResultCache().Read(Dir, KeyOf(units, key))!.Entry;
+        Assert.Equal(2, entry.Declarations().Length);
+
+        var recheck = NewService().Verify(Request(units) with { Recheck = true });
+
+        Assert.True(Result(recheck, key).Rechecked);
+        Assert.Equal(OutcomeKind.Proved, Result(recheck, key).Outcome.Kind);
         Assert.Equal(0, recheck.Counters.TacticRuns);
     }
 
@@ -470,7 +494,7 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
         "SumOfZero() => Prove.That(Sum(0) == 0)", "SumOfZero() => Prove.That(0 == Sum(0))", StringComparison.Ordinal);
 
     private static string EditUser(string source, string parameter) => source.Replace(
-        "User(int a) => Prove.That(Twice(a) == a + a)", $"User(int {parameter}) => Prove.That(Twice({parameter}) == {parameter} + {parameter})", StringComparison.Ordinal);
+        "User(int a) => Prove.That(Twice(a) == unchecked(a + a))", $"User(int {parameter}) => Prove.That(Twice({parameter}) == unchecked({parameter} + {parameter}))", StringComparison.Ordinal);
 
     /// <summary>
     /// A certificate whose theorem with the given last name component has, as its proof, the expression of its own type:

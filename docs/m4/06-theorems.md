@@ -27,6 +27,15 @@ D := instDecidableEqInt32 (Payout 1000 250 500) 500
 The statement is trusted: if `P` said something other than the C# claim, a proof of it would prove the wrong thing.
 So statements are built by `Warrant.Semantics`, with the rest of the trusted translation (KTD22).
 
+Since the M6 follow-ups (#236), the statement is translated as a `Spec` expression is (docs/m6/06): its `+`, `-`, `*`
+and unary `-` on `int` and `long` in C#'s default context must not overflow, and a call in it to a pure method with
+`Spec.Requires` must be within that precondition.
+Each is a well-definedness theorem `T.$wd_k`, proved by M6's default procedure before the theorem, whatever proves the
+claim; the theorem is proved only when every one of them is, and one that fails is WRT0001 at the operation, `well-definedness of a Spec expression`.
+The statement's own term does not change.
+An M4 statement such as `Increment(int.MaxValue) == int.MinValue` has no arithmetic of its own (the wrap is in the
+method's body, which #244 covers) and is unaffected; a statement that wraps on purpose writes `unchecked(...)`.
+
 ## The two proofs
 
 The reference says that without `.By`, the translator tries `rfl` and then `decide` ([reference.md](../proving/reference.md)).

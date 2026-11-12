@@ -132,7 +132,7 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
                     static Proof ValidImpliesPositive(Payment p) =>
                         Prove.That(Spec.Implies(Validate(p) == PaymentResult.Valid, p.Amount > 0));
 
-                    [Theorem] static Proof Ordered(long a, long b) => Prove.That(a >= b || b > a + 1);
+                    [Theorem] static Proof Ordered(long a, long b) => Prove.That(a >= b || b > unchecked(a + 1));
                 }
                 """)],
             checkOverflow: false);

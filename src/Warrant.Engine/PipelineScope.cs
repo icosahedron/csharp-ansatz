@@ -66,9 +66,22 @@ public static partial class Pipeline
                     };
                 }
                 var budget = _budget = new TheoremBudget(options, shell.Budget);
-                return shell.Script is null && shell.Statement.Instance is not null
+                _searched = true;
+                _theorem = true;
+                // #236: the statement's well-definedness obligations, each by the default procedure as a contract's are,
+                // whatever proves the claim itself; the theorem is proved only when all of them are.
+                var wellDefined = new List<KernelDeclaration>();
+                foreach (var wd in translated.WellDefinedness)
+                {
+                    if (ProveWellDefined(unit, wd, display, assumptions, wellDefined, budget) is { } failure)
+                    {
+                        return failure;
+                    }
+                }
+                var outcome = shell.Script is null && shell.Statement.Instance is not null
                     ? Compute(unit, shell, display, assumptions, budget)
                     : RunScript(unit, shell, display, assumptions, budget);
+                return outcome is ProvedOutcome proved ? proved with { WellDefinedness = [.. wellDefined.Cast<TheoremDecl>()] } : outcome;
             }
             var admitted = new List<KernelDeclaration>();
             var definitionBudget = _budget = new TheoremBudget(options, null);
@@ -297,15 +310,25 @@ public static partial class Pipeline
 
         /// <summary>
         /// Admits one of a definition's or type's declarations into the run's fork and records <paramref name="key"/> as the
-        /// owner of its constants (KTD33): the fork keeps them even if a later step of the unit fails or runs out.
+        /// owner of its constants (KTD33): the fork keeps them even if a later step of the unit fails or runs out. A
+        /// theorem's well-definedness theorems (#236) go into its own fork only, and reach the run with its outcome.
         /// </summary>
         private void AddDeclaration(string key, KernelDeclaration declaration, List<KernelDeclaration> admitted, TheoremBudget budget)
         {
             Kernel.Kernel.Add(Env, declaration, budget.Kernel);
-            run.Admitted.Add(declaration);
-            run.Own(key, declaration);
+            if (!_theorem)
+            {
+                run.Admitted.Add(declaration);
+                run.Own(key, declaration);
+            }
             admitted.Add(declaration);
         }
+
+        /// <summary>
+        /// Whether the unit is a theorem, which runs on a worker in its own fork (KTD8): what it admits reaches the run
+        /// with its outcome, in <see cref="RunState"/>'s admission of its level, never from the worker.
+        /// </summary>
+        private bool _theorem;
 
         /// <summary>
         /// A closed theorem with no script (M4, KTD12): tries <c>rfl</c>, then <c>decide</c>; if neither is admitted, reduces

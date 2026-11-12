@@ -178,9 +178,16 @@ public static class Translator
                     }
                 case VirUnitKind.Theorem:
                     {
-                        var (statement, claim) = new BodyTranslator(types, callees).StatementAndClaim(unit);
+                        var (statement, claim, wellDefinedness) = new BodyTranslator(types, callees).TheoremStatement(unit);
+                        foreach (var wd in wellDefinedness)
+                        {
+                            Declare(unit.Key, wd.Theorem.Name, $"{display} (well-definedness {wd.Index})", null);
+                        }
                         Declare(unit.Key, name, display, null);
-                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [], new TheoremShell(name, statement, unit.Script, unit.Budget, claim));
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [], new TheoremShell(name, statement, unit.Script, unit.Budget, claim))
+                        {
+                            WellDefinedness = wellDefinedness,
+                        };
                     }
                 case VirUnitKind.Type:
                     {

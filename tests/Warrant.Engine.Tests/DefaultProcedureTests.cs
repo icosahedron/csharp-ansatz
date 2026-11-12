@@ -310,6 +310,47 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
     }
 
     [Fact]
+    public void ArithmeticInATheoremThatCanOverflowFailsAtTheOperationAndProvesWhenBounded()
+    {
+        // #236: a theorem's statement follows the same rule: its default-context arithmetic must not overflow, whatever
+        // proves the claim; explicit unchecked(...) wraps on purpose.
+        var source = Wrap("""
+            [Theorem]
+            static Proof Unbounded(int a) =>
+                Prove.That(a + 1 > a).By(Tactic.Omega());
+
+            [Theorem]
+            static Proof Bounded(int a) =>
+                Prove.That(Spec.Implies(a < 1000 && a > -1000, a + 1 > a)).By(Tactic.Intro("h"), Tactic.Omega());
+
+            [Theorem]
+            static Proof Wraps() => Prove.That(unchecked(int.MaxValue + One()) == int.MinValue);
+
+            [Theorem]
+            static Proof Overflows() => Prove.That(int.MaxValue + One() == int.MinValue);
+
+            [Theorem]
+            static Proof Quantified() => Prove.That(Spec.ForAll<int>(y => Spec.Implies(y < 5, y + 1 <= 5))).By(Tactic.Intro("y"), Tactic.Intro("h"), Tactic.Omega());
+
+            [Verified]
+            public static int One() => 1;
+            """);
+        var result = Run(source);
+        var unbounded = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Unbounded(System.Int32)"));
+        Assert.All(unbounded.Vcs, v => Assert.Equal(VcKind.WellDefinedness, v.Kind));
+        Assert.StartsWith(VcKinds.Text(VcKind.WellDefinedness), unbounded.Message, StringComparison.Ordinal);
+        Assert.Equal("a + 1", Text(source, "M:S.Unbounded(System.Int32)", unbounded.TacticNode));
+        Assert.IsType<ProvedOutcome>(result.Find("M:S.Bounded(System.Int32)"));
+        var bounded = (ProvedOutcome)result.Find("M:S.Bounded(System.Int32)")!;
+        Assert.Single(bounded.WellDefinedness);
+        Assert.Equal(2, bounded.Declarations.Length);
+        Assert.IsType<ProvedOutcome>(result.Find("M:S.Wraps"));
+        var overflows = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Overflows"));
+        Assert.Equal("int.MaxValue + One()", Text(source, "M:S.Overflows", overflows.TacticNode));
+        Assert.IsType<ProvedOutcome>(result.Find("M:S.Quantified"));
+    }
+
+    [Fact]
     public void AnUnsatisfiableRequiresIsReportedAtItsLine()
     {
         var source = Wrap("""

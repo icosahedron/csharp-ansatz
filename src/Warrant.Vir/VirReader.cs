@@ -117,6 +117,7 @@ public static class VirReader
             "ref" => new RefType(value.GetString()!),
             "nullable" => new NullableType(Type(value)),
             "task" => new TaskType(Type(value)),
+            "opaque" => new OpaqueType(value.GetString() ?? throw new FormatException("An opaque type names its key.")),
             _ => throw new FormatException($"Unknown VIR type '{name}'."),
         };
     }
@@ -299,6 +300,10 @@ public static class VirReader
                 "true" => 1,
                 _ => throw new FormatException($"Not a bool literal: '{text}'."),
             };
+        }
+        if (type == VirType.Unit && text != "0")
+        {
+            throw new FormatException($"Not the unit literal: '{text}'.");
         }
         return Long(text);
     }

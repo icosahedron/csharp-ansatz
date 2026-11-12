@@ -149,7 +149,6 @@ false one pass.
 
 | Ticket | Gap |
 |---|---|
-| #215 | A `CancellationToken` parameter and a bare `return;` have no VIR form and are rejected (chapter 4). |
 | #216 | Theorems over `decimal` `Math.Max`/`Min` with parameters do not prove: nothing splits the `if` (chapter 3). |
 | #217 | `simp` does not compute a `decimal` literal's `units`, so `omega` cannot use it (chapter 3). |
 | #218 | A record with a nullable field fails translation (chapter 5). |

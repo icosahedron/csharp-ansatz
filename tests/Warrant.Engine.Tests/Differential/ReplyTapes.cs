@@ -120,6 +120,8 @@ internal sealed class TapeValues(Values values, Inputs inputs)
                 };
             case NullableType n:
                 return rng.Next(4) == 0 ? null : Draw(n.Value, rng);
+            case OpaqueType:
+                return new CancellationToken(rng.Next(2) == 1);
         }
         var key = ((RefType)type).Key;
         if (values.Definition(key) is RecordDefinition record)
@@ -548,6 +550,9 @@ internal sealed class DependencyRunner
                         Equals(VirType.Bool, Expr.Proj(d, 0, a), Expr.Proj(d, 0, b)),
                         And(Expr.App(C("Nat.beq"), Expr.Proj(d, 1, a), Expr.Proj(d, 1, b)), Expr.App(C("Nat.beq"), Expr.Proj(d, 2, a), Expr.Proj(d, 2, b))));
                 }
+            case OpaqueType:
+                // A CancellationToken is Unit in the model (#215): the model passes () where the CLR passes its token.
+                return C("Bool.true");
             case RefType { Key: var key }:
                 switch (Side.Model.Values.Definition(key))
                 {

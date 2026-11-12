@@ -374,6 +374,63 @@ public sealed class DependencyObligationTests(SemanticsBundleFixture bundle) : I
         AssertProposition(env, translation.Find("M:S.Twice(System.Int32)")!.Contract!.Theorem.Type);
     }
 
+    // ---- CancellationToken and return; (#215) ----
+
+    [Fact]
+    public void ACancellationTokenIsAUnitParameterAndABareReturnIsPureUnit()
+    {
+        var (translation, env) = Translate("""
+            using System.Threading;
+
+            public interface IStore { Task<int> Load(int id, CancellationToken ct); Task Save(int id, CancellationToken ct); }
+
+            [ContractFor(typeof(IStore))]
+            internal abstract class StoreContract : IStore
+            {
+                public Task<int> Load(int id, CancellationToken ct) { Spec.Ensures<int>(r => r >= 0); return default!; }
+                public Task Save(int id, CancellationToken ct) => default!;
+            }
+
+            public sealed class S(IStore store)
+            {
+                [Verified]
+                public async Task Copy(int id, CancellationToken ct)
+                {
+                    if (id < 0) return;
+                    var n = await store.Load(id, ct);
+                    await store.Save(n, ct);
+                }
+            }
+
+            public static class P
+            {
+                [Verified]
+                public static void Check(int x)
+                {
+                    if (x > 0) return;
+                }
+            }
+            """);
+
+        // ∀ {σ} (store_Load : Int32 → Unit → ClrM σ Int32) (store_Save : Int32 → Unit → ClrM σ Unit) (id : Int32) (ct : Unit), ClrM σ Unit
+        var copy = Definition(translation, "M:S.Copy(System.Int32,System.Threading.CancellationToken)");
+        var σ = Assert.IsType<ForallExpr>(copy.Type);
+        var load = Assert.IsType<ForallExpr>(σ.Body);
+        Assert.Equal(Expr.Forall(N("id"), Int32T, Expr.Forall(N("ct"), UnitT, Expr.App(C("Warrant.ClrM"), Expr.BVar(2), Int32T))), load.BinderType);
+        var save = Assert.IsType<ForallExpr>(load.Body);
+        var id = Assert.IsType<ForallExpr>(save.Body);
+        var ct = Assert.IsType<ForallExpr>(id.Body);
+        Assert.Equal(("ct", UnitT), (ct.BinderName.ToString(), ct.BinderType));
+        AssertProposition(env, translation.Find("M:S.Copy(System.Int32,System.Threading.CancellationToken)")!.Contract!.Theorem.Type);
+
+        // `if (x > 0) return;` in a pure void method: both paths return ().
+        var check = Definition(translation, "M:P.Check(System.Int32)");
+        Assert.Equal(Expr.Forall(N("x"), Int32T, UnitT), check.Type);
+        var ite = Assert.IsType<LamExpr>(check.Value).Body;
+        Assert.Equal(C("Unit.unit"), ite.GetAppArgs()[3]);
+        Assert.Equal(C("Unit.unit"), ite.GetAppArgs()[4]);
+    }
+
     // ---- Contract-class members (KTD10, KTD25, KTD26) ----
 
     [Fact]

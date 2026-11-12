@@ -738,7 +738,7 @@ public static partial class Extractor
             {
                 throw Reject(method, "theorem that is not static");
             }
-            Parameters(candidate, walker, method, method.Parameters);
+            Parameters(candidate, walker, method, method.Parameters, opaque: false);
             var value = ReturnedExpression(method)
                 ?? throw Reject(method, "theorem that is not Prove.That");
             IInvocationOperation? by = null;
@@ -780,7 +780,9 @@ public static partial class Extractor
             return timeout == 0 && tacticFuel == 0 && kernelFuel == 0 ? null : new VirBudget(timeout, tacticFuel, kernelFuel);
         }
 
-        private static void Parameters(Candidate candidate, Walker walker, ISymbol member, ImmutableArray<IParameterSymbol> parameters)
+        // `opaque`: whether a CancellationToken parameter is accepted as opaque (#215): for a function or a contract unit,
+        // not for a theorem, whose parameters are quantified over.
+        private static void Parameters(Candidate candidate, Walker walker, ISymbol member, ImmutableArray<IParameterSymbol> parameters, bool opaque = true)
         {
             foreach (var p in parameters)
             {
@@ -789,8 +791,8 @@ public static partial class Extractor
                     throw Reject(member, "ref parameter");
                 }
                 var at = p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
-                var ptype = walker.MapType(p.Type, p.NullableAnnotation == NullableAnnotation.Annotated, at);
-                walker.AddParameter(p, candidate.Params.Count);
+                var ptype = walker.MapParameterType(p.Type, p.NullableAnnotation == NullableAnnotation.Annotated, at, opaque);
+                walker.AddParameter(p, candidate.Params.Count, ptype);
                 candidate.Params.Add(new VirParam(p.Name, ptype));
                 candidate.ParameterSymbols.Add(p);
             }

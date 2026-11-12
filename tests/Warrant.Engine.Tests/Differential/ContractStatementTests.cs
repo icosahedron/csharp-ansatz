@@ -141,6 +141,8 @@ public sealed class ContractStatementTests(M6DependencyFixture fixture, ITestOut
         "M:Corpus.M6.Dependencies.OrderService.Counted(System.Int32)",
         "M:Corpus.M6.Dependencies.OrderService.QuantityOf(System.Int32)",
         "M:Corpus.M6.Dependencies.OrderService.Reserved(System.Int32)",
+        "M:Corpus.M6.Dependencies.ShipmentService.IdOf(System.Int32,System.Threading.CancellationToken)",
+        "M:Corpus.M6.Dependencies.ShipmentService.ShipIfFound(System.Int32,System.Threading.CancellationToken)",
         "M:Corpus.M6.Dependencies.Steps.Next(System.Int32)",
         "M:Corpus.M6.Dependencies.Steps.Run(System.Int32)",
         "M:Corpus.M6.Effects.Closed(System.Int32)",

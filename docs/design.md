@@ -461,7 +461,7 @@ public void PayInInstallments(Payment p, int count, decimal installment)   // no
 | Exceptions | the `ClrExn` branch of `ClrM σ α := ExceptT ClrExn (StateM σ) α` | M6: `overflow`, `divideByZero`, `nullReference`, `invalidOperation`, `assertFailed`, `thrown` (an explicit `throw new T(...)`, by `T`'s key) and `external` (from a dependency). `try`/`catch` is not modelled and is rejected. |
 | An interface with a `[ContractFor]` class, through a `readonly` field or a never-assigned primary-constructor parameter | one operation `args → ClrM σ R` per member called, a parameter of the obligation, with the member's contract as a hypothesis (§6.3) | M6. The world `σ` is opaque, so two calls are related only by their contracts. Other field access: M7. |
 | Mutable classes and fields | heap model (§6.2) | Not in the first effectful milestone. |
-| `async`/`await` | sequencing in the monad: `Task<T>`, `ValueTask<T>` to `ClrM σ T`; `Task`, `ValueTask`, `void` to `ClrM σ Unit` | M6, only when awaiting external or verified calls, with every task-returning call the direct operand of `await`. A `CancellationToken` parameter is not accepted yet (GitHub #215). |
+| `async`/`await` | sequencing in the monad: `Task<T>`, `ValueTask<T>` to `ClrM σ T`; `Task`, `ValueTask`, `void` to `ClrM σ Unit` | M6, only when awaiting external or verified calls, with every task-returning call the direct operand of `await`. A `CancellationToken` parameter is opaque, a `Unit` the method only passes on (GitHub #215), and a bare `return;` returns `()`. |
 
 ### 6.2 The Warrant Lean library (D10)
 

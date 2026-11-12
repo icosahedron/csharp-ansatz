@@ -87,7 +87,9 @@ The model runs in the world `Nat`, the call index, with one operation per member
 otherwise throws a marked error; the final world must equal the CLR's number of calls.
 So a model that calls the wrong member, with other arguments, in another order, or a different number of times fails
 (`ACallWithOtherArgumentsOrInAnotherOrderIsCaught`). Arguments of nullable or closed types are not compared yet; no
-corpus member passes one.
+corpus member passes one. A `CancellationToken` argument (#215) is `()` in the model and equal to any token; the inputs
+give a token parameter `CancellationToken.None` and an already cancelled token, so a method whose result depended on
+the token would disagree with the model.
 On the CLR side, a mock class per contracted interface replays the same tape in a rewritten copy of the compilation
 (`ContractCompilation`), which only adds members: `DispatchProxy` cannot proxy interfaces from the collectible load
 context the tests use, which the plan did not foresee.
@@ -114,7 +116,7 @@ the same type in the same method would be missed; no corpus method has one.
 `tests/corpus/m6/` is the exit criterion as files (KTD24), in the M4 corpus's layout: `accepted/`, `refuted/` and
 `rejected/`, and `expected.json` with each member's outcome and each compilation, five of them (`accepted`, `refuted`,
 `refuted-dependencies`, `rejected`, `checked-project`).
-It holds 155 members (147 at M6's exit; #182 added `Quotient`, `Half`, `QuotientOfAny` and `NoThrowAfterEnsures`, #183 `Sum` and `SumUnbounded`, #213 `Successor` and `Grown`).
+It holds 159 members (147 at M6's exit; #182 added `Quotient`, `Half`, `QuotientOfAny` and `NoThrowAfterEnsures`, #183 `Sum` and `SumUnbounded`, #213 `Successor` and `Grown`, #215 `IdOf`, `ShipIfFound` and `IShipments`' two contract units, and replaced the rejected `Early` with `Uncancelled`).
 `tests/corpus/m6/README.md` lists every file, what each member is for, and the members that moved from the M4 corpus
 (chapter 4).
 

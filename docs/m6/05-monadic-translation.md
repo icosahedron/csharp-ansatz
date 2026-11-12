@@ -79,7 +79,18 @@ from the first call to the second (a kernel-evaluated test with a counting mock 
 `ValueTask` one a `ClrM σ Unit` program; `await` binds the awaited call's program, whether it is a dependency call, a
 raising verified method or a pure one, and the VC walker checks a verified callee's `Spec.Requires` there as at any
 other call (#228).
-A discarded call (`F(x);`) is bound and its value dropped.
+A discarded call (`F(x);`) is bound and its value dropped, and `return;` (#215) is `()`, or `pure ()` in a program.
+
+A `CancellationToken` parameter (`opaque{…}`, #215) is a parameter of type `Unit`, in the method and in the dependency
+operations and contract hypotheses whose members take one: `store_Find : Int32 → Unit → ClrM σ (Option Order)`.
+This is sound because nothing the model computes can depend on a token.
+Extraction lets a token only be passed on (chapter 4), so the method's own code never reads it, and no `Spec` expression
+can mention it, so a contract can neither inspect it nor be confused by it.
+Cancellation is an external effect: a dependency that observes its token raises an exception, which the dependency's
+program may do whatever its arguments are (`ClrExn.external`, KTD4, KTD12), and the report lists the exceptions a call
+may raise.
+A token passed to a verified method is passed on by it in turn, under the same rules.
+`ct.ThrowIfCancellationRequested()` is not modelled; a method that needs it is rejected (WRT0005).
 
 Translation refuses to translate a call to a method that has dependencies of its own; extraction already rejects it.
 

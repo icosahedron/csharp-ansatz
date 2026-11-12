@@ -53,7 +53,7 @@ public static class Literals
     /// <returns>The term.</returns>
     public static Expr Int64(long value) => Integer(VirPrimitive.Int64, value);
 
-    /// <summary>A literal of a primitive type, as VIR stores it (a <c>bool</c> is 0 or 1).</summary>
+    /// <summary>A literal of a primitive type, as VIR stores it (a <c>bool</c> is 0 or 1, the <c>unit</c> value 0).</summary>
     /// <param name="type">The primitive.</param>
     /// <param name="value">The value.</param>
     /// <returns>The term.</returns>
@@ -67,6 +67,9 @@ public static class Literals
             case VirPrimitive.Int32 when value is >= int.MinValue and <= int.MaxValue:
             case VirPrimitive.Int64:
                 return Integer(type, value);
+            // What `return;` returns in a method that returns no value (#215).
+            case VirPrimitive.Unit when value == 0:
+                return Init.UnitUnit;
             default:
                 throw new TranslationException(null, $"the literal {value} is out of range for {type}.");
         }

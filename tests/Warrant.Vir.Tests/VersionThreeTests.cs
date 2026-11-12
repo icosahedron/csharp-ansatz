@@ -128,6 +128,33 @@ public class VersionThreeTests
     }
 
     [Fact]
+    public void AnOpaqueParameterAndAUnitReturnHaveTheDocumentedShape()
+    {
+        // #215: a CancellationToken parameter is `opaque{key}`, and `return;` returns the unit literal `lit{unit, 0}`.
+        const string token = "T:System.Threading.CancellationToken";
+        var unit = VirUnit.Function(
+            "M:C.Early(System.Threading.CancellationToken)",
+            VirList.Of(new VirParam("ct", VirType.Opaque(token))),
+            VirType.Task(VirType.Unit),
+            new BlockStmt(VirList.Of<VirStmt>(new ReturnStmt(LitExpr.Unit))),
+            VirList<VirAssumption>.Empty,
+            Samples.Facts,
+            VirList<string>.Empty);
+
+        var json = VirWriter.WriteString(unit);
+
+        Assert.Contains(J("""`params`:[{`name`:`ct`,`type`:{`opaque`:`T:System.Threading.CancellationToken`}}]"""), json, StringComparison.Ordinal);
+        Assert.Contains(J("""{`return`:{`lit`:{`type`:`unit`,`value`:`0`}}}"""), json, StringComparison.Ordinal);
+        Assert.Equal(unit, VirReader.Read(Encoding.UTF8.GetBytes(json)));
+        Assert.Equal(new OpaqueType(token), VirType.Opaque(token));
+
+        // The unit literal has one value.
+        Assert.Throws<ArgumentException>(() => VirWriter.Write(unit with { Body = new BlockStmt(VirList.Of<VirStmt>(new ReturnStmt(new LitExpr(VirType.Unit, 1)))) }));
+        var forged = json.Replace(J("`type`:`unit`,`value`:`0`"), J("`type`:`unit`,`value`:`1`"), StringComparison.Ordinal);
+        Assert.Throws<FormatException>(() => VirReader.Read(Encoding.UTF8.GetBytes(forged)));
+    }
+
+    [Fact]
     public void AnEnsuresBindsALocalAndANameOrNeither()
     {
         var unit = Samples.SaveContract() with { Body = new BlockStmt(VirList.Of<VirStmt>(new EnsuresStmt(0, null, LitExpr.Bool(true)))) };

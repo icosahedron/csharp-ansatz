@@ -2,11 +2,17 @@ using System.Numerics;
 
 namespace Warrant.Vir;
 
-/// <summary><c>lit{type, value}</c>: a <c>bool</c>, <c>int32</c> or <c>int64</c> constant.</summary>
+/// <summary>
+/// <c>lit{type, value}</c>: a <c>bool</c>, <c>int32</c> or <c>int64</c> constant, or the <c>unit</c> value that <c>return;</c>
+/// returns (#215).
+/// </summary>
 /// <param name="Type">The literal's type.</param>
-/// <param name="Value">The value; for <c>bool</c>, 0 or 1.</param>
+/// <param name="Value">The value; for <c>bool</c>, 0 or 1; for <c>unit</c>, 0.</param>
 public sealed record LitExpr(VirType Type, long Value) : VirExpr(Type)
 {
+    /// <summary>The one <c>unit</c> value: what <c>return;</c> in a <c>void</c>, <c>Task</c> or <c>ValueTask</c> method returns (#215).</summary>
+    public static LitExpr Unit { get; } = new(VirType.Unit, 0);
+
     /// <summary>A <c>bool</c> literal.</summary>
     /// <param name="value">The value.</param>
     /// <returns>The literal.</returns>

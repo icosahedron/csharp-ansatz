@@ -649,6 +649,51 @@ example is `tests/corpus/m6/accepted/Payments.cs`, and its report block is `test
 (`ProcessPaymentsObligationProvesUnderTheDefaultProcedure` in `ExternalCallTests.cs`,
 `TheReportOfProcessPaymentIsTheCheckedInOne` in `ReportTests.cs`).
 
+### A cancellation token passed through, and an early `return;`
+
+```csharp
+public interface IShipments
+{
+    Task<Order?> Find(int id, CancellationToken ct);
+    Task Ship(Order order, CancellationToken ct);
+}
+
+[ContractFor(typeof(IShipments))]
+internal abstract class ShipmentsContract : IShipments
+{
+    public Task<Order?> Find(int id, CancellationToken ct)
+    {
+        Spec.Ensures<Order?>(r => r is null || r.Id == id);
+        return default!;
+    }
+
+    public Task Ship(Order order, CancellationToken ct)
+    {
+        Spec.Requires(order.Id > 0);
+        return default!;
+    }
+}
+
+public sealed class ShipmentService(IShipments shipments)
+{
+    [Verified]
+    public async Task ShipIfFound(int id, CancellationToken ct)
+    {
+        if (id <= 0) return;
+        var order = await shipments.Find(id, ct);
+        if (order is null) return;
+        await shipments.Ship(order, ct);
+    }
+}
+```
+
+Proved with no script: `Ship`'s `Spec.Requires` holds because `Find`'s contract gives `order.Id == id` and the first
+`return;` leaves only `id > 0`. The token is a value the proof cannot look at (a `Unit` in the model), passed on to both
+calls; a cancelled call is one of the exceptions the report says `Find` and `Ship` may raise. Writing `default` or
+`CancellationToken.None` for the token, or reading `ct.IsCancellationRequested`, is rejected. The example is
+`ShipmentService` in `tests/corpus/m6/accepted/Dependencies.cs` (`CorpusTests.EveryM6MemberGetsItsExpectedOutcome`; the
+differential tests run it with a cancelled and an uncancelled token).
+
 ## Facts about particular inputs (M4)
 
 Source: `tests/corpus/m4/accepted/`. These 33 theorems have no parameters, and are proved by computation in the

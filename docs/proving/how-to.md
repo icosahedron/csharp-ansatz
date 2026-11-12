@@ -325,8 +325,14 @@ public sealed class Claims(IClaimStore store)
 Contracts are **never** global axioms. A wrong contract can't be used to prove
 something unrelated; it only weakens the proofs that use it.
 
-Not yet: a `CancellationToken` parameter and a bare `return;` in a `Task`
-method are rejected (GitHub #215), and a field of a nullable result read after
+A `CancellationToken` parameter may be passed on to a dependency call
+(`store.Find(claimId, ct)`) or a verified method: the proof treats it as a
+value it cannot look at, and cancellation as one more exception a call may
+raise. Reading a token (`ct.IsCancellationRequested`) or making one
+(`default`, `CancellationToken.None`) is rejected. A bare `return;` in a
+`void` or `Task` method is fine.
+
+Not yet: a field of a nullable result read after
 a null test (`claim.Amount` above, rather than `claim.Id`) is sometimes not
 related to what the walk learned about it, so a true `Spec.Ensures` about it
 fails (GitHub #226).

@@ -57,7 +57,41 @@ internal sealed partial class Walker
     public static RejectedException Reject(string construct, SyntaxNode? at, string? detail = null, string id = DiagnosticIds.Unsupported) =>
         new(new Rejection(id, construct, at?.GetLocation(), detail is null ? $"M4 does not support {construct}." : $"M4 does not support {construct}: {detail}."));
 
-    public void AddParameter(IParameterSymbol parameter, int index) => _parameters.Add(parameter, index);
+    public void AddParameter(IParameterSymbol parameter, int index, VirType type)
+    {
+        _parameters.Add(parameter, index);
+        _parameterTypes.Add(parameter, type);
+    }
+
+    /// <summary>The VIR type of each of the unit's parameters, as <see cref="MapParameterType"/> mapped it.</summary>
+    private readonly Dictionary<IParameterSymbol, VirType> _parameterTypes = new(SymbolEqualityComparer.Default);
+
+    /// <summary>The key of <c>System.Threading.CancellationToken</c>, the one opaque type (#215).</summary>
+    public const string CancellationTokenKey = "T:System.Threading.CancellationToken";
+
+    /// <summary>Whether a type is the framework's <c>System.Threading.CancellationToken</c>.</summary>
+    private bool IsCancellationToken(ITypeSymbol? type) =>
+        type is INamedTypeSymbol { Name: "CancellationToken", Arity: 0, TypeKind: TypeKind.Struct } named
+        && named.ContainingNamespace?.ToDisplayString() == "System.Threading"
+        && !InSource(named)
+        && Symbols.Key(named) == CancellationTokenKey;
+
+    private static RejectedException TokenNotAParameter(SyntaxNode? at) =>
+        Reject(
+            "cancellation token other than a parameter",
+            at,
+            "a CancellationToken may only be a parameter of a verified method or a contract member, passed on unchanged as an argument; the model has no value for one it reads, builds or stores");
+
+    /// <summary>
+    /// Maps a parameter's declared type: a <c>CancellationToken</c> of a verified method or a contract member is opaque
+    /// (#215), since it is only ever passed on; any other type as <see cref="MapType"/> maps it.
+    /// </summary>
+    /// <param name="type">The parameter's declared type.</param>
+    /// <param name="annotated">Whether the declaration is annotated nullable.</param>
+    /// <param name="at">Where a rejection is reported.</param>
+    /// <param name="opaque">Whether the parameter may be opaque: false for a theorem's.</param>
+    public VirType MapParameterType(ITypeSymbol type, bool annotated, SyntaxNode? at, bool opaque) =>
+        opaque && !annotated && IsCancellationToken(type) ? VirType.Opaque(CancellationTokenKey) : MapType(type, annotated, at);
 
     /// <summary>
     /// Sets the member's declared return type, which a returned value must fit (KTD5). An <c>async</c> method returns the
@@ -67,6 +101,13 @@ internal sealed partial class Walker
         _returns = isAsync && IsTask(type) is { TypeArguments.Length: 1 } task
             ? (task.TypeArguments[0], task.TypeArgumentNullableAnnotations[0] == NullableAnnotation.Annotated)
             : (type, annotated);
+
+    /// <summary>
+    /// Whether the member returns no value: <c>void</c>, or a non-generic <c>Task</c> or <c>ValueTask</c>, whose
+    /// <see cref="SetReturns"/> keeps the task type itself.
+    /// </summary>
+    private bool ReturnsNothing =>
+        _returns is { Type: var type } && (type.SpecialType == SpecialType.System_Void || IsTask(type) is { TypeArguments.Length: 0 });
 
     /// <summary>A returned value: an expression body's, or a <c>return</c> statement's, fitted to the declared return type.</summary>
     public VirExpr Returned(IOperation value)
@@ -104,6 +145,10 @@ internal sealed partial class Walker
         if (Symbols.Primitive(type) is { } p)
         {
             return Symbols.PrimitiveType(p);
+        }
+        if (IsCancellationToken(type))
+        {
+            throw TokenNotAParameter(at);
         }
         switch (type.SpecialType)
         {
@@ -223,9 +268,11 @@ internal sealed partial class Walker
                 return [ExpressionStatement(e)];
             case IReturnOperation { ReturnedValue: { } value } r:
                 return [Track(new ReturnStmt(Returned(value)), r.Syntax)];
+            case IReturnOperation r when ReturnsNothing:
+                // `return;` in a void, Task or ValueTask method returns the unit value, as reaching the end does (#215).
+                return [Track(new ReturnStmt(Track(new LitExpr(VirType.Unit, 0), r.Syntax)), r.Syntax)];
             case IReturnOperation r:
-                // VIR's return carries a value; a method without one ends by reaching its end (M6 U18).
-                throw Reject("return without a value", r.Syntax, "a method that returns no value ends by reaching the end of its body");
+                throw Reject("return without a value", r.Syntax, "only a method that returns no value has a bare return");
             case IConditionalOperation c:
                 {
                     var cond = Expr(c.Condition);
@@ -477,7 +524,10 @@ internal sealed partial class Walker
         {
             // A variable's type is its declaration's, not the flow state Roslyn gives the reference (KTD5).
             case IParameterReferenceOperation p when _parameters.TryGetValue(p.Parameter, out int index):
-                return Track(new ParamExpr(MapType(p.Parameter.Type, Annotated(p.Parameter), syntax), index), syntax);
+                return Track(new ParamExpr(_parameterTypes[p.Parameter], index), syntax);
+            // A token is passed on as the parameter it is, never built (`default`, `CancellationToken.None`) (#215).
+            case not IParameterReferenceOperation when IsCancellationToken(op.Type):
+                throw TokenNotAParameter(syntax);
             case ILocalReferenceOperation l when _locals.TryGetValue(l.Local, out int id):
                 {
                     var type = MapType(l.Type, annotated: false, syntax);

@@ -97,6 +97,8 @@ public sealed class DependencyDifferentialTests(M6DependencyFixture fixture, ITe
         ("accepted", "M:Corpus.M6.Payments.PaymentService.Validate(Corpus.M6.Payments.Payment)"),
         ("accepted", "M:Corpus.M6.Dependencies.Steps.Next(System.Int32)"),
         ("accepted", "M:Corpus.M6.Dependencies.Steps.Run(System.Int32)"),
+        ("accepted", "M:Corpus.M6.Dependencies.ShipmentService.IdOf(System.Int32,System.Threading.CancellationToken)"),
+        ("accepted", "M:Corpus.M6.Dependencies.ShipmentService.ShipIfFound(System.Int32,System.Threading.CancellationToken)"),
         ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Lookups.Neighbour(System.Int32)"),
         ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Lookups.Saved(Corpus.M6.Refuted.Dependencies.Payment)"),
         ("refuted-dependencies", "M:Corpus.M6.Refuted.Dependencies.Lookups.Twice(System.Int32)"),

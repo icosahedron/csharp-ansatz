@@ -64,7 +64,11 @@
       "M:Corpus.M6.Dependencies.IOrders.Reserve(System.Int32,System.Int32)": { "outcome": "translated" },
       "M:System.IDisposable.Dispose": { "outcome": "translated" },
       "M:Corpus.M6.Dependencies.Steps.Next(System.Int32)": { "outcome": "translated" },
-      "M:Corpus.M6.Dependencies.Steps.Run(System.Int32)": { "outcome": "translated" }
+      "M:Corpus.M6.Dependencies.Steps.Run(System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Dependencies.ShipmentService.IdOf(System.Int32,System.Threading.CancellationToken)": { "outcome": "translated", "assumeNonNull": ["shipments", "shipments.Find()"] },
+      "M:Corpus.M6.Dependencies.ShipmentService.ShipIfFound(System.Int32,System.Threading.CancellationToken)": { "outcome": "translated", "assumeNonNull": ["shipments", "shipments.Find()", "shipments.Ship()"] },
+      "M:Corpus.M6.Dependencies.IShipments.Find(System.Int32,System.Threading.CancellationToken)": { "outcome": "translated" },
+      "M:Corpus.M6.Dependencies.IShipments.Ship(Corpus.M6.Dependencies.Order,System.Threading.CancellationToken)": { "outcome": "translated", "assumeNonNull": ["order"] }
     },
     "refuted": {
       "M:Corpus.Rejected.Arithmetic.CheckedAdd(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Arithmetic.cs:10", "count": 1 }, "goal": "case h.left\na b : Int32\nh : a.toInt + b.toInt < -2147483648 ∨ 2147483647 < a.toInt + b.toInt\n⊢ False" },
@@ -164,7 +168,7 @@
       "M:Corpus.M6.Rejected.Dependencies.Store.Configured(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "ConfigureAwait" }] },
       "M:Corpus.M6.Rejected.Dependencies.Store.Delayed(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Task combinator" }] },
       "M:Corpus.M6.Rejected.Dependencies.Store.Fire(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "async void method" }] },
-      "M:Corpus.M6.Rejected.Dependencies.Store.Early(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "return without a value" }] },
+      "M:Corpus.M6.Rejected.Dependencies.Store.Uncancelled(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "cancellation token other than a parameter" }] },
       "M:Corpus.M6.Rejected.Dependencies.Store.Ordered(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "named arguments out of order with a dependency call" }] },
       "M:Corpus.M6.Rejected.Dependencies.Store.Sum(System.Int32,System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Rejected.Dependencies.Store.Dropped(System.Int32)": { "outcome": "rejected", "diagnostics": [{ "id": "WRT0002", "construct": "Task-returning call that is not awaited" }] },

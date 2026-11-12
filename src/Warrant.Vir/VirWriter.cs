@@ -168,6 +168,11 @@ public static class VirWriter
                 Type(w, t.Result);
                 w.Close();
                 break;
+            case OpaqueType o:
+                w.Open();
+                w.Name("opaque").String(o.Key);
+                w.Close();
+                break;
             default:
                 throw new ArgumentException($"Unknown VIR type {type.GetType().Name}.", nameof(type));
         }
@@ -644,6 +649,10 @@ public static class VirWriter
                 1 => "true",
                 _ => throw new ArgumentException($"A bool literal is 0 or 1, not {Decimal(lit.Value)}.", nameof(lit)),
             };
+        }
+        if (lit.Type == VirType.Unit && lit.Value != 0)
+        {
+            throw new ArgumentException($"The unit literal is 0, not {Decimal(lit.Value)}.", nameof(lit));
         }
         return Decimal(lit.Value);
     }

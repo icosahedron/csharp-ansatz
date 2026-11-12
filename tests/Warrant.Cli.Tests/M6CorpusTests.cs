@@ -90,6 +90,8 @@ public sealed class M6CorpusTests
         Assert.Matches($@"(?m)^{contracts}\(49,\d+\): error WRT0001: The contract of 'Contracts\.Kept\(int\)' could not be proved: omega could not prove the goal:", output);
         // #183: arithmetic in a Spec expression that can overflow is reported at the operation.
         Assert.Matches($@"(?m)^{contracts}\(83,\d+\): error WRT0001: The contract of 'Contracts\.SumUnbounded\(int, int\)' could not be proved: well-definedness of a Spec expression: ", output);
+        // #213: a false Spec.Ensures written with Spec.Implies fails at its line.
+        Assert.Matches($@"(?m)^{contracts}\(91,\d+\): error WRT0001: The contract of 'Contracts\.Grown\(int\)' could not be proved: postcondition of the method: ", output);
         var dependencies = Regex.Escape(Path.Combine(dir, "Dependencies.cs"));
         Assert.Matches($@"(?m)^{dependencies}\(35,\d+\): error WRT0001: The contract of 'Lookups\.Neighbour\(int\)' could not be proved: postcondition of the method: ", output);
         Assert.Matches($@"(?m)^{dependencies}\(43,\d+\): error WRT0001: The contract of 'Lookups\.Saved\(Payment\)' could not be proved: postcondition of the method: ", output);

@@ -473,6 +473,83 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
         AssertPropositions(env, negate);
     }
 
+    /// <summary>
+    /// #213: <c>Spec.Implies(p, q)</c> in a contract evaluates <c>q</c> only under <c>p</c>, so the well-definedness and
+    /// overflow obligations of <c>q</c>'s operations (KTD26, #183) are under the guard <c>p</c>; a <c>Spec.Requires</c>
+    /// using it has its vacuity obligation over the implication.
+    /// </summary>
+    [Fact]
+    public void ImpliesInAContractGuardsItsConclusionsObligationsWithItsPremise()
+    {
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Inc(int x)
+                {
+                    Spec.Requires(Spec.Implies(x < 100, x + 1 > x));
+                    return x;
+                }
+
+                [Verified]
+                public static int Quot(int a, int b)
+                {
+                    Spec.Ensures<int>(r => Spec.Implies(b > 0, r == a / b));
+                    return 0;
+                }
+            }
+            """);
+        var inc = Contract(translation, "M:S.Inc(System.Int32)");
+        var wd = Assert.Single(inc.WellDefinedness);
+        Assert.Equal(SpecObligationKind.WellDefinedOperation, wd.Kind);
+        Assert.IsType<BinaryExpr>(wd.Node);
+        // ∀ σ x, x < 100 → ⦃⌜True⌝⦄ Warrant.Int32.addChecked σ x 1 ⦃⇓_ => ⌜True⌝, allowed⦄
+        Assert.Equal(3, wd.Binders);
+        Assert.Equal(Lt(Expr.BVar(0), I(100)), Assert.IsType<ForallExpr>(Under(wd.Theorem.Type, 2)).BinderType);
+        var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 3));
+        Assert.Equal(Expr.App(C("Warrant.Int32.addChecked"), Expr.BVar(2), Expr.BVar(1), I(1)), program);
+        // ∀ x, (x < 100 → x + 1 > x) → False
+        var vacuity = Assert.Single(inc.Vacuity);
+        Assert.Equal(2, vacuity.Binders);
+        var implication = Assert.IsType<ForallExpr>(Assert.IsType<ForallExpr>(Under(vacuity.Theorem.Type, 1)).BinderType);
+        Assert.Equal(Lt(Expr.BVar(0), I(100)), implication.BinderType);
+        Assert.Equal(C("False"), Under(vacuity.Theorem.Type, 2));
+        AssertPropositions(env, inc);
+
+        var quot = Contract(translation, "M:S.Quot(System.Int32,System.Int32)");
+        wd = Assert.Single(quot.WellDefinedness);
+        // ∀ σ a b r, b > 0 → ⦃⌜True⌝⦄ Warrant.Int32.div σ a b ⦃…⦄
+        Assert.Equal(5, wd.Binders);
+        Assert.Equal(Gt(Expr.BVar(1), I(0)), Assert.IsType<ForallExpr>(Under(wd.Theorem.Type, 4)).BinderType);
+        (program, _, _, _) = Triple(Under(wd.Theorem.Type, 5));
+        Assert.Equal(Expr.App(C("Warrant.Int32.div"), Expr.BVar(4), Expr.BVar(3), Expr.BVar(2)), program);
+        AssertPropositions(env, quot);
+    }
+
+    /// <summary>#213: <c>Spec.Implies</c> as a <c>bool</c> value in a contract is <c>!p || q</c>, with <c>q</c> under <c>p</c>.</summary>
+    [Fact]
+    public void ImpliesAsAValueInAContractGuardsItsConclusionWithItsPremise()
+    {
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static bool Same(int x, bool b)
+                {
+                    Spec.Ensures<bool>(r => r == Spec.Implies(x > 0, 10 / x > 0));
+                    return b;
+                }
+            }
+            """);
+        var contract = Contract(translation, "M:S.Same(System.Int32,System.Boolean)");
+        var wd = Assert.Single(contract.WellDefinedness);
+        // ∀ σ x b r, decide (x > 0) = true → ⦃⌜True⌝⦄ Warrant.Int32.div σ 10 x ⦃…⦄
+        Assert.Equal(5, wd.Binders);
+        var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 5));
+        Assert.Equal(Expr.App(C("Warrant.Int32.div"), Expr.BVar(4), I(10), Expr.BVar(3)), program);
+        AssertPropositions(env, contract);
+    }
+
     [Fact]
     public void AnUncheckedCastInASpecExpressionHasNoObligation()
     {

@@ -305,6 +305,28 @@ fails at the `a + b` in `Spec.Ensures` with `well-definedness of a Spec expressi
 Specs keep C#'s `int` and `long`: there is no unbounded integer, so bound the operands rather than widening them. An
 explicit `(int)` cast still truncates as in C#, and a `Spec.Assert` condition still wraps.
 
+### An implication in a contract
+
+```csharp
+[Verified]
+public static int Successor(int x)
+{
+    Spec.Ensures<int>(r => Spec.Implies(x < 1000, r == x + 1));
+    return x < 1000 ? x + 1 : x;
+}
+```
+
+Proved (`Successor` in `tests/corpus/m6/accepted/Contracts.cs`). `Spec.Implies(p, q)` is accepted in `Spec.Requires` and
+`Spec.Ensures` (GitHub #213) and means `p → q`. `q` is read only when `p` holds, so its well-definedness conditions
+(here, that `x + 1` does not overflow) are proved under `p`: `x < 1000` is enough. With `Spec.Implies(x > 0, r == x + 1)`
+the `x + 1` can overflow at `int.MaxValue`, and the build fails at it with `well-definedness of a Spec expression`
+(`ArithmeticInTheConclusionOfImpliesIsWellDefinedUnderItsPremise`). A false implication fails at its `Spec.Ensures`
+line with `postcondition of the method`: `Spec.Ensures<int>(r => Spec.Implies(x > 0, r > x)); return x;` leaves the
+goal `0 < x ⊢ False` (`Grown` in `tests/corpus/m6/refuted/Contracts.cs`). In a `Spec.Requires`, each verified caller
+proves the implication at its arguments, so `Spec.Requires(Spec.Implies(x > 0, x < 100))` accepts `Small(-500)` and
+fails at `Small(500)` (`ARequiresWithImpliesIsACallersPreconditionAndHasAVacuityCheck`). `Spec.Assert` still rejects
+`Spec.Implies` (WRT0004); write `!p || q` there.
+
 ### A null guard
 
 ```csharp

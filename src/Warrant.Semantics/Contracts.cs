@@ -433,8 +433,8 @@ internal sealed partial class BodyTranslator
 
     /// <summary>
     /// The value of an expression in a <c>Spec</c> expression whose parts are evaluated only under a guard (<c>&amp;&amp;</c>,
-    /// <c>||</c>, <c>?:</c> and <c>??</c>), or that calls a method (KTD26); null for any other, which translates as it does
-    /// in a body.
+    /// <c>||</c>, <c>?:</c>, <c>??</c> and <c>Spec.Implies</c>), or that calls a method (KTD26); null for any other, which
+    /// translates as it does in a body.
     /// </summary>
     private Expr? SpecGuarded(VirExpr e, Env env)
     {
@@ -446,6 +446,13 @@ internal sealed partial class BodyTranslator
                     var isTrue = Conditions.IsTrue(a).Prop;
                     var b = InGuard(l.Op == LogicalOp.And ? isTrue : Expr.App(Init.Not, isTrue), () => Value(l.R, env));
                     return l.Op == LogicalOp.And ? Operators.And(a, b) : Operators.Or(a, b);
+                }
+            case ImpliesExpr i:
+                {
+                    // Spec.Implies(p, q) as a bool value (#213): !p || q, with q evaluated only where p holds.
+                    var p = Value(i.A, env);
+                    var q = InGuard(Conditions.IsTrue(p).Prop, () => Value(i.B, env));
+                    return Operators.Or(Operators.Not(p), q);
                 }
             case CondExpr c:
                 {

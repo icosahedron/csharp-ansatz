@@ -53,7 +53,7 @@ logical and, or, not and equality.
 
 | Member | Since | Where | Meaning |
 |---|---|---|---|
-| `Spec.Implies(bool a, bool b)` | M4 | a theorem statement | `a → b`. Any use outside a theorem statement is WRT0004, inside `Spec.Requires` and `Spec.Ensures` too: whether contracts accept it is an open decision (GitHub #213). Write `!a \|\| b` there. |
+| `Spec.Implies(bool a, bool b)` | M4; in contracts M6 (#213) | a theorem statement, or a `Spec.Requires` or `Spec.Ensures` condition | `a → b`. In a contract, `b`'s partial operations and overflow checks are under `a`. Anywhere else, `Spec.Assert` included, it is WRT0004; write `!a \|\| b` there. |
 | `Spec.ForAll<T>(Func<T, bool>)` | M5a | a theorem statement | `∀ x : T, …`. The claim is a lambda with one parameter and an expression body; nest calls for several variables. Elsewhere it is WRT0004. Throws if it ever runs. |
 | `Spec.Exists<T>(Func<T, bool>)` | M5a | a theorem statement | `∃ x : T, …`, with the same rules. |
 | `Spec.Requires(bool)` | M6 | start of a block body, after any `Spec.Decreases` | Precondition. Assumed in the body, proved at each verified call site. Not checked at run time or at call sites Warrant does not verify; the report lists it. |

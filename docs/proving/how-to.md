@@ -240,8 +240,11 @@ Pricing.cs(24,44): error WRT0001: The contract of 'Prices.Refund(int)' could not
   `a + b`; bound each operand in `Spec.Requires` and it proves
   ([proofs that work](proofs-that-work.md#arithmetic-in-a-contract)). An
   explicit `(int)` cast still truncates, and `Spec.Assert` still wraps.
-- `Spec.Implies` is not accepted inside a contract yet (GitHub #213); write
-  `!a || b`.
+- `Spec.Implies(a, b)` is accepted inside `Spec.Requires` and `Spec.Ensures`
+  (GitHub #213). `b` is read only when `a` holds, so a division or an
+  addition in `b` has to be safe only under `a`
+  ([proofs that work](proofs-that-work.md#an-implication-in-a-contract)).
+  `Spec.Assert` still rejects it; write `!a || b` there.
 - The calls are `[Conditional("WARRANT_CONTRACTS")]`: they don't exist in the
   compiled IL and cost nothing at run time. So **nothing checks
   `Spec.Requires` at run time**, and code Warrant doesn't verify can call the

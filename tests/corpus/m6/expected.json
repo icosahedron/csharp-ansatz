@@ -47,6 +47,7 @@
       "M:Corpus.M6.Contracts.Quotient(System.Int32,System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Contracts.Half(System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Contracts.Sum(System.Int32,System.Int32)": { "outcome": "translated" },
+      "M:Corpus.M6.Contracts.Successor(System.Int32)": { "outcome": "translated" },
 
       "M:Corpus.M6.Payments.PaymentService.Validate(Corpus.M6.Payments.Payment)": { "outcome": "translated", "assumeNonNull": ["payment"] },
       "M:Corpus.M6.Payments.PaymentService.ProcessPayment(System.Int32)": { "outcome": "translated", "assumeNonNull": ["store", "store.GetPayment()", "store.SavePayment()"] },
@@ -89,6 +90,7 @@
       "M:Corpus.M6.Refuted.Contracts.Asserted(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Assert", "at": "Contracts.cs:54", "count": 2 }, "goal": "case hc\na b : Int32\n⊢ ¬b = 0" },
       "M:Corpus.M6.Refuted.Contracts.Impossible(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "none", "at": "Contracts.cs:62", "count": 0 }, "goal": "" },
       "M:Corpus.M6.Refuted.Contracts.SumUnbounded(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "WellDefinedness", "at": "Contracts.cs:83", "count": 1 }, "goal": "case h.left\na b r : Int32\nh : a.toInt + b.toInt < -2147483648 ∨ 2147483647 < a.toInt + b.toInt\n⊢ False" },
+      "M:Corpus.M6.Refuted.Contracts.Grown(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Postcondition", "at": "Contracts.cs:91", "count": 1 }, "goal": "x : Int32\nx : 0 < x\n⊢ False" },
       "M:Corpus.M6.Refuted.Contracts.QuotientOfAny(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "ReachableThrow", "at": "Contracts.cs:74", "count": 1 }, "goal": "case ht\na b : Int32\nh : b = 0\nh : True\n⊢ False" }
     },
     "refuted-dependencies": {

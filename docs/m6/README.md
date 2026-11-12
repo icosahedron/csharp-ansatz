@@ -161,12 +161,12 @@ Decided after M6's exit (owner, 2026-11-11):
 - #181: a property relating two calls of a method that can raise is stated as the `Spec.Ensures` of a verified method that makes both calls ([proofs that work](../proving/proofs-that-work.md)).
 - #182: `Spec.NoThrow()` proves that no explicit `throw` is reachable under the `Spec.Requires` (chapter 6).
 - #183: arithmetic in a `Spec` expression must not overflow; specs keep `int` and `long` and get no unbounded integer (chapter 6).
+- #213 (2026-11-12): `Spec.Implies` is accepted inside `Spec.Requires` and `Spec.Ensures`, and its premise guards the obligations of its conclusion (chapters 4 and 6).
 
 Decisions that are the owner's, still open:
 
 | Ticket | Question |
 |---|---|
-| #213 | `Spec.Implies` inside `Spec.Requires` and `Spec.Ensures` (still WRT0004 there; chapter 4). |
 | #219 | A caller of a method whose contract is not proved is skipped, even when it needs only the definition (chapter 6). |
 | #221 | After a failed `Spec.Assert`, later VCs are proved from the asserted fact (chapter 7). |
 | #224 | A `[ProofFor]` script aimed at a false `Ensures` fails where the script fails, not at the `Ensures` line (chapter 7). |

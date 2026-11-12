@@ -61,8 +61,9 @@ internal static class TypeDeclarations
     /// <c>R.$eq a b</c>: the fields compared in order and joined with <c>Bool.and</c>, as the compiler-generated
     /// <c>Equals</c> does. An integer, <c>bool</c> or open-enum field is <c>decide (a.f = b.f)</c> at its underlying type, a
     /// <c>decimal</c> field compares values, <c>decide (Warrant.Decimal.eq a.f b.f)</c> (M6 KTD7, so <c>1.0m</c> and
-    /// <c>1.00m</c> fields are equal, as <c>decimal.Equals</c> makes them), a record field uses that record's <c>$eq</c>, and
-    /// a closed field compares <c>$index</c> values with <c>Nat.beq</c>.
+    /// <c>1.00m</c> fields are equal, as <c>decimal.Equals</c> makes them), a record field uses that record's <c>$eq</c>, a
+    /// closed field compares <c>$index</c> values with <c>Nat.beq</c>, and a nullable field compares its values that way when
+    /// both are present (#218, <see cref="Same"/>).
     /// </summary>
     private static DefinitionDecl Equality(string key, RecordDefinition record, TypeTable types, Func<Expr, ReducibilityHints> regular)
     {
@@ -75,26 +76,42 @@ internal static class TypeDeclarations
         Expr? body = null;
         for (int i = 0; i < record.Fields.Count; i++)
         {
-            var type = record.Fields[i].Type;
-            var fa = Expr.Proj(name, i, a);
-            var fb = Expr.Proj(name, i, b);
-            Expr same;
-            if (types.IsRecord(type))
-            {
-                same = Expr.App(Expr.Const(LeanNames.Equality(((RefType)type).Key)), fa, fb);
-            }
-            else if (types.IsClosed(type))
-            {
-                var index = Expr.Const(LeanNames.Index(((RefType)type).Key));
-                same = Operators.NatBeq(Expr.App(index, fa), Expr.App(index, fb));
-            }
-            else
-            {
-                same = Operators.Decide(Conditions.Eq(types.Underlying(type), fa, fb));
-            }
+            var same = Same(record.Fields[i].Type, Expr.Proj(name, i, a), Expr.Proj(name, i, b), types, lctx, ngen);
             body = body is null ? same : Operators.And(body, same);
         }
         return Definition(LeanNames.Equality(key), lctx.MkPi([a, b], Init.Bool), lctx.MkLambda([a, b], body ?? Init.True), regular);
+    }
+
+    /// <summary>
+    /// Whether two values of a field's type are equal, as the field's <c>EqualityComparer&lt;T&gt;.Default</c> says. A
+    /// nullable field (#218) compares as <c>Nullable&lt;T&gt;.Equals</c> and a nullable reference's default comparer do: two
+    /// nulls are equal, a null and a value are not, and two values compare as <c>T</c>:
+    /// <c>match a with | none =&gt; (match b with | none =&gt; true | some _ =&gt; false)
+    /// | some x =&gt; (match b with | none =&gt; false | some y =&gt; x == y)</c>.
+    /// </summary>
+    private static Expr Same(VirType type, Expr fa, Expr fb, TypeTable types, LocalContext lctx, NameGenerator ngen)
+    {
+        if (type is NullableType nullable)
+        {
+            var value = types.Cic(nullable.Value);
+            var x = lctx.MkLocalDecl(ngen, Name.From("x"), value);
+            var y = lctx.MkLocalDecl(ngen, Name.From("y"), value);
+            var whenNone = Nullables.Match(value, Init.Bool, Init.True, Expr.Lam(Name.From("y"), value, Init.False), fb);
+            var whenSome = lctx.MkLambda(
+                [x],
+                Nullables.Match(value, Init.Bool, Init.False, lctx.MkLambda([y], Same(nullable.Value, x, y, types, lctx, ngen)), fb));
+            return Nullables.Match(value, Init.Bool, whenNone, whenSome, fa);
+        }
+        if (types.IsRecord(type))
+        {
+            return Expr.App(Expr.Const(LeanNames.Equality(((RefType)type).Key)), fa, fb);
+        }
+        if (types.IsClosed(type))
+        {
+            var index = Expr.Const(LeanNames.Index(((RefType)type).Key));
+            return Operators.NatBeq(Expr.App(index, fa), Expr.App(index, fb));
+        }
+        return Operators.Decide(Conditions.Eq(types.Underlying(type), fa, fb));
     }
 
     private static InductiveDecl Inductive(Name name, IEnumerable<InductiveConstructor> ctors) =>

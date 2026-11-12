@@ -442,6 +442,29 @@ with `null read`, and passing an unchecked `Payment?` to a method that takes a `
 a non-null value is required` (`ANullDereferenceGuardedByIsNotNullProvesAndAnUnguardedOneFailsAtItsLine`,
 `ANullablePassedWhereANonNullValueIsRequiredProvesOnlyUnderItsGuard`).
 
+### A record's nullable field
+
+```csharp
+public sealed record Refund(Payment? Original);
+
+[Verified]
+public static int OriginalIdOrZero(Refund refund)
+{
+    Spec.Requires(refund.Original is null || refund.Original.Id > 0);
+    Spec.Ensures<int>(r => r >= 0);
+    if (refund.Original is null) return 0;
+    return refund.Original.Id;
+}
+```
+
+Proved with no script. A null test of a field is a path condition about the field (`refund.Original = none`), so the
+read after the test, and the read inside `Spec.Requires` after `is null ||`, cannot meet a null. Without the test,
+`refund.Original.Id` fails with `null read`. Records with `int?`, `decimal?` and nullable record fields compare with `==`
+as the CLR's generated `Equals` does (GitHub #218): two nulls are equal, a null and a value are not, and `1.0m` equals
+`1.00m`. The examples are `Refunds` in `tests/corpus/m6/accepted/Nullables.cs` and `refuted/Nullables.cs`
+(`ARecordsNullableFieldIsReadAfterANullTestInABodyAndInASpecExpression`; the differential tests compare `SameFee` and
+`SameRefund` with the CLR).
+
 ### `Spec.Assert`
 
 ```csharp

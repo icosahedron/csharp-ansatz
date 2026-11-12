@@ -151,7 +151,6 @@ false one pass.
 |---|---|
 | #216 | Theorems over `decimal` `Math.Max`/`Min` with parameters do not prove: nothing splits the `if` (chapter 3). |
 | #217 | `simp` does not compute a `decimal` literal's `units`, so `omega` cannot use it (chapter 3). |
-| #218 | A record with a nullable field fails translation (chapter 5). |
 | #220 | `warrant translate` passes no attribute sidecar, so it cannot prove contracts (chapter 7). Fixed after M6: it loads the sidecar as `verify` does. |
 | #225 | The CLI summary counts only theorems as "not proved" (chapter 8). Fixed after M6: other units not verified are counted. |
 

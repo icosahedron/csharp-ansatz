@@ -82,7 +82,8 @@ For each:
    `Nullable.some_eq_none` (U20). `SPred.entails_nil` alone never matches a one-state assertion, which is why the
    `_1` and `_cons` forms are listed. The set is kept apart from `Tactic.Simp()`'s default set, as omega-prep is, so
    existing scripts do not change.
-3. Path conditions that are equations are substituted.
+3. Path conditions that are equations `x = e` are substituted, where `x` is a variable or a field of one
+   (`refund.Original = none`, the null test of a record's nullable field, #218).
 4. `omega` runs, through the M5a omega-prep set and chapter 1's division bridges.
 
 U3's checkpoint used exactly this list of `SPred` and `PredTrans` lemmas (`EffectCheckpointTests.VcSimpLemmas`), and

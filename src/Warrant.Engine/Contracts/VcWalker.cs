@@ -974,8 +974,8 @@ internal sealed class VcWalker
     private MVarId? Substitute(MVarId g, SimpContext simp) => _m.WithContext(g, () =>
     {
         var decls = (_m.MCtx.FindDecl(g)?.LCtx.Decls ?? []).Where(d => !d.IsImplementationDetail).ToList();
-        var equations = decls.Where(d => _m.InstantiateMVars(d.Type) is var t && t.HeadIs(EqName) && t.GetAppArgs() is [_, FVarExpr x, var rhs]
-            && ExprOps.Find(rhs, (y, _) => y is FVarExpr f && f.Id == x.Id) is null).ToList();
+        var equations = decls.Where(d => _m.InstantiateMVars(d.Type) is var t && t.HeadIs(EqName) && t.GetAppArgs() is [_, var x, var rhs]
+            && IsAtom(x) && ExprOps.Find(rhs, (y, _) => y == x) is null).ToList();
         if (equations.Count == 0)
         {
             return g;
@@ -989,6 +989,12 @@ internal sealed class VcWalker
         var context = simp with { Theorems = simp.Theorems.Insert(0, theorems) };
         return _m.SimpGoal(g, context, simplifyTarget: true, others)?.Goal;
     });
+
+    /// <summary>
+    /// What a path condition <c>x = e</c> may rewrite: a variable, or a field of one (<c>refund.Days = none</c>, a null test
+    /// of a record's nullable field, #218).
+    /// </summary>
+    private static bool IsAtom(Expr e) => e is FVarExpr || (e is ProjExpr p && IsAtom(p.Struct));
 
     private static string FirstLine(string text) => text.IndexOf('\n', StringComparison.Ordinal) is var i and >= 0 ? text[..i] : text;
 }

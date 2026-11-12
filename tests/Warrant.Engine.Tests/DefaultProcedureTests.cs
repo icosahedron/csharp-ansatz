@@ -253,6 +253,42 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
         Assert.Equal((VcKind.NullPassed, "p"), Failure(source, "M:S.Unguarded(Payment)", result.Find("M:S.Unguarded(Payment)")));
     }
 
+    [Fact]
+    public void ARecordsNullableFieldIsReadAfterANullTestInABodyAndInASpecExpression()
+    {
+        // #218: a null test of a field is a path condition about the field itself (refund.Original = none), which rewrites
+        // the guard of a later read of it, as a null test of a parameter does.
+        var source = """
+            #nullable enable
+            public sealed record Payment(int Id, decimal Amount);
+            public sealed record Refund(int Id, int? Days, decimal? Fee, Payment? Original);
+
+            """ + Wrap("""
+            [Verified]
+            public static int OriginalIdOrZero(Refund refund)
+            {
+                Spec.Requires(refund.Original is null || refund.Original.Id > 0);
+                Spec.Ensures<int>(r => r >= 0);
+                if (refund.Original is null) return 0;
+                return refund.Original.Id;
+            }
+
+            [Verified]
+            public static Refund WithoutFee(Refund refund)
+            {
+                Spec.Ensures<Refund>(r => r.Fee is null && r.Id == refund.Id);
+                return refund with { Fee = null };
+            }
+
+            [Verified]
+            public static int Unchecked(Refund refund) => refund.Original.Id;
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.OriginalIdOrZero(Refund)"));
+        Proved(result.Find("M:S.WithoutFee(Refund)"));
+        Assert.Equal((VcKind.NullRead, "refund.Original"), Failure(source, "M:S.Unchecked(Refund)", result.Find("M:S.Unchecked(Refund)")));
+    }
+
     // ---- Spec expressions (KTD25, KTD26; moved from U10, #169) ----
 
     [Fact]

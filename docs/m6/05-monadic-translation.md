@@ -94,9 +94,15 @@ A token passed to a verified method is passed on by it in turn, under the same r
 
 Translation refuses to translate a call to a method that has dependencies of its own; extraction already rejects it.
 
+A record's nullable field (#218) is an `Option` field like any nullable value, read by projection, tested with
+`Option.isNone` and built with `Option.some` or `Option.none`.
+The record's `$eq` compares it as the CLR's generated `Equals` does through `EqualityComparer<T?>.Default`: two nulls
+are equal, a null and a value are not, and two values compare as the field's type does, so a `decimal?` field compares
+by value (`1.0m` equals `1.00m`) and a `Payment?` field by `Payment`'s `$eq`:
+`match a.f with | none => (match b.f with | none => true | some _ => false) | some x => (match b.f with | none => false | some y => x == y)`.
+`Refunds.SameFee` and `SameRefund` in the corpus are compared with the CLR on every boundary pair (chapter 8).
+
 ## What does not translate
 
-- A record with a nullable field (#218): the record's `$eq` is built field by field and has no case for an
-  `Option` field. Extraction accepts such records since U17; translation stops with an error, never a silent pass.
 - A contract unit is never a definition, since nothing in a contract class runs: it translates to its checks only
   (chapter 6).

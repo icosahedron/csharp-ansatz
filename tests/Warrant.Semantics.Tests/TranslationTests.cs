@@ -622,6 +622,63 @@ public sealed class TranslationTests(SemanticsBundleFixture bundle) : IClassFixt
         });
     }
 
+    /// <summary>
+    /// #218: a nullable field is compared as <c>EqualityComparer&lt;T?&gt;.Default</c> compares it: two nulls are equal, a null
+    /// and a value are not, and two values are equal as <c>T</c>'s own equality says (a <c>decimal</c> by value, so
+    /// <c>1.0m</c> and <c>1.00m</c> agree; a record by its <c>$eq</c>).
+    /// </summary>
+    [Fact]
+    public void ARecordWithNullableFieldsComparesThemAsTheClrDoes()
+    {
+        var translation = TranslationCorpus.Translate(TranslationCorpus.Inline("""
+            #nullable enable
+            public sealed record Payment(int Id, decimal Amount);
+            public sealed record Refund(int Id, int? Days, decimal? Fee, Payment? Original);
+
+            public static class R
+            {
+                [Verified]
+                public static bool Same(Refund a, Refund b) => a == b;
+            }
+            """), bundle.Env);
+        var env = TranslationCorpus.Admit(bundle, translation);
+        var refund = translation.Find("T:Refund")!.Name;
+        var payment = translation.Find("T:Payment")!.Name;
+        Expr Some(string type, Expr value) => App(C("Option.some", Level.Zero), C(type), value);
+        Expr None(string type) => App(C("Option.none", Level.Zero), C(type));
+        Expr Dec(decimal d) => Literals.Decimal(DecimalLitExpr.Of(d));
+        Expr Pay(int id, decimal amount) => App(Expr.Const(payment.Append("$mk")), Int32Lit(id), Dec(amount));
+        Expr Refund(Expr days, Expr fee, Expr original) =>
+            App(Expr.Const(refund.Append("$mk")), Int32Lit(1), days, fee, original);
+        Expr NoFee() => None("Warrant.Decimal");
+        Expr NoOriginal() => App(C("Option.none", Level.Zero), Expr.Const(payment));
+        Expr Original(int id, decimal amount) => App(C("Option.some", Level.Zero), Expr.Const(payment), Pay(id, amount));
+        var eq = Expr.Const(refund.Append("$eq"));
+        KernelThread.Run(() =>
+        {
+            var checker = new TypeChecker(env);
+            bool Equal(Expr a, Expr b)
+            {
+                var result = checker.Whnf(App(eq, a, b));
+                Assert.True(result == C("Bool.true") || result == C("Bool.false"), $"$eq did not compute: {result}");
+                return result == C("Bool.true");
+            }
+
+            Assert.True(Equal(Refund(None("Int32"), NoFee(), NoOriginal()), Refund(None("Int32"), NoFee(), NoOriginal())));
+            Assert.False(Equal(Refund(Some("Int32", Int32Lit(1)), NoFee(), NoOriginal()), Refund(None("Int32"), NoFee(), NoOriginal())));
+            Assert.False(Equal(Refund(None("Int32"), NoFee(), NoOriginal()), Refund(Some("Int32", Int32Lit(1)), NoFee(), NoOriginal())));
+            Assert.False(Equal(Refund(Some("Int32", Int32Lit(1)), NoFee(), NoOriginal()), Refund(Some("Int32", Int32Lit(2)), NoFee(), NoOriginal())));
+            Assert.True(Equal(Refund(Some("Int32", Int32Lit(2)), NoFee(), NoOriginal()), Refund(Some("Int32", Int32Lit(2)), NoFee(), NoOriginal())));
+            // decimal? compares values: 1.0m == 1.00m.
+            Assert.True(Equal(Refund(None("Int32"), Some("Warrant.Decimal", Dec(1.0m)), NoOriginal()), Refund(None("Int32"), Some("Warrant.Decimal", Dec(1.00m)), NoOriginal())));
+            Assert.False(Equal(Refund(None("Int32"), Some("Warrant.Decimal", Dec(1.0m)), NoOriginal()), Refund(None("Int32"), NoFee(), NoOriginal())));
+            // Payment? compares with Payment's $eq.
+            Assert.True(Equal(Refund(None("Int32"), NoFee(), Original(3, 2.5m)), Refund(None("Int32"), NoFee(), Original(3, 2.50m))));
+            Assert.False(Equal(Refund(None("Int32"), NoFee(), Original(3, 2.5m)), Refund(None("Int32"), NoFee(), Original(4, 2.5m))));
+            Assert.False(Equal(Refund(None("Int32"), NoFee(), Original(3, 2.5m)), Refund(None("Int32"), NoFee(), NoOriginal())));
+        });
+    }
+
     [Fact]
     public void ATheoremShellFixesItsNameAndType()
     {

@@ -38,6 +38,13 @@
       "M:Corpus.M6.Decimals.Largest(System.Decimal,System.Decimal)": { "outcome": "translated" },
       "M:Corpus.M6.Decimals.Smallest(System.Decimal,System.Decimal)": { "outcome": "translated" },
       "M:Corpus.M6.Decimals.Size(System.Decimal)": { "outcome": "translated" },
+      "T:Corpus.M6.Fee": { "outcome": "translated" },
+      "T:Corpus.M6.Refund": { "outcome": "translated" },
+      "M:Corpus.M6.Refunds.SameFee(Corpus.M6.Fee,Corpus.M6.Fee)": { "outcome": "translated", "assumeNonNull": ["a", "b"] },
+      "M:Corpus.M6.Refunds.SameRefund(Corpus.M6.Refund,Corpus.M6.Refund)": { "outcome": "translated", "assumeNonNull": ["a", "b"] },
+      "M:Corpus.M6.Refunds.DaysOrZero(Corpus.M6.Fee)": { "outcome": "translated", "assumeNonNull": ["fee"] },
+      "M:Corpus.M6.Refunds.Waived(Corpus.M6.Fee)": { "outcome": "translated", "assumeNonNull": ["fee"] },
+      "M:Corpus.M6.Refunds.OriginalIdOrZero(Corpus.M6.Refund)": { "outcome": "translated", "assumeNonNull": ["refund"] },
 
       "M:Corpus.M6.Contracts.NonNegative(System.Int32)": { "outcome": "translated" },
       "M:Corpus.M6.Contracts.AtMost(System.Int32,System.Int32)": { "outcome": "translated" },
@@ -84,6 +91,7 @@
       "M:Corpus.M6.Refuted.Nullables.Unchecked(Corpus.M6.Refuted.Payment)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "NullPassed", "at": "Nullables.cs:25", "count": 1 }, "goal": "case h.left\npayment : Option Payment?\nh : payment = Option.none\n⊢ False" },
       "M:Corpus.M6.Refuted.Decimals.AddFee(System.Decimal)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Nullables.cs:32", "count": 1 }, "goal": "case h.left\namount : Warrant.Decimal\nh : Warrant.Decimal.sum amount (Warrant.Decimal.lit Bool.false 125 2 (Eq.refl Bool.true) (Eq.refl Bool.true)) = Option.none\n⊢ False" },
       "M:Corpus.M6.Refuted.Decimals.Difference(System.Decimal,System.Decimal)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Nullables.cs:35", "count": 1 }, "goal": "case h.left\na b : Warrant.Decimal\nh : Warrant.Decimal.sum a (Warrant.Decimal.neg b) = Option.none\n⊢ False" },
+      "M:Corpus.M6.Refuted.Refunds.OriginalId(Corpus.M6.Refuted.Refund)": { "outcome": "unproved", "code": "WRT0001", "assumeNonNull": ["refund"], "vc": { "kind": "NullRead", "at": "Nullables.cs:45", "count": 1 }, "goal": "case h.left\nrefund : Refund\nh : refund.Original = Option.none\n⊢ False" },
 
       "M:Corpus.M6.Refuted.Contracts.Ratio(System.Int32,System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Contracts.cs:15", "count": 1 }, "goal": "case h.right.left\na b : Int32\nh h : ¬b = 0\nh : a = Int32.minValue ∧ b = -1\n⊢ False" },
       "M:Corpus.M6.Refuted.Contracts.Neg(System.Int32)": { "outcome": "unproved", "code": "WRT0001", "vc": { "kind": "Overflow", "at": "Contracts.cs:20", "count": 1 }, "goal": "case h.right.left\nx : Int32\nh : x = Int32.minValue\n⊢ False" },

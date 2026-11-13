@@ -133,9 +133,6 @@ internal sealed class VcWalker
     private static readonly Name PredTransApply = Name.Parse("Std.Do.PredTrans.apply");
     private static readonly Name AndName = Name.Parse("And");
     private static readonly Name EqName = Name.Parse("Eq");
-    private static readonly Name AllowedName = Name.Parse("Warrant.ClrExn.Allowed");
-    private static readonly Name ExternalName = Name.Parse("Warrant.ClrExn.External");
-    private static readonly Name ClrExnName = Name.Parse("Warrant.ClrExn");
     private static readonly Name H = Name.From("h");
     private static readonly Name S = Name.From("s");
     private static readonly Name Sigma = Name.From("σ");
@@ -545,7 +542,7 @@ internal sealed class VcWalker
         }
         e = Strip(_m.InstantiateMVars(e));
         var ctor = (e.GetAppFn() as ConstExpr)?.Name;
-        if (ctor is null || ctor.ToString() is not ("Warrant.ClrExn.thrown" or "Warrant.ClrExn.external"))
+        if (ctor is null || (ctor != ClrExnNames.Thrown && ctor != ClrExnNames.ExternalException))
         {
             Leaf(h, node);
             return;
@@ -555,7 +552,7 @@ internal sealed class VcWalker
         {
             return;
         }
-        if (_noThrow && ctor.ToString() == "Warrant.ClrExn.thrown")
+        if (_noThrow && ctor == ClrExnNames.Thrown)
         {
             // ClrExn.External (thrown T) is False: the VC is that the path conditions are contradictory, stated without
             // the world, so the failure shows only them.
@@ -599,7 +596,7 @@ internal sealed class VcWalker
     {
         // A callee with Spec.NoThrow states ClrExn.External as its exception postcondition (#182).
         bool external = _m.Env.Find(contract)?.Type is { } type
-            && ExprOps.Find(type, (x, _) => x is ConstExpr { Name: var n } && n == ExternalName) is not null;
+            && ExprOps.Find(type, (x, _) => x is ConstExpr { Name: var n } && n == ClrExnNames.External) is not null;
         var rule = pure && _noThrow ? SpecTable.CallPure : external ? SpecTable.CallExternal : SpecTable.Call;
         Consequence(g, rule, ExprOps.MkApp(Expr.Const(contract), args), contract.ToString(), VcKind.CalleePrecondition, node, () =>
         {
@@ -797,15 +794,16 @@ internal sealed class VcWalker
                 Each(Rule(g, () => _m.ApplyConst(g, SpecTable.Resume)), g, site, Walk);
                 return;
             }
-            var (kind, node) = Exception(target) switch
+            var exception = Exception(target);
+            var (kind, node) = exception switch
             {
                 null => (_kind, _node),
-                "overflow" => (VcKind.Overflow, site),
-                "divideByZero" => (VcKind.DivisionByZero, site),
-                "invalidOperation" => (VcKind.NullRead, site),
-                "nullReference" => (NullKind(site), site),
+                _ when exception == ClrExnNames.Overflow => (VcKind.Overflow, site),
+                _ when exception == ClrExnNames.DivideByZero => (VcKind.DivisionByZero, site),
+                _ when exception == ClrExnNames.InvalidOperation => (VcKind.NullRead, site),
+                _ when exception == ClrExnNames.NullReference => (NullKind(site), site),
                 // A default-context operation's model fails as a Spec.Assert does where the CLR would wrap (#244).
-                "assertFailed" => (NodeAt(site) is BinaryExpr or UnaryExpr ? VcKind.ArithmeticOverflow : VcKind.Assert, site),
+                _ when exception == ClrExnNames.AssertFailed => (NodeAt(site) is BinaryExpr or UnaryExpr ? VcKind.ArithmeticOverflow : VcKind.Assert, site),
                 _ => (VcKind.Unsupported, site ?? _lastNode),
             };
             Leftovers.Add(new(g, IsOperation(_kind) ? _kind : kind, IsOperation(_kind) ? _node : node));
@@ -815,16 +813,17 @@ internal sealed class VcWalker
 
     /// <summary>
     /// The <c>ClrExn</c> constructor a goal <c>ClrExn.Allowed e</c>, or <c>ClrExn.External e</c> under <c>Spec.NoThrow</c>
-    /// (#182), names, as its last name component; null when the goal is not one.
+    /// (#182), names (one of <see cref="ClrExnNames.Constructors"/>, a name under <see cref="ClrExnNames.Type"/>); null when
+    /// the goal is not one.
     /// </summary>
-    private static string? Exception(Expr target)
+    private static Name? Exception(Expr target)
     {
-        string? found = null;
+        Name? found = null;
         ExprOps.Replace(target, (x, _) =>
         {
-            if (found is null && (x.HeadIs(AllowedName) || x.HeadIs(ExternalName)) && x.GetAppArgs() is [var e] && e.GetAppFn() is ConstExpr c && c.Name.Prefix == ClrExnName)
+            if (found is null && (x.HeadIs(ClrExnNames.Allowed) || x.HeadIs(ClrExnNames.External)) && x.GetAppArgs() is [var e] && e.GetAppFn() is ConstExpr c && c.Name.Prefix == ClrExnNames.Type)
             {
-                found = c.Name.ToString()[(ClrExnName.ToString().Length + 1)..];
+                found = c.Name;
             }
             return null;
         });
@@ -957,7 +956,18 @@ internal sealed class VcWalker
     /// condition such as <c>p = none</c> meets the guard <c>¬p.isNone</c>; then omega. Throws when they do not prove it.
     /// </summary>
     /// <returns>The goal omega was given, or null when simp closed it.</returns>
-    private MVarId? Discharge(MVarId g, SimpContext simp)
+    private MVarId? Discharge(MVarId g, SimpContext simp) => Discharge(g, simp, []);
+
+    /// <summary>How many <c>Bool</c> case splits one VC may take (#227, #245): at most 2^3 cases.</summary>
+    private const int MaxBoolSplits = 3;
+
+    /// <summary>
+    /// <see cref="Discharge(MVarId, SimpContext)"/> inside the case splits on the terms <paramref name="split"/>: when omega
+    /// fails, a <c>Bool</c> term the goal tests that is not split yet (<c>flagged = false</c>, a null test
+    /// <c>x.isNone = true</c>, one side of <c>f = g</c>) is split into its two values, each case rewritten with its value
+    /// and discharged again (#227, #245), since omega does not split a <c>Bool</c>. A failure reports omega's first one.
+    /// </summary>
+    private MVarId? Discharge(MVarId g, SimpContext simp, ImmutableHashSet<Expr> split)
     {
         if (_m.SimpAll(g, simp) is not { } rest)
         {
@@ -977,9 +987,94 @@ internal sealed class VcWalker
             }
             substituted = again;
         }
-        _m.OmegaTactic(substituted);
+        var saved = _m.SaveState();
+        try
+        {
+            _m.OmegaTactic(substituted);
+        }
+        catch (MetaException ex) when (ex is not MetaResourceException && split.Count < MaxBoolSplits && BoolTest(substituted, split) is { } test)
+        {
+            var failed = _m.SaveState();
+            _m.Restore(saved);
+            if (!SplitBool(substituted, test, simp, split))
+            {
+                _m.Restore(failed);
+                throw;
+            }
+        }
         return substituted;
     }
+
+    /// <summary>
+    /// A <c>Bool</c> term, not a constant and not in <paramref name="split"/>, that the goal or a hypothesis states an
+    /// equation about (<c>b = true</c>, <c>b = false</c>, or <c>b = c</c> between two terms); null when there is none. A
+    /// split's own case hypothesis <c>b = true</c> names a term in <paramref name="split"/>, so the next split is another.
+    /// </summary>
+    private Expr? BoolTest(MVarId g, ImmutableHashSet<Expr> split) => _m.WithContext(g, () =>
+    {
+        var terms = (_m.MCtx.FindDecl(g)?.LCtx.Decls ?? []).Where(d => !d.IsImplementationDetail).Select(d => d.Type).Append(_m.GetMVarType(g));
+        foreach (var term in terms)
+        {
+            Expr? candidate = null;
+            ExprOps.Find(_m.InstantiateMVars(term), (e, _) =>
+            {
+                if (e.HeadIs(EqName) && e.GetAppArgs() is [ConstExpr { Name: var type }, var lhs, var rhs] && type == BoolName)
+                {
+                    candidate = new[] { lhs, rhs }.FirstOrDefault(t => t is not ConstExpr && !t.HasLooseBVars && !t.HasExprMVar && !split.Contains(t));
+                }
+                return candidate is not null;
+            });
+            if (candidate is not null)
+            {
+                return candidate;
+            }
+        }
+        return null;
+    });
+
+    /// <summary>
+    /// Splits the goal <c>G</c> on the <c>Bool</c> term <paramref name="b"/> by <c>Bool.casesOn (motive := fun x =&gt; b =
+    /// x → G) b ?false ?true rfl</c>, and discharges each case with <c>b = false</c> or <c>b = true</c> rewriting the
+    /// others. False, with the Meta state to be restored, when a case is not proved.
+    /// </summary>
+    private bool SplitBool(MVarId g, Expr b, SimpContext simp, ImmutableHashSet<Expr> split)
+    {
+        try
+        {
+            var cases = _m.WithContext(g, () =>
+            {
+                var target = _m.InstantiateMVars(_m.GetMVarType(g));
+                var boolType = Expr.Const(BoolName);
+                Expr Case(Expr value) => Expr.Forall(H, Expr.App(Expr.Const(EqName, Level.One), boolType, b, value), target);
+                var motive = Expr.Lam(Name.From("x"), boolType, Case(Expr.BVar(0)));
+                var onFalse = _m.MkFreshExprSyntheticOpaqueMVar(Case(Expr.Const(BoolFalseName)));
+                var onTrue = _m.MkFreshExprSyntheticOpaqueMVar(Case(Expr.Const(BoolTrueName)));
+                var proof = Expr.App(Expr.Const(BoolCasesOnName, Level.Zero), motive, b, onFalse, onTrue,
+                    Expr.App(Expr.Const(EqReflName, Level.One), boolType, b));
+                _m.Assign(g, proof);
+                return new[] { onFalse.Id, onTrue.Id };
+            });
+            foreach (var c in cases)
+            {
+                var (fvars, goal) = _m.IntroN(c, 1, [H]);
+                if (Substitute(goal, simp, [fvars[0]]) is { } rest)
+                {
+                    Discharge(rest, simp, split.Add(b));
+                }
+            }
+            return true;
+        }
+        catch (MetaException ex) when (ex is not MetaResourceException)
+        {
+            return false;
+        }
+    }
+
+    private static readonly Name BoolName = Name.Parse("Bool");
+    private static readonly Name BoolTrueName = Name.Parse("Bool.true");
+    private static readonly Name BoolFalseName = Name.Parse("Bool.false");
+    private static readonly Name BoolCasesOnName = Name.Parse("Bool.casesOn");
+    private static readonly Name EqReflName = Name.Parse("Eq.refl");
 
     /// <summary>
     /// Each path condition <c>x = e</c> about a variable rewrites the other hypotheses and the goal (as Lean's

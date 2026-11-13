@@ -33,6 +33,22 @@ public sealed class BundleTests(SemanticsBundleFixture bundle) : IClassFixture<S
         Assert.All(theorems, t => Assert.IsType<TheoremInfo>(bundle.Env.Find(Name.Parse(t))));
     }
 
+    /// <summary>
+    /// The ClrExn names the translation and the VC walker share (#232) are the bundle's: every constructor in declaration
+    /// order, both exception postconditions and their equation at each constructor.
+    /// </summary>
+    [Fact]
+    public void ClrExnNamesAreTheBundles()
+    {
+        var inductive = Assert.IsType<InductiveInfo>(bundle.Env.Find(ClrExnNames.Type));
+        Assert.Equal(inductive.Constructors.ToList(), ClrExnNames.Constructors.ToList());
+        foreach (var post in new[] { ClrExnNames.Allowed, ClrExnNames.External })
+        {
+            Assert.IsType<DefinitionInfo>(bundle.Env.Find(post));
+            Assert.All(ClrExnNames.Constructors, c => Assert.IsType<TheoremInfo>(bundle.Env.Find(ClrExnNames.Equation(post, c))));
+        }
+    }
+
     [Fact]
     public void NothingDependsOnSorry() =>
         Assert.Null(bundle.Env.Find(Name.From("sorryAx")));

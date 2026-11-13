@@ -32,7 +32,7 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal(204, Sidecar.Instances.Count());
         Assert.Equal(738, Sidecar.ReducibilityStatuses.Count());
         Assert.Equal(103, Sidecar.DefEqNames.Count());
-        Assert.Equal(401, Sidecar.Matchers.Count());
+        Assert.Equal(402, Sidecar.Matchers.Count());
         Assert.Equal(77, Sidecar.Classes.Count());
         Assert.Equal(41, Sidecar.SpecEntries.Count);
     }

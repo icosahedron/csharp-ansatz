@@ -452,13 +452,18 @@ The condition is proved under what is known at the operation: the method's
   `a + b` with `overflow in a checked operation`. If the code should throw on
   overflow, throw explicitly (next guide).
 
-The default procedure's `omega` reads linear arithmetic only: `a * b` of two
-variables is never bounded by it (GitHub #257). It also knows nothing of a
-recursive call's result (a recursive method has no `Spec.Requires`, #256), nor
-of a local whose value is merged from two branches that each change two locals
-(#255). These are gaps in the checker, not in your code: prove such an
-operation with a `[ProofFor]` script, or wait for the fix. Write `unchecked`
-only where wrapping is what the code means; it removes the check.
+The default procedure's `omega` reads linear arithmetic only, so a product
+`a * b` of two variables is bounded only through literal bounds on both
+factors: `Spec.Requires(0 <= price && price <= 10000 && 0 <= quantity &&
+quantity <= 1000)` proves `price * quantity` (GitHub #257), but a factor
+bounded only by another variable (`b <= a`) is not, so bound each factor by a
+literal. The default procedure also knows nothing of a recursive call's result
+(a recursive method has no `Spec.Requires`, #256), nor of a local whose value
+is merged from two branches that each change two locals (#255). These are gaps
+in the checker, not in your code. A `[ProofFor]` script does not help a pure
+method here: it proves the contract obligation, and the no-overflow obligations
+are the default procedure's alone. Write `unchecked` only where wrapping is
+what the code means; it removes the check.
 
 In a project with `<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>`,
 all arithmetic is checked, and Warrant follows the project setting.
@@ -474,9 +479,9 @@ Bound the operands (`Spec.Implies(x < 1000 && x > -1000, ...)` in a theorem,
 
 `decimal` (M6) doesn't wrap: `a + b` and `a - b` throw `OverflowException`
 when the result is out of range, even in `unchecked` code. A method that adds
-`decimal`s therefore needs bounds on its inputs in `Spec.Requires`. `simp`
-does not yet compute the value of a `decimal` literal, so `omega` cannot use
-a bound such as `a < 1000m` (GitHub #217).
+`decimal`s therefore needs bounds on its inputs in `Spec.Requires`.
+`Tactic.Omega()` reads a `decimal` literal's value (GitHub #217), so a bound
+such as `a < 1000m` is a fact `omega` can use.
 
 ## Specify a method that throws
 
@@ -614,10 +619,10 @@ static Proof DoubleIsMonotone(int x, int y) =>
          .By(Tactic.Simp(), Tactic.Omega());
 ```
 
-A limit in both routes: `int` arithmetic in a `Spec.Ensures` or a theorem
-wraps, and `omega` cannot always use the bounds to rule the wrap out. With
-`r == x * 3` in place of `r == x + x`, neither `Monotone` nor the theorem is
-proved, though the bounds keep `x * 3` far from overflow.
+Both routes work for `r == x * 3` too: `omega` alone cannot always use the
+bounds to rule out `int` multiplication's wrap-around, so when it fails,
+`Tactic.Omega()` proves `x * 3` in range under them and uses its exact value
+(GitHub #237).
 
 ## Prove things about private methods
 
@@ -680,8 +685,10 @@ long as the member cannot throw (a theorem cannot call one that can). A code
 fix that does the rewrite is deferred.
 
 A `bool` postcondition that needs a case split on a `bool` parameter, such as
-`r => !flagged || r`, is not proved yet (GitHub #227); `r => r == (…)`, stating
-the result exactly, is.
+`r => !flagged || r`, or on a null test, such as
+`r => x is null ? r == 0 : r == x.Value`, is proved too: the default procedure
+splits a `bool` that `omega` leaves, up to three of them on one path
+(GitHub #227, #245).
 
 ## Keep logging out of the proof
 

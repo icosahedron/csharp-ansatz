@@ -40,7 +40,9 @@ internal sealed class EffectCorpus : IDisposable
         Environment = Run.Environment.Fork();
         KernelThread.Run(() => AdmitCallersOfUnprovedContracts(inputs));
         Environment.Freeze();
-        Assembly = CorpusAssembly.Load(clr ?? compilation);
+        // The witness copies (#233) are added members; the methods compared are unchanged.
+        Assembly = CorpusAssembly.Load(AssertWitness.Add(clr ?? compilation, out var witnesses));
+        Witnesses = witnesses;
         var definitions = Extraction.Units.Where(u => u.Unit.Definition is not null).ToDictionary(u => u.Key, u => u.Unit.Definition!, StringComparer.Ordinal);
         var values = new Values(Assembly, definitions);
         Inputs = new Inputs(values);
@@ -133,6 +135,17 @@ internal sealed class EffectCorpus : IDisposable
 
     public CorpusAssembly Assembly { get; }
 
+    /// <summary>The name of each verified method's witness copy (<see cref="AssertWitness"/>), by the method's key.</summary>
+    public IReadOnlyDictionary<string, string> Witnesses { get; }
+
+    /// <summary>
+    /// Whether the witness copy of a function fails on these arguments: a false <c>Spec.Assert</c> or an overflow of
+    /// default-context arithmetic (#233); only a false <c>Spec.Assert</c> when the original run threw
+    /// <see cref="OverflowException"/> (<paramref name="thrown"/>, #266); null when it has none.
+    /// </summary>
+    public bool? WitnessFails(ExtractedUnit unit, IReadOnlyList<object?> args, Exception? thrown = null) =>
+        AssertWitness.Fails(Assembly.MethodOf(unit.Unit), Witnesses.GetValueOrDefault(unit.Key), args, thrown);
+
     public Inputs Inputs { get; }
 
     public ModelCheck Model { get; }
@@ -151,6 +164,11 @@ internal sealed class EffectCorpus : IDisposable
         var types = ModelCheck.ParameterTypes(unit.Unit);
         var returns = ModelCheck.Returned(unit.Unit);
         var raising = Model.IsRaising(unit.Unit);
+        // A raising method's skips need its witness copy (#266): without one they would fall back to the model's word.
+        if (raising && unit.Key.StartsWith("M:", StringComparison.Ordinal) && !Witnesses.ContainsKey(unit.Key))
+        {
+            throw new InvalidOperationException($"{unit.Key} is a raising method with no witness copy (AssertWitness); its skips could not be confirmed.");
+        }
         return args =>
         {
             var description = $"{unit.DisplayName}({string.Join(", ", args.Select((a, i) => Model.Values.Display(types[i], a)))})";
@@ -171,7 +189,7 @@ internal sealed class EffectCorpus : IDisposable
             }
             if (raising)
             {
-                return Model.CheckRaising(description, returns, Model.Run(unit.Unit, args), result, thrown);
+                return Model.CheckRaising(description, returns, Model.Run(unit.Unit, args), result, thrown, () => WitnessFails(unit, args, thrown));
             }
             return thrown is not null
                 ? InputCheck.Disagrees($"{description}: the CLR threw {thrown.GetType().Name} but the model is a pure function")
@@ -627,8 +645,136 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
                 Spec.Assert(x == 0);
                 return x;
             }
+
+            [Verified]
+            public static int Sum(int a, int b)
+            {
+                Spec.Assert(true);
+                return a + b;
+            }
+
+            [Verified]
+            public static int Narrow(long l)
+            {
+                Spec.Assert((int)l != 1);
+                return (int)l;
+            }
+
+            [Verified]
+            public static int Bumped(int a)
+            {
+                Spec.Assert(a != 5);
+                return checked(a + 1);
+            }
+
+            [Verified]
+            public static void Positive(int x) => Spec.Assert(x > 0);
+
+            [Verified]
+            public static void CallsPositive(int x) => Positive(x);
+
+            [Verified]
+            public static int Never(int x) => throw new System.ArgumentException("never");
         }
         """;
+
+    /// <summary>
+    /// A skip is confirmed on the CLR (#233): the witness copy of the method fails where a <c>Spec.Assert</c> is false or
+    /// default-context <c>+</c>, <c>-</c>, <c>*</c> or unary <c>-</c> overflows, not where a default-context narrowing wraps
+    /// (the model wraps there too); when the original run itself threw <see cref="OverflowException"/>, only a false
+    /// <c>Spec.Assert</c> witnesses it (#266). An <c>assertFailed</c> run the CLR does not witness is a disagreement, not a
+    /// skip, so a mistranslated condition cannot hide behind it. An expression-bodied void method, an assertion or a call,
+    /// has a copy too.
+    /// </summary>
+    [Fact]
+    public void ASkipMustBeWitnessedOnTheClr()
+    {
+        using var side = new EffectCorpus(Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Assertions.cs", "using Warrant;\n" + Assertions)], checkOverflow: false));
+        var nonZero = side.Unit("M:S.NonZero(System.Int32)");
+        var sum = side.Unit("M:S.Sum(System.Int32,System.Int32)");
+        Assert.Equal((true, false), (side.WitnessFails(nonZero, [0]), side.WitnessFails(nonZero, [5])));
+        Assert.Equal((true, false), (side.WitnessFails(sum, [int.MaxValue, 1]), side.WitnessFails(sum, [1, 2])));
+        // A default-context narrowing wraps in the copy as in the model, in the body and in an assertion's condition.
+        var narrow = side.Unit("M:S.Narrow(System.Int64)");
+        Assert.Equal((false, false), (side.WitnessFails(narrow, [long.MaxValue]), side.WitnessFails(narrow, [2L])));
+        Assert.Equal((true, true), (side.WitnessFails(narrow, [1L]), side.WitnessFails(narrow, [(1L << 32) + 1])));
+        // Where the original threw OverflowException, an explicit checked overflow is no witness; a false assert is.
+        var bumped = side.Unit("M:S.Bumped(System.Int32)");
+        Assert.Throws<OverflowException>(() => CorpusAssembly.Invoke(side.Assembly.MethodOf(bumped.Unit), [int.MaxValue]));
+        Assert.Equal(true, side.WitnessFails(bumped, [int.MaxValue]));
+        Assert.Equal(false, side.WitnessFails(bumped, [int.MaxValue], new OverflowException()));
+        Assert.Equal(true, side.WitnessFails(bumped, [5], new OverflowException()));
+        // Expression-bodied void methods, which extraction refuses but which still get a copy: an assertion, and a call whose
+        // callee's assertion the copy does not see.
+        bool? Fails(string name, int x) => AssertWitness.Fails(
+            side.Assembly.Assembly.GetType("S", throwOnError: true)!.GetMethod(name)!, side.Witnesses[$"M:S.{name}(System.Int32)"], [x]);
+        Assert.Equal((true, false), (Fails("Positive", 0), Fails("Positive", 1)));
+        Assert.Equal(false, Fails("CallsPositive", 0));
+        // A throw expression as the body stays a throw, and its exception is no witness.
+        Assert.Equal(false, Fails("Never", 0));
+        // The original methods are unchanged: the assert does nothing and the sum wraps.
+        Assert.Equal(int.MinValue, CorpusAssembly.Invoke(side.Assembly.MethodOf(sum.Unit), [int.MaxValue, 1]));
+
+        var sumCheck = side.Checker(sum);
+        var run = new EffectRun();
+        KernelThread.Run(() =>
+        {
+            run.Record(sumCheck([int.MaxValue, 1]));
+            run.Record(sumCheck([1, 2]));
+            var model = side.Model.Run(nonZero.Unit, [0]);
+            Assert.Same(InputCheck.Skipped, side.Model.CheckRaising("NonZero(0)", VirType.Int32, model, 100, null, () => true));
+            var unwitnessed = side.Model.CheckRaising("NonZero(0)", VirType.Int32, model, 100, null, () => false);
+            Assert.False(unwitnessed.IsSkipped);
+            Assert.Contains(
+                "NonZero(0): the model computes error assertFailed, which the CLR does not confirm: no Spec.Assert fails there, and no "
+                + "default-context arithmetic overflows (an overflow is not counted where the original run threw OverflowException); the CLR returned 100",
+                unwitnessed.Disagreement, StringComparison.Ordinal);
+        });
+        Assert.Empty(run.Disagreements);
+        Assert.Equal((2, 1), (run.Checked, run.Skipped));
+    }
+
+    /// <summary>
+    /// End to end (#266): when the CLR's own method asserts something other than what the method extraction read asserts,
+    /// the model's <c>assertFailed</c> is not witnessed, and the checker reports a disagreement rather than a skip.
+    /// </summary>
+    [Fact]
+    public void AnAssertTheClrDoesNotFailIsADisagreement()
+    {
+        var extracted = Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Assertions.cs", "using Warrant;\n" + Assertions)], checkOverflow: false);
+        var clr = Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Assertions.cs", "using Warrant;\n" + Assertions.Replace("Spec.Assert(x == 0);", "Spec.Assert(true);", StringComparison.Ordinal))],
+            checkOverflow: false);
+        using var side = new EffectCorpus(extracted, clr);
+        var check = side.Checker(side.Unit("M:S.OnlyZero(System.Int32)"));
+        var (zero, five) = KernelThread.Run(() => (check([0]), check([5])));
+        Assert.Same(InputCheck.Agrees, zero);
+        Assert.False(five.IsSkipped);
+        Assert.Contains("the model computes error assertFailed, which the CLR does not confirm", five.Disagreement, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A raising method with no witness copy cannot be checked (#266): its skips would rest on the model alone, so
+    /// <see cref="EffectCorpus.Checker"/> refuses it. Here the CLR's copy of the source lacks <c>[Verified]</c> on it.
+    /// </summary>
+    [Fact]
+    public void ARaisingMethodWithNoWitnessIsRefused()
+    {
+        var at = Assertions.LastIndexOf("[Verified]", Assertions.IndexOf("public static int OnlyZero", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.True(at > 0);
+        var extracted = Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Assertions.cs", "using Warrant;\n" + Assertions)], checkOverflow: false);
+        var clr = Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Assertions.cs", "using Warrant;\n" + Assertions.Remove(at, "[Verified]".Length))],
+            checkOverflow: false);
+        using var side = new EffectCorpus(extracted, clr);
+        Assert.DoesNotContain("M:S.OnlyZero(System.Int32)", side.Witnesses.Keys);
+        var refused = Assert.Throws<InvalidOperationException>(() => side.Checker(side.Unit("M:S.OnlyZero(System.Int32)")));
+        Assert.Contains("is a raising method with no witness copy", refused.Message, StringComparison.Ordinal);
+        side.Checker(side.Unit("M:S.NonZero(System.Int32)"));
+    }
 
     /// <summary>
     /// An input on which the model fails a <c>Spec.Assert</c> is skipped and counted: <c>Spec.Assert</c> is
@@ -676,6 +822,88 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         Assert.Equal((7, 6), (run.Checked, run.Skipped));
         var failure = Assert.Throws<XunitException>(() => run.AssertEnoughEvaluated("OnlyZero"));
         Assert.Contains("only 1 of its 7 inputs were evaluated; 6 were skipped", failure.Message, StringComparison.Ordinal);
+    }
+
+    // ---- Generated equality of records with nullable fields (#218, #253) ----
+
+    private const string NullableFields = """
+        #nullable enable
+        [Closed]
+        public sealed class Shade
+        {
+            public static Shade Light { get; } = new();
+
+            public static Shade Dark { get; } = new();
+
+            private Shade()
+            {
+            }
+        }
+
+        public sealed record Flags(bool? On, Shade? Color);
+
+        public sealed record Inner(bool? Paid);
+
+        public sealed record Outer(Inner? Maybe, Inner Always, int? Days);
+
+        public static class E
+        {
+            [Verified]
+            public static bool SameFlags(Flags a, Flags b) => a == b;
+
+            [Verified]
+            public static bool SameOuter(Outer a, Outer b) => a == b;
+        }
+        """;
+
+    /// <summary>
+    /// A record's generated <c>$eq</c> agrees with the CLR's generated <c>Equals</c> for a <c>bool?</c> field, a nullable
+    /// closed class field, and a record nested in a record, nullable or not, whose own fields are nullable (#253), on every
+    /// boundary combination and on random inputs. A nullable closed enum is not a nullable type M6 supports
+    /// (<c>Nullable&lt;T&gt;</c> of <c>bool</c>, <c>int</c>, <c>long</c> or <c>decimal</c> only, KTD5), so a record cannot
+    /// have one.
+    /// </summary>
+    [Fact]
+    public void NullableFieldEqualityAgreesWithTheClrForBoolClosedClassAndNestedRecords()
+    {
+        using var side = new EffectCorpus(Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("NullableFields.cs", "using Warrant;\n" + NullableFields)], checkOverflow: false));
+        Assert.Empty(side.Extraction.Diagnostics);
+        foreach (var key in new[] { "M:E.SameFlags(Flags,Flags)", "M:E.SameOuter(Outer,Outer)" })
+        {
+            var unit = side.Unit(key);
+            var types = ModelCheck.ParameterTypes(unit.Unit);
+            var check = side.Checker(unit);
+            var run = new EffectRun();
+            var boundaries = side.Inputs.BoundaryInputs(types);
+            var equal = 0;
+            KernelThread.Run(() =>
+            {
+                foreach (var input in boundaries)
+                {
+                    run.Record(check(input));
+                    equal += Equals(input[0], input[1]) ? 1 : 0;
+                }
+                Pbt.Check(Prop.ForAll(side.Inputs.Arbitrary(types), args =>
+                {
+                    if (run.Record(check(args)) is { } disagreement)
+                    {
+                        throw new XunitException(disagreement);
+                    }
+                }), Pbt.Config(RandomInputsPerFunction));
+            });
+            output.WriteLine($"{key}: {run.Checked} inputs, {equal} equal boundary pairs");
+            Assert.True(run.Disagreements.Count == 0, run.Report());
+            Assert.Equal(0, run.Skipped);
+            // Both outcomes are compared: some boundary pairs are equal, most are not.
+            Assert.InRange(equal, 1, boundaries.Count - 1);
+        }
+
+        var closedEnum = EngineCorpus.Extract(Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("ClosedEnum.cs", "using Warrant;\n[Closed] public enum Light { Red, Green }\npublic sealed record Lamp(Light? Color);\n"
+                + "public static class L { [Verified] public static bool Same(Lamp a, Lamp b) => a == b; }\n")], checkOverflow: false));
+        Assert.Contains(closedEnum.Diagnostics, d => (d.Id, d.Construct) == ("WRT0002", "nullable type"));
+        Assert.Null(closedEnum.Find("M:L.Same(Lamp,Lamp)"));
     }
 
     // ---- Which definitions are compared ----

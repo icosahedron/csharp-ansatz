@@ -238,11 +238,17 @@ the wrap never happens. A failure is WRT0001 at the operation, `arithmetic overf
   is `unchecked` (recursive methods have no `Spec.Requires` yet, GitHub #256). Once an operation's obligation holds, its exact value
   `(a op b).toInt = a.toInt op b.toInt` is a fact for the obligations after it on the same path, inside the guard it
   was under; `omega` reasons through the wrap-around's `Int.bmod` only by its real shadow, which cannot close nested
-  arithmetic such as `a * 3 - b` even under tight bounds (`ANestedProductIsBoundedThroughItsExactValueNotItsWrapAround`).
+  arithmetic such as `a * 3 - b` even under tight bounds. Since #237 `Tactic.Omega()` finds such an exact value itself
+  when `omega` alone fails, by proving the operation in range under the bounds
+  (`ANestedProductIsBoundedThroughItsExactValueNotItsWrapAround`, [docs/m5a/06](../m5a/06-bridging-and-omega.md#when-omega-alone-fails)).
   The same facts serve a `Spec` expression's arithmetic.
-  `omega` reads only linear arithmetic: a product of two variables is never bounded by it, so such a product fails
-  unless a `[ProofFor]` script proves it (GitHub #257). `unchecked` states that wrapping is intended; it is not the
-  way around a gap. The other gaps: join points (#255), recursive methods (#256), closed-enum arms (#258).
+  `omega` reads only linear arithmetic, so a product of two variables is an atom to it; since #257 the same step adds
+  the product's bounds from literal bounds on both factors, so `price * quantity` under
+  `0 <= price && price <= 10000 && 0 <= quantity && quantity <= 1000` proves. A factor bounded only by another
+  variable (`b <= a`) gets no bound, and the product fails; a `[ProofFor]` script does not reach a pure method's
+  no-overflow obligation, which the default procedure alone proves (`AProductWhoseFactorHasNoLiteralBoundFailsEvenWithAProofForScript`).
+  `unchecked` states that wrapping is intended; it is not the way around a gap. The other gaps: join points (#255),
+  recursive methods (#256), closed-enum arms (#258).
 - *A method that can raise* has the operation as a site of its program instead: `Warrant.Int32.addImplicit σ a b` and
   likewise for `-`, `*`, unary `-` and `long` (`lean/Warrant/Checked.lean`), which is `pure (a + b)` where the exact
   result is in range and `throw .assertFailed` where the CLR would wrap. `assertFailed` is not allowed, so the contract

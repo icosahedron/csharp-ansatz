@@ -47,6 +47,7 @@ How the bundle grew, unit by unit (counts from `scripts/count-export.py`, `tests
 | U20 | 630 | 4,112 | three simp lemmas for a nullable `Spec.Ensures` meeting a constructor |
 | #182 | 641 | 4,125 | `Spec.NoThrow`: `ClrExn.External`, its equations, `ClrExn.allowed_of_external`, `Vc.callExternal`, `Vc.callPure` |
 | #244 | 660 | 4,165 | the models of default-context `+ - *` and unary `-` in a body that can raise, and `Int.instAdd`, `Int.instSub`, `Int.instMul` |
+| #257 | 673 | 4,175 | the product bounds for `omega` (`Warrant.Int.mul_*`), the `toInt_*_of_range` lemmas as roots, and `Bool.casesOn` (#227, #237) |
 
 No unit added an axiom.
 

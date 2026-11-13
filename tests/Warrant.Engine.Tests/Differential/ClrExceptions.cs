@@ -1,4 +1,5 @@
 using Warrant.Cic;
+using Warrant.Semantics;
 
 namespace Warrant.Engine.Tests.Differential;
 
@@ -22,23 +23,23 @@ internal static class ClrExceptions
     /// <summary>The <c>ClrExn</c> constructors that stand for one CLR exception type, by their last name component.</summary>
     public static IReadOnlyDictionary<string, Type> Implicit { get; } = new Dictionary<string, Type>(StringComparer.Ordinal)
     {
-        ["overflow"] = typeof(OverflowException),
-        ["divideByZero"] = typeof(DivideByZeroException),
-        ["invalidOperation"] = typeof(InvalidOperationException),
-        ["nullReference"] = typeof(NullReferenceException),
+        [ClrExnNames.Overflow.StringComponent] = typeof(OverflowException),
+        [ClrExnNames.DivideByZero.StringComponent] = typeof(DivideByZeroException),
+        [ClrExnNames.InvalidOperation.StringComponent] = typeof(InvalidOperationException),
+        [ClrExnNames.NullReference.StringComponent] = typeof(NullReferenceException),
     };
 
     /// <summary>The constructor for an explicit throw, <c>thrown (type : String)</c>.</summary>
-    public const string Thrown = "thrown";
+    public static string Thrown { get; } = ClrExnNames.Thrown.StringComponent;
 
     /// <summary>The constructor of a failed <c>Spec.Assert</c>, which has no CLR counterpart (#186).</summary>
-    public const string AssertFailed = "assertFailed";
+    public static string AssertFailed { get; } = ClrExnNames.AssertFailed.StringComponent;
 
     /// <summary>The constructor of an exception a dependency throws (plan U22): <see cref="MockException"/>.</summary>
-    public const string External = "external";
+    public static string External { get; } = ClrExnNames.ExternalException.StringComponent;
 
     /// <summary><c>Warrant.ClrExn</c>.</summary>
-    public static readonly Name Type = Name.Parse("Warrant.ClrExn");
+    public static Name Type => ClrExnNames.Type;
 
     /// <summary>The constant <c>Warrant.ClrExn.c</c>.</summary>
     public static Expr Constructor(string name) => Expr.Const(Type.Append(name));

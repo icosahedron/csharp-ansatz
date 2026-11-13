@@ -885,6 +885,14 @@ public class DependencyExtractionTests
     [InlineData("public async Task<int> Kept(int id, System.Threading.CancellationToken ct) { var t = ct; return await store.LoadWithin(id, t); }", "M:Service.Kept(System.Int32,System.Threading.CancellationToken)", "WRT0002 | cancellation token other than a parameter")]
     [InlineData("public int Asked(int id, System.Threading.CancellationToken ct) => ct.IsCancellationRequested ? 0 : id;", "M:Service.Asked(System.Int32,System.Threading.CancellationToken)", "WRT0005 | P:System.Threading.CancellationToken.IsCancellationRequested")]
     [InlineData("public async Task<int> Checked(int id, System.Threading.CancellationToken ct) { ct.ThrowIfCancellationRequested(); return await store.LoadWithin(id, ct); }", "M:Service.Checked(System.Int32,System.Threading.CancellationToken)", "WRT0005 | M:System.Threading.CancellationToken.ThrowIfCancellationRequested")]
+    // #253: a nullable token (Nullable<CancellationToken> has no model), a token kept in a field, one captured by a lambda
+    // (the delegate's type has none), and one passed to a member that is neither a dependency's nor verified: Task.Delay
+    // is refused as a task that is not a dependency's, an unverified helper as an unverified call.
+    [InlineData("public async Task<int> Maybe(int id, System.Threading.CancellationToken? ct) => await store.LoadWithin(id, ct ?? default);", "M:Service.Maybe(System.Int32,System.Nullable{System.Threading.CancellationToken})", "WRT0002 | nullable type")]
+    [InlineData("public async Task<int> Field(int id) => await store.LoadWithin(id, _ct); private readonly System.Threading.CancellationToken _ct;", "M:Service.Field(System.Int32)", "WRT0002 | cancellation token other than a parameter")]
+    [InlineData("public async Task<int> Captured(int id, System.Threading.CancellationToken ct) { System.Func<System.Threading.CancellationToken> f = () => ct; return await store.LoadWithin(id, f()); }", "M:Service.Captured(System.Int32,System.Threading.CancellationToken)", "WRT0002 | unsupported type")]
+    [InlineData("public async Task<int> Elsewhere(int id, System.Threading.CancellationToken ct) { await Task.Delay(1, ct); return await store.LoadWithin(id, ct); }", "M:Service.Elsewhere(System.Int32,System.Threading.CancellationToken)", "WRT0002 | Task combinator")]
+    [InlineData("public int Helper(int id, System.Threading.CancellationToken ct) => Use(id, ct); public static int Use(int id, System.Threading.CancellationToken ct) => id;", "M:Service.Helper(System.Int32,System.Threading.CancellationToken)", "WRT0005 | M:Service.Use(System.Int32,System.Threading.CancellationToken)")]
     public void ACancellationTokenIsOnlyPassedOn(string member, string key, string expected)
     {
         var result = Service(

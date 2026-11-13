@@ -372,6 +372,56 @@ public class EffectExtractionTests
         Assert.All(inner.Stmts, s => Assert.Equal(VirOverflow.Unchecked, Assert.IsType<BinaryExpr>(Assert.IsType<AssignStmt>(s).Value).Overflow));
     }
 
+    /// <summary>
+    /// A <c>checked</c> block in the default project makes its compound assignments, increments and decrements, negation
+    /// and narrowing checked, and what follows it is the default again; in a checked project, an <c>unchecked</c> block's
+    /// negation and narrowing are unchecked and a narrowing outside it is checked (#233).
+    /// </summary>
+    [Fact]
+    public void ACheckedOrUncheckedBlockDecidesEveryOperationInIt()
+    {
+        const string source = """
+            [Verified]
+            public static long F(long a, long b)
+            {
+                var x = a;
+                BLOCK
+                {
+                    x += b;
+                    x *= b;
+                    x -= b;
+                    x--;
+                    x = -x;
+                    x = (int)x;
+                }
+                x += b;
+                return (int)x;
+            }
+            """;
+        static void Expect(BlockStmt body, VirOverflow inside, VirOverflow after, VirOverflow narrowing)
+        {
+            var inner = Assert.IsType<BlockStmt>(body.Stmts[1]);
+            Assert.Equal(6, inner.Stmts.Count);
+            Assert.All(inner.Stmts, s => Assert.Equal(inside, Assert.IsType<AssignStmt>(s).Value switch
+            {
+                BinaryExpr e => e.Overflow,
+                UnaryExpr e => e.Overflow,
+                ConvertExpr { Operand: ConvertExpr narrow } => narrow.Overflow,
+                ConvertExpr e => e.Overflow,
+                var other => throw new InvalidOperationException($"unexpected {other}"),
+            }));
+            Assert.Equal(after, Assert.IsType<BinaryExpr>(Assert.IsType<AssignStmt>(body.Stmts[2]).Value).Overflow);
+            var returned = Assert.IsType<ReturnStmt>(body.Stmts[3]).Value;
+            Assert.Equal(narrowing, Assert.IsType<ConvertExpr>(returned is ConvertExpr { Operand: ConvertExpr n } ? n : returned).Overflow);
+        }
+        Expect(
+            Assert.IsType<BlockStmt>(Body(source.Replace("BLOCK", "checked", StringComparison.Ordinal), "M:C.F(System.Int64,System.Int64)")),
+            VirOverflow.Checked, VirOverflow.Wrap, VirOverflow.Wrap);
+        Expect(
+            Assert.IsType<BlockStmt>(Body(source.Replace("BLOCK", "unchecked", StringComparison.Ordinal), "M:C.F(System.Int64,System.Int64)", checkOverflow: true)),
+            VirOverflow.Unchecked, VirOverflow.Checked, VirOverflow.Checked);
+    }
+
     [Theory]
     [InlineData("x / x <= 1", "division")]
     [InlineData("x % -1 == 0", "remainder")]

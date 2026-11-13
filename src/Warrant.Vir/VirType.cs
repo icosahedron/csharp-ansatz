@@ -37,8 +37,13 @@ public abstract record VirType
     /// <returns>The type <c>task{result}</c>.</returns>
     public static TaskType Task(VirType result) => new(result);
 
+    /// <summary>The key of <c>System.Threading.CancellationToken</c>, the one opaque type (#215, #253).</summary>
+    public const string CancellationTokenKey = "T:System.Threading.CancellationToken";
+
     /// <summary>An opaque type: a parameter the method only passes on, never reads (#215).</summary>
-    /// <param name="key">The CLR type's key; only <c>T:System.Threading.CancellationToken</c> is extracted.</param>
+    /// <param name="key">
+    /// The CLR type's key; only <see cref="CancellationTokenKey"/> is extracted, and the VIR reader reads no other.
+    /// </param>
     /// <returns>The type <c>opaque{key}</c>.</returns>
     public static OpaqueType Opaque(string key) => new(key);
 }

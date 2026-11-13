@@ -594,6 +594,21 @@ Warrant.Int64.negImplicit_spec
 Int.instAdd
 Int.instSub
 Int.instMul
+# omega's strengthening steps (Warrant.Meta, #237, #257, #227): an operation's exact value where it is in range, the
+# product bounds of lean/Warrant/Checked.lean, and the case split on a Bool.
+Warrant.Int32.toInt_add_of_range
+Warrant.Int32.toInt_sub_of_range
+Warrant.Int32.toInt_mul_of_range
+Warrant.Int32.toInt_neg_of_range
+Warrant.Int64.toInt_add_of_range
+Warrant.Int64.toInt_sub_of_range
+Warrant.Int64.toInt_mul_of_range
+Warrant.Int64.toInt_neg_of_range
+Warrant.Int.mul_ge_of_ge_of_ge
+Warrant.Int.mul_ge_of_le_of_le
+Warrant.Int.mul_le_of_ge_of_le
+Warrant.Int.mul_le_of_le_of_ge
+Bool.casesOn
 
 # Nullable values and Math on int and long (M6 U16; plan M6 KTD5, KTD23, lean/Warrant/Nullable.lean and Math.lean):
 # a nullable value is an Option (null is none, a T converted to T? is some), the raising reads with their @[spec]

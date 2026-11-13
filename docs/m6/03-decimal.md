@@ -93,13 +93,15 @@ The differential tests (chapter 8) run the 14 `decimal` members of the corpus ag
 and compare results by representation: `-1.00m` against the model's `-1.0m`, or `0m` against `-0m`, is a disagreement
 (`ADecimalResultIsComparedByRepresentation`). All agree.
 
-## Known gaps
+## Gaps fixed after M6
 
-Each of these makes a true claim fail or a method be rejected; none lets a false claim pass.
+Each of these made a true claim fail; neither let a false claim pass.
 
-- **#216**: `Prove.That(Larger(a, b) >= a)` over parameters, with `Larger` returning `Math.Max(a, b)`, does not prove.
-  After unfolding through `max_def` and `le_iff` the goal is `units a ≤ units (if … then a else b)`, and nothing splits
-  the `if`: `omega` treats it as an atom. The `int` and `long` versions prove, because their models unfold to `Int32`
-  comparisons `omega` reads.
+- **#216**: `Prove.That(Larger(a, b) >= a)` over parameters, with `Larger` returning `Math.Max(a, b)`, did not prove:
+  after unfolding through `max_def` and `le_iff` the goal is `units a ≤ units (if … then a else b)`, and `omega` took
+  the `if` as an atom. The omega-prep set now has `apply_ite Warrant.Decimal.units`, which moves `units` inside the
+  `if`, an `if` on integers that `omega` splits (`DecimalMaxAndMinOverParametersAreProvable`).
 - **#217**: `simp` does not compute `units` of a literal, so a claim over every `decimal` that mentions one
-  (`Spec.Implies(a > 0m, -a < a)`) does not prove.
+  (`Spec.Implies(a > 0m, -a < a)`) did not prove. When `omega` alone fails, `Tactic.Omega()` now adds
+  `units (lit …) = n` for each literal, proved by `rfl` (`ADecimalLiteralIsReadByOmega`;
+  [docs/m5a/06](../m5a/06-bridging-and-omega.md#when-omega-alone-fails)).

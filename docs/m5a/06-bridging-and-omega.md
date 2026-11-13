@@ -105,8 +105,8 @@ In this order, after the goal's premises become hypotheses:
   `0 ≤ x * y ≤ 10000000` (#257); from `-5 ≤ x, y ≤ -1`, `1 ≤ x * y ≤ 25`. A factor whose bound is not a literal
   (`b ≤ a`) gets none, and neither does the outer product of `a * b * c`, whose factor `a * b` has no literal bound,
   nor a sum of products (GitHub #271). A bound tighter than a fact that holds only through a disjunction
-  (`Spec.Requires(a >= 0 || a >= 1)` beside `-10 <= a`) or a condition outside an `if` over the product
-  (`(a < 0 ? 1 : 0) + a * b`) is not used: the fact is. These facts come first, so the next step's range proofs have
+  (`Spec.Requires(a >= 0 || a >= 1)` beside `-10 <= a`), or that a comparison elsewhere suggests and only non-literal
+  hypotheses imply (`0 <= a` from `a >= b` and `0 <= b`, in `(a < 0 ? 1 : 0) + a * b`), is not used: the fact is. These facts come first, so the next step's range proofs have
   them.
 - **Exact values.** For each `int`/`long` `a + b`, `a - b`, `a * b` or `-a` in the goal that is not an operation on
   literals (`-5` is a literal to the prep step), a nested `Tactic.Omega()`

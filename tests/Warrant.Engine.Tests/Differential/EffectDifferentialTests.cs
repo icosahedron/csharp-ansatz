@@ -732,6 +732,88 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         Assert.Contains("only 1 of its 7 inputs were evaluated; 6 were skipped", failure.Message, StringComparison.Ordinal);
     }
 
+    // ---- Generated equality of records with nullable fields (#218, #253) ----
+
+    private const string NullableFields = """
+        #nullable enable
+        [Closed]
+        public sealed class Shade
+        {
+            public static Shade Light { get; } = new();
+
+            public static Shade Dark { get; } = new();
+
+            private Shade()
+            {
+            }
+        }
+
+        public sealed record Flags(bool? On, Shade? Color);
+
+        public sealed record Inner(bool? Paid);
+
+        public sealed record Outer(Inner? Maybe, Inner Always, int? Days);
+
+        public static class E
+        {
+            [Verified]
+            public static bool SameFlags(Flags a, Flags b) => a == b;
+
+            [Verified]
+            public static bool SameOuter(Outer a, Outer b) => a == b;
+        }
+        """;
+
+    /// <summary>
+    /// A record's generated <c>$eq</c> agrees with the CLR's generated <c>Equals</c> for a <c>bool?</c> field, a nullable
+    /// closed class field, and a record nested in a record, nullable or not, whose own fields are nullable (#253), on every
+    /// boundary combination and on random inputs. A nullable closed enum is not a nullable type M6 supports
+    /// (<c>Nullable&lt;T&gt;</c> of <c>bool</c>, <c>int</c>, <c>long</c> or <c>decimal</c> only, KTD5), so a record cannot
+    /// have one.
+    /// </summary>
+    [Fact]
+    public void NullableFieldEqualityAgreesWithTheClrForBoolEnumAndNestedRecords()
+    {
+        using var side = new EffectCorpus(Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("NullableFields.cs", "using Warrant;\n" + NullableFields)], checkOverflow: false));
+        Assert.Empty(side.Extraction.Diagnostics);
+        foreach (var key in new[] { "M:E.SameFlags(Flags,Flags)", "M:E.SameOuter(Outer,Outer)" })
+        {
+            var unit = side.Unit(key);
+            var types = ModelCheck.ParameterTypes(unit.Unit);
+            var check = side.Checker(unit);
+            var run = new EffectRun();
+            var boundaries = side.Inputs.BoundaryInputs(types);
+            var equal = 0;
+            KernelThread.Run(() =>
+            {
+                foreach (var input in boundaries)
+                {
+                    run.Record(check(input));
+                    equal += Equals(input[0], input[1]) ? 1 : 0;
+                }
+                Pbt.Check(Prop.ForAll(side.Inputs.Arbitrary(types), args =>
+                {
+                    if (run.Record(check(args)) is { } disagreement)
+                    {
+                        throw new XunitException(disagreement);
+                    }
+                }), Pbt.Config(RandomInputsPerFunction));
+            });
+            output.WriteLine($"{key}: {run.Checked} inputs, {equal} equal boundary pairs");
+            Assert.True(run.Disagreements.Count == 0, run.Report());
+            Assert.Equal(0, run.Skipped);
+            // Both outcomes are compared: some boundary pairs are equal, most are not.
+            Assert.InRange(equal, 1, boundaries.Count - 1);
+        }
+
+        var closedEnum = EngineCorpus.Extract(Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("ClosedEnum.cs", "using Warrant;\n[Closed] public enum Light { Red, Green }\npublic sealed record Lamp(Light? Color);\n"
+                + "public static class L { [Verified] public static bool Same(Lamp a, Lamp b) => a == b; }\n")], checkOverflow: false));
+        Assert.Contains(closedEnum.Diagnostics, d => (d.Id, d.Construct) == ("WRT0002", "nullable type"));
+        Assert.Null(closedEnum.Find("M:L.Same(Lamp,Lamp)"));
+    }
+
     // ---- Which definitions are compared ----
 
     private const string Admission = """

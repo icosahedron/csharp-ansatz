@@ -1043,4 +1043,82 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
         Assert.IsType<UndecidedOutcome>(outcome);
         Assert.Equal("WRT0006", UndecidedOutcome.Code);
     }
+
+    // ---- A bare `return;` (#215, #253) ----
+
+    /// <summary>
+    /// A bare <c>return;</c> ends its path wherever it is (#253): on a path that is not the last, in a switch section, in
+    /// both branches of an <c>if</c>, and in a <c>ValueTask</c> method. Each assertion after it holds only because the
+    /// path that returned does not reach it, so each proves; without the return, the same assertion fails.
+    /// </summary>
+    [Fact]
+    public void ABareReturnEndsItsPathWhereverItIs()
+    {
+        var source = "using System.Threading.Tasks;\n" + Wrap("""
+            [Verified]
+            public static void NotLast(int x)
+            {
+                if (x == int.MaxValue) return;
+                Spec.Assert(x < int.MaxValue);
+            }
+
+            [Verified]
+            public static void InASwitch(int x)
+            {
+                switch (x)
+                {
+                    case 0:
+                        return;
+                    default:
+                        Spec.Assert(x != 0);
+                        break;
+                }
+                Spec.Assert(x != 0);
+            }
+
+            [Verified]
+            public static void BothBranches(int x)
+            {
+                if (x > 0)
+                {
+                    Spec.Assert(x > 0);
+                    return;
+                }
+                else
+                {
+                    Spec.Assert(x <= 0);
+                    return;
+                }
+            }
+
+            [Verified]
+            public static async ValueTask Later(int x)
+            {
+                if (x == int.MaxValue) return;
+                Spec.Assert(x < int.MaxValue);
+                await Twice(x);
+            }
+
+            [Verified]
+            public static async Task<int> Twice(int x)
+            {
+                Spec.Requires(x < int.MaxValue);
+                return x;
+            }
+
+            [Verified]
+            public static void WithoutTheReturn(int x)
+            {
+                if (x == 0) return;
+                Spec.Assert(x < int.MaxValue);
+            }
+            """);
+        var result = Run(source);
+        foreach (var key in new[] { "M:S.NotLast(System.Int32)", "M:S.InASwitch(System.Int32)", "M:S.BothBranches(System.Int32)", "M:S.Later(System.Int32)" })
+        {
+            Proved(result.Find(key));
+        }
+        const string Without = "M:S.WithoutTheReturn(System.Int32)";
+        Assert.Equal((VcKind.Assert, "Spec.Assert(x < int.MaxValue);"), Failure(source, Without, result.Find(Without)));
+    }
 }

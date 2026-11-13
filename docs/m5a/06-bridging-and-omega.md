@@ -50,6 +50,7 @@ Warrant.Int32.toInt_div, Warrant.Int32.toInt_mod                        (M6 U2)
 apply_ite Int32.toInt
 the Int64 versions of all of the above
 Int32.toInt_toInt64, Int64.toInt_toInt32
+apply_ite Warrant.Decimal.units                                         (#216)
 Int.bmod_def
 Int.ediv_neg, Int.emod_neg                                              (M6 U2)
 ```
@@ -74,6 +75,34 @@ This is Lean's `bv_omega` pattern (`simp only [bitvec_to_nat] at *; omega`), whi
 
 The range facts `-2^31 ≤ x.toInt` and `x.toInt < 2^31` are not rewrites; `omega` needs them as hypotheses.
 Lean's `omega` already adds `BitVec.isLt` whenever it meets a `BitVec.toNat x` atom, and Warrant's port adds the two `Int32` (or `Int64`) range lemmas whenever it meets an `Int32.toInt x` atom (KTD12).
+
+## When `omega` alone fails
+
+If the prep step and `omega` do not prove the goal, `Tactic.Omega()` tries it once more with facts that hold in every
+case but that `omega` cannot find (`OmegaStrengthened`, `src/Warrant.Meta/Tactic/Omega/Strengthen.cs`; #217, #237,
+#257). Each fact is a proved hypothesis or rewrite, so the kernel checks it with the rest of the proof, and the step can
+only make a true goal provable. A goal `omega` proves alone gets the same proof as before, and a failure reports the
+first attempt's goal and constraints.
+
+- **Exact values.** For each `int`/`long` `a + b`, `a - b`, `a * b` or `-a` in the goal, a nested `Tactic.Omega()`
+  tries to prove the exact result in range, `¬(a.toInt * b.toInt < -2^31 ∨ 2^31 - 1 < a.toInt * b.toInt)`; where it
+  does, `Warrant.Int32.toInt_mul_of_range` (and its siblings in `lean/Warrant/Checked.lean`) rewrites
+  `(a * b).toInt` to `a.toInt * b.toInt` in the prep step, before `toInt_mul`'s `bmod`. `omega` has no dark shadow,
+  so it cannot always rule out the wrap-around from bounds on its own; `x * 3 ≤ y * 3` under `0 ≤ x ≤ y ≤ 1000` is
+  the example (#237).
+- **`decimal` literals.** After the prep step (whose `decide` would otherwise turn it into `True`), each
+  `Warrant.Decimal.units (lit s m e _ _)` with literal arguments gets the hypothesis `units (lit …) = n`, with `n` the
+  literal's value in units of 10^-28, proved by `rfl`: the kernel computes it (#217).
+- **Products.** `omega` reads linear arithmetic only, so `x * y` of two non-literal terms is an atom. For each such
+  product in a hypothesis, the step looks for literal bounds on `x` and `y` in the hypotheses (`c ≤ x`, `x < c`, after
+  the prep step), proves the tightest it can with a nested `omega`, and adds the bounds of
+  `Warrant.Int.mul_ge_of_ge_of_ge`, `mul_ge_of_le_of_le`, `mul_le_of_ge_of_le` and `mul_le_of_le_of_ge`
+  (`lean/Warrant/Checked.lean`): the four corners of `0 ≤ (x - a) * (y - b)`, linear in the atom `x * y` (McCormick's
+  inequalities). From `0 ≤ x ≤ 10000` and `0 ≤ y ≤ 1000` they give `0 ≤ x * y ≤ 10000000` (#257). A factor whose
+  bound is not a literal (`b ≤ a`) gets none.
+
+The nested proofs run with a smaller step (no exact values, and none deeper than two levels), and at most eight terms
+of each kind are tried.
 
 ## The true example
 

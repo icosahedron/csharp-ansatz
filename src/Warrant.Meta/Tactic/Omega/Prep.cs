@@ -42,6 +42,8 @@ namespace Warrant.Meta
                 new(Name.Parse("apply_ite"), AppliedTo: Name.Parse($"{t}.toInt")),
             ]),
             E("Int32.toInt_toInt64"), E("Int64.toInt_toInt32"),
+            // `units (if c then a else b)`, the decimal Math.Min and Math.Max unfolded (#216), as an `if` omega splits.
+            new(Name.Parse("apply_ite"), AppliedTo: Name.Parse("Warrant.Decimal.units")),
             E("Int.bmod_def"),
             // A negative divisor's sign moves out: the literal lemmas give `-↑n`, which omega's `groundInt?` does not read.
             E("Int.ediv_neg"), E("Int.emod_neg"),
@@ -124,14 +126,46 @@ namespace Warrant.Meta
         /// <c>Tactic.Omega()</c> (plan KTD13; docs/m5a/06): the omega-prep set at every hypothesis and the goal, as
         /// <c>try simp only [prep] at *</c>, then Lean 4.35.0's <c>omega</c> tactic (<c>evalOmega</c>,
         /// Lean/Elab/Tactic/Omega/Frontend.lean 704): <c>assumption</c> at reducible and instance transparency, else the
-        /// decision procedure (<see cref="Omega"/>).
+        /// decision procedure (<see cref="Omega"/>). When that fails, the goal is tried once more with facts <c>omega</c>
+        /// cannot find itself (<see cref="OmegaStrengthened"/>, docs/m5a/06 "When omega alone fails"; #217, #237, #257).
         /// </summary>
         /// <param name="mvarId">The goal.</param>
         /// <exception cref="TacticException">
         /// <c>omega</c> could not prove the goal; the exception's goal is <paramref name="mvarId"/> as it was given, before
         /// the prep step, and its message is omega's constraints.
         /// </exception>
-        public void OmegaTactic(MVarId mvarId)
+        public void OmegaTactic(MVarId mvarId) => OmegaTacticAt(mvarId, 0);
+
+        /// <summary>
+        /// <see cref="OmegaTactic(MVarId)"/> at a nesting depth: when the prep step and <c>omega</c> fail, the goal is
+        /// tried again with the strengthening facts (<see cref="OmegaStrengthened"/>), unless this is already a nested
+        /// call that proves one of them. A failure reports the first attempt's message.
+        /// </summary>
+        private void OmegaTacticAt(MVarId mvarId, int depth)
+        {
+            var saved = SaveState();
+            try
+            {
+                OmegaPlain(mvarId);
+            }
+            catch (TacticException) when (depth < 2)
+            {
+                var failed = SaveState();
+                Restore(saved);
+                try
+                {
+                    OmegaStrengthened(mvarId, depth);
+                    return;
+                }
+                catch (MetaException ex) when (Combinators.IsRecoverable(ex))
+                {
+                    Restore(failed);
+                }
+                throw;
+            }
+        }
+
+        private void OmegaPlain(MVarId mvarId)
         {
             var g = mvarId;
             var saved = SaveState();

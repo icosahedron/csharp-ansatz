@@ -88,7 +88,14 @@ For each:
    `r = some v₁` and `r = some v₂`, which substitution makes `some v₁ = some v₂`. That gives `v₁ = v₂`, proved by
    `congrArg (fun o => Nullable.coalesce o v₁)`, which rewrites every other hypothesis, so a fact about `v₁` (from the
    contract or a null test's `||`) is one about `v₂` (#226).
-4. `omega` runs, through the M5a omega-prep set and chapter 1's division bridges.
+4. `omega` runs, through the M5a omega-prep set and chapter 1's division bridges, and when that fails, with
+   `Tactic.Omega()`'s strengthening facts: in-range exact values, `decimal` literal values and product bounds
+   ([docs/m5a/06](../m5a/06-bridging-and-omega.md#when-omega-alone-fails), #217, #237, #257).
+5. If `omega` still fails and the goal or a hypothesis compares a `Bool` term with `true` or `false` (a `bool`
+   parameter, `flagged = false`, or a null test, `x.isNone = true`), the goal is split on that term with
+   `Bool.casesOn`, each case rewritten with `b = false` or `b = true` as step 3 rewrites, and steps 3 to 5 run on
+   each case, up to three splits deep (#227, #245). `omega` does not split a `Bool`. A failure reports `omega`'s first
+   goal.
 
 U3's checkpoint used exactly this list of `SPred` and `PredTrans` lemmas (`EffectCheckpointTests.VcSimpLemmas`), and
 the `ULift Prop` assertions of `Std.Do` did not defeat it, so the plan's fallback, a `wp` calculus over plain `Prop`s,
@@ -152,13 +159,19 @@ In a theorem's script it is `unsupported script argument`.
 - `omega` cannot relate `a / b` to `a` and `b` for a symbolic `b`; such a fact needs a `Spec.Assert` with a script, or
   a `[ProofFor]` script.
 - A `switch` over a closed enum on a non-variable discriminant has no `generalize` step and becomes a leftover.
-- #227: a `bool` postcondition that needs a case split on a `bool` parameter (`r => !flagged || r`) is left to `omega`,
-  which does not split `Bool`s, and fails; stated as `r == (…)` it proves.
+- #227 and #245 (fixed after M6): a `bool` postcondition that needs a case split on a `bool` parameter
+  (`r => !flagged || r`), or a conditional `Spec.Ensures` over a null test (`r => x is null ? r == 0 : r == x.Value`),
+  was left to `omega`, which does not split `Bool`s. Step 5 above splits them.
 - #220 (fixed after M6): `warrant translate` loaded no attribute sidecar, so it could not run the default procedure and
   reported a contract that `warrant verify` proves as not proved. It now loads the sidecar beside the bundle, as
   `verify` does.
-- #244: `omega` reads only linear arithmetic, so a product of two variables (`a * b`) is never bounded by it, however
-  tight the `Spec.Requires` (#257); prove it with a `[ProofFor]` script. A pure method's join point parameter (a local
+- #244: `omega` reads only linear arithmetic. Since #257 a product of two variables (`a * b`) is bounded from literal
+  bounds on both factors (`0 <= a && a <= 10000` in the `Spec.Requires`), but not from a bound that is not a literal
+  (`b <= a`). A `[ProofFor]` script cannot help a pure method there: its no-overflow obligations (`$wd_k`) are proved by
+  the default procedure only, before the contract obligation the script proves
+  (`AProductWhoseFactorHasNoLiteralBoundFailsEvenWithAProofForScript`). In a method that can raise the operation is a
+  site of the contract obligation, so a script reaches it, but the script's tactics have nothing beyond `Tactic.Omega()`
+  for a product either. A pure method's join point parameter (a local
   merged after branches that change two locals, or after a `switch` with a `return`) carries no value into the
   obligations after it (#255), a recursive call's result is unknown and a recursive method has no `Spec.Requires`
   (#256), and closed-enum arms give no facts (#258) (chapter 6). These are checker gaps: `unchecked` is only for an

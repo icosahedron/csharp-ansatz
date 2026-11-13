@@ -493,4 +493,33 @@ def negImplicit {σ : Type} (a : _root_.Int64) : ClrM σ _root_.Int64 :=
 
 end Int64
 
+/-! Bounds on a product of two integers from bounds on its factors (#257), for `omega`, which reads linear arithmetic
+only: `x * y` is an atom to it, and each lemma states a linear bound on that atom when `a` and `b` are literals. They are
+the four corners of `0 ≤ (x - a) * (y - b)` and its sign variants (McCormick's inequalities), together exact at the
+corners of the box. `omega`'s product step (`MetaM.OmegaTactic`) adds them as hypotheses for the bounds it can prove. -/
+
+namespace Int
+
+theorem mul_ge_of_ge_of_ge {x y a b : _root_.Int} (hx : a ≤ x) (hy : b ≤ y) : a * y + b * x - a * b ≤ x * y := by
+  have h := _root_.Int.mul_nonneg (_root_.Int.sub_nonneg_of_le hx) (_root_.Int.sub_nonneg_of_le hy)
+  rw [_root_.Int.sub_mul, _root_.Int.mul_sub, _root_.Int.mul_sub, _root_.Int.mul_comm x b] at h
+  omega
+
+theorem mul_ge_of_le_of_le {x y a b : _root_.Int} (hx : x ≤ a) (hy : y ≤ b) : a * y + b * x - a * b ≤ x * y := by
+  have h := _root_.Int.mul_nonneg (_root_.Int.sub_nonneg_of_le hx) (_root_.Int.sub_nonneg_of_le hy)
+  rw [_root_.Int.sub_mul, _root_.Int.mul_sub, _root_.Int.mul_sub, _root_.Int.mul_comm x b] at h
+  omega
+
+theorem mul_le_of_ge_of_le {x y a b : _root_.Int} (hx : a ≤ x) (hy : y ≤ b) : x * y ≤ a * y + b * x - a * b := by
+  have h := _root_.Int.mul_nonneg (_root_.Int.sub_nonneg_of_le hx) (_root_.Int.sub_nonneg_of_le hy)
+  rw [_root_.Int.sub_mul, _root_.Int.mul_sub, _root_.Int.mul_sub, _root_.Int.mul_comm x b] at h
+  omega
+
+theorem mul_le_of_le_of_ge {x y a b : _root_.Int} (hx : x ≤ a) (hy : b ≤ y) : x * y ≤ a * y + b * x - a * b := by
+  have h := _root_.Int.mul_nonneg (_root_.Int.sub_nonneg_of_le hx) (_root_.Int.sub_nonneg_of_le hy)
+  rw [_root_.Int.sub_mul, _root_.Int.mul_sub, _root_.Int.mul_sub, _root_.Int.mul_comm x b] at h
+  omega
+
+end Int
+
 end Warrant

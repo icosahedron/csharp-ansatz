@@ -61,13 +61,26 @@ public sealed class RelationalPropertyTests(EngineFixture engine) : IClassFixtur
     }
 
     [Fact]
-    public void TheSameWrapperWithAWrappingTimesThreeIsNotProvedYet()
+    public void TheSameWrapperWithTimesThreeIsProvedThroughTheExactProduct()
     {
-        // The limit the guide states: `r == x * 3` is Int32 multiplication, which wraps, and omega (Lean's as well as
-        // Warrant's port: it has no dark shadow) cannot use the bounds to rule out the wrap, so `x * 3 <= y * 3` stays open.
-        var source = Source.Replace("x + x", "x * 3", StringComparison.Ordinal);
-        var outcome = Pipeline.Run(EngineCorpus.Inputs(EngineCorpus.Inline(source)), engine.Bundle, engine.Options).Find("M:S.Monotone(System.Int32,System.Int32)");
-        var notProved = Assert.IsType<NotProvedOutcome>(outcome);
-        Assert.Equal(Contracts.VcKind.Postcondition, Assert.Single(notProved.Vcs).Kind);
+        // #237: `r == x * 3` is Int32 multiplication, whose wrap-around omega (Lean's as well as Warrant's port: it has no
+        // dark shadow) cannot rule out from the bounds. Tactic.Omega()'s strengthening step proves `x.toInt * 3` in range
+        // under them, so the product is its exact value, and `x * 3 <= y * 3` is linear; the theorem proves the same way.
+        var source = Source.Replace("x + x", "x * 3", StringComparison.Ordinal).Replace("y + y", "y * 3", StringComparison.Ordinal);
+        var result = Pipeline.Run(EngineCorpus.Inputs(EngineCorpus.Inline(source)), engine.Bundle, engine.Options);
+        var monotone = result.Find("M:S.Monotone(System.Int32,System.Int32)");
+        Assert.True(monotone is TranslatedOutcome m && m.Declarations.Any(d => d is Kernel.TheoremDecl), Describe(monotone));
+        var theorem = result.Find("M:S.DoubleIsMonotone(System.Int32,System.Int32)");
+        Assert.True(theorem is ProvedOutcome, Describe(theorem));
+    }
+
+    [Fact]
+    public void TimesThreeWithoutBoundsIsNotProved()
+    {
+        // The exact value needs the range proved: without the upper bound `x * 3` may wrap, and the relation fails.
+        var source = Source.Replace("x + x", "x * 3", StringComparison.Ordinal).Replace("y + y", "y * 3", StringComparison.Ordinal)
+            .Replace("Spec.Implies(0 <= x && x <= y && y <= 1000, ", "Spec.Implies(0 <= x && x <= y, ", StringComparison.Ordinal);
+        var theorem = Pipeline.Run(EngineCorpus.Inputs(EngineCorpus.Inline(source)), engine.Bundle, engine.Options).Find("M:S.DoubleIsMonotone(System.Int32,System.Int32)");
+        Assert.IsType<NotProvedOutcome>(theorem);
     }
 }

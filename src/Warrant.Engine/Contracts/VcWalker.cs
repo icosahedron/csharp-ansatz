@@ -952,7 +952,18 @@ internal sealed class VcWalker
     /// condition such as <c>p = none</c> meets the guard <c>¬p.isNone</c>; then omega. Throws when they do not prove it.
     /// </summary>
     /// <returns>The goal omega was given, or null when simp closed it.</returns>
-    private MVarId? Discharge(MVarId g, SimpContext simp)
+    private MVarId? Discharge(MVarId g, SimpContext simp) => Discharge(g, simp, 0);
+
+    /// <summary>How many <c>Bool</c> case splits one VC may take (#227, #245): at most 2^3 cases.</summary>
+    private const int MaxBoolSplits = 3;
+
+    /// <summary>
+    /// <see cref="Discharge(MVarId, SimpContext)"/> after <paramref name="splits"/> case splits: when omega fails, a
+    /// <c>Bool</c> term the goal tests (<c>flagged = false</c>, a null test <c>x.isNone = true</c>) is split into its two
+    /// values, each case rewritten with its value and discharged again (#227, #245), since omega does not split a
+    /// <c>Bool</c>. A failure reports omega's first one.
+    /// </summary>
+    private MVarId? Discharge(MVarId g, SimpContext simp, int splits)
     {
         if (_m.SimpAll(g, simp) is not { } rest)
         {
@@ -972,9 +983,88 @@ internal sealed class VcWalker
             }
             substituted = again;
         }
-        _m.OmegaTactic(substituted);
+        var saved = _m.SaveState();
+        try
+        {
+            _m.OmegaTactic(substituted);
+        }
+        catch (MetaException ex) when (ex is not MetaResourceException && splits < MaxBoolSplits && BoolTest(substituted) is { } test)
+        {
+            var failed = _m.SaveState();
+            _m.Restore(saved);
+            if (!SplitBool(substituted, test, simp, splits))
+            {
+                _m.Restore(failed);
+                throw;
+            }
+        }
         return substituted;
     }
+
+    /// <summary>
+    /// A <c>Bool</c> term the goal or a hypothesis compares with <c>true</c> or <c>false</c>, not itself a constant; null
+    /// when there is none.
+    /// </summary>
+    private Expr? BoolTest(MVarId g) => _m.WithContext(g, () =>
+    {
+        var terms = (_m.MCtx.FindDecl(g)?.LCtx.Decls ?? []).Where(d => !d.IsImplementationDetail).Select(d => d.Type).Append(_m.GetMVarType(g));
+        foreach (var term in terms)
+        {
+            var found = ExprOps.Find(_m.InstantiateMVars(term), (e, _) =>
+                e.HeadIs(EqName) && e.GetAppArgs() is [ConstExpr { Name: var type }, var lhs, ConstExpr { Name: var value }]
+                && type == BoolName && (value == BoolTrueName || value == BoolFalseName)
+                && lhs is not ConstExpr && !lhs.HasLooseBVars && !lhs.HasExprMVar);
+            if (found is not null)
+            {
+                return found.GetAppArgs()[1];
+            }
+        }
+        return null;
+    });
+
+    /// <summary>
+    /// Splits the goal <c>G</c> on the <c>Bool</c> term <paramref name="b"/> by <c>Bool.casesOn (motive := fun x =&gt; b =
+    /// x → G) b ?false ?true rfl</c>, and discharges each case with <c>b = false</c> or <c>b = true</c> rewriting the
+    /// others. False, with the Meta state to be restored, when a case is not proved.
+    /// </summary>
+    private bool SplitBool(MVarId g, Expr b, SimpContext simp, int splits)
+    {
+        try
+        {
+            var cases = _m.WithContext(g, () =>
+            {
+                var target = _m.InstantiateMVars(_m.GetMVarType(g));
+                var boolType = Expr.Const(BoolName);
+                Expr Case(Expr value) => Expr.Forall(H, Expr.App(Expr.Const(EqName, Level.One), boolType, b, value), target);
+                var motive = Expr.Lam(Name.From("x"), boolType, Case(Expr.BVar(0)));
+                var onFalse = _m.MkFreshExprSyntheticOpaqueMVar(Case(Expr.Const(BoolFalseName)));
+                var onTrue = _m.MkFreshExprSyntheticOpaqueMVar(Case(Expr.Const(BoolTrueName)));
+                var proof = Expr.App(Expr.Const(BoolCasesOnName, Level.Zero), motive, b, onFalse, onTrue,
+                    Expr.App(Expr.Const(EqReflName, Level.One), boolType, b));
+                _m.Assign(g, proof);
+                return new[] { onFalse.Id, onTrue.Id };
+            });
+            foreach (var c in cases)
+            {
+                var (fvars, goal) = _m.IntroN(c, 1, [H]);
+                if (Substitute(goal, simp, [fvars[0]]) is { } rest)
+                {
+                    Discharge(rest, simp, splits + 1);
+                }
+            }
+            return true;
+        }
+        catch (MetaException ex) when (ex is not MetaResourceException)
+        {
+            return false;
+        }
+    }
+
+    private static readonly Name BoolName = Name.Parse("Bool");
+    private static readonly Name BoolTrueName = Name.Parse("Bool.true");
+    private static readonly Name BoolFalseName = Name.Parse("Bool.false");
+    private static readonly Name BoolCasesOnName = Name.Parse("Bool.casesOn");
+    private static readonly Name EqReflName = Name.Parse("Eq.refl");
 
     /// <summary>
     /// Each path condition <c>x = e</c> about a variable rewrites the other hypotheses and the goal (as Lean's

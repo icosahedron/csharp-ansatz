@@ -261,12 +261,39 @@ A `decimal` keeps its scale, as the CLR's does, but `==`, `<` and `<=` compare v
 record's `==` compares a `decimal` field the same way. Comparisons, unary `-` and `Math.Min`, `Max` and `Abs` cannot
 throw, so theorems may use them; the first two theorems are proved by computation. Over every `decimal`,
 `Warrant.Decimal.lt_iff` and `le_iff` turn the order into one on `units`, the value as an integer count of 10^-28, which
-`omega` reads. Two things do not work yet: `simp` does not compute `units` of a literal, so a claim over every `decimal`
-that mentions one (`a > 0m`) is not proved, and nothing splits the `if` that `Math.Max` unfolds to, so
-`Larger(a, b) >= a` is not proved either. `+` and `-` on `decimal` can throw, so a method that uses them is a program in
+`omega` reads. `+` and `-` on `decimal` can throw, so a method that uses them is a program in
 the effect monad, for its contract obligation (from M6 U10 and U11). These examples are not in the corpus:
 `DecimalEqualityAndOrderAreProvable` in `tests/Warrant.Engine.Tests/TheoremTests.cs` proves all four
 (`dotnet test tests/Warrant.Engine.Tests --filter DecimalEqualityAndOrderAreProvable`).
+
+`Math.Max` and `Math.Min` over parameters, and literals in a claim over every `decimal`, prove the same way:
+
+```csharp
+[Verified] public static decimal Smaller(decimal a, decimal b) => Math.Min(a, b);
+
+[Theorem]
+static Proof LargerIsAtLeastTheFirst(decimal a, decimal b) =>
+    Prove.That(Larger(a, b) >= a)
+         .By(Tactic.Unfold(nameof(Larger)), Tactic.Simp(Lean.Const("Warrant.Decimal.max_def"), Lean.Const("Warrant.Decimal.le_iff")), Tactic.Omega());
+
+[Theorem]
+static Proof SmallerOfOrderedIsTheFirst(decimal a, decimal b) =>
+    Prove.That(Spec.Implies(a <= b, Smaller(a, b) <= a))
+         .By(Tactic.Unfold(nameof(Smaller)),
+             Tactic.Simp(Lean.Const("Warrant.Decimal.min_def"), Lean.Const("Warrant.Decimal.lt_iff"), Lean.Const("Warrant.Decimal.le_iff")),
+             Tactic.Omega());
+
+[Theorem]
+static Proof NegatingAPositiveMakesItSmaller(decimal a) =>
+    Prove.That(Spec.Implies(a > 0m, -a < a))
+         .By(Tactic.Simp(Lean.Const("Warrant.Decimal.lt_iff"), Lean.Const("Warrant.Decimal.units_neg")), Tactic.Omega());
+```
+
+`max_def` unfolds `Math.Max` to an `if` on decimals, and the omega-prep step moves `units` inside it, which leaves an
+`if` on integers that `omega` splits (GitHub #216). A literal such as `0m` is `units` of a literal to `omega`, whose
+value `Tactic.Omega()` states when `omega` alone fails (GitHub #217). `DecimalMaxAndMinOverParametersAreProvable` and
+`ADecimalLiteralIsReadByOmega` in `tests/Warrant.Engine.Tests/ProcedureStrengthTests.cs` prove these; a false claim
+such as `Spec.Implies(a > 0m, a > 1m)` still fails (`AFalseClaimAboutADecimalLiteralStillFails`).
 
 ## Contracts proved with no script (M6)
 
@@ -370,8 +397,55 @@ what is known on the way to it: the `Spec.Requires`, the `if` branch and `switch
 build fails at `x += 5` with `arithmetic overflow`. A guard works as well as a precondition: `a < 1000 ? a + 1 : 0`
 is proved with none. When wrapping is the point (a hash, a checksum), write `unchecked(...)` or `unchecked { }`,
 which has no condition (`ArithmeticInAPureBodyThatCanOverflowFailsAtTheOperationAndProvesWhenBounded`).
-`omega` reads linear arithmetic only, so `a * b` of two variables is not bounded by any `Spec.Requires`; a value
-merged from two branches that change two locals reaches the operation unknown.
+A value merged from two branches that change two locals reaches the operation unknown.
+
+### A product of two bounded variables
+
+```csharp
+[Verified]
+public static int Total(int price, int quantity)
+{
+    Spec.Requires(0 <= price && price <= 10000 && 0 <= quantity && quantity <= 1000);
+    Spec.Ensures<int>(r => r >= 0 && r <= 10000000);
+    return price * quantity;
+}
+```
+
+Proved. `omega` reads linear arithmetic only, so `price * quantity` is an atom to it, and alone it can neither rule
+out the overflow nor prove the `Spec.Ensures`. When it fails, `Tactic.Omega()` looks for literal bounds on each factor,
+proves them, and adds the bounds they put on the product (`Warrant.Int.mul_ge_of_ge_of_ge` and its three siblings, from
+`0 ≤ (x - a) * (y - b)`), here `0 ≤ price * quantity ≤ 10000000` (GitHub #257). Signs do not matter:
+`-1000 <= a && a <= 1000 && -50 <= b && b <= 2000` bounds the `long` `a * b + 1`. Each factor needs a literal bound:
+with `-a <= b && b <= a` the product fails at `a * b` with `arithmetic overflow`, though it cannot overflow, and a
+`[ProofFor]` script cannot rescue it, since a pure method's no-overflow conditions are the default procedure's alone.
+`tests/Warrant.Engine.Tests/ProcedureStrengthTests.cs` runs these (`AProductOfTwoBoundedVariablesIsBounded`,
+`AProductWhoseFactorHasNoLiteralBoundFailsEvenWithAProofForScript`).
+
+### A `bool` result by cases
+
+```csharp
+[Verified]
+public static bool NeedsReview(int amount, int threshold, bool flagged)
+{
+    Spec.Ensures<bool>(r => !flagged || r);
+    return amount > threshold || flagged;
+}
+
+[Verified]
+public static int DaysOrZero(int? x)
+{
+    Spec.Ensures<int>(r => x is null ? r == 0 : r == x.Value);
+    return x is null ? 0 : x.Value;
+}
+```
+
+Both proved. `omega` does not split a `bool`: `NeedsReview`'s goal is `flagged = false ∨ threshold < amount ∨ flagged =
+true`, true by cases on `flagged` only. When `omega` fails, the default procedure splits a `bool` the goal compares
+with `true` or `false`, here `flagged`, and in `DaysOrZero` the null test `x.isNone`, and proves each case with its value
+substituted (GitHub #227, #245). A record's nullable field works the same way (`refund.Days is null ? … :
+refund.Days.Value`). With `return amount > threshold;` the case `flagged = true, amount <= threshold` fails, and so
+does the method (`ABoolEnsuresThatNeedsACaseSplitOnABoolParameterIsProved`, `AConditionalEnsuresOverANullTestIsProved`,
+`ABoolEnsuresThatIsFalseInOneCaseStillFails` in `ProcedureStrengthTests`).
 
 ### Arithmetic bounded by a callee's `Spec.Ensures`
 
@@ -802,6 +876,7 @@ All three are proved; `Scale` and `Monotone` with no script. `Scale` can throw, 
 `Spec.Ensures`, and the VC walker uses `Scale`'s proved contract at each call, so with the two results
 rewritten by those `Spec.Ensures` the goal it leaves is `x + x ≤ y + y` under the bounds, which `omega` closes. `DoubleIsMonotone` is the other route:
 `Scale`'s `Spec.Ensures` pins its result, so the relation is a theorem about `x + x`. With `x * 3` in place of `x + x`,
-neither is proved: `int` multiplication wraps, and `omega` (Lean's too, which has no dark shadow) cannot use the bounds
-to rule the wrap out. `tests/Warrant.Engine.Tests/RelationalPropertyTests.cs` runs this example, in a class `S`, and
-pins the `x * 3` limit (`dotnet test tests/Warrant.Engine.Tests --filter RelationalPropertyTests`).
+both are proved too: `int` multiplication wraps, and `omega` alone (Lean's too, which has no dark shadow) cannot use the
+bounds to rule the wrap out, so `Tactic.Omega()` proves `x.toInt * 3` in range under them and uses the exact product
+(GitHub #237); without the bound `y <= 1000` the theorem fails. `tests/Warrant.Engine.Tests/RelationalPropertyTests.cs`
+runs this example, in a class `S`, with both (`dotnet test tests/Warrant.Engine.Tests --filter RelationalPropertyTests`).

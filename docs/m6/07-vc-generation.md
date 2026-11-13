@@ -158,6 +158,8 @@ In a theorem's script it is `unsupported script argument`.
   reported a contract that `warrant verify` proves as not proved. It now loads the sidecar beside the bundle, as
   `verify` does.
 - #244: `omega` reads only linear arithmetic, so a product of two variables (`a * b`) is never bounded by it, however
-  tight the `Spec.Requires`; write it `unchecked` or prove it with a `[ProofFor]` script. A pure method's join point
-  parameter (a local merged after branches that change two locals, or after a `switch` with a `return`) carries no
-  value into the obligations after it, and a recursive call's result is unknown (chapter 6).
+  tight the `Spec.Requires` (#257); prove it with a `[ProofFor]` script. A pure method's join point parameter (a local
+  merged after branches that change two locals, or after a `switch` with a `return`) carries no value into the
+  obligations after it (#255), a recursive call's result is unknown and a recursive method has no `Spec.Requires`
+  (#256), and closed-enum arms give no facts (#258) (chapter 6). These are checker gaps: `unchecked` is only for an
+  intended wrap, since it removes the check.

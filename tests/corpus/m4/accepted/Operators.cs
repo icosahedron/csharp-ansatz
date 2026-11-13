@@ -23,7 +23,7 @@ public static class Operators
     public static int UnaryPlus(int x) => +x;
 
     [Verified]
-    // Operator wiring over the whole range, so the arithmetic wraps on purpose (#244).
+    // Operator wiring over the whole range, so the arithmetic wraps on purpose (#244), here and in LongMultiply.
     public static long LongSubtract(long a, long b) => unchecked(a - b);
 
     [Verified]

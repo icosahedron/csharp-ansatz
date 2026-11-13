@@ -29,7 +29,7 @@ public static class Locals
             cost = cost + 15;
             bonus = 1;
         }
-        // cost and bonus reach here through a join point, whose parameters carry no value into an obligation (#244).
+        // Not an intended wrap: a join point's parameters carry no value into an obligation yet (gap #255; bound when fixed).
         if (member) return unchecked(cost - 5);
         return unchecked(cost + bonus);
     }
@@ -78,7 +78,7 @@ public static class Locals
             case >= 5 and < 9:
                 return 20;
         }
-        // result is 0 or 10, but a join point's parameter carries no value into the obligation (#244), so unchecked.
+        // Not an intended wrap: result is 0 or 10, but a join point carries no value into the obligation yet (gap #255).
         return unchecked(result + 1);
     }
 

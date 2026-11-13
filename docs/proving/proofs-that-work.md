@@ -192,8 +192,8 @@ public static int Sum(int n)
 ```
 
 `Sum` becomes a well-founded definition over `Int.toNat n`. Its `n + Sum(n - 1)` is `unchecked`: nothing is known of
-a recursive call's result where the no-overflow obligation is stated, a recursive method has no `Spec.Requires`, and
-the sum does overflow for large `n`. Without `unchecked` the method fails at that `+` with `arithmetic overflow`
+a recursive call's result where the no-overflow obligation is stated, a recursive method has no `Spec.Requires` yet
+(GitHub #256, a checker gap), and the sum does overflow for large `n`. Without `unchecked` the method fails at that `+` with `arithmetic overflow`
 (`ARecursiveMethodsArithmeticHasObligationsAndItsRecursiveResultIsUnknown`); `n - 1` alone, under `n > 0`, is proved. Warrant proves the decrease obligation
 `Sum.$dec_1` with `omega`, and derives the equation lemma `Sum.$eq_def` that `Unfold` uses. `Add(a, b)` (measure:
 the second parameter) and `SumLong(long n)` are proved terminating the same way. A call that does not decrease

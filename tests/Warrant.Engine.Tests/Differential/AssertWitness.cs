@@ -12,14 +12,19 @@ namespace Warrant.Engine.Tests.Differential;
 /// instance method of the same type and signature, <c>__WarrantWitnessN</c>, whose body is the original's with every
 /// <c>Spec.Assert(c)</c> statement made <c>if (!(c)) throw …</c> and the whole body in a <c>checked</c> block, so that
 /// default-context arithmetic raises <see cref="OverflowException"/> where it would wrap. A default-context narrowing
-/// cast is made <c>unchecked((T)e)</c>, since the model wraps it too (#266); an explicit <c>unchecked</c> stays unchecked.
-/// The copies are added members that nothing calls, so the original methods run as before.
+/// cast, in the body or in an assertion's condition, is made <c>unchecked((T)checked(e))</c>: it wraps, since the model
+/// wraps it too, and its operand stays checked (#266); an explicit <c>unchecked</c> stays unchecked. An expression body
+/// that is a throw expression stays a <c>throw</c>. The copies are added members that nothing calls, so the original
+/// methods run as before.
 /// <para>
 /// What a copy's <see cref="OverflowException"/> shows is weaker than a false assertion: an explicit <c>checked</c>
 /// overflow, a <c>decimal</c> overflow or <c>MinValue / -1</c> raises it in the copy as in the original. So when the
-/// original run itself threw <see cref="OverflowException"/>, only a false assertion witnesses the skip (#266). A copy calls
-/// the original callees, so a failure inside a verified callee is not witnessed; such a skip is reported as a
-/// disagreement, never accepted unconfirmed.
+/// original run itself threw <see cref="OverflowException"/>, only a false assertion witnesses the skip (#266). That is
+/// strict in one case: default-context arithmetic that wraps and then an explicit <c>checked</c> operation that overflows
+/// on the wrapped value (<c>var s = a + b; return checked(s * 2);</c>) is an <c>assertFailed</c> run the copy cannot
+/// confirm, so it is reported as a disagreement, never skipped. A copy calls the original callees, so a failure inside a
+/// verified callee is not witnessed either; such a skip is likewise reported as a disagreement, never accepted
+/// unconfirmed.
 /// </para>
 /// </summary>
 internal static class AssertWitness
@@ -128,7 +133,9 @@ internal static class AssertWitness
                 bool statement = symbol.ReturnsVoid
                     || (symbol.IsAsync && symbol.ReturnType is INamedTypeSymbol { IsGenericType: false });
                 body = SyntaxFactory.Block(
-                    BodyRewriter.IsAssert(model, expression) is { } condition ? BodyRewriter.Check(condition)
+                    BodyRewriter.IsAssert(model, expression) is { } condition ? rewriter.Check(condition)
+                    // `=> throw e` is the statement `throw e;`, never `return throw e;`.
+                    : expression is ThrowExpressionSyntax thrown ? SyntaxFactory.ThrowStatement((ExpressionSyntax)rewriter.Visit(thrown.Expression))
                     : statement ? SyntaxFactory.ExpressionStatement((ExpressionSyntax)rewriter.Visit(expression))
                     : SyntaxFactory.ReturnStatement((ExpressionSyntax)rewriter.Visit(expression)));
             }
@@ -147,7 +154,8 @@ internal static class AssertWitness
 
     /// <summary>
     /// Makes each <c>Spec.Assert(c, …)</c> statement <c>if (!(c)) throw new InvalidProgramException(…)</c>, and each narrowing
-    /// cast in C#'s default context <c>unchecked((T)e)</c>. It must visit original nodes, which the semantic model knows.
+    /// cast in C#'s default context, in the body or in an assertion's condition, <c>unchecked((T)checked(e))</c>. It must
+    /// visit original nodes, which the semantic model knows.
     /// </summary>
     private sealed class BodyRewriter(SemanticModel model) : CSharpSyntaxRewriter
     {
@@ -159,9 +167,12 @@ internal static class AssertWitness
                 ? invocation.ArgumentList.Arguments[0].Expression
                 : null;
 
-        /// <summary>The copy's check of an assertion's condition.</summary>
-        public static StatementSyntax Check(ExpressionSyntax condition) =>
-            SyntaxFactory.ParseStatement($"if (!({condition})) throw new global::System.InvalidProgramException(\"{AssertMessage}\");");
+        /// <summary>
+        /// The copy's check of an assertion's condition (an original node), the condition rewritten as the body is, so a
+        /// narrowing in it wraps as the model's does (#266).
+        /// </summary>
+        public StatementSyntax Check(ExpressionSyntax condition) =>
+            SyntaxFactory.ParseStatement($"if (!({Visit(condition)})) throw new global::System.InvalidProgramException(\"{AssertMessage}\");");
 
         public override SyntaxNode? VisitExpressionStatement(ExpressionStatementSyntax node) =>
             IsAssert(model, node.Expression) is { } condition ? Check(condition) : base.VisitExpressionStatement(node);

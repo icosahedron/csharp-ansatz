@@ -246,8 +246,8 @@ internal sealed class ModelCheck(KernelEnvironment env, Values values, KernelLim
         return witness?.Invoke() switch
         {
             false => InputCheck.Disagrees(
-                $"{description}: the model computes error assertFailed, but on the CLR every Spec.Assert holds and no "
-                + $"default-context arithmetic overflows (the CLR {clr})"),
+                $"{description}: the model computes error assertFailed, which the CLR does not confirm: no Spec.Assert fails there, and no "
+                + $"default-context arithmetic overflows (an overflow is not counted where the original run threw OverflowException); the CLR {clr}"),
             _ => InputCheck.Skipped,
         };
     }

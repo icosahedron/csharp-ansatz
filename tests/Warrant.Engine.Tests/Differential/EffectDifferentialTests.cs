@@ -656,7 +656,7 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
             [Verified]
             public static int Narrow(long l)
             {
-                Spec.Assert(true);
+                Spec.Assert((int)l != 1);
                 return (int)l;
             }
 
@@ -672,6 +672,9 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
 
             [Verified]
             public static void CallsPositive(int x) => Positive(x);
+
+            [Verified]
+            public static int Never(int x) => throw new System.ArgumentException("never");
         }
         """;
 
@@ -692,9 +695,10 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         var sum = side.Unit("M:S.Sum(System.Int32,System.Int32)");
         Assert.Equal((true, false), (side.WitnessFails(nonZero, [0]), side.WitnessFails(nonZero, [5])));
         Assert.Equal((true, false), (side.WitnessFails(sum, [int.MaxValue, 1]), side.WitnessFails(sum, [1, 2])));
-        // A default-context narrowing wraps in the copy as in the model.
+        // A default-context narrowing wraps in the copy as in the model, in the body and in an assertion's condition.
         var narrow = side.Unit("M:S.Narrow(System.Int64)");
-        Assert.Equal((false, false), (side.WitnessFails(narrow, [long.MaxValue]), side.WitnessFails(narrow, [1L])));
+        Assert.Equal((false, false), (side.WitnessFails(narrow, [long.MaxValue]), side.WitnessFails(narrow, [2L])));
+        Assert.Equal((true, true), (side.WitnessFails(narrow, [1L]), side.WitnessFails(narrow, [(1L << 32) + 1])));
         // Where the original threw OverflowException, an explicit checked overflow is no witness; a false assert is.
         var bumped = side.Unit("M:S.Bumped(System.Int32)");
         Assert.Throws<OverflowException>(() => CorpusAssembly.Invoke(side.Assembly.MethodOf(bumped.Unit), [int.MaxValue]));
@@ -707,6 +711,8 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
             side.Assembly.Assembly.GetType("S", throwOnError: true)!.GetMethod(name)!, side.Witnesses[$"M:S.{name}(System.Int32)"], [x]);
         Assert.Equal((true, false), (Fails("Positive", 0), Fails("Positive", 1)));
         Assert.Equal(false, Fails("CallsPositive", 0));
+        // A throw expression as the body stays a throw, and its exception is no witness.
+        Assert.Equal(false, Fails("Never", 0));
         // The original methods are unchanged: the assert does nothing and the sum wraps.
         Assert.Equal(int.MinValue, CorpusAssembly.Invoke(side.Assembly.MethodOf(sum.Unit), [int.MaxValue, 1]));
 
@@ -721,7 +727,8 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
             var unwitnessed = side.Model.CheckRaising("NonZero(0)", VirType.Int32, model, 100, null, () => false);
             Assert.False(unwitnessed.IsSkipped);
             Assert.Contains(
-                "NonZero(0): the model computes error assertFailed, but on the CLR every Spec.Assert holds and no default-context arithmetic overflows (the CLR returned 100)",
+                "NonZero(0): the model computes error assertFailed, which the CLR does not confirm: no Spec.Assert fails there, and no "
+                + "default-context arithmetic overflows (an overflow is not counted where the original run threw OverflowException); the CLR returned 100",
                 unwitnessed.Disagreement, StringComparison.Ordinal);
         });
         Assert.Empty(run.Disagreements);
@@ -745,7 +752,28 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         var (zero, five) = KernelThread.Run(() => (check([0]), check([5])));
         Assert.Same(InputCheck.Agrees, zero);
         Assert.False(five.IsSkipped);
-        Assert.Contains("the model computes error assertFailed, but on the CLR every Spec.Assert holds", five.Disagreement, StringComparison.Ordinal);
+        Assert.Contains("the model computes error assertFailed, which the CLR does not confirm", five.Disagreement, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A raising method with no witness copy cannot be checked (#266): its skips would rest on the model alone, so
+    /// <see cref="EffectCorpus.Checker"/> refuses it. Here the CLR's copy of the source lacks <c>[Verified]</c> on it.
+    /// </summary>
+    [Fact]
+    public void ARaisingMethodWithNoWitnessIsRefused()
+    {
+        var at = Assertions.LastIndexOf("[Verified]", Assertions.IndexOf("public static int OnlyZero", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.True(at > 0);
+        var extracted = Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Assertions.cs", "using Warrant;\n" + Assertions)], checkOverflow: false);
+        var clr = Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Assertions.cs", "using Warrant;\n" + Assertions.Remove(at, "[Verified]".Length))],
+            checkOverflow: false);
+        using var side = new EffectCorpus(extracted, clr);
+        Assert.DoesNotContain("M:S.OnlyZero(System.Int32)", side.Witnesses.Keys);
+        var refused = Assert.Throws<InvalidOperationException>(() => side.Checker(side.Unit("M:S.OnlyZero(System.Int32)")));
+        Assert.Contains("is a raising method with no witness copy", refused.Message, StringComparison.Ordinal);
+        side.Checker(side.Unit("M:S.NonZero(System.Int32)"));
     }
 
     /// <summary>

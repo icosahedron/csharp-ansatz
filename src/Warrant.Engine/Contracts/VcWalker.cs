@@ -962,6 +962,16 @@ internal sealed class VcWalker
         {
             return null;
         }
+        // Two reads of one nullable value are two cases of it, `r = some v₁` and `r = some v₂`, which substitution turns
+        // into `some v₁ = some v₂`; `v₁ = v₂` then makes a fact about v₁ one about v₂ (#226).
+        for (int round = 0; round < 4 && Inject(substituted) is (var injected, { Length: > 0 } values); round++)
+        {
+            if (Substitute(injected, simp, values) is not { } again)
+            {
+                return null;
+            }
+            substituted = again;
+        }
         _m.OmegaTactic(substituted);
         return substituted;
     }
@@ -971,11 +981,15 @@ internal sealed class VcWalker
     /// <c>simp_all</c> uses its hypotheses), so a model operation's case <c>p = none</c> meets the branch's guard on
     /// <c>p</c>. Null when that closes the goal.
     /// </summary>
-    private MVarId? Substitute(MVarId g, SimpContext simp) => _m.WithContext(g, () =>
+    // `only`: the equations to rewrite with, when given; then they rewrite every other hypothesis, the path conditions
+    // that are equations among them (#226).
+    private MVarId? Substitute(MVarId g, SimpContext simp, FVarId[]? only = null) => _m.WithContext(g, () =>
     {
         var decls = (_m.MCtx.FindDecl(g)?.LCtx.Decls ?? []).Where(d => !d.IsImplementationDetail).ToList();
-        var equations = decls.Where(d => _m.InstantiateMVars(d.Type) is var t && t.HeadIs(EqName) && t.GetAppArgs() is [_, FVarExpr x, var rhs]
-            && ExprOps.Find(rhs, (y, _) => y is FVarExpr f && f.Id == x.Id) is null).ToList();
+        var equations = only is not null
+            ? decls.Where(d => only.Contains(d.FVarId)).ToList()
+            : decls.Where(d => _m.InstantiateMVars(d.Type) is var t && t.HeadIs(EqName) && t.GetAppArgs() is [_, var x, var rhs]
+                && IsAtom(x) && ExprOps.Find(rhs, (y, _) => y == x) is null).ToList();
         if (equations.Count == 0)
         {
             return g;
@@ -989,6 +1003,52 @@ internal sealed class VcWalker
         var context = simp with { Theorems = simp.Theorems.Insert(0, theorems) };
         return _m.SimpGoal(g, context, simplifyTarget: true, others)?.Goal;
     });
+
+    /// <summary>
+    /// For each hypothesis <c>h : some a = some b</c> not yet injected, the hypothesis <c>a = b</c>, proved by
+    /// <c>congrArg (fun o =&gt; Nullable.coalesce o a) h</c>, whose type <c>coalesce (some a) a = coalesce (some b) a</c> is
+    /// <c>a = b</c> by computation (#226), with the new hypotheses. The kernel checks the term.
+    /// </summary>
+    private (MVarId Goal, FVarId[] Values) Inject(MVarId g) => _m.WithContext(g, () =>
+    {
+        var decls = (_m.MCtx.FindDecl(g)?.LCtx.Decls ?? []).Where(d => !d.IsImplementationDetail).ToList();
+        var known = decls.Select(d => _m.InstantiateMVars(d.Type)).ToHashSet();
+        var facts = new List<(Name, Expr, Expr)>();
+        foreach (var d in decls)
+        {
+            if (_m.InstantiateMVars(d.Type) is var t && t.HeadIs(EqName) && t.GetAppArgs() is [_, var lhs, var rhs]
+                && lhs.HeadIs(OptionSomeName) && rhs.HeadIs(OptionSomeName)
+                && lhs.GetAppArgs() is [var type, var a] && rhs.GetAppArgs() is [_, var b] && a != b)
+            {
+                var equation = Expr.App(Expr.Const(EqName, Level.One), type, a, b);
+                if (!known.Add(equation))
+                {
+                    continue;
+                }
+                var option = Expr.App(Expr.Const(OptionName, Level.Zero), type);
+                var read = Expr.Lam(Name.From("o"), option, Expr.App(Expr.Const(CoalesceName), type, Expr.BVar(0), a));
+                var proof = Expr.App(Expr.Const(CongrArgName, Level.One, Level.One), option, type, lhs, rhs, read, d.ToExpr());
+                facts.Add((H, equation, proof));
+            }
+        }
+        if (facts.Count == 0)
+        {
+            return (g, Array.Empty<FVarId>());
+        }
+        var (values, goal) = _m.AssertHypotheses(g, facts);
+        return (goal, values);
+    });
+
+    private static readonly Name OptionName = Name.Parse("Option");
+    private static readonly Name OptionSomeName = Name.Parse("Option.some");
+    private static readonly Name CoalesceName = Name.Parse("Warrant.Nullable.coalesce");
+    private static readonly Name CongrArgName = Name.Parse("congrArg");
+
+    /// <summary>
+    /// What a path condition <c>x = e</c> may rewrite: a variable, or a field of one (<c>refund.Days = none</c>, a null test
+    /// of a record's nullable field, #218).
+    /// </summary>
+    private static bool IsAtom(Expr e) => e is FVarExpr || (e is ProjExpr p && IsAtom(p.Struct));
 
     private static string FirstLine(string text) => text.IndexOf('\n', StringComparison.Ordinal) is var i and >= 0 ? text[..i] : text;
 }

@@ -181,7 +181,7 @@ public sealed class ContractSurfaceTests
             [Verified] public async Task<int> Configured(int id) => await store.GetPayment(id).ConfigureAwait(false) is null ? 0 : 1;
             [Verified] public async Task<int> Delayed(int id) { await Task.Delay(1); return id; }
             [Verified] public async void Fire(Payment p) => await store.SavePayment(p);
-            [Verified] public async Task Early(Payment p) { if (p.Id < 0) return; await store.SavePayment(p); }
+            [Verified] public async Task Early(Payment p, System.Threading.CancellationToken ct) { var t = ct; await store.SavePayment(p); }
 
             [Verified]
             public int InClaim(int x)
@@ -233,7 +233,7 @@ public sealed class ContractSurfaceTests
                 "WRT0002 | ConfigureAwait",
                 "WRT0002 | Task combinator",
                 "WRT0002 | async void method",
-                "WRT0002 | return without a value",
+                "WRT0002 | cancellation token other than a parameter",
                 "WRT0002 | dependency call in a Spec expression",
                 "WRT0002 | assigned primary-constructor parameter",
             ],

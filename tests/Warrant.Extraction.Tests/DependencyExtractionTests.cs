@@ -825,12 +825,94 @@ public class DependencyExtractionTests
     [InlineData("public async Task<int> Configured(int id) => await store.Load(id).ConfigureAwait(false);", "M:Service.Configured(System.Int32)", "ConfigureAwait")]
     [InlineData("public async Task<int> Combined(int id) { await Task.WhenAll(store.Load(id)); return id; }", "M:Service.Combined(System.Int32)", "Task combinator")]
     [InlineData("public async void Fire(int id) { await store.Load(id); }", "M:Service.Fire(System.Int32)", "async void method")]
-    [InlineData("public async Task Early(int id) { if (id < 0) return; await store.Load(id); }", "M:Service.Early(System.Int32)", "return without a value")]
     public void ATaskThatIsNotTheDirectOperandOfAwaitIsRejected(string member, string key, string construct)
     {
         var result = Service("[Verified] " + member);
 
         Assert.Equal("WRT0002 | " + construct, Only(result, key));
+    }
+
+    // ---- CancellationToken and return; (#215) ----
+
+    private const string Token = "T:System.Threading.CancellationToken";
+
+    [Fact]
+    public void ABareReturnInAVoidOrTaskMethodReturnsTheUnitLiteral()
+    {
+        var result = Service("""
+                [Verified]
+                public async Task Early(int id) { if (id < 0) return; await store.Load(id); }
+
+                [Verified]
+                public void Logged(int id)
+                {
+                    if (id <= 0) return;
+                    store.Log(id);
+                }
+            """);
+
+        Assert.Empty(result.Diagnostics);
+        var early = Assert.IsType<BlockStmt>(Unit(result, "M:Service.Early(System.Int32)").Body);
+        var then = Assert.IsType<IfStmt>(early.Stmts[0]).Then;
+        Assert.Equal(new ReturnStmt(new LitExpr(VirType.Unit, 0)), Assert.Single(Assert.IsType<BlockStmt>(then).Stmts));
+        Assert.Equal(VirType.Unit, Unit(result, "M:Service.Logged(System.Int32)").Returns);
+    }
+
+    [Fact]
+    public void ACancellationTokenParameterIsOpaqueAndPassedThroughToADependencyCall()
+    {
+        var result = Service(
+            """
+                [Verified]
+                public async Task<int> Loaded(int id, System.Threading.CancellationToken ct) => await store.LoadWithin(id, ct);
+            """,
+            contract: "public Task<int> LoadWithin(int id, System.Threading.CancellationToken ct) { Spec.Ensures<int>(r => r >= 0); return default!; }",
+            store: "Task<int> LoadWithin(int id, System.Threading.CancellationToken ct);");
+
+        Assert.Empty(result.Diagnostics);
+        var loaded = Unit(result, "M:Service.Loaded(System.Int32,System.Threading.CancellationToken)");
+        Assert.Equal(new VirParam("ct", VirType.Opaque(Token)), loaded.Params![1]);
+        var call = Assert.IsType<ExternalCallExpr>(Assert.IsType<AwaitExpr>(loaded.Body).Operand);
+        Assert.Equal(new ParamExpr(VirType.Opaque(Token), 1), call.Args[1]);
+        var contract = Unit(result, "M:IStore.LoadWithin(System.Int32,System.Threading.CancellationToken)");
+        Assert.Equal(VirType.Opaque(Token), contract.Params![1].Type);
+    }
+
+    [Theory]
+    [InlineData("public async Task<int> Defaulted(int id) => await store.LoadWithin(id, default);", "M:Service.Defaulted(System.Int32)", "WRT0002 | cancellation token other than a parameter")]
+    [InlineData("public async Task<int> Omitted(int id) => await store.LoadWithin(id);", "M:Service.Omitted(System.Int32)", "WRT0002 | cancellation token other than a parameter")]
+    [InlineData("public async Task<int> NoToken(int id) => await store.LoadWithin(id, System.Threading.CancellationToken.None);", "M:Service.NoToken(System.Int32)", "WRT0002 | cancellation token other than a parameter")]
+    [InlineData("public async Task<int> Kept(int id, System.Threading.CancellationToken ct) { var t = ct; return await store.LoadWithin(id, t); }", "M:Service.Kept(System.Int32,System.Threading.CancellationToken)", "WRT0002 | cancellation token other than a parameter")]
+    [InlineData("public int Asked(int id, System.Threading.CancellationToken ct) => ct.IsCancellationRequested ? 0 : id;", "M:Service.Asked(System.Int32,System.Threading.CancellationToken)", "WRT0005 | P:System.Threading.CancellationToken.IsCancellationRequested")]
+    [InlineData("public async Task<int> Checked(int id, System.Threading.CancellationToken ct) { ct.ThrowIfCancellationRequested(); return await store.LoadWithin(id, ct); }", "M:Service.Checked(System.Int32,System.Threading.CancellationToken)", "WRT0005 | M:System.Threading.CancellationToken.ThrowIfCancellationRequested")]
+    public void ACancellationTokenIsOnlyPassedOn(string member, string key, string expected)
+    {
+        var result = Service(
+            "[Verified] " + member,
+            contract: "public Task<int> LoadWithin(int id, System.Threading.CancellationToken ct = default) => default!;",
+            store: "Task<int> LoadWithin(int id, System.Threading.CancellationToken ct = default);");
+
+        Assert.Equal(expected, Only(result, key));
+    }
+
+    [Fact]
+    public void ATheoremOrARecordCannotHoldACancellationToken()
+    {
+        var result = Extract("""
+            using System.Threading;
+            public sealed record Job(int Id, CancellationToken Token);
+            public static class T
+            {
+                [Theorem]
+                public static Proof Any(CancellationToken ct) => Prove.That(true);
+
+                [Verified]
+                public static int IdOf(Job job) => job.Id;
+            }
+            """);
+
+        Assert.Equal("WRT0002 | cancellation token other than a parameter", Only(result, "M:T.Any(System.Threading.CancellationToken)"));
+        Assert.Equal("WRT0002 | cancellation token other than a parameter", Only(result, "T:Job"));
     }
 
     [Fact]

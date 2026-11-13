@@ -103,5 +103,3 @@ Each of these makes a true claim fail or a method be rejected; none lets a false
   comparisons `omega` reads.
 - **#217**: `simp` does not compute `units` of a literal, so a claim over every `decimal` that mentions one
   (`Spec.Implies(a > 0m, -a < a)`) does not prove.
-- **#218**: a record with a nullable field (`decimal?`, `int?`, `Payment?`) fails translation, because the record's
-  `$eq` has no case for a nullable field. Extraction accepts such records; translation stops with an error.

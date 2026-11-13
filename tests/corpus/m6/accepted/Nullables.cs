@@ -65,3 +65,37 @@ public static class Decimals
     [Verified]
     public static decimal Size(decimal amount) => Math.Abs(amount);
 }
+
+// #218: records with nullable fields (int?, decimal? and a nullable record), compared as the CLR's generated Equals
+// compares them, read after a null test in a body and in a Spec expression, and updated with `with`.
+public sealed record Fee(int? Days, decimal? Amount);
+
+public sealed record Refund(Payment? Original);
+
+public static class Refunds
+{
+    [Verified]
+    public static bool SameFee(Fee a, Fee b) => a == b;
+
+    [Verified]
+    public static bool SameRefund(Refund a, Refund b) => a == b;
+
+    [Verified]
+    public static int DaysOrZero(Fee fee) => fee.Days ?? 0;
+
+    [Verified]
+    public static Fee Waived(Fee fee)
+    {
+        Spec.Ensures<Fee>(r => r.Amount is null);
+        return fee with { Amount = null };
+    }
+
+    [Verified]
+    public static int OriginalIdOrZero(Refund refund)
+    {
+        Spec.Requires(refund.Original is null || refund.Original.Id > 0);
+        Spec.Ensures<int>(r => r >= 0);
+        if (refund.Original is null) return 0;
+        return refund.Original.Id;
+    }
+}

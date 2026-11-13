@@ -25,6 +25,8 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
         PrimitiveType p => Literals.Type(p.Kind),
         RefType r => Expr.Const(LeanNames.ForKey(r.Key)),
         NullableType n => Expr.App(Option, CicType(n.Value)),
+        // A CancellationToken is Unit (#215).
+        OpaqueType => Literals.Type(VirPrimitive.Unit),
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
     };
 
@@ -42,9 +44,10 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
     /// <exception cref="ModelGapException">The value has no counterpart in the model: null of a non-nullable type, or an unnamed closed value.</exception>
     public Expr Term(VirType type, object? value)
     {
-        if (type is PrimitiveType { Kind: VirPrimitive.Unit })
+        if (type is PrimitiveType { Kind: VirPrimitive.Unit } or OpaqueType)
         {
-            // What a void, Task or ValueTask method returns (M6 KTD22): the CLR gives nothing back.
+            // What a void, Task or ValueTask method returns (M6 KTD22): the CLR gives nothing back. A CancellationToken,
+            // cancelled or not, is the one value of Unit (#215).
             return Expr.Const(Name.Parse("Unit.unit"));
         }
         if (type is NullableType nullable)
@@ -94,6 +97,10 @@ internal sealed class Values(CorpusAssembly assembly, IReadOnlyDictionary<string
         if (type is PrimitiveType { Kind: VirPrimitive.Unit })
         {
             return "()";
+        }
+        if (type is OpaqueType && value is CancellationToken token)
+        {
+            return token.IsCancellationRequested ? "new CancellationToken(true)" : "CancellationToken.None";
         }
         if (value is null)
         {

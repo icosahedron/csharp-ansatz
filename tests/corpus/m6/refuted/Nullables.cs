@@ -34,3 +34,14 @@ public static class Decimals
     [Verified]
     public static decimal Difference(decimal a, decimal b) => a - b;
 }
+
+// #218: a nullable field read that nothing tests.
+public sealed record Refund(Payment? Original);
+
+public static class Refunds
+{
+#pragma warning disable CS8602
+    [Verified]
+    public static int OriginalId(Refund refund) => refund.Original.Id;
+#pragma warning restore CS8602
+}

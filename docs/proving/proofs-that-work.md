@@ -442,6 +442,29 @@ with `null read`, and passing an unchecked `Payment?` to a method that takes a `
 a non-null value is required` (`ANullDereferenceGuardedByIsNotNullProvesAndAnUnguardedOneFailsAtItsLine`,
 `ANullablePassedWhereANonNullValueIsRequiredProvesOnlyUnderItsGuard`).
 
+### A record's nullable field
+
+```csharp
+public sealed record Refund(Payment? Original);
+
+[Verified]
+public static int OriginalIdOrZero(Refund refund)
+{
+    Spec.Requires(refund.Original is null || refund.Original.Id > 0);
+    Spec.Ensures<int>(r => r >= 0);
+    if (refund.Original is null) return 0;
+    return refund.Original.Id;
+}
+```
+
+Proved with no script. A null test of a field is a path condition about the field (`refund.Original = none`), so the
+read after the test, and the read inside `Spec.Requires` after `is null ||`, cannot meet a null. Without the test,
+`refund.Original.Id` fails with `null read`. Records with `int?`, `decimal?` and nullable record fields compare with `==`
+as the CLR's generated `Equals` does (GitHub #218): two nulls are equal, a null and a value are not, and `1.0m` equals
+`1.00m`. The examples are `Refunds` in `tests/corpus/m6/accepted/Nullables.cs` and `refuted/Nullables.cs`
+(`ARecordsNullableFieldIsReadAfterANullTestInABodyAndInASpecExpression`; the differential tests compare `SameFee` and
+`SameRefund` with the CLR).
+
 ### `Spec.Assert`
 
 ```csharp
@@ -623,6 +646,26 @@ and one that expects two calls to `GetPayment(id)` to agree: each call may see a
 `tests/Warrant.Engine.Tests/ExternalCallTests.cs` (`AnEnsuresThatHoldsOnlyThroughTheMembersContractProves` and the
 three after it).
 
+### Several fields of the result after its null test
+
+```csharp
+[Verified]
+public async Task<int> IdIfPending(int id)
+{
+    Spec.Ensures<int>(r => r == 0 || r == id);
+    var p = await store.GetPayment(id);
+    if (p is null || p.Status != PaymentStatus.Pending) return 0;
+    return p.Id;
+}
+```
+
+Proved with no script. Each read of `p` is checked not to be null on its own, so the walk names `p`'s value once for
+`p.Status` and once for `p.Id`; the two names are of one value (`some v₁ = some v₂` gives `v₁ = v₂`), so what the contract
+says about the first (`v₁.Id == id`) is what the `Spec.Ensures` needs of the second (GitHub #226). The same holds for a
+fact from the null test's `||`: `if (p is null || p.Amount < 0) return 0; return p.Amount;` proves `r >= 0`. The example
+is `PaymentLookup.IdIfPending` in `tests/corpus/m6/accepted/Payments.cs`
+(`AFieldOfANullableResultReadAfterANullTestIsRelatedToWhatTheWalkLearned` in `ExternalCallTests.cs`).
+
 ### The payment example
 
 Design §5.2's `ProcessPayment`, shortened here, is proved with its store as a hypothesis:
@@ -648,6 +691,51 @@ that `payment` is not null where `Validate` and `with` use it. Its report lists 
 example is `tests/corpus/m6/accepted/Payments.cs`, and its report block is `tests/corpus/m6/ProcessPayment.report.txt`
 (`ProcessPaymentsObligationProvesUnderTheDefaultProcedure` in `ExternalCallTests.cs`,
 `TheReportOfProcessPaymentIsTheCheckedInOne` in `ReportTests.cs`).
+
+### A cancellation token passed through, and an early `return;`
+
+```csharp
+public interface IShipments
+{
+    Task<Order?> Find(int id, CancellationToken ct);
+    Task Ship(Order order, CancellationToken ct);
+}
+
+[ContractFor(typeof(IShipments))]
+internal abstract class ShipmentsContract : IShipments
+{
+    public Task<Order?> Find(int id, CancellationToken ct)
+    {
+        Spec.Ensures<Order?>(r => r is null || r.Id == id);
+        return default!;
+    }
+
+    public Task Ship(Order order, CancellationToken ct)
+    {
+        Spec.Requires(order.Id > 0);
+        return default!;
+    }
+}
+
+public sealed class ShipmentService(IShipments shipments)
+{
+    [Verified]
+    public async Task ShipIfFound(int id, CancellationToken ct)
+    {
+        if (id <= 0) return;
+        var order = await shipments.Find(id, ct);
+        if (order is null) return;
+        await shipments.Ship(order, ct);
+    }
+}
+```
+
+Proved with no script: `Ship`'s `Spec.Requires` holds because `Find`'s contract gives `order.Id == id` and the first
+`return;` leaves only `id > 0`. The token is a value the proof cannot look at (a `Unit` in the model), passed on to both
+calls; a cancelled call is one of the exceptions the report says `Find` and `Ship` may raise. Writing `default` or
+`CancellationToken.None` for the token, or reading `ct.IsCancellationRequested`, is rejected. The example is
+`ShipmentService` in `tests/corpus/m6/accepted/Dependencies.cs` (`CorpusTests.EveryM6MemberGetsItsExpectedOutcome`; the
+differential tests run it with a cancelled and an uncancelled token).
 
 ## Facts about particular inputs (M4)
 

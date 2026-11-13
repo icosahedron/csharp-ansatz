@@ -198,9 +198,16 @@ A few guards the plan did not ask for, each against an ambiguity that would othe
 evaluation order: an inherited member stated by two contract classes, a default-interface member without a contract
 member, and named arguments out of order around a dependency or awaited call (the model evaluates in parameter order).
 
-**Not yet** (#215): VIR has no opaque type and no value-less return.
-So a `CancellationToken` parameter is still `unsupported type`, although KTD22 calls tokens opaque parameters, and a
-`void` or `Task` method must end by reaching the end of its body: `return;` is `return without a value`.
+**Cancellation tokens and `return;`** (#215).
+A `CancellationToken` parameter of a verified method or a contract member is `opaque{T:System.Threading.CancellationToken}`,
+as KTD22 calls tokens opaque parameters, and its only use is to be passed on unchanged as an argument, to a dependency
+member or a verified method.
+Anything else that has a token type is `cancellation token other than a parameter`: `default`, `CancellationToken.None`,
+an optional token argument left out, a local, a field of a record, a theorem's parameter, a `Spec.ForAll` over tokens.
+Reading one (`ct.IsCancellationRequested`, `ct.ThrowIfCancellationRequested()`) calls an unverified member (WRT0005).
+So nothing a proof reads depends on which token was passed; chapter 5 says how translation binds it.
+A bare `return;` in a `void`, `Task` or `ValueTask` method is `return{lit{unit, 0}}`, the unit value a method that ends by
+reaching the end of its body returns too.
 
 ## What moved between corpora
 

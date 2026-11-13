@@ -79,13 +79,30 @@ from the first call to the second (a kernel-evaluated test with a counting mock 
 `ValueTask` one a `ClrM σ Unit` program; `await` binds the awaited call's program, whether it is a dependency call, a
 raising verified method or a pure one, and the VC walker checks a verified callee's `Spec.Requires` there as at any
 other call (#228).
-A discarded call (`F(x);`) is bound and its value dropped.
+A discarded call (`F(x);`) is bound and its value dropped, and `return;` (#215) is `()`, or `pure ()` in a program.
+
+A `CancellationToken` parameter (`opaque{…}`, #215) is a parameter of type `Unit`, in the method and in the dependency
+operations and contract hypotheses whose members take one: `store_Find : Int32 → Unit → ClrM σ (Option Order)`.
+This is sound because nothing the model computes can depend on a token.
+Extraction lets a token only be passed on (chapter 4), so the method's own code never reads it, and no `Spec` expression
+can mention it, so a contract can neither inspect it nor be confused by it.
+Cancellation is an external effect: a dependency that observes its token raises an exception, which the dependency's
+program may do whatever its arguments are (`ClrExn.external`, KTD4, KTD12), and the report lists the exceptions a call
+may raise.
+A token passed to a verified method is passed on by it in turn, under the same rules.
+`ct.ThrowIfCancellationRequested()` is not modelled; a method that needs it is rejected (WRT0005).
 
 Translation refuses to translate a call to a method that has dependencies of its own; extraction already rejects it.
 
+A record's nullable field (#218) is an `Option` field like any nullable value, read by projection, tested with
+`Option.isNone` and built with `Option.some` or `Option.none`.
+The record's `$eq` compares it as the CLR's generated `Equals` does through `EqualityComparer<T?>.Default`: two nulls
+are equal, a null and a value are not, and two values compare as the field's type does, so a `decimal?` field compares
+by value (`1.0m` equals `1.00m`) and a `Payment?` field by `Payment`'s `$eq`:
+`match a.f with | none => (match b.f with | none => true | some _ => false) | some x => (match b.f with | none => false | some y => x == y)`.
+`Refunds.SameFee` and `SameRefund` in the corpus are compared with the CLR on every boundary pair (chapter 8).
+
 ## What does not translate
 
-- A record with a nullable field (#218): the record's `$eq` is built field by field and has no case for an
-  `Option` field. Extraction accepts such records since U17; translation stops with an error, never a silent pass.
 - A contract unit is never a definition, since nothing in a contract class runs: it translates to its checks only
   (chapter 6).

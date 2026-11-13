@@ -82,7 +82,12 @@ For each:
    `Nullable.some_eq_none` (U20). `SPred.entails_nil` alone never matches a one-state assertion, which is why the
    `_1` and `_cons` forms are listed. The set is kept apart from `Tactic.Simp()`'s default set, as omega-prep is, so
    existing scripts do not change.
-3. Path conditions that are equations are substituted.
+3. Path conditions that are equations `x = e` are substituted, where `x` is a variable or a field of one
+   (`refund.Original = none`, the null test of a record's nullable field, #218).
+   Each read of a nullable value cases on it anew, so two reads of a dependency's result after its null test leave
+   `r = some v₁` and `r = some v₂`, which substitution makes `some v₁ = some v₂`. That gives `v₁ = v₂`, proved by
+   `congrArg (fun o => Nullable.coalesce o v₁)`, which rewrites every other hypothesis, so a fact about `v₁` (from the
+   contract or a null test's `||`) is one about `v₂` (#226).
 4. `omega` runs, through the M5a omega-prep set and chapter 1's division bridges.
 
 U3's checkpoint used exactly this list of `SPred` and `PredTrans` lemmas (`EffectCheckpointTests.VcSimpLemmas`), and
@@ -147,9 +152,6 @@ In a theorem's script it is `unsupported script argument`.
 - `omega` cannot relate `a / b` to `a` and `b` for a symbolic `b`; such a fact needs a `Spec.Assert` with a script, or
   a `[ProofFor]` script.
 - A `switch` over a closed enum on a non-variable discriminant has no `generalize` step and becomes a leftover.
-- #226: a field of a dependency's nullable result, read after a null test, is not related to the hypothesis the walk
-  learned about it, so `if (c is null || c.Amount < 0) return 0; return c.Amount;` does not prove `r >= 0`. The same
-  shape with `c.Id` and the contract's `c.Id == id` proves.
 - #227: a `bool` postcondition that needs a case split on a `bool` parameter (`r => !flagged || r`) is left to `omega`,
   which does not split `Bool`s, and fails; stated as `r == (…)` it proves.
 - #220 (fixed after M6): `warrant translate` loaded no attribute sidecar, so it could not run the default procedure and

@@ -296,7 +296,9 @@ emitted IL by default. They remain fully bound in Roslyn's semantic model and
 `IOperation` tree, which is all Warrant needs. C# allows `[Conditional]` only
 on `void` methods, so value-returning calls such as `Spec.Implies` and
 `Prove.That` stay in the IL: `Spec.Implies` computes the implication and
-`Prove.That` throws. In M4 both are valid only in theorem statements (WRT0004).
+`Prove.That` throws. In M4 both are valid only in theorem statements (WRT0004);
+from M6, `Spec.Implies` is also valid inside `Spec.Requires` and `Spec.Ensures`
+(#213).
 
 C# attribute arguments must be compile-time constants, so
 `[Ensures(r => r > 0)]` is impossible. String specs would be untyped. Warrant

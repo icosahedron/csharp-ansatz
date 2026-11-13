@@ -140,9 +140,10 @@ them, so a problem with the `[ProofFor]` method itself is reported on it: no suc
 `nameof` cannot tell apart), an `M` that is not verified, another signature or body, and a second `[ProofFor]` for
 `M`, which names the first.
 
-`Spec.Implies` is still accepted only in theorem statements: inside a `Spec.Requires` or `Spec.Ensures` it is WRT0004,
-although translation already handles it as a guard. Whether M6 should accept it there is the owner's open decision #213;
-until then write `!a || b`.
+`Spec.Implies` is accepted in theorem statements and, since the owner's decision on #213 (2026-11-12), inside a
+`Spec.Requires` or `Spec.Ensures` condition, where it becomes an `ImpliesExpr` as in a theorem statement and translation
+treats its premise as a guard of its conclusion (chapter 6). Anywhere else, `Spec.Assert` included, it is still WRT0004
+(`Spec.Implies outside a theorem statement`).
 
 ## Dependencies, contract classes and `async` (U18)
 

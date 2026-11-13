@@ -18,6 +18,12 @@ internal sealed partial class Walker
 
     private const string LeadingOrder = "the leading Spec statements are Spec.Decreases, then Spec.Requires, then Spec.NoThrow, then Spec.Ensures.";
 
+    /// <summary>
+    /// How many <c>Spec.Requires</c> or <c>Spec.Ensures</c> conditions the walk is inside, where <c>Spec.Implies</c> is
+    /// accepted as it is in a theorem statement (#213); a <c>Spec.Assert</c> condition is not one.
+    /// </summary>
+    private int _contractClaims;
+
     private static bool IsSpec(IInvocationOperation call, string name) => Symbols.IsNamed(call.TargetMethod, SpecType, name);
 
     /// <summary>
@@ -78,6 +84,7 @@ internal sealed partial class Walker
             return Track(new NoThrowStmt(), at);
         }
         _claims++;
+        _contractClaims++;
         try
         {
             return rank == 1
@@ -87,6 +94,7 @@ internal sealed partial class Walker
         finally
         {
             _claims--;
+            _contractClaims--;
         }
     }
 

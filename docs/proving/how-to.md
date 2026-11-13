@@ -238,15 +238,18 @@ Pricing.cs(24,44): error WRT0001: The contract of 'Prices.Refund(int)' could not
   no implicit exception (a zero divisor, overflow, a null read) can happen.
 - Arithmetic in a contract must not overflow (GitHub #183): `+`, `-`, `*` and
   unary `-` on `int` and `long` in `Spec.Requires` or `Spec.Ensures` fail the
-  proof at that operation unless they provably stay in range, even though the
-  code itself wraps. `Spec.Ensures<int>(r => r == a + b)` alone fails at
+  proof at that operation unless they provably stay in range, as they do in a
+  verified method's body (GitHub #244). `Spec.Ensures<int>(r => r == a + b)` alone fails at
   `a + b`; bound each operand in `Spec.Requires` and it proves
   ([proofs that work](proofs-that-work.md#arithmetic-in-a-contract)). An
   explicit `(int)` cast still truncates. The same holds in a `Spec.Assert`
   condition (GitHub #235), bounded by the `Spec.Requires`, the branch it is
   in and earlier `Spec.Assert`s.
-- `Spec.Implies` is not accepted inside a contract yet (GitHub #213); write
-  `!a || b`.
+- `Spec.Implies(a, b)` is accepted inside `Spec.Requires` and `Spec.Ensures`
+  (GitHub #213). `b` is read only when `a` holds, so a division or an
+  addition in `b` has to be safe only under `a`
+  ([proofs that work](proofs-that-work.md#an-implication-in-a-contract)).
+  `Spec.Assert` still rejects it; write `!a || b` there.
 - The calls are `[Conditional("WARRANT_CONTRACTS")]`: they don't exist in the
   compiled IL and cost nothing at run time. So **nothing checks
   `Spec.Requires` at run time**, and code Warrant doesn't verify can call the

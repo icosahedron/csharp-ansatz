@@ -309,6 +309,119 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
         Proved(result.Find("M:S.Bounded(System.Int32,System.Int32)"));
     }
 
+    // ---- Spec.Implies in a contract (#213) ----
+
+    [Fact]
+    public void AnEnsuresWithImpliesProvesWhenTrueAndFailsAtTheEnsuresLineWhenFalse()
+    {
+        var source = Wrap("""
+            [Verified]
+            public static int Clamp(int x)
+            {
+                Spec.Ensures<int>(r => Spec.Implies(x > 0, r > 0));
+                return x > 0 ? x : 0;
+            }
+
+            [Verified]
+            public static int Wrong(int x)
+            {
+                Spec.Ensures<int>(r => Spec.Implies(x > 0, r > 0));
+                return x - 1;
+            }
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.Clamp(System.Int32)"));
+        Assert.Equal(
+            (VcKind.Postcondition, "Spec.Ensures<int>(r => Spec.Implies(x > 0, r > 0));"),
+            Failure(source, "M:S.Wrong(System.Int32)", result.Find("M:S.Wrong(System.Int32)")));
+    }
+
+    [Fact]
+    public void ImpliesAsABoolValueInAnEnsuresIsNotPOrQ()
+    {
+        var source = Wrap("""
+            [Verified]
+            public static bool Right(int x)
+            {
+                Spec.Ensures<bool>(r => r == Spec.Implies(x > 0, x > 1));
+                // Written as !p || q: the VC simp set does not yet relate decide (x <= 0) to !decide (x > 0) in a bool equality.
+                return !(x > 0) || x > 1;
+            }
+
+            [Verified]
+            public static bool Wrong(int x)
+            {
+                Spec.Ensures<bool>(r => r == Spec.Implies(x > 0, x > 1));
+                return x > 0 && x > 1;
+            }
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.Right(System.Int32)"));
+        Assert.Equal(
+            (VcKind.Postcondition, "Spec.Ensures<bool>(r => r == Spec.Implies(x > 0, x > 1));"),
+            Failure(source, "M:S.Wrong(System.Int32)", result.Find("M:S.Wrong(System.Int32)")));
+    }
+
+    [Fact]
+    public void ArithmeticInTheConclusionOfImpliesIsWellDefinedUnderItsPremise()
+    {
+        // #183: x + 1 must not overflow, which holds only under the premise x < 100.
+        var source = Wrap("""
+            [Verified]
+            public static int Guarded(int x)
+            {
+                Spec.Ensures<int>(r => Spec.Implies(x < 100, r == x + 1));
+                return x < 100 ? x + 1 : 0;
+            }
+
+            [Verified]
+            public static int Unguarded(int x)
+            {
+                Spec.Ensures<int>(r => Spec.Implies(x > 0, r == x + 1));
+                return x > 0 ? x : 0;
+            }
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.Guarded(System.Int32)"));
+        var unguarded = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Unguarded(System.Int32)"));
+        Assert.Equal(VcKind.WellDefinedness, unguarded.Vcs[0].Kind);
+        Assert.Equal("x + 1", Text(source, "M:S.Unguarded(System.Int32)", unguarded.Vcs[0].Node));
+    }
+
+    [Fact]
+    public void ARequiresWithImpliesIsACallersPreconditionAndHasAVacuityCheck()
+    {
+        var source = Wrap("""
+            [Verified]
+            public static int Small(int x)
+            {
+                Spec.Requires(Spec.Implies(x > 0, x < 100));
+                return x;
+            }
+
+            [Verified]
+            public static int Fine() => Small(50) + Small(-500);
+
+            [Verified]
+            public static int TooBig() => Small(500);
+
+            [Verified]
+            public static int Never(int x)
+            {
+                Spec.Requires(x > 0);
+                Spec.Requires(Spec.Implies(x > 0, x < 0));
+                return x;
+            }
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.Small(System.Int32)"));
+        Proved(result.Find("M:S.Fine"));
+        Assert.Equal((VcKind.CalleePrecondition, "Small(500)"), Failure(source, "M:S.TooBig", result.Find("M:S.TooBig")));
+        var never = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Never(System.Int32)"));
+        Assert.StartsWith("The contract is unsatisfiable", never.Message, StringComparison.Ordinal);
+        Assert.Equal("Spec.Requires(Spec.Implies(x > 0, x < 0));", Text(source, "M:S.Never(System.Int32)", never.TacticNode));
+    }
+
     [Fact]
     public void ArithmeticInATheoremThatCanOverflowFailsAtTheOperationAndProvesWhenBounded()
     {

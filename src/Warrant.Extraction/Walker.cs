@@ -1035,9 +1035,14 @@ internal sealed partial class Walker
         }
         if (Symbols.IsNamed(target, "Warrant.Spec", "Implies"))
         {
-            if (!_inTheorem)
+            // A theorem statement, or a Spec.Requires or Spec.Ensures condition (#213), is a proposition.
+            if (!_inTheorem && _contractClaims == 0)
             {
-                throw Reject("Spec.Implies outside a theorem statement", syntax, id: DiagnosticIds.MalformedSpec);
+                throw Reject(
+                    "Spec.Implies outside a theorem statement",
+                    syntax,
+                    "Spec.Implies is accepted only in a theorem statement or a Spec.Requires or Spec.Ensures condition",
+                    id: DiagnosticIds.MalformedSpec);
             }
             var args = Arguments(target, call.Arguments, syntax);
             return Track(new ImpliesExpr(args[0], args[1]), syntax);

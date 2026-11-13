@@ -21,7 +21,8 @@ public enum VirOverflow
     /// <c>unchecked</c>: wrapping on purpose, written as <c>unchecked(...)</c> or in an <c>unchecked { }</c> block, the
     /// nearest such context around the node. Its value is the wrapped one, as for <see cref="Wrap"/>, with no obligation
     /// that it does not overflow. Only on <c>+</c>, <c>-</c>, <c>*</c> and unary <c>-</c> on <c>int</c> and <c>long</c>, and
-    /// on narrowing; never on a unit's facts. Added to VIR version 3 before its release (#236).
+    /// on narrowing from <c>int64</c> to <c>int32</c>; never on a unit's facts. The VIR reader rejects it anywhere else
+    /// (#249). Added to VIR version 3 before its release (#236).
     /// </summary>
     Unchecked,
 }

@@ -82,6 +82,51 @@ public class VersionThreeTests
         Assert.Throws<FormatException>(() => VirReader.Read(Encoding.UTF8.GetBytes(forged)));
     }
 
+    /// <summary>
+    /// <c>unchecked</c> is read only where <see cref="VirOverflow.Unchecked"/> says it can be (#249): on <c>+</c>, <c>-</c>,
+    /// <c>*</c> and unary <c>-</c> on <c>int32</c> or <c>int64</c>, and on narrowing from <c>int64</c> to <c>int32</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("""{`binary`:{`type`:`int32`,`op`:`div`,`overflow`:`unchecked`,`l`:{`param`:{`type`:`int32`,`index`:0}},`r`:{`param`:{`type`:`int32`,`index`:0}}}}""")]
+    [InlineData("""{`binary`:{`type`:`int64`,`op`:`rem`,`overflow`:`unchecked`,`l`:{`param`:{`type`:`int64`,`index`:0}},`r`:{`param`:{`type`:`int64`,`index`:0}}}}""")]
+    [InlineData("""{`binary`:{`type`:`decimal`,`op`:`add`,`overflow`:`unchecked`,`l`:{`param`:{`type`:`decimal`,`index`:0}},`r`:{`param`:{`type`:`decimal`,`index`:0}}}}""")]
+    [InlineData("""{`unary`:{`type`:`int32`,`op`:`plus`,`overflow`:`unchecked`,`operand`:{`param`:{`type`:`int32`,`index`:0}}}}""")]
+    [InlineData("""{`unary`:{`type`:`decimal`,`op`:`neg`,`overflow`:`unchecked`,`operand`:{`param`:{`type`:`decimal`,`index`:0}}}}""")]
+    [InlineData("""{`convert`:{`type`:`int64`,`from`:`int32`,`to`:`int64`,`overflow`:`unchecked`,`operand`:{`param`:{`type`:`int32`,`index`:0}}}}""")]
+    public void UncheckedIsReadOnlyWhereItCanWrap(string body)
+    {
+        var a = new ParamExpr(VirType.Int32, 0);
+        var valid = VirWriter.WriteString(Samples.Payout() with { Body = new BinaryExpr(VirType.Int32, BinaryOp.Add, VirOverflow.Unchecked, a, a) });
+        var at = valid.IndexOf(J("{`binary`:"), StringComparison.Ordinal);
+        var end = valid.IndexOf(J(",`assumptions`:"), at, StringComparison.Ordinal);
+        Assert.True(at > 0 && end > at, valid);
+        var forged = valid[..at] + J(body) + valid[end..];
+
+        var e = Assert.Throws<FormatException>(() => VirReader.Read(Encoding.UTF8.GetBytes(forged)));
+        Assert.Contains("'unchecked'", e.Message, StringComparison.Ordinal);
+
+        // The same node with `wrap` is read.
+        VirReader.Read(Encoding.UTF8.GetBytes(forged.Replace(J("`overflow`:`unchecked`"), J("`overflow`:`wrap`"), StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void UncheckedIsReadOnEveryWrappingOperation()
+    {
+        var i = new ParamExpr(VirType.Int32, 0);
+        var l = new ParamExpr(VirType.Int64, 0);
+        foreach (var body in new VirExpr[]
+        {
+            new BinaryExpr(VirType.Int32, BinaryOp.Sub, VirOverflow.Unchecked, i, i),
+            new BinaryExpr(VirType.Int64, BinaryOp.Mul, VirOverflow.Unchecked, l, l),
+            new UnaryExpr(VirType.Int64, UnaryOp.Neg, VirOverflow.Unchecked, l),
+            new ConvertExpr(VirType.Int64, VirType.Int32, VirOverflow.Unchecked, l),
+        })
+        {
+            var unit = Samples.Payout() with { Body = body };
+            Assert.Equal(unit, VirReader.Read(VirWriter.Write(unit)));
+        }
+    }
+
     [Theory]
     [InlineData("0.0000000000000000000000000001")]
     [InlineData("7.9228162514264337593543950335")]
@@ -147,6 +192,14 @@ public class VersionThreeTests
         Assert.Contains(J("""{`return`:{`lit`:{`type`:`unit`,`value`:`0`}}}"""), json, StringComparison.Ordinal);
         Assert.Equal(unit, VirReader.Read(Encoding.UTF8.GetBytes(json)));
         Assert.Equal(new OpaqueType(token), VirType.Opaque(token));
+
+        // CancellationToken is the one opaque type (#253): another key is malformed, so the trusted reader keeps what
+        // extraction emits, and the translation's Unit for an opaque parameter covers only a pass-through token.
+        var other = json.Replace(token, "T:System.IO.Stream", StringComparison.Ordinal);
+        Assert.NotEqual(json, other);
+        var refused = Assert.Throws<FormatException>(() => VirReader.Read(Encoding.UTF8.GetBytes(other)));
+        Assert.Equal("An opaque type is T:System.Threading.CancellationToken, not 'T:System.IO.Stream'.", refused.Message);
+        Assert.Equal(token, VirType.CancellationTokenKey);
 
         // The unit literal has one value.
         Assert.Throws<ArgumentException>(() => VirWriter.Write(unit with { Body = new BlockStmt(VirList.Of<VirStmt>(new ReturnStmt(new LitExpr(VirType.Unit, 1)))) }));

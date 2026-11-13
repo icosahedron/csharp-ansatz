@@ -132,9 +132,10 @@ public static class Translator
                 case VirUnitKind.Function when raising && recursive:
                     // Extraction rejects this (KTD11): the recursive call would sit inside a bind, out of the decrease obligations' sight.
                     throw new TranslationException(unit.Key, "a recursive method that can raise an exception is not translated (recursion with effects).");
-                case VirUnitKind.Function when recursive && HasContract(unit):
-                    // Extraction rejects this (KTD11): the recursive call could not use the method's own unproved triple.
-                    throw new TranslationException(unit.Key, "a recursive method with Spec.Requires or Spec.Ensures is not translated (contract on a recursive method).");
+                case VirUnitKind.Function when recursive && HasEnsures(unit):
+                    // Extraction rejects this (KTD11): the recursive call could not use the method's own unproved triple. A
+                    // Spec.Requires is allowed (#256): each recursive call is checked against it, never assumes it.
+                    throw new TranslationException(unit.Key, "a recursive method with Spec.Ensures is not translated (contract on a recursive method).");
                 case VirUnitKind.Function when raising:
                     {
                         // M6 KTD4, KTD11: a unit that can raise is a ClrM program over an opaque world, and KTD12: it has a
@@ -156,7 +157,7 @@ public static class Translator
                 case VirUnitKind.Function when BodyTranslator.IsRecursive(unit):
                     {
                         // M5a KTD14, KTD15: the decrease theorems, the Nat.fix definition, then the equation lemma.
-                        var (type, value, decreases, proof) = new BodyTranslator(types, callees).Recursive(unit);
+                        var (type, value, decreases, proof) = new BodyTranslator(types, callees) { Contracted = true }.Recursive(unit);
                         var decl = TypeDeclarations.Definition(name, type, value, Regular);
                         Declare(unit.Key, name, display, decl.Value.Hints);
                         foreach (var decrease in decreases)
@@ -164,9 +165,10 @@ public static class Translator
                             Declare(unit.Key, decrease.Theorem.Name, $"{display} (decrease {decrease.Index})", null);
                         }
                         var equationName = LeanNames.EquationLemma(unit.Key);
-                        var equation = new TheoremShell(equationName, new BodyTranslator(types, callees).Equation(unit, name), null, null);
+                        var equation = new TheoremShell(equationName, new BodyTranslator(types, callees) { Contracted = true }.Equation(unit, name), null, null);
                         Declare(unit.Key, equationName, $"{display} (equation)", null);
-                        // #244: its implicit arithmetic must not overflow, stated after the definition, which it may name.
+                        // #244: its implicit arithmetic must not overflow, and #256: each recursive call is within its Spec.Requires, stated
+                        // after the definition, which they may name.
                         return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null, new RecursiveDefinition(decreases, equation, proof))
                         {
                             Contract = Contract(unit, name, display, types, callees, raising: false),
@@ -238,8 +240,8 @@ public static class Translator
             }
         }
 
-        private static bool HasContract(VirUnit unit) =>
-            unit.Body is BlockStmt block && block.Stmts.Any(s => s is RequiresStmt or EnsuresStmt);
+        private static bool HasEnsures(VirUnit unit) =>
+            unit.Body is BlockStmt block && block.Stmts.Any(s => s is EnsuresStmt);
 
         /// <summary>
         /// A function unit's contract obligation (M6 KTD12), with its names recorded; null for a pure unit without a

@@ -275,6 +275,10 @@ internal sealed partial class BodyTranslator
         bool noThrow = raising && stmts.Any(s => s is NoThrowStmt);
         // #244: a pure method's own implicit arithmetic must not overflow; a raising method's is a site of its program.
         bool overflows = !raising && unit.Body is { } code && BodyNodes(code).Any(n => n is VirExpr e && SpecOverflows(e));
+        // #256: a recursive method's calls to itself must be within its Spec.Requires, which its body assumes; they are
+        // recorded by the same translation of the body.
+        bool recursesWithin = !raising && requires.Count > 0 && unit.Body is { } called
+            && BodyNodes(called).Any(n => n is CallExpr c && string.Equals(c.Target, unit.Key, StringComparison.Ordinal));
         if (!raising && requires.Count == 0 && ensures.Count == 0 && !overflows)
         {
             return null;
@@ -344,7 +348,7 @@ internal sealed partial class BodyTranslator
 
         // #235: a Spec.Assert's condition is a Spec expression, but it sits inside the program.
         var asserts = raising && unit.Body is { } body && Nodes(body).Any(n => n is AssertStmt) ? AssertObligations(unit, spec.WellDefinedness.Count) : [];
-        var arithmetic = overflows ? OverflowObligations(unit, spec.WellDefinedness.Count) : [];
+        var arithmetic = overflows || recursesWithin ? OverflowObligations(unit, spec.WellDefinedness.Count) : [];
         return new ContractObligation(
             theorem, all.Count, [.. all.Select(x => _lctx.Get(x).UserName)], operations.Count, unit.Script, specLemma, specBinders,
             [.. spec.WellDefinedness, .. asserts, .. arithmetic], [.. vacuity], raising);

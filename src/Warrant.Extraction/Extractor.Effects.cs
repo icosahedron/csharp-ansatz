@@ -73,14 +73,15 @@ public static partial class Extractor
         private Rejection? RaisingFunction(Candidate c, EffectAnalysis analysis)
         {
             var name = Symbols.Display(c.Symbol);
-            var contract = c.Body is BlockStmt block ? block.Stmts.FirstOrDefault(s => s is RequiresStmt or EnsuresStmt) : null;
+            // A Spec.Requires is allowed (#256): each recursive call is checked against it. A Spec.Ensures is not yet.
+            var contract = c.Body is BlockStmt block ? block.Stmts.FirstOrDefault(s => s is EnsuresStmt) : null;
             if (analysis.IsRecursive(c.Key) && contract is not null)
             {
                 return new Rejection(
                     DiagnosticIds.Unsupported,
                     "contract on a recursive method",
                     At(c, contract, c.Symbol),
-                    $"{name}: a recursive method takes no Spec.Requires or Spec.Ensures in M6, because its recursive call cannot use its own contract before it is proved.");
+                    $"{name}: a recursive method takes no Spec.Ensures, because its recursive call cannot use its own contract before it is proved; a Spec.Requires is allowed.");
             }
             if (analysis.IsRecursive(c.Key) && analysis.CauseOf(c.Key) is { } cause)
             {

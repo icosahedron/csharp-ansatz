@@ -454,11 +454,15 @@ The condition is proved under what is known at the operation: the method's
 
 The default procedure's `omega` reads linear arithmetic only: `a * b` of two
 variables is never bounded by it (GitHub #257). It also knows nothing of a
-recursive call's result (a recursive method has no `Spec.Requires`, #256), nor
-of a local whose value is merged from two branches that each change two locals
-(#255). These are gaps in the checker, not in your code: prove such an
-operation with a `[ProofFor]` script, or wait for the fix. Write `unchecked`
-only where wrapping is what the code means; it removes the check.
+recursive call's result (a recursive method has no `Spec.Ensures` yet). These
+are gaps in the checker, not in your code: prove such an operation with a
+`[ProofFor]` script, or wait for the fix. Write `unchecked` only where wrapping
+is what the code means; it removes the check.
+
+What it does know: a local merged from branches keeps the value each branch
+gave it (#255), a `switch` section over a `[Closed]` enum knows which members
+it takes (#258), and a recursive method may bound its parameters with
+`Spec.Requires`, which each recursive call must then satisfy (#256).
 
 In a project with `<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>`,
 all arithmetic is checked, and Warrant follows the project setting.

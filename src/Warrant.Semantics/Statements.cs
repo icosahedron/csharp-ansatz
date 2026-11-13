@@ -200,12 +200,84 @@ internal sealed partial class BodyTranslator
         {
             inner = inner.Set(live[i], parameters[i]);
         }
+        if (_overflowObligations)
+        {
+            return KnownJoinPoint(branches, branch, combine, live, parameters, inner, k);
+        }
         var body = _lctx.MkLambda(parameters, InScope(parameters, () => WithFacts(parameters.Select(p => (p, false)), () => k.Invoke(inner))));
         var jp = _lctx.MkLetDecl(_ngen, JoinPointName, _lctx.MkPi(parameters, k.ResultType), body);
         var jump = new Jump(jp, live, k.ResultType);
         var unreachable = new Unreachable(k.ResultType);
         var term = InScope(jp, () => combine([.. Enumerable.Range(0, branches.Count).Select(i => branch(i, FallsThrough(branches[i]) ? jump : unreachable))], k.ResultType));
         return _lctx.MkLambda([jp], term);
+    }
+
+    /// <summary>
+    /// Rule 5 while a pure body's obligations are stated (#244, #255): the branches first, each jump recording what its path
+    /// knows, then <paramref name="k"/>, whose obligations know that one of the incoming paths was taken, with its values.
+    /// Each path gives <c>∃ ys, facts ∧ x₁ = v₁ ∧ … ∧ xₙ = vₙ</c> over the facts added on it since the branch point and
+    /// the values its jump passes, an <c>int</c> or <c>long</c> compared by <c>toInt</c>; <c>ys</c> are the parameters of
+    /// join points inside the branch, out of scope at this one. The parameters are bound with their disjunction as a fact.
+    /// The term is <c>(fun jp =&gt; combine(branches)) (fun x₁ … xₙ =&gt; k)</c>, which only the obligations read.
+    /// </summary>
+    private Expr KnownJoinPoint(
+        IReadOnlyList<VirStmt> branches,
+        Func<int, Continuation, Expr> branch,
+        Func<IReadOnlyList<Expr>, Expr, Expr> combine,
+        List<int> live,
+        List<Expr> parameters,
+        Env inner,
+        Continuation k)
+    {
+        var jp = _lctx.MkLocalDecl(_ngen, JoinPointName, _lctx.MkPi(parameters, k.ResultType));
+        var paths = new List<Expr>();
+        var jump = new KnownJump(this, jp, live, parameters, _facts!.Count, paths, k.ResultType);
+        var unreachable = new Unreachable(k.ResultType);
+        var term = combine([.. Enumerable.Range(0, branches.Count).Select(i => branch(i, FallsThrough(branches[i]) ? jump : unreachable))], k.ResultType);
+        IEnumerable<(Expr, bool)> known = parameters.Select(p => (p, false));
+        if (paths.Count > 0)
+        {
+            known = [.. known, (paths.Skip(1).Aggregate(paths[0], (a, b) => Expr.App(Init.Or, a, b)), true)];
+        }
+        var body = _lctx.MkLambda(parameters, WithFacts(known, () => k.Invoke(inner)));
+        return Expr.App(_lctx.MkLambda([jp], term), body);
+    }
+
+    /// <summary>
+    /// What one path knows where it jumps to a join point (#255): <c>∃ ys, facts ∧ x₁ = v₁ ∧ …</c>, as
+    /// <see cref="KnownJoinPoint"/> states it, from the facts after the first <paramref name="from"/>.
+    /// </summary>
+    private Expr PathFact(List<int> live, List<Expr> parameters, Env env, int from)
+    {
+        var entries = _facts!.Skip(from).ToList();
+        var parts = entries.Where(e => e.IsFact).Select(e => Zeta(e.Value)).ToList();
+        for (int i = 0; i < live.Count; i++)
+        {
+            var type = Local(live[i]).Init.Type;
+            var value = Zeta(env.Get(live[i]));
+            parts.Add(type == VirType.Int32 || type == VirType.Int64
+                ? Expr.App(Init.Eq, Init.Int, ToInt(_types.Underlying(type), parameters[i]), ToInt(_types.Underlying(type), value))
+                : Expr.App(Init.Eq, _types.Cic(type), parameters[i], value));
+        }
+        var fact = parts.Count == 0 ? Init.PropTrue : parts.SkipLast(1).Reverse().Aggregate(parts[^1], (acc, p) => Expr.App(Init.And, p, acc));
+        foreach (var y in entries.Where(e => !e.IsFact).Select(e => e.Value).Reverse())
+        {
+            fact = Expr.App(Init.Exists, _lctx.Get(y).Type, _lctx.MkLambda([y], fact));
+        }
+        return fact;
+    }
+
+    /// <summary>A jump to a join point whose incoming paths are recorded (#255): <c>jp</c> applied, as <see cref="Jump"/>.</summary>
+    private sealed class KnownJump(BodyTranslator owner, Expr joinPoint, List<int> locals, List<Expr> parameters, int from, List<Expr> paths, Expr type)
+        : Continuation(type)
+    {
+        public override IReadOnlySet<int> Reads { get; } = locals.ToHashSet();
+
+        public override Expr Invoke(Env env)
+        {
+            paths.Add(owner.PathFact(locals, parameters, env, from));
+            return Expr.App(joinPoint, [.. locals.Select(env.Get)]);
+        }
     }
 
     private static readonly Name JoinPointName = Name.From("jp");

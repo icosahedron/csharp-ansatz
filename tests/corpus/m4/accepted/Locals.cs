@@ -29,9 +29,9 @@ public static class Locals
             cost = cost + 15;
             bonus = 1;
         }
-        // Not an intended wrap: a join point's parameters carry no value into an obligation yet (gap #255; bound when fixed).
-        if (member) return unchecked(cost - 5);
-        return unchecked(cost + bonus);
+        // cost and bonus are known on each path into the join point (#255), so these are bounded too.
+        if (member) return cost - 5;
+        return cost + bonus;
     }
 
     // Both branches can fall through and neither changes a local the rest reads, but the
@@ -78,8 +78,8 @@ public static class Locals
             case >= 5 and < 9:
                 return 20;
         }
-        // Not an intended wrap: result is 0 or 10, but a join point carries no value into the obligation yet (gap #255).
-        return unchecked(result + 1);
+        // result is 0 or 10 here, which the join point knows (#255).
+        return result + 1;
     }
 
     [Theorem]

@@ -22,12 +22,14 @@ internal sealed partial class BodyTranslator
         {
             // Each constructor takes the value of the first arm that covers it; an arm covering several is copied.
             var members = _types.Closed(s.Scrutinee.Type).Members;
-            var values = s.Arms.Select(a => arm(a.Value)).ToList();
-            var minors = members.Select(m =>
-            {
-                int arm = FirstIndex(s.Arms, a => Covers(a.Pattern, m.Name, members));
-                return arm >= 0 ? values[arm] : throw new TranslationException(null, $"the switch does not cover {m.Name}.");
-            });
+            var first = members.Select(m => FirstIndex(s.Arms, a => Covers(a.Pattern, m.Name, members))).ToList();
+            // In a Spec expression, and in a pure body whose obligations are stated, an arm is evaluated only for the
+            // members it is the first to cover (#258).
+            var values = s.Arms.Select((a, i) => _spec is null
+                ? arm(a.Value)
+                : InGuards([IsOneOf(s.Scrutinee.Type, scrutinee, [.. members.Where((_, m) => first[m] == i)])], () => arm(a.Value))).ToList();
+            var minors = members.Select((m, i) =>
+                first[i] >= 0 ? values[first[i]] : throw new TranslationException(null, $"the switch does not cover {m.Name}."));
             return Recursor(s.Scrutinee.Type, type, minors, scrutinee);
         }
 
@@ -76,7 +78,9 @@ internal sealed partial class BodyTranslator
                 branches.Add(EmptyBlock);
                 cover = [.. cover.Select(i => i >= 0 ? i : branches.Count - 1)];
             }
-            return Branches(branches, null, (terms, type) => SharedRecursor(s.Scrutinee.Type, type, terms, cover, scrutinee), env, k);
+            // In each branch the scrutinee is one of the members that take it (#258).
+            var facts = branches.Select((_, i) => (IReadOnlyList<Expr>)[IsOneOf(s.Scrutinee.Type, scrutinee, [.. members.Where((_, m) => cover[m] == i)])]).ToList();
+            return Branches(branches, null, (terms, type) => SharedRecursor(s.Scrutinee.Type, type, terms, cover, scrutinee), env, k, facts);
         }
 
         if (@default >= 0 && sections[@default].Labels.Count > 1)
@@ -102,6 +106,21 @@ internal sealed partial class BodyTranslator
             env,
             k,
             [.. branches.Select((_, i) => ChainFacts(tests, tested.IndexOf(i) is >= 0 and var j ? j : tested.Count))]);
+    }
+
+    /// <summary>
+    /// That the value <paramref name="scrutinee"/> of a closed type is one of <paramref name="members"/>:
+    /// <c>s = T.m₁ ∨ s = T.m₂ ∨ …</c>, <c>False</c> for none (#258). An equation, so the default procedure can substitute
+    /// the member wherever the scrutinee is a variable, and <c>==</c> on the type (<c>Nat.beq (T.$index s) …</c>) then
+    /// computes.
+    /// </summary>
+    private Expr IsOneOf(VirType closed, Expr scrutinee, IReadOnlyList<VirClosedMember> members)
+    {
+        var type = _types.Cic(closed);
+        var tests = members
+            .Select(m => Expr.App(Init.Eq, type, scrutinee, Expr.Const(LeanNames.Member(Key(closed), m.Name))))
+            .ToList();
+        return tests.Count == 0 ? Init.PropFalse : tests.SkipLast(1).Reverse().Aggregate(tests[^1], (acc, t) => Expr.App(Init.Or, t, acc));
     }
 
     /// <summary>

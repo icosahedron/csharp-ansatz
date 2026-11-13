@@ -24,12 +24,13 @@ public sealed class RecursionTests(EngineFixture engine) : IClassFixture<EngineF
         var translated = Assert.IsType<TranslatedOutcome>(outcome);
         var names = translated.Declarations.Select(NameOf).ToList();
         var name = LeanNames.ForKey(key).ToString();
-        // Add's b - 1 is default-context arithmetic: its obligation and the contract that carries it come after the
-        // equation lemma (#244). Sum's and SumLong's arithmetic is unchecked.
+        // Add's obligations come after the equation lemma (#244, #256): its Spec.Requires's int.MaxValue - b, then its
+        // body's a + 1 and b - 1 and the recursive call's precondition, then the contract that carries them. Sum's and
+        // SumLong's arithmetic is unchecked.
         List<string> expected = [$"{name}.$dec_1", name, $"{name}.$eq_def"];
         if (key.Contains(".Add(", StringComparison.Ordinal))
         {
-            expected.AddRange([$"{name}.$wd_1", $"{name}.$contract"]);
+            expected.AddRange([$"{name}.$wd_1", $"{name}.$wd_2", $"{name}.$wd_3", $"{name}.$wd_4", $"{name}.$contract"]);
         }
         Assert.Equal(expected, names);
     }

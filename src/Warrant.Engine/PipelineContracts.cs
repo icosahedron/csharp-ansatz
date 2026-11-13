@@ -371,7 +371,11 @@ public static partial class Pipeline
                 _contractAssumptions.AddRange(recorded.Where(a => a.Assumption.Kind == VirAssumptionKind.CalleeContract));
                 return failure;
             }
-            return Omega(unit, wd.Theorem, wd.Binders, at, "the precondition of a method called in a Spec expression", display, assumptions, admitted, budget);
+            // #256: a recursive method's call to itself must be within its own Spec.Requires.
+            var what = wd.Node is CallExpr { Target: var target } && string.Equals(target, unit.Unit.Key, StringComparison.Ordinal)
+                ? "the precondition of the method's recursive call"
+                : "the precondition of a method called in a Spec expression";
+            return Omega(unit, wd.Theorem, wd.Binders, at, what, display, assumptions, admitted, budget);
         }
 
         /// <summary>

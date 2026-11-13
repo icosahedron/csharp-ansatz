@@ -954,6 +954,17 @@ internal sealed class VcWalker
     /// <returns>The goal omega was given, or null when simp closed it.</returns>
     private MVarId? Discharge(MVarId g, SimpContext simp)
     {
+        // A closed-enum switch arm that covers several members knows `s = A ∨ s = B` (#258): one case per member, so each
+        // equation substitutes below.
+        if (AtomCases(g) is { } major)
+        {
+            MVarId? last = null;
+            foreach (var c in _m.Cases(g, major))
+            {
+                last = Discharge(c.MVarId, simp);
+            }
+            return last;
+        }
         if (_m.SimpAll(g, simp) is not { } rest)
         {
             return null;
@@ -975,6 +986,29 @@ internal sealed class VcWalker
         _m.OmegaTactic(substituted);
         return substituted;
     }
+
+    /// <summary>
+    /// A hypothesis <c>x = c₁ ∨ x = c₂ ∨ …</c>, each side an equation of a variable (<see cref="IsAtom"/>) with a closed
+    /// term, which <c>cases</c> splits into one goal per equation (#258); null when there is none.
+    /// </summary>
+    private FVarId? AtomCases(MVarId g) => _m.WithContext(g, () =>
+    {
+        foreach (var d in (_m.MCtx.FindDecl(g)?.LCtx.Decls ?? []).Where(d => !d.IsImplementationDetail))
+        {
+            if (_m.InstantiateMVars(d.Type) is var t && t.HeadIs(OrName) && t.GetAppArgs() is [var a, var b] && IsAtomEquation(a) && IsAtomEquations(b))
+            {
+                return (FVarId?)d.FVarId;
+            }
+        }
+        return null;
+    });
+
+    private static bool IsAtomEquations(Expr e) =>
+        IsAtomEquation(e) || (e.HeadIs(OrName) && e.GetAppArgs() is [var a, var b] && IsAtomEquation(a) && IsAtomEquations(b));
+
+    private static bool IsAtomEquation(Expr e) => e.HeadIs(EqName) && e.GetAppArgs() is [_, var x, var c] && IsAtom(x) && !c.HasFVar;
+
+    private static readonly Name OrName = Name.Parse("Or");
 
     /// <summary>
     /// Each path condition <c>x = e</c> about a variable rewrites the other hypotheses and the goal (as Lean's

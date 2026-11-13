@@ -296,8 +296,10 @@ public class ContractExtractionTests
     }
 
     [Fact]
-    public void AContractOnARecursiveMethodIsRejected()
+    public void AnEnsuresOnARecursiveMethodIsRejectedAndARequiresIsNot()
     {
+        // #256: a recursive method's Spec.Requires is checked at each recursive call, so it is allowed; its Spec.Ensures
+        // would be used by the recursive call before it is proved.
         var result = Members("""
                 [Verified]
                 public static int Down(int n)
@@ -316,7 +318,7 @@ public class ContractExtractionTests
                 }
             """);
 
-        Assert.Equal("WRT0002 | contract on a recursive method", Only(result, "M:C.Down(System.Int32)"));
+        Assert.Empty(result.DiagnosticsFor("M:C.Down(System.Int32)"));
         Assert.Equal("WRT0002 | contract on a recursive method", Only(result, "M:C.Up(System.Int32)"));
     }
 

@@ -44,8 +44,8 @@ Since the M6 follow-ups a verified method's own `int` and `long` arithmetic in C
 |---|---|---|
 | `accepted` `Increment` | `Spec.Requires(x < int.MaxValue)` | `x + 1`; `LargerBelowMax`'s premise is the precondition, which the theorem's well-definedness obligation checks. |
 | `refuted` `Increment` | `unchecked(x + 1)` | `AlwaysLarger` is about the wrap: still false, with the counterexample `x = 2147483647`. |
-| `Sum`, `SumLong` | `unchecked(n + Sum(n - 1))` | Nothing is known of a recursive call's result where the obligation is stated, and the sums do overflow for large `n`. |
-| `Add` | `unchecked(a + 1)` | `a + 1` overflows at `int.MaxValue`, and a recursive method has no `Spec.Requires`. Its `b - 1` keeps its obligation, proved under `b > 0`, so `Add` admits `$wd_1` and `$contract` after its equation lemma. |
+| `Sum`, `SumLong` | `unchecked(n + Sum(n - 1))` | Nothing is known of a recursive call's result where the obligation is stated (a recursive method has no `Spec.Ensures` yet), and the sums do overflow for large `n`. |
+| `Add` | `Spec.Requires(b >= 0 && a <= int.MaxValue - b)` (#256; it was `unchecked(a + 1)` before a recursive method could state one) | The body assumes it, so `a + 1` and `b - 1` are proved, and the recursive call `Add(a + 1, b - 1)` is checked against it; `Add` admits its `$wd` obligations and `$contract` after its equation lemma. |
 | `rejected` `Scale` (both) | `unchecked(x + x)` | Helpers of the rejected scripts. |
 
 `Bad`'s `n - 1` has an obligation too, but its decrease obligation fails first, so it is refuted for the same reason.

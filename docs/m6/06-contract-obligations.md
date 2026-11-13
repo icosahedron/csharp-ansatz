@@ -213,21 +213,38 @@ the wrap never happens. A failure is WRT0001 at the operation, `arithmetic overf
   ```
 
   The facts are what the path to the operation knows: the `Spec.Requires`, the condition of each `if` branch taken and
-  of each `switch` section taken over an integer or open enum; the guards are those inside the expression (`&&`, `||`,
-  `?:`, `??`, a switch expression's arm over an integer or open enum); a local's `let` is unfolded into its value.
-  A join point's parameters are bound with nothing known of them, so a value merged after an `if` that changes two
-  locals, or a `switch` with a `return` in it, is unknown at the operation that reads it. A pure callee's
+  of each `switch` section taken over an integer or open enum, and over a closed enum that the scrutinee is one of the
+  members the section takes, `s = T.A ∨ s = T.B` (#258); the guards are those inside the expression (`&&`, `||`,
+  `?:`, `??`, a switch expression's arm, over a closed enum the members it is the first to cover); a local's `let` is
+  unfolded into its value.
+  A join point's parameters (a value merged after an `if` that changes two locals, or a `switch` with a `return` in
+  it) are known by their value on each incoming path (#255): the branches are translated before the join point's
+  body, each jump records `∃ ys, facts ∧ x₁ = v₁ ∧ …` over the facts its path added since the branch point and the
+  values it passes (an `int` or `long` as `x.toInt = v.toInt`), with `ys` the parameters of join points inside the
+  branch, and the join point's parameters are bound with the disjunction of those as a fact. Each disjunct holds on its
+  path, and the body runs only after one of the jumps, so the fact holds wherever the body's obligations are used. The
+  term this translation builds is discarded; the definition's join point is unchanged. A pure callee's
   `Spec.Ensures` is known through its `f.$contract_spec`, which the default procedure adds for every application of it
   in a goal (chapter 7). A call of a recursive method to itself is its own constant, which the obligations, admitted
   after the definition, can name; nothing is known of its value, so arithmetic on a recursive result fails unless it
-  is `unchecked` (recursive methods have no `Spec.Requires` yet, GitHub #256). Once an operation's obligation holds, its exact value
+  is `unchecked` (a recursive method has no `Spec.Ensures` yet). A recursive method may state `Spec.Requires` (#256):
+  its body's obligations assume it, as any method's do, and each call of the method to itself records an obligation
+  of kind `CalleePrecondition`, the precondition at the call's arguments under the facts of the path to it, proved by
+  `omega` as a callee precondition in a `Spec` expression is. Every outside caller is checked at its call (the call
+  makes it raise, KTD11), and a call to itself does not make the method raise. So by well-founded induction on the
+  `Spec.Decreases` measure every execution that starts within the `Spec.Requires` stays within it, and the body's
+  obligations hold of each. These obligations are stated whenever the method calls itself, even with no implicit
+  arithmetic. Once an operation's obligation holds, its exact value
   `(a op b).toInt = a.toInt op b.toInt` is a fact for the obligations after it on the same path, inside the guard it
   was under; `omega` reasons through the wrap-around's `Int.bmod` only by its real shadow, which cannot close nested
   arithmetic such as `a * 3 - b` even under tight bounds (`ANestedProductIsBoundedThroughItsExactValueNotItsWrapAround`).
   The same facts serve a `Spec` expression's arithmetic.
   `omega` reads only linear arithmetic: a product of two variables is never bounded by it, so such a product fails
   unless a `[ProofFor]` script proves it (GitHub #257). `unchecked` states that wrapping is intended; it is not the
-  way around a gap. The other gaps: join points (#255), recursive methods (#256), closed-enum arms (#258).
+  way around a gap. The other gap: a recursive call's result, which needs `Spec.Ensures` on a recursive method.
+  `AJoinPointsParametersCarryTheirValueOnEachIncomingPathIntoLaterObligations`,
+  `AClosedEnumSwitchArmKnowsItsCase` and `ARecursiveMethodsRequiresIsAssumedByItsBodyAndCheckedAtEachRecursiveCall`
+  (`OverflowGapTests`) each pair a bound that proves with a twin where the same fact would be wrong and fails.
 - *A method that can raise* has the operation as a site of its program instead: `Warrant.Int32.addImplicit σ a b` and
   likewise for `-`, `*`, unary `-` and `long` (`lean/Warrant/Checked.lean`), which is `pure (a + b)` where the exact
   result is in range and `throw .assertFailed` where the CLR would wrap. `assertFailed` is not allowed, so the contract

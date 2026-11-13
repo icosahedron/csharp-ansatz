@@ -232,8 +232,8 @@ public static partial class Pipeline
             {
                 RecordWithoutAProof(unit, contract, function, budget, WalkerIn);
             }
-            return AdmitProof(unit, shell, VcWalker.Strip(found.Proof!), $"the kernel rejected the proof Warrant built for the contract obligation {shell.Name}", display, assumptions, admitted, budget)
-                ?? (ProofTerms.IsAdmittedAs(Env, shell) ? null : new FailedOutcome(key, kind, display, assumptions, $"the kernel admitted {shell.Name} with a type other than its statement."));
+            return AdmitProof(unit, shell, VcWalker.Strip(found.Proof!), $"the kernel rejected the proof Warrant built for {Shown(shell.Name)}", display, assumptions, admitted, budget)
+                ?? (ProofTerms.IsAdmittedAs(Env, shell) ? null : new FailedOutcome(key, kind, display, assumptions, $"the kernel admitted {Shown(shell.Name)} with a type other than its statement."));
         }
 
         /// <summary>
@@ -338,10 +338,10 @@ public static partial class Pipeline
             }
             if (proof.HasExprMVar || proof.HasLevelMVar || proof.HasFVar)
             {
-                return new InternalErrorOutcome(key, kind, display, assumptions, $"the default procedure closed {shell.Name}, but the proof term still has a hole.");
+                return new InternalErrorOutcome(key, kind, display, assumptions, $"the default procedure closed {Shown(shell.Name)}, but the proof term still has a hole.");
             }
             Record(unit, walker);
-            return AdmitProof(unit, shell, proof, $"the kernel rejected the proof Warrant built for {shell.Name}", display, assumptions, admitted, budget);
+            return AdmitProof(unit, shell, proof, $"the kernel rejected the proof Warrant built for {Shown(shell.Name)}", display, assumptions, admitted, budget);
         }
 
         /// <summary>
@@ -447,7 +447,7 @@ public static partial class Pipeline
             {
                 proof = Expr.Lam(binders[i].Name, binders[i].Type, proof);
             }
-            return AdmitProof(unit, spec, proof, $"the kernel rejected the derivation of {spec.Name} from {contract.Theorem.Name}", display, assumptions, admitted, budget);
+            return AdmitProof(unit, spec, proof, $"the kernel rejected the derivation of {Shown(spec.Name)} from {Shown(contract.Theorem.Name)}", display, assumptions, admitted, budget);
         }
 
         private static readonly Expr SpecWorld = Expr.Const(Name.Parse("Unit"));
@@ -468,10 +468,11 @@ public static partial class Pipeline
             var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = run.Names };
             var goal = meta.MkFreshExprSyntheticOpaqueMVar(shell.Type);
             MVarId? current = null;
+            MVarId? stated = null;
             Expr proof;
             try
             {
-                current = meta.IntroN(goal.Id, binders).Goal;
+                current = stated = meta.IntroN(goal.Id, binders).Goal;
                 // The VC simp set first, as the default procedure's leftovers get it: it decides a conjunct about constants
                 // only, such as `7 ≤ 1000` in a recursive call's precondition, which omega alone does not (#256).
                 if (meta.SimpAll(current.Value, VcSimpSet.Context(meta)) is { } rest)
@@ -492,7 +493,8 @@ public static partial class Pipeline
             }
             catch (MetaException ex)
             {
-                var failed = ex is TacticException { Goal: { } g } && meta.MCtx.FindDecl(g) is not null ? g : current ?? goal.Id;
+                // The proposition as stated, not what the VC simp set left of it, which can be `⊢ False` (PR #265).
+                var failed = stated ?? (ex is TacticException { Goal: { } g } && meta.MCtx.FindDecl(g) is not null ? g : current ?? goal.Id);
                 return new NotProvedOutcome(key, kind, display, assumptions, ex.Message, new GoalPrinter(Env, run.Names).PpGoals(meta.MCtx, [failed]), at, []);
             }
 #pragma warning disable CA1031 // KTD19: an unexpected failure in Meta ends this unit as Warrant's bug, not the whole run.
@@ -503,16 +505,16 @@ public static partial class Pipeline
             }
             if (proof.HasExprMVar || proof.HasLevelMVar || proof.HasFVar)
             {
-                return new InternalErrorOutcome(key, kind, display, assumptions, $"omega closed {shell.Name}, but the proof term still has a hole.");
+                return new InternalErrorOutcome(key, kind, display, assumptions, $"omega closed {Shown(shell.Name)}, but the proof term still has a hole.");
             }
-            return AdmitProof(unit, shell, proof, $"the kernel rejected the proof Warrant built for {shell.Name}", display, assumptions, admitted, budget);
+            return AdmitProof(unit, shell, proof, $"the kernel rejected the proof Warrant built for {Shown(shell.Name)}", display, assumptions, admitted, budget);
         }
 
         /// <summary>
-        /// A generated declaration as messages name it (#272): its display name, such as <c>F(int) (well-definedness 1)</c>,
+        /// A generated declaration as messages name it (#272): its display name, such as <c>F (well-definedness 1)</c>,
         /// never its Lean constant.
         /// </summary>
-        private string Shown(Name name) => run.Names.Constant?.Invoke(name) ?? "a generated proof";
+        private string Shown(Name name) => run.Shown(name);
 
         /// <summary>Admits a proved obligation into the run's fork. Null when it was admitted, else the unit's outcome.</summary>
         private UnitOutcome? AdmitProof(

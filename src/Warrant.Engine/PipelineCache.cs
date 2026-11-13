@@ -64,6 +64,12 @@ public static partial class Pipeline
     private sealed partial class RunState
     {
         /// <summary>
+        /// A generated declaration as messages name it (#272): its display name, such as <c>F (well-definedness 1)</c>,
+        /// never its Lean constant.
+        /// </summary>
+        public string Shown(Name name) => Names.Constant?.Invoke(name) ?? "a generated proof";
+
+        /// <summary>
         /// The outcomes the result cache holds, by key (KTD15): translated, and admitted from their certificates only when
         /// a unit that runs depends on them, or under recheck.
         /// </summary>
@@ -205,7 +211,7 @@ public static partial class Pipeline
                 {
                     if (!proofs.TryGetValue(wd.Theorem.Name, out var proof))
                     {
-                        missing = $"it holds no proof of {wd.Theorem.Name}";
+                        missing = $"it holds no proof of {Shown(wd.Theorem.Name)}";
                         break;
                     }
                     var admitted = wd.Theorem.WithProof(proof);
@@ -223,7 +229,7 @@ public static partial class Pipeline
                     {
                         return (cached with { Certificate = declaration, WellDefinedness = [.. wellDefined] }, stopwatch.Elapsed, Source.Cache);
                     }
-                    reason = $"the kernel admitted {shell.Name} with a type other than its statement";
+                    reason = $"the kernel admitted {Shown(shell.Name)} with a type other than its statement";
                 }
             }
             catch (KernelResourceException ex) when (budget.StopsCachedCheck(Recheck, ex, options.CancellationToken))
@@ -327,7 +333,7 @@ public static partial class Pipeline
             }
             else
             {
-                reason = $"it holds no proof of {shell.Name}";
+                reason = $"it holds no proof of {Shown(shell.Name)}";
             }
             if (run.Recheck)
             {

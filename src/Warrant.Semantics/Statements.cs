@@ -258,11 +258,12 @@ internal sealed partial class BodyTranslator
         // The exact values this path's implicit operations were found to have (`(a + 15).toInt = a.toInt + 15`, #244): an
         // int parameter's value is stated through them, `x.toInt = a.toInt + 15`, so omega need not read the operation
         // through the wrap-around (#272), and such a fact is kept only where something else still mentions its operation.
+        // Exact-value facts are told apart by where they came from (SpecState.Known), never by their shape.
         var exact = new Dictionary<Expr, Expr>();
-        foreach (var known in entries.Where(e => e.IsFact).Select(e => Zeta(e.Value)))
+        foreach (var entry in entries.Where(e => e.IsFact))
         {
-            if (known.GetAppFn() == Init.Eq && known.GetAppArgs() is [var t, var lhs, var rhs] && t == Init.Int
-                && (lhs.GetAppFn() == Init.Int32ToInt || lhs.GetAppFn() == Init.Int64ToInt))
+            var known = Zeta(entry.Value);
+            if (_exactFacts.Contains(entry.Value) && known.GetAppArgs() is [_, var lhs, var rhs])
             {
                 exact.TryAdd(lhs, rhs);
             }
@@ -280,8 +281,23 @@ internal sealed partial class BodyTranslator
                 ? Expr.App(Init.Eq, Init.Int, ToInt(_types.Underlying(type), parameters[i]), Exactly(ToInt(_types.Underlying(type), value)))
                 : Expr.App(Init.Eq, _types.Cic(type), parameters[i], value));
         }
-        var mentioned = exact.Where(x => parts.Any(p => Warrant.Kernel.ExprOps.Find(p, (y, _) => y == x.Key.GetAppArgs()[0]) is not null)).ToList();
-        parts.InsertRange(0, mentioned.Select(x => Expr.App(Init.Eq, Init.Int, x.Key, x.Value)));
+        // Kept: every exact-value fact whose operation something kept still mentions, to a fixpoint, so a kept fact's own
+        // operands keep theirs.
+        var kept = new List<KeyValuePair<Expr, Expr>>();
+        bool Mentions(Expr p, Expr lhs) => Warrant.Kernel.ExprOps.Find(p, (y, _) => y == lhs.GetAppArgs()[0]) is not null;
+        for (bool grew = true; grew;)
+        {
+            grew = false;
+            foreach (var x in exact.Where(x => !kept.Contains(x)).ToList())
+            {
+                if (parts.Any(p => Mentions(p, x.Key)) || kept.Any(k => Mentions(k.Value, x.Key)))
+                {
+                    kept.Add(x);
+                    grew = true;
+                }
+            }
+        }
+        parts.InsertRange(0, kept.Select(x => Expr.App(Init.Eq, Init.Int, x.Key, x.Value)));
         var fact = parts.Count == 0 ? Init.PropTrue : parts.SkipLast(1).Reverse().Aggregate(parts[^1], (acc, p) => Expr.App(Init.And, p, acc));
         foreach (var y in entries.Where(e => !e.IsFact).Select(e => e.Value).Reverse())
         {

@@ -754,6 +754,7 @@ internal sealed partial class BodyTranslator
             if (Guards.Count == 0 && t._facts is { } kept)
             {
                 kept.Add((fact, true));
+                t._exactFacts.Add(fact);
                 return;
             }
             Guards.Add(fact);

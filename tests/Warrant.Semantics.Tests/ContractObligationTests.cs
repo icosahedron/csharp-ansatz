@@ -736,6 +736,71 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     }
 
     [Fact]
+    public void AJoinPointsPathFactStatesAValueThroughItsExactValueAndDropsAnUnmentionedExactFact()
+    {
+        // #255, #272: after `if (express) { cost = cost + 15; bonus = 1; }`, the express path states cost by the exact value
+        // of `weight * 2 + 15`, (weight * 2).toInt + 15, not through the wrapped `(weight * 2 + 15).toInt`, and the exact
+        // fact of that `+`, which nothing kept mentions any more, is left out.
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Shipping(int weight, bool express, bool member)
+                {
+                    Spec.Requires(weight >= 0 && weight <= 1000000);
+                    var cost = weight * 2;
+                    var bonus = 0;
+                    if (express)
+                    {
+                        cost = cost + 15;
+                        bonus = 1;
+                    }
+                    if (member) return cost - 5;
+                    return cost + bonus;
+                }
+            }
+            """);
+        var f = Contract(translation, "M:S.Shipping(System.Int32,System.Boolean,System.Boolean)");
+        AssertPropositions(env, f);
+        // $wd_3 is cost - 5: ∀ σ weight express member (h : Requires) (h : exact weight * 2) cost bonus (h : paths) (h : member), …
+        var wd = f.WellDefinedness.Single(w => w.Index == 3);
+        var statement = wd.Theorem.Type;
+        Expr? paths = null;
+        while (statement is ForallExpr pi)
+        {
+            if (pi.BinderType.GetAppFn() == C("Or"))
+            {
+                paths = pi.BinderType;
+                break;
+            }
+            statement = pi.Body;
+        }
+        Assert.NotNull(paths);
+        // Inside the disjunction cost is #1 and bonus #0; the left disjunct is the express path.
+        var express = paths!.GetAppArgs()[0];
+        var conjuncts = new List<Expr>();
+        for (var e = express; ; e = e.GetAppArgs()[1])
+        {
+            if (e.GetAppFn() != C("And"))
+            {
+                conjuncts.Add(e);
+                break;
+            }
+            conjuncts.Add(e.GetAppArgs()[0]);
+        }
+        static bool IsToIntOfAdd(Expr e) => e.GetAppFn() == C("Int32.toInt") && e.GetAppArgs() is [var a] && a.GetAppFn() == C("HAdd.hAdd", Level.Zero, Level.Zero, Level.Zero);
+        var cost = Assert.Single(conjuncts, c => c.GetAppFn() == C("Eq", Level.One) && c.GetAppArgs()[1] == Expr.App(C("Int32.toInt"), Expr.BVar(1)));
+        var value = cost.GetAppArgs()[2];
+        // (weight * 2).toInt + 15 over Int: an Int addition whose left side is the toInt of the product.
+        Assert.Equal(C("HAdd.hAdd", Level.Zero, Level.Zero, Level.Zero), value.GetAppFn());
+        Assert.Equal(C("Int"), value.GetAppArgs()[0]);
+        Assert.Equal(C("Int32.toInt"), value.GetAppArgs()[4].GetAppFn());
+        Assert.Equal(C("HMul.hMul", Level.Zero, Level.Zero, Level.Zero), value.GetAppArgs()[4].GetAppArgs()[0].GetAppFn());
+        // No conjunct reads `(weight * 2 + 15).toInt`: its exact fact is gone with it.
+        Assert.DoesNotContain(conjuncts, c => Kernel.ExprOps.Find(c, (x, _) => IsToIntOfAdd(x)) is not null);
+    }
+
+    [Fact]
     public void ATheoremStatementsArithmeticHasAnOverflowObligationUnderItsGuardsAndBinders()
     {
         // #236: a theorem's statement is translated as a Spec expression is: T.$wd_k over σ, the parameters, the

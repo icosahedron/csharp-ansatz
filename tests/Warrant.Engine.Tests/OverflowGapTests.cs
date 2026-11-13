@@ -296,6 +296,10 @@ public sealed class OverflowGapTests(EngineFixture engine) : IClassFixture<Engin
         var result = Run(source);
         const string drop1 = "M:S.Drop1(System.Int32,System.Int32)";
         Assert.Equal("Drop1(n / 2, int.MaxValue)", Text(source, drop1, NotProvedAt(result.Find(drop1))));
+        // The goal shown is the precondition at the call, not what the VC simp set left of it (`⊢ False`).
+        var goals = ((NotProvedOutcome)result.Find(drop1)!).Goals;
+        Assert.DoesNotContain("⊢ False", goals, StringComparison.Ordinal);
+        Assert.Contains("1000", goals.Split('⊢')[^1], StringComparison.Ordinal);
         const string drop2 = "M:S.Drop2(System.Int32,System.Int32)";
         Assert.Equal("Drop2(unchecked(n - 1), int.MaxValue)", Text(source, drop2, NotProvedAt(result.Find(drop2))));
         Assert.IsType<SkippedOutcome>(result.Find("M:S.CallsDrop1"));
@@ -305,7 +309,8 @@ public sealed class OverflowGapTests(EngineFixture engine) : IClassFixture<Engin
     public void AKernelTimeOutOnAnObligationNamesItByItsDisplayName()
     {
         // #272: a time-out while the kernel checks an obligation's proof names the obligation as the reports do, never by
-        // its Lean constant. 10,000 kernel steps check the definition but not the first no-overflow proof.
+        // its Lean constant. Some kernel fuel checks the definition but not an obligation's proof; the test looks for it,
+        // so it does not depend on how many steps either takes.
         var source = Wrap("""
             [Verified]
             public static int F(int a)
@@ -314,10 +319,18 @@ public sealed class OverflowGapTests(EngineFixture engine) : IClassFixture<Engin
                 return a * 2 + 1;
             }
             """);
-        var options = engine.Options with { Kernel = Kernel.KernelLimits.Corpus with { Fuel = 10_000 } };
-        var outcome = Pipeline.Run(EngineCorpus.Inputs(EngineCorpus.Inline(source)), engine.Bundle, options).Find("M:S.F(System.Int32)");
-        var undecided = Assert.IsType<UndecidedOutcome>(outcome);
-        Assert.Contains("the kernel checked F (well-definedness 1)", undecided.Reason, StringComparison.Ordinal);
+        var inputs = EngineCorpus.Inputs(EngineCorpus.Inline(source));
+        UndecidedOutcome? undecided = null;
+        for (long fuel = 1_000; fuel <= 1_024_000 && undecided is null; fuel *= 2)
+        {
+            var options = engine.Options with { Kernel = Kernel.KernelLimits.Corpus with { Fuel = fuel } };
+            if (Pipeline.Run(inputs, engine.Bundle, options).Find("M:S.F(System.Int32)") is UndecidedOutcome u
+                && u.Reason.Contains("the kernel checked F (", StringComparison.Ordinal))
+            {
+                undecided = u;
+            }
+        }
+        Assert.NotNull(undecided);
         Assert.DoesNotContain("Cs.", undecided.Reason, StringComparison.Ordinal);
     }
 }

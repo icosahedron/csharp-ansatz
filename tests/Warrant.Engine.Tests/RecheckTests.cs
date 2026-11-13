@@ -325,7 +325,7 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Equal(OutcomeKind.Failed, rejected.Outcome.Kind);
         Assert.Equal(InternalErrorOutcome.Code, rejected.Outcome.Code);
         Assert.StartsWith("cached certificate for 'S.Bounded(int)' was rejected by the kernel: ", rejected.Outcome.Message, StringComparison.Ordinal);
-        Assert.Contains("it holds no proof of Cs.S.«Bounded(System.Int32)».$wd_1", rejected.Outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("it holds no proof of Bounded (well-definedness 1)", rejected.Outcome.Message, StringComparison.Ordinal);
         Assert.False(rejected.FromCache);
         Assert.False(rejected.Rechecked);
         Assert.Equal(0, recheck.Counters.TacticRuns);

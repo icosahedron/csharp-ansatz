@@ -180,8 +180,13 @@ public sealed class ProcedureStrengthTests(EngineFixture engine) : IClassFixture
             [ProofFor(nameof(Area))]
             static Proof AreaProof() => Prove.Contract().By(Tactic.VcGen(), Tactic.Omega());
             """);
-        var outcome = Assert.IsType<NotProvedOutcome>(Run(source).Find("M:S.Area(System.Int32,System.Int32)"));
+        // The trace records every script that runs: the script is never reached, so its strength does not matter.
+        var ran = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var options = engine.Options with { TacticTrace = (key, _) => ran.Add(key) };
+        var result = Pipeline.Run(EngineCorpus.Inputs(EngineCorpus.Inline(source)), engine.Bundle, options);
+        var outcome = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Area(System.Int32,System.Int32)"));
         Assert.Equal(VcKind.ArithmeticOverflow, Assert.Single(outcome.Vcs).Kind);
+        Assert.DoesNotContain("M:S.Area(System.Int32,System.Int32)", ran);
     }
 
     [Fact]
@@ -198,5 +203,91 @@ public sealed class ProcedureStrengthTests(EngineFixture engine) : IClassFixture
             """);
         var outcome = Assert.IsType<NotProvedOutcome>(Run(source).Find("M:S.Total(System.Int32,System.Int32)"));
         Assert.Equal(VcKind.ArithmeticOverflow, Assert.Single(outcome.Vcs).Kind);
+    }
+
+    [Fact]
+    public void SeveralBoolAndNullTestsAreEachSplit()
+    {
+        // Review of #263: a split's own case hypothesis must not be split again, so a second bool or null test is.
+        var source = """
+            #nullable enable
+
+            """ + Wrap("""
+            [Verified]
+            public static bool Both(int a, int t, bool f, bool g)
+            {
+                Spec.Ensures<bool>(r => !(f && g) || r);
+                return a > t || (f && g);
+            }
+
+            [Verified]
+            public static bool EitherNot(int a, int t, bool f, bool g)
+            {
+                Spec.Ensures<bool>(r => !f || !g || r);
+                return a > t || (f & g);
+            }
+
+            [Verified]
+            public static int FirstOrSecond(int? x, int? y)
+            {
+                Spec.Ensures<int>(r => x is null ? (y is null ? r == 0 : r == y.Value) : r == x.Value);
+                return x is null ? (y is null ? 0 : y.Value) : x.Value;
+            }
+
+            [Verified]
+            public static int FlaggedNull(bool f, int? x)
+            {
+                Spec.Ensures<int>(r => !f || (x is null ? r == 0 : r == 1));
+                return x is null ? 0 : 1;
+            }
+
+            [Verified]
+            public static bool SameOrLarger(int a, int t, bool f, bool g)
+            {
+                Spec.Ensures<bool>(r => (f == g) || r);
+                return a > t || (f != g);
+            }
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.Both(System.Int32,System.Int32,System.Boolean,System.Boolean)"));
+        Proved(result.Find("M:S.EitherNot(System.Int32,System.Int32,System.Boolean,System.Boolean)"));
+        Proved(result.Find("M:S.FirstOrSecond(System.Nullable{System.Int32},System.Nullable{System.Int32})"));
+        Proved(result.Find("M:S.FlaggedNull(System.Boolean,System.Nullable{System.Int32})"));
+        Proved(result.Find("M:S.SameOrLarger(System.Int32,System.Int32,System.Boolean,System.Boolean)"));
+    }
+
+    [Fact]
+    public void TwoSidedProductBoundsProveAtTheDefaultBudget()
+    {
+        // Review of #263: these came back undecided at the default fuel, each factor bound being proved again at each level.
+        var source = Wrap("""
+            [Verified]
+            public static int Closed(int a, int b)
+            {
+                Spec.Requires(1 <= a && a <= 99 && 1 <= b && b <= 99);
+                Spec.Ensures<int>(r => r >= 1 && r <= 9801);
+                return a * b;
+            }
+
+            [Verified]
+            public static int Open(int a, int b)
+            {
+                Spec.Requires(0 < a && a < 100 && 0 < b && b < 100);
+                Spec.Ensures<int>(r => r >= 1 && r <= 9801);
+                return a * b;
+            }
+
+            [Verified]
+            public static int Negative(int a, int b)
+            {
+                Spec.Requires(-5 <= a && a <= -1 && -5 <= b && b <= -1);
+                Spec.Ensures<int>(r => r >= 1 && r <= 25);
+                return a * b;
+            }
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.Closed(System.Int32,System.Int32)"));
+        Proved(result.Find("M:S.Open(System.Int32,System.Int32)"));
+        Proved(result.Find("M:S.Negative(System.Int32,System.Int32)"));
     }
 }

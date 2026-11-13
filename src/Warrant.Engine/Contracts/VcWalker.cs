@@ -952,18 +952,18 @@ internal sealed class VcWalker
     /// condition such as <c>p = none</c> meets the guard <c>¬p.isNone</c>; then omega. Throws when they do not prove it.
     /// </summary>
     /// <returns>The goal omega was given, or null when simp closed it.</returns>
-    private MVarId? Discharge(MVarId g, SimpContext simp) => Discharge(g, simp, 0);
+    private MVarId? Discharge(MVarId g, SimpContext simp) => Discharge(g, simp, []);
 
     /// <summary>How many <c>Bool</c> case splits one VC may take (#227, #245): at most 2^3 cases.</summary>
     private const int MaxBoolSplits = 3;
 
     /// <summary>
-    /// <see cref="Discharge(MVarId, SimpContext)"/> after <paramref name="splits"/> case splits: when omega fails, a
-    /// <c>Bool</c> term the goal tests (<c>flagged = false</c>, a null test <c>x.isNone = true</c>) is split into its two
-    /// values, each case rewritten with its value and discharged again (#227, #245), since omega does not split a
-    /// <c>Bool</c>. A failure reports omega's first one.
+    /// <see cref="Discharge(MVarId, SimpContext)"/> inside the case splits on the terms <paramref name="split"/>: when omega
+    /// fails, a <c>Bool</c> term the goal tests that is not split yet (<c>flagged = false</c>, a null test
+    /// <c>x.isNone = true</c>, one side of <c>f = g</c>) is split into its two values, each case rewritten with its value
+    /// and discharged again (#227, #245), since omega does not split a <c>Bool</c>. A failure reports omega's first one.
     /// </summary>
-    private MVarId? Discharge(MVarId g, SimpContext simp, int splits)
+    private MVarId? Discharge(MVarId g, SimpContext simp, ImmutableHashSet<Expr> split)
     {
         if (_m.SimpAll(g, simp) is not { } rest)
         {
@@ -988,11 +988,11 @@ internal sealed class VcWalker
         {
             _m.OmegaTactic(substituted);
         }
-        catch (MetaException ex) when (ex is not MetaResourceException && splits < MaxBoolSplits && BoolTest(substituted) is { } test)
+        catch (MetaException ex) when (ex is not MetaResourceException && split.Count < MaxBoolSplits && BoolTest(substituted, split) is { } test)
         {
             var failed = _m.SaveState();
             _m.Restore(saved);
-            if (!SplitBool(substituted, test, simp, splits))
+            if (!SplitBool(substituted, test, simp, split))
             {
                 _m.Restore(failed);
                 throw;
@@ -1002,21 +1002,27 @@ internal sealed class VcWalker
     }
 
     /// <summary>
-    /// A <c>Bool</c> term the goal or a hypothesis compares with <c>true</c> or <c>false</c>, not itself a constant; null
-    /// when there is none.
+    /// A <c>Bool</c> term, not a constant and not in <paramref name="split"/>, that the goal or a hypothesis states an
+    /// equation about (<c>b = true</c>, <c>b = false</c>, or <c>b = c</c> between two terms); null when there is none. A
+    /// split's own case hypothesis <c>b = true</c> names a term in <paramref name="split"/>, so the next split is another.
     /// </summary>
-    private Expr? BoolTest(MVarId g) => _m.WithContext(g, () =>
+    private Expr? BoolTest(MVarId g, ImmutableHashSet<Expr> split) => _m.WithContext(g, () =>
     {
         var terms = (_m.MCtx.FindDecl(g)?.LCtx.Decls ?? []).Where(d => !d.IsImplementationDetail).Select(d => d.Type).Append(_m.GetMVarType(g));
         foreach (var term in terms)
         {
-            var found = ExprOps.Find(_m.InstantiateMVars(term), (e, _) =>
-                e.HeadIs(EqName) && e.GetAppArgs() is [ConstExpr { Name: var type }, var lhs, ConstExpr { Name: var value }]
-                && type == BoolName && (value == BoolTrueName || value == BoolFalseName)
-                && lhs is not ConstExpr && !lhs.HasLooseBVars && !lhs.HasExprMVar);
-            if (found is not null)
+            Expr? candidate = null;
+            ExprOps.Find(_m.InstantiateMVars(term), (e, _) =>
             {
-                return found.GetAppArgs()[1];
+                if (e.HeadIs(EqName) && e.GetAppArgs() is [ConstExpr { Name: var type }, var lhs, var rhs] && type == BoolName)
+                {
+                    candidate = new[] { lhs, rhs }.FirstOrDefault(t => t is not ConstExpr && !t.HasLooseBVars && !t.HasExprMVar && !split.Contains(t));
+                }
+                return candidate is not null;
+            });
+            if (candidate is not null)
+            {
+                return candidate;
             }
         }
         return null;
@@ -1027,7 +1033,7 @@ internal sealed class VcWalker
     /// x → G) b ?false ?true rfl</c>, and discharges each case with <c>b = false</c> or <c>b = true</c> rewriting the
     /// others. False, with the Meta state to be restored, when a case is not proved.
     /// </summary>
-    private bool SplitBool(MVarId g, Expr b, SimpContext simp, int splits)
+    private bool SplitBool(MVarId g, Expr b, SimpContext simp, ImmutableHashSet<Expr> split)
     {
         try
         {
@@ -1049,7 +1055,7 @@ internal sealed class VcWalker
                 var (fvars, goal) = _m.IntroN(c, 1, [H]);
                 if (Substitute(goal, simp, [fvars[0]]) is { } rest)
                 {
-                    Discharge(rest, simp, splits + 1);
+                    Discharge(rest, simp, split.Add(b));
                 }
             }
             return true;

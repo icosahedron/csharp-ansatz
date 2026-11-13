@@ -134,27 +134,21 @@ namespace Warrant.Meta
         /// <c>omega</c> could not prove the goal; the exception's goal is <paramref name="mvarId"/> as it was given, before
         /// the prep step, and its message is omega's constraints.
         /// </exception>
-        public void OmegaTactic(MVarId mvarId) => OmegaTacticAt(mvarId, 0);
-
-        /// <summary>
-        /// <see cref="OmegaTactic(MVarId)"/> at a nesting depth: when the prep step and <c>omega</c> fail, the goal is
-        /// tried again with the strengthening facts (<see cref="OmegaStrengthened"/>), unless this is already a nested
-        /// call that proves one of them. A failure reports the first attempt's message.
-        /// </summary>
-        private void OmegaTacticAt(MVarId mvarId, int depth)
+        public void OmegaTactic(MVarId mvarId)
         {
+            // A failure reports the first attempt's message; the strengthened attempt's own proofs are plain (OmegaPlain).
             var saved = SaveState();
             try
             {
                 OmegaPlain(mvarId);
             }
-            catch (TacticException) when (depth < 2)
+            catch (TacticException)
             {
                 var failed = SaveState();
                 Restore(saved);
                 try
                 {
-                    OmegaStrengthened(mvarId, depth);
+                    OmegaStrengthened(mvarId);
                     return;
                 }
                 catch (MetaException ex) when (Combinators.IsRecoverable(ex))

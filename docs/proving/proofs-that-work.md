@@ -415,11 +415,13 @@ Proved. `omega` reads linear arithmetic only, so `price * quantity` is an atom t
 out the overflow nor prove the `Spec.Ensures`. When it fails, `Tactic.Omega()` looks for literal bounds on each factor,
 proves them, and adds the bounds they put on the product (`Warrant.Int.mul_ge_of_ge_of_ge` and its three siblings, from
 `0 ≤ (x - a) * (y - b)`), here `0 ≤ price * quantity ≤ 10000000` (GitHub #257). Signs do not matter:
-`-1000 <= a && a <= 1000 && -50 <= b && b <= 2000` bounds the `long` `a * b + 1`. Each factor needs a literal bound:
+`-1000 <= a && a <= 1000 && -50 <= b && b <= 2000` bounds the `long` `a * b + 1`, and `-5 <= a, b <= -1` proves
+`1 <= a * b && a * b <= 25` (`TwoSidedProductBoundsProveAtTheDefaultBudget`). Each factor needs a literal bound, and a
+product of three factors, `a * b * c`, gets none for its outer product:
 with `-a <= b && b <= a` the product fails at `a * b` with `arithmetic overflow`, though it cannot overflow, and a
 `[ProofFor]` script cannot rescue it, since a pure method's no-overflow conditions are the default procedure's alone.
 `tests/Warrant.Engine.Tests/ProcedureStrengthTests.cs` runs these (`AProductOfTwoBoundedVariablesIsBounded`,
-`AProductWhoseFactorHasNoLiteralBoundFailsEvenWithAProofForScript`).
+`AProductWhoseFactorHasNoLiteralBoundFailsEvenWithAProofForScript`, which checks that the script never runs).
 
 ### A `bool` result by cases
 
@@ -443,7 +445,9 @@ Both proved. `omega` does not split a `bool`: `NeedsReview`'s goal is `flagged =
 true`, true by cases on `flagged` only. When `omega` fails, the default procedure splits a `bool` the goal compares
 with `true` or `false`, here `flagged`, and in `DaysOrZero` the null test `x.isNone`, and proves each case with its value
 substituted (GitHub #227, #245). A record's nullable field works the same way (`refund.Days is null ? … :
-refund.Days.Value`). With `return amount > threshold;` the case `flagged = true, amount <= threshold` fails, and so
+refund.Days.Value`), and so do up to three such terms on one path: `!(f && g) || r`, two nested null tests,
+`!f || (x is null ? r == 0 : r == 1)`, and `(f == g) || r`, which splits `f` and then `g`
+(`SeveralBoolAndNullTestsAreEachSplit`). With `return amount > threshold;` the case `flagged = true, amount <= threshold` fails, and so
 does the method (`ABoolEnsuresThatNeedsACaseSplitOnABoolParameterIsProved`, `AConditionalEnsuresOverANullTestIsProved`,
 `ABoolEnsuresThatIsFalseInOneCaseStillFails` in `ProcedureStrengthTests`).
 

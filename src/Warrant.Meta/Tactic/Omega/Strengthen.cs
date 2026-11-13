@@ -8,27 +8,31 @@ namespace Warrant.Meta;
 /// <summary>
 /// What <c>Tactic.Omega()</c> tries when <c>omega</c> alone fails (#217, #237, #257): facts that are true in every case
 /// and that <c>omega</c> cannot find itself, each one proved, so the step can only make a true goal provable. It runs only
-/// after a failure, so a goal <c>omega</c> proves alone gets the same proof as before.
+/// after a failure, so a goal <c>omega</c> proves alone gets the same proof as before. Every nested proof it makes is a
+/// plain <c>Tactic.Omega()</c> (the prep step and <c>omega</c>), never strengthened again, so the step costs a bounded
+/// number of <c>omega</c> runs.
 /// <list type="bullet">
-/// <item>A <c>decimal</c> literal's <c>units</c> is a closed integer, stated as <c>units (lit …) = n</c> and proved by
-/// <c>rfl</c>: the kernel computes it (#217).</item>
+/// <item>A product <c>x * y</c> of two integer terms, an atom to <c>omega</c>, gets the linear bounds that follow from
+/// literal bounds on its factors (<c>Warrant.Int.mul_ge_of_ge_of_ge</c> and its siblings, McCormick's inequalities, #257),
+/// each as an implication from the factor bounds, which <c>omega</c> itself discharges or drops. They are added first, so
+/// the range proofs below can use them.</item>
 /// <item>An <c>int</c> or <c>long</c> <c>+</c>, <c>-</c>, <c>*</c> or unary <c>-</c> whose exact result <c>omega</c> proves
 /// in range has that exact value, by <c>Warrant.Int32.toInt_mul_of_range</c> and its siblings, instead of the
 /// wrap-around's <c>Int.bmod</c>, whose case split <c>omega</c> cannot always close (#237).</item>
-/// <item>A product <c>x * y</c> of two integer terms, an atom to <c>omega</c>, gets the linear bounds that follow from the
-/// literal bounds on its factors that <c>omega</c> proves (<c>Warrant.Int.mul_ge_of_ge_of_ge</c> and its siblings,
-/// McCormick's inequalities, #257).</item>
+/// <item>A <c>decimal</c> literal's <c>units</c> is a closed integer, stated as <c>units (lit …) = n</c> and proved by
+/// <c>rfl</c>: the kernel computes it (#217).</item>
 /// </list>
 /// </summary>
 public sealed partial class MetaM
 {
-    /// <summary>How many terms of each kind the step looks at, so a large goal does not run <c>omega</c> many times.</summary>
+    /// <summary>
+    /// How many terms of each kind the step looks at (operations for exact values, products, decimal literals), so a large
+    /// goal does not run <c>omega</c> many times.
+    /// </summary>
     private const int StrengthenLimit = 8;
 
     private static readonly Name DecimalUnits = Name.Parse("Warrant.Decimal.units");
     private static readonly Name DecimalLit = Name.Parse("Warrant.Decimal.lit");
-    private static readonly Name BoolTrueName = Name.Parse("Bool.true");
-    private static readonly Name BoolFalseName = Name.Parse("Bool.false");
     private static readonly Name Int32Name = Name.Parse("Int32");
     private static readonly Name Int64Name = Name.Parse("Int64");
     private static readonly Name IntInstLE = Name.Parse("Int.instLEInt");
@@ -39,26 +43,25 @@ public sealed partial class MetaM
     ];
 
     /// <summary>
-    /// <c>Tactic.Omega()</c> with the strengthening facts: the in-range exact values in the omega-prep step, the decimal
-    /// literal values and product bounds after it (the prep step's <c>decide</c> would turn a literal's equation into
-    /// <c>True</c>), then <c>omega</c>.
+    /// <c>Tactic.Omega()</c> with the strengthening facts: the product bounds before the omega-prep step, the in-range
+    /// exact values in it, the decimal literal values after it (the prep step's <c>decide</c> would turn a literal's
+    /// equation into <c>True</c>), then <c>omega</c>.
     /// </summary>
     /// <param name="mvarId">The goal.</param>
-    /// <param name="depth">0 at the top; the nested <c>omega</c> calls that prove a range or a bound are deeper.</param>
-    private void OmegaStrengthened(MVarId mvarId, int depth)
+    private void OmegaStrengthened(MVarId mvarId)
     {
-        // The goal's premises become hypotheses first, so a range or bound proof can use them.
+        // The goal's premises become hypotheses first, so a bound or range proof can use them.
         if (FalseOrByContra(mvarId) is not { } start)
         {
             return;
         }
-        var exact = depth == 0 ? ExactValues(start, depth) : null;
+        var g = ProductBoundFacts(start);
         var context = OmegaPrepSet.Context(this);
-        if (exact is not null)
+        if (ExactValues(g) is { } exact)
         {
             context = context with { Theorems = context.Theorems.Insert(0, exact) };
         }
-        if (SimpAll(start, context) is not { } prepped)
+        if (SimpAll(g, context) is not { } prepped)
         {
             return;
         }
@@ -66,15 +69,18 @@ public sealed partial class MetaM
         {
             return;
         }
-        var g = ProductBoundFacts(DecimalLiteralFacts(contra), depth);
-        if (WithReducibleAndInstances(() => AssumptionCore(g)))
+        var last = DecimalLiteralFacts(contra);
+        if (WithReducibleAndInstances(() => AssumptionCore(last)))
         {
             return;
         }
-        Omega(g);
+        Omega(last);
     }
 
-    /// <summary>For each <c>units (lit s m e _ _)</c> with literal arguments, the hypothesis <c>units (lit …) = n</c> by <c>rfl</c>.</summary>
+    /// <summary>
+    /// For each <c>units (lit s m e _ _)</c> with literal arguments, at most <see cref="StrengthenLimit"/> of them, the
+    /// hypothesis <c>units (lit …) = n</c> by <c>rfl</c>.
+    /// </summary>
     private MVarId DecimalLiteralFacts(MVarId g)
     {
         var facts = new List<(Name, Expr, Expr)>();
@@ -83,11 +89,12 @@ public sealed partial class MetaM
         {
             ExprOps.ForEach(term, (e, _) =>
             {
-                if (OmegaExprs.AppOf(e, DecimalUnits, 1) is [var lit] && OmegaExprs.AppOf(lit, DecimalLit, 5) is [var sign, var m, var s, _, _]
-                    && sign is ConstExpr { Name: var signName } && (signName == BoolTrueName || signName == BoolFalseName)
+                if (facts.Count < StrengthenLimit
+                    && OmegaExprs.AppOf(e, DecimalUnits, 1) is [var lit] && OmegaExprs.AppOf(lit, DecimalLit, 5) is [var sign, var m, var s, _, _]
+                    && sign is ConstExpr { Name: var signName } && (signName == OmegaNames.BoolTrue || signName == OmegaNames.BoolFalse)
                     && NatLiteral(m) is { } mantissa && NatLiteral(s) is { } scale && scale <= 28 && !e.HasLooseBVars && seen.Add(e))
                 {
-                    var value = mantissa * BigInteger.Pow(10, 28 - (int)scale) * (signName == BoolTrueName ? -1 : 1);
+                    var value = mantissa * BigInteger.Pow(10, 28 - (int)scale) * (signName == OmegaNames.BoolTrue ? -1 : 1);
                     facts.Add((Name.From("hlit"), OmegaExprs.MkEq(OmegaExprs.IntType, e, OmegaExprs.IntLit(value)),
                         Expr.App(Expr.Const(OmegaNames.EqRefl, Level.One), OmegaExprs.IntType, e)));
                     return false;
@@ -101,11 +108,12 @@ public sealed partial class MetaM
     }
 
     /// <summary>
-    /// For each <c>int</c>/<c>long</c> <c>a + b</c>, <c>a - b</c>, <c>a * b</c> or <c>-a</c> in the goal whose exact result
-    /// a nested <c>omega</c> proves in range, the equation <c>(a op b).toInt = a.toInt op b.toInt</c>, as simp lemmas for
-    /// the omega-prep step, tried before its wrap-around lemmas.
+    /// For each <c>int</c>/<c>long</c> <c>a + b</c>, <c>a - b</c>, <c>a * b</c> or <c>-a</c> in the goal, at most
+    /// <see cref="StrengthenLimit"/> of them, whose exact result a plain <c>Tactic.Omega()</c> proves in range, the
+    /// equation <c>(a op b).toInt = a.toInt op b.toInt</c>, as simp lemmas for the omega-prep step, tried before its
+    /// wrap-around lemmas. Null when there is none.
     /// </summary>
-    private SimpTheorems? ExactValues(MVarId g, int depth)
+    private SimpTheorems? ExactValues(MVarId g)
     {
         var candidates = new List<(Name Lemma, Expr[] Args)>();
         var seen = new HashSet<Expr>();
@@ -132,7 +140,7 @@ public sealed partial class MetaM
             {
                 continue;
             }
-            if (ProveByOmega(g, range, depth + 1) is { } proof)
+            if (ProveByOmega(g, range) is { } proof)
             {
                 (theorems ??= new SimpTheorems()).AddRange(MkSimpTheoremsFromProof(Expr.App(partial, proof), priority: DefaultSimpPriority + 10));
             }
@@ -161,103 +169,108 @@ public sealed partial class MetaM
     }
 
     /// <summary>
-    /// For each product <c>x * y</c> of two non-literal integer terms in a hypothesis, the bounds of <see cref="ProductBounds"/>
-    /// for the literal bounds on <c>x</c> and <c>y</c> that the hypotheses state and a nested <c>omega</c> proves.
+    /// For each product <c>x * y</c> of two non-literal integer terms, at most <see cref="StrengthenLimit"/> of them, the
+    /// four lemmas of <see cref="ProductBounds"/> at the tightest literal bound the hypotheses state on each side of
+    /// <c>x</c> and <c>y</c>, as hypotheses <c>a ≤ x → b ≤ y → a * y + b * x - a * b ≤ x * y</c> and so on: <c>omega</c>
+    /// reads an implication as a disjunction, so it uses a corner whose bounds hold and drops one whose bounds it cannot
+    /// show, and no bound needs a proof of its own. The products and the bounds are read from the goal as the omega-prep
+    /// step leaves it (where <c>(a * b).toInt</c> is <c>a.toInt * b.toInt</c> under its <c>bmod</c>, and <c>0 ≤ a</c> is
+    /// <c>0 ≤ a.toInt</c>), in a trial run that is then undone; the facts are added to <paramref name="g"/> itself, before
+    /// the prep step, so later proofs in the goal have them. A product of three factors, <c>(x * y) * z</c>, gets no bound
+    /// for its outer product, whose factor <c>x * y</c> has no literal bound.
     /// </summary>
-    private MVarId ProductBoundFacts(MVarId g, int depth)
+    private MVarId ProductBoundFacts(MVarId g)
     {
-        if (depth > 1)
-        {
-            return g;
-        }
-        var hyps = WithContext(g, () => LCtx.Decls.Where(d => !d.IsImplementationDetail && IsProp(d.Type)).Select(d => this.InstantiateMVars(d.Type)).ToList());
+        var known = WithContext(g, () => LCtx.Decls.Select(d => d.FVarId).ToHashSet());
         var products = new List<(Expr X, Expr Y)>();
-        var seen = new HashSet<Expr>();
-        var lower = new Dictionary<Expr, List<BigInteger>>();
-        var upper = new Dictionary<Expr, List<BigInteger>>();
-        foreach (var hyp in hyps)
+        var lower = new Dictionary<Expr, SortedSet<BigInteger>>();
+        var upper = new Dictionary<Expr, SortedSet<BigInteger>>();
+        var saved = SaveState();
+        try
         {
-            ExprOps.ForEach(hyp, (e, _) =>
+            if (SimpAll(g, OmegaPrepSet.Context(this)) is { } trial)
             {
-                if (e.HasLooseBVars)
-                {
-                    return false;
-                }
-                if (OmegaExprs.AppOf(e, OmegaNames.HMul, 6) is [var t, _, _, _, var x, var y] && t is ConstExpr { Name: var tn } && tn == OmegaNames.Int
-                    && Ground(x) is null && Ground(y) is null && products.Count < StrengthenLimit && seen.Add(e))
-                {
-                    products.Add((x, y));
-                }
-                if (Comparison(e) is var (strict, a, b))
-                {
-                    // a ≤ b, or a < b, that is a + 1 ≤ b.
-                    if (Ground(a) is { } c)
-                    {
-                        Add(lower, b, strict ? c + 1 : c);
-                    }
-                    else if (Ground(b) is { } d)
-                    {
-                        Add(upper, a, strict ? d - 1 : d);
-                    }
-                }
-                return true;
-            });
+                Scan(trial.Goal);
+            }
+        }
+        catch (MetaException ex) when (Combinators.IsRecoverable(ex))
+        {
+        }
+        finally
+        {
+            Restore(saved);
         }
         if (products.Count == 0)
         {
             return g;
         }
         var facts = new List<(Name, Expr, Expr)>();
-        var proved = new Dictionary<(Expr, bool), (BigInteger, Expr)?>();
         foreach (var (x, y) in products)
         {
-            var lx = Bound(x, lowerSide: true);
-            var ux = Bound(x, lowerSide: false);
-            var ly = Bound(y, lowerSide: true);
-            var uy = Bound(y, lowerSide: false);
+            var lx = Bound(lower, x, tightest: v => v.Max);
+            var ux = Bound(upper, x, tightest: v => v.Min);
+            var ly = Bound(lower, y, tightest: v => v.Max);
+            var uy = Bound(upper, y, tightest: v => v.Min);
             // mul_ge_of_ge_of_ge, mul_ge_of_le_of_le, mul_le_of_ge_of_le, mul_le_of_le_of_ge: the bounds on x, then on y.
-            (int Lemma, (BigInteger, Expr)? Bx, (BigInteger, Expr)? By)[] corners = [(0, lx, ly), (1, ux, uy), (2, lx, uy), (3, ux, ly)];
+            (int Lemma, BigInteger? Bx, BigInteger? By)[] corners = [(0, lx, ly), (1, ux, uy), (2, lx, uy), (3, ux, ly)];
             foreach (var (lemma, bx, by) in corners)
             {
-                if (bx is var (a, hx) && by is var (b, hy) && Env.Find(ProductBounds[lemma]) is not null)
+                if (bx is { } a && by is { } b && Env.Find(ProductBounds[lemma]) is not null)
                 {
-                    var proof = Expr.App(Expr.Const(ProductBounds[lemma]), x, y, OmegaExprs.IntLit(a), OmegaExprs.IntLit(b), hx, hy);
-                    facts.Add((Name.From("hmul"), WithContext(g, () => InferType(proof)), proof));
+                    var fact = Expr.App(Expr.Const(ProductBounds[lemma]), x, y, OmegaExprs.IntLit(a), OmegaExprs.IntLit(b));
+                    facts.Add((Name.From("hmul"), WithContext(g, () => InferType(fact)), fact));
                 }
             }
         }
         return facts.Count == 0 ? g : AssertHypotheses(g, facts).Goal;
 
-        (BigInteger, Expr)? Bound(Expr x, bool lowerSide)
+        void Scan(MVarId prepped)
         {
-            if (proved.TryGetValue((x, lowerSide), out var known))
+            var hyps = WithContext(prepped, () => LCtx.Decls.Where(d => !d.IsImplementationDetail && IsProp(d.Type)).Select(d => this.InstantiateMVars(d.Type)).ToList());
+            var seen = new HashSet<Expr>();
+            foreach (var hyp in hyps)
             {
-                return known;
-            }
-            (BigInteger, Expr)? result = null;
-            var candidates = (lowerSide ? lower : upper).GetValueOrDefault(x) ?? [];
-            // The tightest bound first; a looser one if omega cannot prove it.
-            foreach (var c in lowerSide ? candidates.Distinct().OrderDescending() : candidates.Distinct().Order())
-            {
-                var literal = OmegaExprs.IntLit(c);
-                var prop = lowerSide ? IntLe(literal, x) : IntLe(x, literal);
-                if (ProveByOmega(g, prop, depth + 2) is { } proof)
+                ExprOps.ForEach(hyp, (e, _) =>
                 {
-                    result = (c, proof);
-                    break;
-                }
+                    if (e.HasLooseBVars)
+                    {
+                        return false;
+                    }
+                    if (products.Count < StrengthenLimit && OmegaExprs.AppOf(e, OmegaNames.HMul, 6) is [var t, _, _, _, var x, var y] && IsInt(t)
+                        && Ground(x) is null && Ground(y) is null && OnlyKnown(e) && seen.Add(e))
+                    {
+                        products.Add((x, y));
+                    }
+                    if (Comparison(e) is var (strict, a, b))
+                    {
+                        // a ≤ b, or a < b, that is a + 1 ≤ b.
+                        if (Ground(a) is { } c)
+                        {
+                            Add(lower, b, strict ? c + 1 : c);
+                        }
+                        else if (Ground(b) is { } d)
+                        {
+                            Add(upper, a, strict ? d - 1 : d);
+                        }
+                    }
+                    return true;
+                });
             }
-            proved[(x, lowerSide)] = result;
-            return result;
         }
 
-        static void Add(Dictionary<Expr, List<BigInteger>> bounds, Expr term, BigInteger value)
+        // Whether every free variable of e is one of g's: a term the trial prep step made up cannot be used in g.
+        bool OnlyKnown(Expr e) => ExprOps.Find(e, (y, _) => y is FVarExpr f && !known.Contains(f.Id)) is null;
+
+        static BigInteger? Bound(Dictionary<Expr, SortedSet<BigInteger>> bounds, Expr x, Func<SortedSet<BigInteger>, BigInteger> tightest) =>
+            bounds.TryGetValue(x, out var set) ? tightest(set) : null;
+
+        static void Add(Dictionary<Expr, SortedSet<BigInteger>> bounds, Expr term, BigInteger value)
         {
-            if (!bounds.TryGetValue(term, out var list))
+            if (!bounds.TryGetValue(term, out var set))
             {
-                bounds[term] = list = [];
+                bounds[term] = set = [];
             }
-            list.Add(value);
+            set.Add(value);
         }
 
         static (bool Strict, Expr A, Expr B)? Comparison(Expr e) =>
@@ -274,14 +287,14 @@ public sealed partial class MetaM
 
     private static Expr IntLe(Expr a, Expr b) => Expr.App(Expr.Const(OmegaNames.LE, Level.Zero), OmegaExprs.IntType, Expr.Const(IntInstLE), a, b);
 
-    /// <summary>A proof of <paramref name="prop"/> in <paramref name="g"/>'s context by <c>Tactic.Omega()</c>, or null.</summary>
-    private Expr? ProveByOmega(MVarId g, Expr prop, int depth)
+    /// <summary>A proof of <paramref name="prop"/> in <paramref name="g"/>'s context by a plain <c>Tactic.Omega()</c>, or null.</summary>
+    private Expr? ProveByOmega(MVarId g, Expr prop)
     {
         var saved = SaveState();
         try
         {
             var goal = WithContext(g, () => MkFreshExprSyntheticOpaqueMVar(prop));
-            OmegaTacticAt(goal.Id, depth);
+            OmegaPlain(goal.Id);
             var proof = this.InstantiateMVars(goal);
             if (proof.HasExprMVar)
             {

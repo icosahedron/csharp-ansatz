@@ -20,6 +20,7 @@ public static class OmegaNames
     internal static readonly Name Nat = N("Nat");
     internal static readonly Name Bool = N("Bool");
     internal static readonly Name BoolTrue = N("Bool.true");
+    internal static readonly Name BoolFalse = N("Bool.false");
     internal static readonly Name False = N("False");
     internal static readonly Name Eq = N("Eq");
     internal static readonly Name EqRefl = N("Eq.refl");

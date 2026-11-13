@@ -84,6 +84,19 @@ case but that `omega` cannot find (`OmegaStrengthened`, `src/Warrant.Meta/Tactic
 only make a true goal provable. A goal `omega` proves alone gets the same proof as before, and a failure reports the
 first attempt's goal and constraints.
 
+In this order:
+
+- **Products.** `omega` reads linear arithmetic only, so `x * y` of two non-literal terms is an atom. For each such
+  product, the step reads the tightest literal bound on each side of `x` and `y` that a hypothesis states (`c ≤ x`,
+  `x < c`, after the prep step, which a trial run of it shows and then undoes), and adds
+  `Warrant.Int.mul_ge_of_ge_of_ge`, `mul_ge_of_le_of_le`, `mul_le_of_ge_of_le` and `mul_le_of_le_of_ge`
+  (`lean/Warrant/Checked.lean`) at those bounds: the four corners of `0 ≤ (x - a) * (y - b)`, linear in the atom
+  `x * y` (McCormick's inequalities). Each is added as an implication, `a ≤ x → b ≤ y → a * y + b * x - a * b ≤ x * y`,
+  which `omega` reads as a disjunction: it uses a corner whose bounds hold and drops one whose bounds it cannot show,
+  so no bound needs a proof of its own. From `0 ≤ x ≤ 10000` and `0 ≤ y ≤ 1000` they give `0 ≤ x * y ≤ 10000000`
+  (#257); from `-5 ≤ x, y ≤ -1`, `1 ≤ x * y ≤ 25`. A factor whose bound is not a literal (`b ≤ a`) gets none, and
+  neither does the outer product of `a * b * c`, whose factor `a * b` has no literal bound. These facts come first, so
+  the next step's range proofs have them.
 - **Exact values.** For each `int`/`long` `a + b`, `a - b`, `a * b` or `-a` in the goal, a nested `Tactic.Omega()`
   tries to prove the exact result in range, `¬(a.toInt * b.toInt < -2^31 ∨ 2^31 - 1 < a.toInt * b.toInt)`; where it
   does, `Warrant.Int32.toInt_mul_of_range` (and its siblings in `lean/Warrant/Checked.lean`) rewrites
@@ -93,16 +106,11 @@ first attempt's goal and constraints.
 - **`decimal` literals.** After the prep step (whose `decide` would otherwise turn it into `True`), each
   `Warrant.Decimal.units (lit s m e _ _)` with literal arguments gets the hypothesis `units (lit …) = n`, with `n` the
   literal's value in units of 10^-28, proved by `rfl`: the kernel computes it (#217).
-- **Products.** `omega` reads linear arithmetic only, so `x * y` of two non-literal terms is an atom. For each such
-  product in a hypothesis, the step looks for literal bounds on `x` and `y` in the hypotheses (`c ≤ x`, `x < c`, after
-  the prep step), proves the tightest it can with a nested `omega`, and adds the bounds of
-  `Warrant.Int.mul_ge_of_ge_of_ge`, `mul_ge_of_le_of_le`, `mul_le_of_ge_of_le` and `mul_le_of_le_of_ge`
-  (`lean/Warrant/Checked.lean`): the four corners of `0 ≤ (x - a) * (y - b)`, linear in the atom `x * y` (McCormick's
-  inequalities). From `0 ≤ x ≤ 10000` and `0 ≤ y ≤ 1000` they give `0 ≤ x * y ≤ 10000000` (#257). A factor whose
-  bound is not a literal (`b ≤ a`) gets none.
 
-The nested proofs run with a smaller step (no exact values, and none deeper than two levels), and at most eight terms
-of each kind are tried.
+The nested range proofs are plain `Tactic.Omega()` runs, never strengthened again, and at most eight terms of each kind
+(products, operations, literals) are taken, so the step costs a bounded number of `omega` runs. They are charged to the
+unit's tactic fuel: a product bounded on both sides with both bounds used (`1 <= a <= 99`, `1 <= b <= 99`,
+`Spec.Ensures(r => r >= 1 && r <= 9801)`) takes most of the default budget.
 
 ## The true example
 

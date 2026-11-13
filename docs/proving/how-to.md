@@ -682,7 +682,8 @@ fix that does the rewrite is deferred.
 A `bool` postcondition that needs a case split on a `bool` parameter, such as
 `r => !flagged || r`, or on a null test, such as
 `r => x is null ? r == 0 : r == x.Value`, is proved too: the default procedure
-splits a `bool` that `omega` leaves (GitHub #227, #245).
+splits a `bool` that `omega` leaves, up to three of them on one path
+(GitHub #227, #245).
 
 ## Keep logging out of the proof
 

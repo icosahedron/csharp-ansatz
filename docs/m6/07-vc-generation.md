@@ -91,11 +91,12 @@ For each:
 4. `omega` runs, through the M5a omega-prep set and chapter 1's division bridges, and when that fails, with
    `Tactic.Omega()`'s strengthening facts: in-range exact values, `decimal` literal values and product bounds
    ([docs/m5a/06](../m5a/06-bridging-and-omega.md#when-omega-alone-fails), #217, #237, #257).
-5. If `omega` still fails and the goal or a hypothesis compares a `Bool` term with `true` or `false` (a `bool`
-   parameter, `flagged = false`, or a null test, `x.isNone = true`), the goal is split on that term with
-   `Bool.casesOn`, each case rewritten with `b = false` or `b = true` as step 3 rewrites, and steps 3 to 5 run on
-   each case, up to three splits deep (#227, #245). `omega` does not split a `Bool`. A failure reports `omega`'s first
-   goal.
+5. If `omega` still fails and the goal or a hypothesis states an equation about a `Bool` term not split yet (a `bool`
+   parameter, `flagged = false`; a null test, `x.isNone = true`; either side of `f = g`), the goal is split on that
+   term with `Bool.casesOn`, each case rewritten with `b = false` or `b = true` as step 3 rewrites, and steps 2 to 5 run
+   on each case, up to three terms split on one path (#227, #245): two `bool` parameters, two null tests, or a `bool`
+   and a null test are each split. `omega` does not split a `Bool`. A failure reports `omega`'s first goal. A fourth
+   `Bool` term on one path is not split.
 
 U3's checkpoint used exactly this list of `SPred` and `PredTrans` lemmas (`EffectCheckpointTests.VcSimpLemmas`), and
 the `ULift Prop` assertions of `Std.Do` did not defeat it, so the plan's fallback, a `wp` calculus over plain `Prop`s,

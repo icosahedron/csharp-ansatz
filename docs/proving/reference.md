@@ -57,7 +57,7 @@ logical and, or, not and equality.
 | `Spec.ForAll<T>(Func<T, bool>)` | M5a | a theorem statement | `∀ x : T, …`. The claim is a lambda with one parameter and an expression body; nest calls for several variables. Elsewhere it is WRT0004. Throws if it ever runs. |
 | `Spec.Exists<T>(Func<T, bool>)` | M5a | a theorem statement | `∃ x : T, …`, with the same rules. |
 | `Spec.Requires(bool)` | M6 | start of a block body, after any `Spec.Decreases` | Precondition. Assumed in the body, proved at each verified call site. Not checked at run time or at call sites Warrant does not verify; the report lists it. |
-| `Spec.NoThrow()` | M6 (#182) | start of a block body, after any `Spec.Requires` and before any `Spec.Ensures`; at most once | No explicit `throw` of the method is reachable under its `Spec.Requires`: a reachable one fails the build at the `throw` instead of being listed. An exception from a dependency is still allowed. A raising verified callee needs it too. Holds already of a method that cannot raise. Not valid in a `[ContractFor]` class. |
+| `Spec.NoThrow()` | M6 (#182) | start of a block body, after any `Spec.Requires` and before any `Spec.Ensures`; at most once | No explicit `throw` of the method is reachable under its `Spec.Requires`: a reachable one fails the build at the `throw` instead of being listed. An exception from a dependency is still allowed. A raising verified callee needs it too. Holds already of a method that cannot raise, where it is warning WRT0013. Not valid in a `[ContractFor]` class. |
 | `Spec.Ensures<T>(Func<T, bool>)` | M6 | start of a block body, after any `Spec.Requires` and `Spec.NoThrow` | Postcondition on normal return; the argument is the return value. `T` is the return type, or the awaited type of `Task<T>`/`ValueTask<T>`. A path that ends in an explicit `throw` or a dependency's exception need not satisfy it, and the report lists that path. |
 | `Spec.Ensures(Func<bool>)` | M6 | start of a `void`, `Task` or `ValueTask` method's block body | Postcondition with no return value. |
 | `Spec.Assert(bool, params Tactic[])` | M6 | statement | A fact to prove at this point, by its script if it has one, then usable afterwards. |
@@ -259,6 +259,7 @@ These are rejected:
 | `Spec.Requires not leading the body`, `Spec.NoThrow not leading the body`, `Spec.Ensures not leading the body` | WRT0002 | They must lead the block body: after any `Spec.Decreases`, and before any other statement. |
 | `Spec.Requires after Spec.Ensures`, `Spec.Requires after Spec.NoThrow`, `Spec.NoThrow after Spec.Ensures` | WRT0002 | The order is `Spec.Decreases`, then `Spec.Requires`, then `Spec.NoThrow`, then `Spec.Ensures`. |
 | `second Spec.NoThrow` | WRT0002 | At most one. |
+| `Spec.NoThrow on a method that cannot raise` | WRT0013 (warning) | The method has no exception case, so `Spec.NoThrow` holds already and changes nothing (#239); it still translates. |
 | `Spec.NoThrow in a contract member` | WRT0002 | Reported for the `[ContractFor]` class: `Spec.NoThrow` is for a verified method's own body. |
 | `Spec.Requires in an expression-bodied member`, `Spec.NoThrow in an expression-bodied member`, `Spec.Ensures in an expression-bodied member`, `Spec.Assert in an expression-bodied member`, `Spec.Assert outside a statement` | WRT0002 | A contract needs a block body (design Q17). |
 | `Spec.Ensures type argument that is not the return type` | WRT0002 | `T` in `Spec.Ensures<T>` is the return type, nullable annotation included, or the awaited type of `Task<T>` or `ValueTask<T>`. The message names it. |
@@ -341,8 +342,9 @@ Numbers are provisional.
 | WRT0010 | error | build task | Internal error (M5a): the kernel rejected a term Warrant built, the engine could not translate or admit a unit, or the `warrant` CLI failed (the message quotes the end of its error output). Never means the claim is false. Report it as a bug. |
 | WRT0011 | warning | `Warrant` package | Nothing is verified (M5a): the project references `Warrant` but not `Warrant.Build`, or sets `WarrantEnabled` to something other than `true`. Silence it with `NoWarn`. Its location is the package's `build/Warrant.targets`. |
 | WRT0012 | error | build task | The compilation cannot be rebuilt from Csc's arguments (M5a). Warrant runs the project's source generators, so this means the code does not compile, or a generator could not load (for example one built for a compiler newer than Warrant's Roslyn 5.9.0) or threw; a generator problem fails even when the code compiles without its output. Names the missing symbols and the generator problem. |
+| WRT0013 | warning | analyzer | A `Spec` statement states nothing (M6): `Spec.NoThrow` on a method that cannot raise (#239). The method still translates. Silence it with `NoWarn`. |
 
-Extraction raises WRT0002 to WRT0005, WRT0008 and WRT0009, and `warrant
+Extraction raises WRT0002 to WRT0005, WRT0008, WRT0009 and WRT0013, and `warrant
 translate` and `warrant verify` report them with the engine's WRT0001, WRT0006
 and WRT0010. The build task reports what `warrant verify` reports, plus WRT0010
 when the CLI fails; WRT0011 comes from the `Warrant` package's own targets.

@@ -60,7 +60,8 @@ internal static class ClrTerms
     /// KTD12's postcondition: <c>ensures r</c> on normal return, and <c>ClrExn.Allowed e</c> for an exception, so only an
     /// explicit throw or an exception propagated from a dependency is allowed.
     /// </summary>
-    public static Expr Post(MetaM m, Expr sigma, Expr alpha, Func<Expr, Expr> ensures)
+    /// <param name="exceptions">The exception half's predicate: <c>ClrExn.Allowed</c>, or <c>ClrExn.External</c> for <c>Spec.NoThrow</c> (#182).</param>
+    public static Expr Post(MetaM m, Expr sigma, Expr alpha, Func<Expr, Expr> ensures, string exceptions = "Warrant.ClrExn.Allowed")
     {
         var shape = Shape(sigma);
         var arg = ArgShape(sigma);
@@ -69,7 +70,7 @@ internal static class ClrTerms
         var conds = Expr.App(C("Std.Do.ExceptConds", Level.Zero), shape);
         var argConds = Expr.App(C("Std.Do.ExceptConds", Level.Zero), arg);
         var ok = Lam(m, "r", alpha, r => Pure(sigma, ensures(r)));
-        var exc = Lam(m, "e", ClrExnT, e => PureArg(sigma, Allowed(e)));
+        var exc = Lam(m, "e", ClrExnT, e => PureArg(sigma, Expr.App(C(exceptions), e)));
         return Expr.App(C("Prod.mk", Level.Zero, Level.Zero), Expr.Forall(N("r"), alpha, assertion), conds, ok,
             Expr.App(C("Prod.mk", Level.Zero, Level.Zero), Expr.Forall(N("e"), ClrExnT, argAssertion), argConds, exc,
                 C("PUnit.unit", Level.One)));

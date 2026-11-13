@@ -64,7 +64,9 @@ fails the build at the `throw` (chapter 7) instead of being listed as a `MayThro
 `Requires`, fails at its `throw`.
 
 - A pure method raises nothing, so `Spec.NoThrow` holds of it already: it is accepted and its obligation is the one
-  without (`NoThrowOnAPureMethodChangesNothing`).
+  without (`NoThrowOnAPureMethodChangesNothing`). Extraction warns that it states nothing there (WRT0013,
+  `Spec.NoThrow on a method that cannot raise`, at the statement, #239), so it is not read as a check
+  (`NoThrowOnAMethodThatCannotRaiseIsAWarningAtTheStatement`); the build still passes.
 - A method with dependencies still allows their exceptions, and its hypotheses about them say so: under `Spec.NoThrow`
   each contract hypothesis's exception postcondition is `ClrExn.External` too, since an exception from a dependency is
   `ClrExn.external` (KTD12). With `ClrExn.Allowed` there, a dependency's contract would allow it an explicit throw that
@@ -72,7 +74,13 @@ fails the build at the `throw` (chapter 7) instead of being listed as a `MayThro
   premises of that one method's theorem only; no other theorem uses them.
 - A caller without `Spec.NoThrow` uses a NoThrow callee's contract by consequence, through
   `ClrExn.allowed_of_external : ClrExn.External e → ClrExn.Allowed e`. A caller with `Spec.NoThrow` needs the same of
-  every raising verified callee: a callee without it may throw explicitly, which fails at the call.
+  every raising verified callee: a callee without it may throw explicitly, which fails at the call
+  (`CalleeMayThrow`, chapter 7), even when every throw of the callee is unreachable under the call's arguments (#238).
+  The caller knows the callee through its contract only (KTD12), and a contract without `Spec.NoThrow` allows an
+  explicit throw whatever the arguments, so nothing short of the callee's body could tell the two apart. The message
+  names the callee and the way out: give it `Spec.NoThrow`, with a `Spec.Requires` that rules its throws out and that
+  the call meets. Lifting this soundly needs either the callee's body at the call (no longer modular) or a new contract
+  form that states when the callee does not throw; both are the owner's decision.
 - `Spec.NoThrow` in a `[ContractFor]` class member is rejected: it is for a verified method's own body, and a
   dependency's exceptions are always allowed.
 

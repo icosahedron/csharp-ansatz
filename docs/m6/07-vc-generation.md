@@ -42,6 +42,12 @@ program's head:
 | a dependency operation | `Vc.call` with its contract hypothesis at the call's arguments and the current world (`Vc.callExternal` under `Spec.NoThrow`) | its `Requires` as a VC at the call; its `Ensures` a hypothesis for the rest; its exception allowed, and recorded |
 | anything else | none | a leftover |
 
+The walker picks `Vc.call` or `Vc.callExternal` from the contract's type, not by trying one and then the other:
+`Apply` may unify `Vc.call`'s premise with a NoThrow callee's contract when the call's arguments let the callee's body
+reduce to `pure v`, since unfolding `Std.Do.Triple` and the program then makes the two triples definitionally equal
+(the kernel admits that proof), and the callee's `Ensures` then reaches the rest of the walk only as `r = r` (#241;
+`VcCallUnificationTests` in `Warrant.Meta.Tests`). This is Lean's lazy delta reduction, not a unifier bug.
+
 Between rules the walker does a light reduction: β, projections, `let`s (a join point among them) and
 `(⌜p⌝ s).down` to `p`, as Lean's `dsimp only` would (#212); nothing of the default simp set, so the next rule still
 matches.
@@ -104,7 +110,8 @@ and strips the tags from every proof.
 This is a deviation from the plan, which did not say how node IDs would reach the walker.
 
 Each failing VC is its own WRT0001 at its node, starting with its kind (`VcKinds.Text`), then its path conditions as
-hypotheses and its goal after the VC simp set:
+hypotheses and its goal after the VC simp set. A hypothesis the simp set rewrote to `True`, such as a `Spec.Requires`
+under the branch that settles it, is left out of the goal shown, which is display only (#240):
 
 | Kind | Text |
 |---|---|
@@ -119,7 +126,7 @@ hypotheses and its goal after the VC simp set:
 | `WellDefinedness` | well-definedness of a Spec expression |
 | `Unsupported` | a program shape the VC walker has no rule for (reported where the walk last was, #223) |
 | `ReachableThrow` | an explicit throw is reachable under the Requires (Spec.NoThrow) (reported at the `throw`, #182) |
-| `CalleeMayThrow` | a callee without Spec.NoThrow may throw explicitly at this call (Spec.NoThrow) (#182) |
+| `CalleeMayThrow` | a callee without Spec.NoThrow may throw explicitly at this call (Spec.NoThrow) (#182); the message goes on to name the callee and the way out, `Spec.NoThrow` on it with a `Spec.Requires` the call meets (#238, chapter 6) |
 | `ArithmeticOverflow` | arithmetic overflow: this int/long operation may overflow, where C# would wrap (write unchecked(...) if wrapping is intended) (#244: a default-context operation in a method's body, reported at it; in a method that can raise, the walker maps its model's `assertFailed` at an arithmetic node to this kind) |
 
 From the M6 corpus (*ran*, as `docs/proving/proofs-that-work.md` shows it):

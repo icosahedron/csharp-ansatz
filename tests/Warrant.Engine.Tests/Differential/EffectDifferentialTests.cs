@@ -140,10 +140,11 @@ internal sealed class EffectCorpus : IDisposable
 
     /// <summary>
     /// Whether the witness copy of a function fails on these arguments: a false <c>Spec.Assert</c> or an overflow of
-    /// default-context arithmetic (#233); null when it has none.
+    /// default-context arithmetic (#233); only a false <c>Spec.Assert</c> when the original run threw
+    /// <see cref="OverflowException"/> (<paramref name="thrown"/>, #266); null when it has none.
     /// </summary>
-    public bool? WitnessFails(ExtractedUnit unit, IReadOnlyList<object?> args) =>
-        AssertWitness.Fails(Assembly.MethodOf(unit.Unit), Witnesses.GetValueOrDefault(unit.Key), args);
+    public bool? WitnessFails(ExtractedUnit unit, IReadOnlyList<object?> args, Exception? thrown = null) =>
+        AssertWitness.Fails(Assembly.MethodOf(unit.Unit), Witnesses.GetValueOrDefault(unit.Key), args, thrown);
 
     public Inputs Inputs { get; }
 
@@ -163,6 +164,11 @@ internal sealed class EffectCorpus : IDisposable
         var types = ModelCheck.ParameterTypes(unit.Unit);
         var returns = ModelCheck.Returned(unit.Unit);
         var raising = Model.IsRaising(unit.Unit);
+        // A raising method's skips need its witness copy (#266): without one they would fall back to the model's word.
+        if (raising && unit.Key.StartsWith("M:", StringComparison.Ordinal) && !Witnesses.ContainsKey(unit.Key))
+        {
+            throw new InvalidOperationException($"{unit.Key} is a raising method with no witness copy (AssertWitness); its skips could not be confirmed.");
+        }
         return args =>
         {
             var description = $"{unit.DisplayName}({string.Join(", ", args.Select((a, i) => Model.Values.Display(types[i], a)))})";
@@ -183,7 +189,7 @@ internal sealed class EffectCorpus : IDisposable
             }
             if (raising)
             {
-                return Model.CheckRaising(description, returns, Model.Run(unit.Unit, args), result, thrown, () => WitnessFails(unit, args));
+                return Model.CheckRaising(description, returns, Model.Run(unit.Unit, args), result, thrown, () => WitnessFails(unit, args, thrown));
             }
             return thrown is not null
                 ? InputCheck.Disagrees($"{description}: the CLR threw {thrown.GetType().Name} but the model is a pure function")
@@ -646,13 +652,36 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
                 Spec.Assert(true);
                 return a + b;
             }
+
+            [Verified]
+            public static int Narrow(long l)
+            {
+                Spec.Assert(true);
+                return (int)l;
+            }
+
+            [Verified]
+            public static int Bumped(int a)
+            {
+                Spec.Assert(a != 5);
+                return checked(a + 1);
+            }
+
+            [Verified]
+            public static void Positive(int x) => Spec.Assert(x > 0);
+
+            [Verified]
+            public static void CallsPositive(int x) => Positive(x);
         }
         """;
 
     /// <summary>
-    /// A skip is confirmed on the CLR (#233): the witness copy of the method fails exactly where a <c>Spec.Assert</c> is
-    /// false or default-context arithmetic overflows, and an <c>assertFailed</c> run the CLR does not witness is a
-    /// disagreement, not a skip, so a mistranslated condition cannot hide behind it.
+    /// A skip is confirmed on the CLR (#233): the witness copy of the method fails where a <c>Spec.Assert</c> is false or
+    /// default-context <c>+</c>, <c>-</c>, <c>*</c> or unary <c>-</c> overflows, not where a default-context narrowing wraps
+    /// (the model wraps there too); when the original run itself threw <see cref="OverflowException"/>, only a false
+    /// <c>Spec.Assert</c> witnesses it (#266). An <c>assertFailed</c> run the CLR does not witness is a disagreement, not a
+    /// skip, so a mistranslated condition cannot hide behind it. An expression-bodied void method, an assertion or a call,
+    /// has a copy too.
     /// </summary>
     [Fact]
     public void ASkipMustBeWitnessedOnTheClr()
@@ -663,6 +692,21 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         var sum = side.Unit("M:S.Sum(System.Int32,System.Int32)");
         Assert.Equal((true, false), (side.WitnessFails(nonZero, [0]), side.WitnessFails(nonZero, [5])));
         Assert.Equal((true, false), (side.WitnessFails(sum, [int.MaxValue, 1]), side.WitnessFails(sum, [1, 2])));
+        // A default-context narrowing wraps in the copy as in the model.
+        var narrow = side.Unit("M:S.Narrow(System.Int64)");
+        Assert.Equal((false, false), (side.WitnessFails(narrow, [long.MaxValue]), side.WitnessFails(narrow, [1L])));
+        // Where the original threw OverflowException, an explicit checked overflow is no witness; a false assert is.
+        var bumped = side.Unit("M:S.Bumped(System.Int32)");
+        Assert.Throws<OverflowException>(() => CorpusAssembly.Invoke(side.Assembly.MethodOf(bumped.Unit), [int.MaxValue]));
+        Assert.Equal(true, side.WitnessFails(bumped, [int.MaxValue]));
+        Assert.Equal(false, side.WitnessFails(bumped, [int.MaxValue], new OverflowException()));
+        Assert.Equal(true, side.WitnessFails(bumped, [5], new OverflowException()));
+        // Expression-bodied void methods, which extraction refuses but which still get a copy: an assertion, and a call whose
+        // callee's assertion the copy does not see.
+        bool? Fails(string name, int x) => AssertWitness.Fails(
+            side.Assembly.Assembly.GetType("S", throwOnError: true)!.GetMethod(name)!, side.Witnesses[$"M:S.{name}(System.Int32)"], [x]);
+        Assert.Equal((true, false), (Fails("Positive", 0), Fails("Positive", 1)));
+        Assert.Equal(false, Fails("CallsPositive", 0));
         // The original methods are unchanged: the assert does nothing and the sum wraps.
         Assert.Equal(int.MinValue, CorpusAssembly.Invoke(side.Assembly.MethodOf(sum.Unit), [int.MaxValue, 1]));
 
@@ -682,6 +726,26 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         });
         Assert.Empty(run.Disagreements);
         Assert.Equal((2, 1), (run.Checked, run.Skipped));
+    }
+
+    /// <summary>
+    /// End to end (#266): when the CLR's own method asserts something other than what the method extraction read asserts,
+    /// the model's <c>assertFailed</c> is not witnessed, and the checker reports a disagreement rather than a skip.
+    /// </summary>
+    [Fact]
+    public void AnAssertTheClrDoesNotFailIsADisagreement()
+    {
+        var extracted = Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Assertions.cs", "using Warrant;\n" + Assertions)], checkOverflow: false);
+        var clr = Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Assertions.cs", "using Warrant;\n" + Assertions.Replace("Spec.Assert(x == 0);", "Spec.Assert(true);", StringComparison.Ordinal))],
+            checkOverflow: false);
+        using var side = new EffectCorpus(extracted, clr);
+        var check = side.Checker(side.Unit("M:S.OnlyZero(System.Int32)"));
+        var (zero, five) = KernelThread.Run(() => (check([0]), check([5])));
+        Assert.Same(InputCheck.Agrees, zero);
+        Assert.False(five.IsSkipped);
+        Assert.Contains("the model computes error assertFailed, but on the CLR every Spec.Assert holds", five.Disagreement, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -772,7 +836,7 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
     /// have one.
     /// </summary>
     [Fact]
-    public void NullableFieldEqualityAgreesWithTheClrForBoolEnumAndNestedRecords()
+    public void NullableFieldEqualityAgreesWithTheClrForBoolClosedClassAndNestedRecords()
     {
         using var side = new EffectCorpus(Warrant.Frontend.CompilationFactory.Create(
             [new Warrant.Frontend.SourceFile("NullableFields.cs", "using Warrant;\n" + NullableFields)], checkOverflow: false));

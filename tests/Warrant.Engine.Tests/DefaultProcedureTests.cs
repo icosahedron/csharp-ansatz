@@ -1048,8 +1048,9 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
 
     /// <summary>
     /// A bare <c>return;</c> ends its path wherever it is (#253): on a path that is not the last, in a switch section, in
-    /// both branches of an <c>if</c>, and in a <c>ValueTask</c> method. Each assertion after it holds only because the
-    /// path that returned does not reach it, so each proves; without the return, the same assertion fails.
+    /// both branches of an <c>if</c> (each branch returning before its own assertion, and again at its end), and in a
+    /// <c>ValueTask</c> method. Each assertion after a return holds only because the path that returned does not reach
+    /// it, so each proves; with the guarding return on another value, the same assertion fails (#266).
     /// </summary>
     [Fact]
     public void ABareReturnEndsItsPathWhereverItIs()
@@ -1081,12 +1082,31 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
             {
                 if (x > 0)
                 {
-                    Spec.Assert(x > 0);
+                    if (x == int.MaxValue) return;
+                    Spec.Assert(x < int.MaxValue);
                     return;
                 }
                 else
                 {
-                    Spec.Assert(x <= 0);
+                    if (x == int.MinValue) return;
+                    Spec.Assert(x > int.MinValue);
+                    return;
+                }
+            }
+
+            [Verified]
+            public static void BothBranchesWithoutTheReturn(int x)
+            {
+                if (x > 0)
+                {
+                    if (x == int.MaxValue) return;
+                    Spec.Assert(x < int.MaxValue);
+                    return;
+                }
+                else
+                {
+                    if (x == 0) return;
+                    Spec.Assert(x > int.MinValue);
                     return;
                 }
             }
@@ -1120,5 +1140,7 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
         }
         const string Without = "M:S.WithoutTheReturn(System.Int32)";
         Assert.Equal((VcKind.Assert, "Spec.Assert(x < int.MaxValue);"), Failure(source, Without, result.Find(Without)));
+        const string BothWithout = "M:S.BothBranchesWithoutTheReturn(System.Int32)";
+        Assert.Equal((VcKind.Assert, "Spec.Assert(x > int.MinValue);"), Failure(source, BothWithout, result.Find(BothWithout)));
     }
 }

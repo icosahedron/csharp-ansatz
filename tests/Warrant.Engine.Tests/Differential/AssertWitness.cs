@@ -7,16 +7,19 @@ namespace Warrant.Engine.Tests.Differential;
 
 /// <summary>
 /// The CLR's side of a skipped input (#233): the model ends in <c>assertFailed</c> where a <c>Spec.Assert</c> is false (#186)
-/// or default-context arithmetic would wrap (#244), and the CLR runs on, so the skip must be confirmed on the CLR rather than
-/// decided by the model alone. Each verified method gets a witness copy, a static or instance method of the same type and
-/// signature, <c>__WarrantWitnessN</c>, whose body is the original's with every <c>Spec.Assert(c)</c> statement made
-/// <c>if (!(c)) throw …</c> and the whole body in a <c>checked</c> block, so default-context arithmetic raises
-/// <see cref="OverflowException"/> where it would wrap; an explicit <c>unchecked</c> stays unchecked, as in the model. The
-/// copies are added members that nothing calls, so the original methods run as before.
+/// or default-context <c>+</c>, <c>-</c>, <c>*</c> or unary <c>-</c> would wrap (#244), and the CLR runs on, so the skip must
+/// be confirmed on the CLR rather than decided by the model alone. Each verified method gets a witness copy, a static or
+/// instance method of the same type and signature, <c>__WarrantWitnessN</c>, whose body is the original's with every
+/// <c>Spec.Assert(c)</c> statement made <c>if (!(c)) throw …</c> and the whole body in a <c>checked</c> block, so that
+/// default-context arithmetic raises <see cref="OverflowException"/> where it would wrap. A default-context narrowing
+/// cast is made <c>unchecked((T)e)</c>, since the model wraps it too (#266); an explicit <c>unchecked</c> stays unchecked.
+/// The copies are added members that nothing calls, so the original methods run as before.
 /// <para>
-/// A copy calls the original callees, so a failure inside a verified callee is not witnessed; such a skip is reported as a
-/// disagreement, never accepted unconfirmed. A narrowing conversion is checked in the copy too, so a copy may raise where
-/// the model only wraps; it is consulted only on an input the model already fails.
+/// What a copy's <see cref="OverflowException"/> shows is weaker than a false assertion: an explicit <c>checked</c>
+/// overflow, a <c>decimal</c> overflow or <c>MinValue / -1</c> raises it in the copy as in the original. So when the
+/// original run itself threw <see cref="OverflowException"/>, only a false assertion witnesses the skip (#266). A copy calls
+/// the original callees, so a failure inside a verified callee is not witnessed; such a skip is reported as a
+/// disagreement, never accepted unconfirmed.
 /// </para>
 /// </summary>
 internal static class AssertWitness
@@ -46,9 +49,10 @@ internal static class AssertWitness
 
     /// <summary>
     /// Whether the witness copy of a method raises for these arguments (the receiver first for an instance method): a false
-    /// <c>Spec.Assert</c> or an overflow. Null when the method has no copy.
+    /// <c>Spec.Assert</c>, or an overflow unless the original run threw <see cref="OverflowException"/> itself
+    /// (<paramref name="thrown"/>). Null when the method has no copy.
     /// </summary>
-    public static bool? Fails(MethodInfo original, string? witness, IReadOnlyList<object?> args)
+    public static bool? Fails(MethodInfo original, string? witness, IReadOnlyList<object?> args, Exception? thrown = null)
     {
         if (witness is null)
         {
@@ -64,7 +68,7 @@ internal static class AssertWitness
         }
         catch (OverflowException)
         {
-            return true;
+            return thrown is not OverflowException;
         }
         catch (InvalidProgramException ex) when (ex.Message == AssertMessage)
         {
@@ -110,21 +114,24 @@ internal static class AssertWitness
 
         private MethodDeclarationSyntax Copy(MethodDeclarationSyntax method, IMethodSymbol symbol, string name)
         {
+            // Every decision is made on the original nodes, which the semantic model knows (#266); only then is the
+            // rewritten expression of an expression body put into a new statement.
+            var rewriter = new BodyRewriter(model);
             BlockSyntax body;
             if (method.Body is { } block)
             {
-                body = block;
+                body = (BlockSyntax)rewriter.Visit(block);
             }
             else
             {
                 var expression = method.ExpressionBody!.Expression;
                 bool statement = symbol.ReturnsVoid
                     || (symbol.IsAsync && symbol.ReturnType is INamedTypeSymbol { IsGenericType: false });
-                body = SyntaxFactory.Block(statement
-                    ? SyntaxFactory.ExpressionStatement(expression)
-                    : SyntaxFactory.ReturnStatement(expression));
+                body = SyntaxFactory.Block(
+                    BodyRewriter.IsAssert(model, expression) is { } condition ? BodyRewriter.Check(condition)
+                    : statement ? SyntaxFactory.ExpressionStatement((ExpressionSyntax)rewriter.Visit(expression))
+                    : SyntaxFactory.ReturnStatement((ExpressionSyntax)rewriter.Visit(expression)));
             }
-            body = (BlockSyntax)new AssertRewriter(model).Visit(body);
             var modifiers = SyntaxFactory.TokenList(method.Modifiers.Where(m =>
                 !m.IsKind(SyntaxKind.OverrideKeyword) && !m.IsKind(SyntaxKind.VirtualKeyword) && !m.IsKind(SyntaxKind.SealedKeyword)
                 && !m.IsKind(SyntaxKind.NewKeyword) && !m.IsKind(SyntaxKind.PartialKeyword)));
@@ -138,21 +145,41 @@ internal static class AssertWitness
         }
     }
 
-    /// <summary>Makes each <c>Spec.Assert(c, …)</c> statement <c>if (!(c)) throw new InvalidProgramException(…)</c>.</summary>
-    private sealed class AssertRewriter(SemanticModel model) : CSharpSyntaxRewriter
+    /// <summary>
+    /// Makes each <c>Spec.Assert(c, …)</c> statement <c>if (!(c)) throw new InvalidProgramException(…)</c>, and each narrowing
+    /// cast in C#'s default context <c>unchecked((T)e)</c>. It must visit original nodes, which the semantic model knows.
+    /// </summary>
+    private sealed class BodyRewriter(SemanticModel model) : CSharpSyntaxRewriter
     {
-        public override SyntaxNode? VisitExpressionStatement(ExpressionStatementSyntax node)
+        /// <summary>The condition of a <c>Spec.Assert</c> invocation (an original node); null for any other expression.</summary>
+        public static ExpressionSyntax? IsAssert(SemanticModel model, ExpressionSyntax expression) =>
+            expression is InvocationExpressionSyntax invocation
+            && model.GetSymbolInfo(invocation).Symbol is IMethodSymbol { Name: "Assert", ContainingType: { } spec }
+            && spec.ToDisplayString() == "Warrant.Spec"
+                ? invocation.ArgumentList.Arguments[0].Expression
+                : null;
+
+        /// <summary>The copy's check of an assertion's condition.</summary>
+        public static StatementSyntax Check(ExpressionSyntax condition) =>
+            SyntaxFactory.ParseStatement($"if (!({condition})) throw new global::System.InvalidProgramException(\"{AssertMessage}\");");
+
+        public override SyntaxNode? VisitExpressionStatement(ExpressionStatementSyntax node) =>
+            IsAssert(model, node.Expression) is { } condition ? Check(condition) : base.VisitExpressionStatement(node);
+
+        public override SyntaxNode? VisitCastExpression(CastExpressionSyntax node)
         {
-            // The original node, still in the semantic model's tree: a copy's body is rewritten from the original syntax.
-            if (node.Expression is InvocationExpressionSyntax invocation
-                && model.GetSymbolInfo(invocation).Symbol is IMethodSymbol { Name: "Assert", ContainingType: { } spec }
-                && spec.ToDisplayString() == "Warrant.Spec")
+            var visited = (CastExpressionSyntax)base.VisitCastExpression(node)!;
+            bool inContext = node.Ancestors().TakeWhile(a => a is not MemberDeclarationSyntax)
+                .Any(a => a is CheckedExpressionSyntax or CheckedStatementSyntax);
+            if (inContext
+                || model.GetOperation(node) is not Microsoft.CodeAnalysis.Operations.IConversionOperation conversion
+                || conversion.GetConversion() is not { IsNumeric: true, IsExplicit: true })
             {
-                var condition = invocation.ArgumentList.Arguments[0].Expression;
-                return SyntaxFactory.ParseStatement(
-                    $"if (!({condition})) throw new global::System.InvalidProgramException(\"{AssertMessage}\");");
+                return visited;
             }
-            return base.VisitExpressionStatement(node);
+            // unchecked((T)checked(e)): the conversion wraps, and the operand keeps the copy's checked context.
+            var operand = SyntaxFactory.CheckedExpression(SyntaxKind.CheckedExpression, visited.Expression.WithoutTrivia());
+            return SyntaxFactory.CheckedExpression(SyntaxKind.UncheckedExpression, visited.WithExpression(operand));
         }
     }
 }

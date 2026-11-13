@@ -42,7 +42,8 @@ expression or `unchecked { }` block, the nearest such context deciding (an `unch
 reverse raises).
 `wrap` is now only C#'s default context, which must not overflow where Warrant proves something (#183, #236; method
 bodies are #244); `unchecked` wraps on purpose, with no obligation; a unit's `facts` stay `wrap` or `checked`, and a
-reader rejects `unchecked` there, and on any node other than those (#249).
+reader rejects `unchecked` there, and on any node other than an `int32` or `int64` `add`, `sub`, `mul` or unary `neg`
+and an `int64` to `int32` `convert` (#249).
 A unit that uses no version-3 form encodes as in version 2 apart from its `vir` field, which every unit's bytes contain,
 so every unit and closure hash changed once and every M5b cache entry was invalidated, as U1's new bundle hash did
 anyway.

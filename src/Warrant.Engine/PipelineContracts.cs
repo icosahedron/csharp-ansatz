@@ -346,7 +346,7 @@ public static partial class Pipeline
 
         /// <summary>
         /// One well-definedness obligation (KTD26): a callee's precondition is a plain proposition, proved as a decrease
-        /// obligation is, by its binders introduced and omega; that a partial operation does not raise, or that a pure
+        /// obligation is, by its binders introduced and omega (and, where omega fails, the VC simp set then omega); that a partial operation does not raise, or that a pure
         /// body's implicit arithmetic does not overflow (#244), is a triple over its model, proved by the default procedure
         /// (KTD13, KTD14) and reported at the operation. Null when it was admitted, else the unit's outcome.
         /// </summary>
@@ -456,7 +456,7 @@ public static partial class Pipeline
 
         /// <summary>
         /// A proposition proved as a decrease obligation is (M5a KTD15): its binders introduced, then <c>Tactic.Omega()</c>'s
-        /// pipeline, and the proof admitted. Null when it was admitted, else the unit's outcome, WRT0001 at
+        /// pipeline (and, where that fails, the VC simp set then omega), and the proof admitted. Null when it was admitted, else the unit's outcome, WRT0001 at
         /// <paramref name="at"/> with the goal.
         /// </summary>
         private UnitOutcome? Omega(

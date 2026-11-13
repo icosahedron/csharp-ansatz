@@ -40,7 +40,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
     [Fact]
     public void TheM5aAndM4CorporaGetThePipelinesOutcomesThroughTheService()
     {
-        // Both sides without a wall-clock limit (#272): the comparison is of what each computes, and a unit that reaches
+        // Both sides with a 1-hour limit, in effect none (#272): the comparison is of what each computes, and a unit that reaches
         // the time limit on one side only, under the load of the other test classes, says nothing about the service.
         var options = engine.Options with { Timeout = TimeSpan.FromHours(1) };
         var compilations = CorpusSet.M5a.Names.Select(n => $"m5a/{n}").Concat(CorpusSet.M4.Names).ToList();

@@ -198,15 +198,17 @@ internal sealed class ModelCheck(KernelEnvironment env, Values values, KernelLim
     /// <paramref name="result"/>): <see cref="InputCheck.Agrees"/>, <see cref="InputCheck.Skipped"/> when the model
     /// fails a <c>Spec.Assert</c> (#186), or a message with both outcomes. Must run on a kernel thread.
     /// </summary>
-    public InputCheck CheckRaising(string description, VirType returns, Expr run, object? result, Exception? thrown) =>
-        CheckOutcome(description, returns, o => RunsTo(Values.CicType(returns), run, o), () => Outcome(returns, run), result, thrown);
+    public InputCheck CheckRaising(string description, VirType returns, Expr run, object? result, Exception? thrown, Func<bool?>? witness = null) =>
+        CheckOutcome(description, returns, o => RunsTo(Values.CicType(returns), run, o), () => Outcome(returns, run), result, thrown, witness);
 
     /// <summary>
     /// <see cref="CheckRaising"/> for any run: <paramref name="runsTo"/> decides whether the model's run ends in an outcome
     /// (<c>Except.ok v</c> or <c>Except.error e</c>), and <paramref name="outcome"/> describes the model's outcome for
-    /// messages. Must run on a kernel thread.
+    /// messages. <paramref name="witness"/> says whether the CLR's witness copy fails on the input
+    /// (<see cref="AssertWitness"/>): an <c>assertFailed</c> run is skipped only when it does not return false; null when no
+    /// copy can run, as for a property or a run against reply tapes. Must run on a kernel thread.
     /// </summary>
-    public InputCheck CheckOutcome(string description, VirType returns, Func<Expr, bool> runsTo, Func<string> outcome, object? result, Exception? thrown)
+    public InputCheck CheckOutcome(string description, VirType returns, Func<Expr, bool> runsTo, Func<string> outcome, object? result, Exception? thrown, Func<bool?>? witness = null)
     {
         var r = Values.CicType(returns);
         string clr;
@@ -235,9 +237,19 @@ internal sealed class ModelCheck(KernelEnvironment env, Values values, KernelLim
             }
             clr = $"threw {thrown.GetType().Name}";
         }
-        return runsTo(Error(r, ClrExceptions.Constructor(ClrExceptions.AssertFailed)))
-            ? InputCheck.Skipped
-            : InputCheck.Disagrees($"{description}: the CLR {clr} but the model computes {outcome()}");
+        if (!runsTo(Error(r, ClrExceptions.Constructor(ClrExceptions.AssertFailed))))
+        {
+            return InputCheck.Disagrees($"{description}: the CLR {clr} but the model computes {outcome()}");
+        }
+        // The model fails a Spec.Assert or default-context arithmetic would wrap: the skip stands only when the CLR's
+        // witness copy fails too (#233), so a mistranslated condition cannot hide behind it.
+        return witness?.Invoke() switch
+        {
+            false => InputCheck.Disagrees(
+                $"{description}: the model computes error assertFailed, but on the CLR every Spec.Assert holds and no "
+                + $"default-context arithmetic overflows (the CLR {clr})"),
+            _ => InputCheck.Skipped,
+        };
     }
 
     /// <summary>

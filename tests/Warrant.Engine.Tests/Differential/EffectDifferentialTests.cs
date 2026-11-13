@@ -40,7 +40,9 @@ internal sealed class EffectCorpus : IDisposable
         Environment = Run.Environment.Fork();
         KernelThread.Run(() => AdmitCallersOfUnprovedContracts(inputs));
         Environment.Freeze();
-        Assembly = CorpusAssembly.Load(clr ?? compilation);
+        // The witness copies (#233) are added members; the methods compared are unchanged.
+        Assembly = CorpusAssembly.Load(AssertWitness.Add(clr ?? compilation, out var witnesses));
+        Witnesses = witnesses;
         var definitions = Extraction.Units.Where(u => u.Unit.Definition is not null).ToDictionary(u => u.Key, u => u.Unit.Definition!, StringComparer.Ordinal);
         var values = new Values(Assembly, definitions);
         Inputs = new Inputs(values);
@@ -133,6 +135,16 @@ internal sealed class EffectCorpus : IDisposable
 
     public CorpusAssembly Assembly { get; }
 
+    /// <summary>The name of each verified method's witness copy (<see cref="AssertWitness"/>), by the method's key.</summary>
+    public IReadOnlyDictionary<string, string> Witnesses { get; }
+
+    /// <summary>
+    /// Whether the witness copy of a function fails on these arguments: a false <c>Spec.Assert</c> or an overflow of
+    /// default-context arithmetic (#233); null when it has none.
+    /// </summary>
+    public bool? WitnessFails(ExtractedUnit unit, IReadOnlyList<object?> args) =>
+        AssertWitness.Fails(Assembly.MethodOf(unit.Unit), Witnesses.GetValueOrDefault(unit.Key), args);
+
     public Inputs Inputs { get; }
 
     public ModelCheck Model { get; }
@@ -171,7 +183,7 @@ internal sealed class EffectCorpus : IDisposable
             }
             if (raising)
             {
-                return Model.CheckRaising(description, returns, Model.Run(unit.Unit, args), result, thrown);
+                return Model.CheckRaising(description, returns, Model.Run(unit.Unit, args), result, thrown, () => WitnessFails(unit, args));
             }
             return thrown is not null
                 ? InputCheck.Disagrees($"{description}: the CLR threw {thrown.GetType().Name} but the model is a pure function")
@@ -627,8 +639,50 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
                 Spec.Assert(x == 0);
                 return x;
             }
+
+            [Verified]
+            public static int Sum(int a, int b)
+            {
+                Spec.Assert(true);
+                return a + b;
+            }
         }
         """;
+
+    /// <summary>
+    /// A skip is confirmed on the CLR (#233): the witness copy of the method fails exactly where a <c>Spec.Assert</c> is
+    /// false or default-context arithmetic overflows, and an <c>assertFailed</c> run the CLR does not witness is a
+    /// disagreement, not a skip, so a mistranslated condition cannot hide behind it.
+    /// </summary>
+    [Fact]
+    public void ASkipMustBeWitnessedOnTheClr()
+    {
+        using var side = new EffectCorpus(Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Assertions.cs", "using Warrant;\n" + Assertions)], checkOverflow: false));
+        var nonZero = side.Unit("M:S.NonZero(System.Int32)");
+        var sum = side.Unit("M:S.Sum(System.Int32,System.Int32)");
+        Assert.Equal((true, false), (side.WitnessFails(nonZero, [0]), side.WitnessFails(nonZero, [5])));
+        Assert.Equal((true, false), (side.WitnessFails(sum, [int.MaxValue, 1]), side.WitnessFails(sum, [1, 2])));
+        // The original methods are unchanged: the assert does nothing and the sum wraps.
+        Assert.Equal(int.MinValue, CorpusAssembly.Invoke(side.Assembly.MethodOf(sum.Unit), [int.MaxValue, 1]));
+
+        var sumCheck = side.Checker(sum);
+        var run = new EffectRun();
+        KernelThread.Run(() =>
+        {
+            run.Record(sumCheck([int.MaxValue, 1]));
+            run.Record(sumCheck([1, 2]));
+            var model = side.Model.Run(nonZero.Unit, [0]);
+            Assert.Same(InputCheck.Skipped, side.Model.CheckRaising("NonZero(0)", VirType.Int32, model, 100, null, () => true));
+            var unwitnessed = side.Model.CheckRaising("NonZero(0)", VirType.Int32, model, 100, null, () => false);
+            Assert.False(unwitnessed.IsSkipped);
+            Assert.Contains(
+                "NonZero(0): the model computes error assertFailed, but on the CLR every Spec.Assert holds and no default-context arithmetic overflows (the CLR returned 100)",
+                unwitnessed.Disagreement, StringComparison.Ordinal);
+        });
+        Assert.Empty(run.Disagreements);
+        Assert.Equal((2, 1), (run.Checked, run.Skipped));
+    }
 
     /// <summary>
     /// An input on which the model fails a <c>Spec.Assert</c> is skipped and counted: <c>Spec.Assert</c> is

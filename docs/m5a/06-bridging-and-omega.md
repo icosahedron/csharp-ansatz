@@ -84,24 +84,25 @@ case but that `omega` cannot find (`OmegaStrengthened`, `src/Warrant.Meta/Tactic
 only make a true goal provable. A goal `omega` proves alone gets the same proof as before, and a failure reports the
 first attempt's goal and constraints.
 
-In this order:
+In this order, after the goal's premises become hypotheses:
 
+- **`if`s over a product.** An `if` whose branches mention `*` (a pure method's `if (a < 0) return 0; return a * b;`
+  becomes `0 ≤ if a < 0 then 0 else a * b`) is split on its condition with `dite`, at most two deep, and each case
+  rewritten with the condition or its negation, so the next step sees it as a fact. `omega` splits such an `if` too, but
+  inside its own search, where no bound can be read.
 - **Products.** `omega` reads linear arithmetic only, so `x * y` of two non-literal terms is an atom. For each such
   product, the step reads literal bounds on each side of `x` and `y` from the hypotheses (`c ≤ x`, `x < c`, after the
-  prep step, which a trial run of it shows and then undoes) and uses one per side:
-  - a tighter comparison found anywhere other than as a fact, or the complement of one (an `if`'s condition, a side of
-    `||`: `¬(a < 0)` gives `0 ≤ a`), when a plain `omega` proves it from the linear hypotheses; at most two are tried;
-  - else the tightest bound a hypothesis or one of its top-level conjuncts states as a fact;
-  - else, for a side with no fact, the tightest such comparison unproved (an `if` in the goal that `omega` splits).
-
-  It adds `Warrant.Int.mul_ge_of_ge_of_ge`, `mul_ge_of_le_of_le`, `mul_le_of_ge_of_le` and `mul_le_of_le_of_ge`
-  (`lean/Warrant/Checked.lean`) at those bounds: the four corners of `0 ≤ (x - a) * (y - b)`, linear in the atom
-  `x * y` (McCormick's inequalities). A proved bound is applied; an unproved one stays a premise,
-  `a ≤ x → b ≤ y → a * y + b * x - a * b ≤ x * y`, which `omega` reads as a disjunction and discharges. From
-  `0 ≤ x ≤ 10000` and `0 ≤ y ≤ 1000` they give `0 ≤ x * y ≤ 10000000` (#257); from `-5 ≤ x, y ≤ -1`,
-  `1 ≤ x * y ≤ 25`. A factor whose bound is not a literal (`b ≤ a`) gets none, and neither does the outer product of
-  `a * b * c`, whose factor `a * b` has no literal bound, nor a sum of products (GitHub #271). These facts come first,
-  so the next step's range proofs have them.
+  prep step, which a trial run of it shows and then undoes) and uses one per side: the tightest fact, what a
+  hypothesis states through `∧` and `¬` (`¬(p ∨ q)` is `¬p` and `¬q`, `¬(p → q)` is `p` and `¬q`, `¬(x < c)` is
+  `c ≤ x`), so the negated goal of `Spec.Ensures(r => !(a >= 0) || r >= 0)` states `0 ≤ a`; with no fact on a side, the
+  tightest comparison found anywhere else, or the complement of one. It adds `Warrant.Int.mul_ge_of_ge_of_ge`,
+  `mul_ge_of_le_of_le`, `mul_le_of_ge_of_le` and `mul_le_of_le_of_ge` (`lean/Warrant/Checked.lean`) at those bounds:
+  the four corners of `0 ≤ (x - a) * (y - b)`, linear in the atom `x * y` (McCormick's inequalities), each as an
+  implication from its bounds, `a ≤ x → b ≤ y → a * y + b * x - a * b ≤ x * y`, which `omega` reads as a disjunction
+  and discharges, so no bound needs a proof of its own. From `0 ≤ x ≤ 10000` and `0 ≤ y ≤ 1000` they give
+  `0 ≤ x * y ≤ 10000000` (#257); from `-5 ≤ x, y ≤ -1`, `1 ≤ x * y ≤ 25`. A factor whose bound is not a literal
+  (`b ≤ a`) gets none, and neither does the outer product of `a * b * c`, whose factor `a * b` has no literal bound,
+  nor a sum of products (GitHub #271). These facts come first, so the next step's range proofs have them.
 - **Exact values.** For each `int`/`long` `a + b`, `a - b`, `a * b` or `-a` in the goal that is not an operation on
   literals (`-5` is a literal to the prep step), a nested `Tactic.Omega()`
   tries to prove the exact result in range, `¬(a.toInt * b.toInt < -2^31 ∨ 2^31 - 1 < a.toInt * b.toInt)`; where it
@@ -117,7 +118,7 @@ The nested range proofs are plain `Tactic.Omega()` runs, never strengthened agai
 (products, operations, literals) are taken, so the step costs a bounded number of `omega` runs. They are charged to the
 unit's tactic fuel: a product bounded on both sides with both bounds used (`1 <= a <= 99`, `1 <= b <= 99`,
 `Spec.Ensures(r => r >= 1 && r <= 9801)`) needs about 113,000 of the default 171,970 steps, and `-5 <= a, b <= -1`
-with `1 <= r <= 25` about 123,000; a bound from a branch, `if (a > 5) return 0;`, about 84,000. A goal with no `*` skips the product part and its trial prep step.
+with `1 <= r <= 25` about 123,000; a bound from a branch, `if (a > 5) return 0;`, about 66,000. A goal with no `*` skips the product part and its trial prep step.
 
 ## The true example
 

@@ -317,10 +317,76 @@ public sealed class ProcedureStrengthTests(EngineFixture engine) : IClassFixture
     }
 
     [Fact]
+    public void ABoundStatedOnlyInTheNegatedGoalIsAFact()
+    {
+        // Review of #263, round 3: `Spec.Ensures(r => !(a >= 0) || r >= 0)` becomes the hypothesis `¬(¬(0 ≤ a) ∨ 0 ≤ a * b)`,
+        // whose `0 ≤ a` is a fact only through the negation; the Spec.Requires bound -10 must not win over it.
+        var source = Wrap("""
+            [Verified]
+            public static int NotNegated(int a, int b)
+            {
+                Spec.Requires(-10 <= a && a <= 10 && 0 <= b && b <= 10);
+                Spec.Ensures<int>(r => !(a >= 0) || r >= 0);
+                return a * b;
+            }
+
+            [Verified]
+            public static int Disjunct(int a, int b)
+            {
+                Spec.Requires(-10 <= a && a <= 10 && 0 <= b && b <= 10);
+                Spec.Ensures<int>(r => a < 0 || r >= 0);
+                return a * b;
+            }
+
+            [Verified]
+            public static int OnlyInTheGoal(int a, int b)
+            {
+                Spec.Requires(0 <= b && b <= 10);
+                Spec.Ensures<int>(r => !(0 <= a && a <= 10) || r >= 0);
+                return unchecked(a * b);
+            }
+            """);
+        var result = Run(source);
+        foreach (var name in new[] { "NotNegated", "Disjunct", "OnlyInTheGoal" })
+        {
+            Proved(result.Find($"M:S.{name}(System.Int32,System.Int32)"));
+        }
+    }
+
+    [Fact]
+    public void ABranchConditionIsTighterThanTheRequires()
+    {
+        // Review of #263, round 3: after `if (a < 0) return 0;` (or on b) the goal is `0 ≤ if a < 0 then 0 else a * b`;
+        // split on the condition, the case `¬(a < 0)` states `0 ≤ a`, a fact tighter than the Spec.Requires bound -10.
+        var source = Wrap("""
+            [Verified]
+            public static int OnA(int a, int b)
+            {
+                Spec.Requires(-10 <= a && a <= 10 && 0 <= b && b <= 10);
+                Spec.Ensures<int>(r => r >= 0);
+                if (a < 0) { return 0; }
+                return a * b;
+            }
+
+            [Verified]
+            public static int OnB(int a, int b)
+            {
+                Spec.Requires(0 <= a && a <= 10 && -10 <= b && b <= 10);
+                Spec.Ensures<int>(r => r >= 0);
+                if (b < 0) { return 0; }
+                return a * b;
+            }
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.OnA(System.Int32,System.Int32)"));
+        Proved(result.Find("M:S.OnB(System.Int32,System.Int32)"));
+    }
+
+    [Fact]
     public void TheComplementOfABranchNotTakenBoundsAFactor()
     {
         // Review of #263, round 2: after `if (a < 0) return 0;` the path knows `!(a < 0)`, whose complement `0 <= a` is the
-        // lower bound the product needs. On its own: its proof is the heaviest of these for the kernel (about 2.5 s).
+        // lower bound the product needs.
         var source = Wrap("""
             [Verified]
             public static int ByTheComplement(int a, int b)

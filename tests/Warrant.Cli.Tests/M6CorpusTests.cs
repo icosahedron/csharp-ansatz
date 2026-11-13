@@ -90,14 +90,20 @@ public sealed class M6CorpusTests
         Assert.Matches($@"(?m)^{contracts}\(49,\d+\): error WRT0001: The contract of 'Contracts\.Kept\(int\)' could not be proved: omega could not prove the goal:", output);
         // #183: arithmetic in a Spec expression that can overflow is reported at the operation.
         Assert.Matches($@"(?m)^{contracts}\(83,\d+\): error WRT0001: The contract of 'Contracts\.SumUnbounded\(int, int\)' could not be proved: well-definedness of a Spec expression: ", output);
+        // #213: a false Spec.Ensures written with Spec.Implies fails at its line.
+        Assert.Matches($@"(?m)^{contracts}\(91,\d+\): error WRT0001: The contract of 'Contracts\.Grown\(int\)' could not be proved: postcondition of the method: ", output);
         var dependencies = Regex.Escape(Path.Combine(dir, "Dependencies.cs"));
-        Assert.Matches($@"(?m)^{dependencies}\(35,\d+\): error WRT0001: The contract of 'Lookups\.Neighbour\(int\)' could not be proved: postcondition of the method: ", output);
-        Assert.Matches($@"(?m)^{dependencies}\(43,\d+\): error WRT0001: The contract of 'Lookups\.Saved\(Payment\)' could not be proved: postcondition of the method: ", output);
-        Assert.Matches($@"(?m)^{dependencies}\(52,\d+\): error WRT0001: The contract of 'Lookups\.Twice\(int\)' could not be proved: postcondition of the method: ", output);
-        Assert.Matches($@"(?m)^{dependencies}\(59,\d+\): error WRT0001: The contract of 'Lookups\.TwiceScripted\(int\)' could not be proved: unsolved goals", output);
-        Assert.Matches($@"(?m)^{dependencies}\(82,\d+\): error WRT0001: The contract of 'ICounter\.Count\(\)' could not be proved: The contract is unsatisfiable: ", output);
+        Assert.Matches($@"(?m)^{dependencies}\(36,\d+\): error WRT0001: The contract of 'Lookups\.Neighbour\(int\)' could not be proved: postcondition of the method: ", output);
+        Assert.Matches($@"(?m)^{dependencies}\(44,\d+\): error WRT0001: The contract of 'Lookups\.Saved\(Payment\)' could not be proved: postcondition of the method: ", output);
+        Assert.Matches($@"(?m)^{dependencies}\(53,\d+\): error WRT0001: The contract of 'Lookups\.Twice\(int\)' could not be proved: postcondition of the method: ", output);
+        Assert.Matches($@"(?m)^{dependencies}\(60,\d+\): error WRT0001: The contract of 'Lookups\.TwiceScripted\(int\)' could not be proved: unsolved goals", output);
+        Assert.Matches($@"(?m)^{dependencies}\(83,\d+\): error WRT0001: The contract of 'ICounter\.Count\(\)' could not be proved: The contract is unsatisfiable: ", output);
         // #228: an awaited call to a verified method is checked against its Spec.Requires like any other call.
-        Assert.Matches($@"(?m)^{dependencies}\(107,\d+\): error WRT0001: The contract of 'Steps\.Run\(int\)' could not be proved: precondition of a callee at this call: ", output);
+        Assert.Matches($@"(?m)^{dependencies}\(108,\d+\): error WRT0001: The contract of 'Steps\.Run\(int\)' could not be proved: precondition of a callee at this call: ", output);
+        // #225: the summary counts the methods whose contracts failed, not only theorems.
+        var failed = Regex.Count(output, @"(?m)^  \S.*  (unproved|undecided|internal|failed|skipped)\b");
+        Assert.True(failed > 0, output);
+        Assert.Matches($@"(?m)^Warrant: \d+ verified units, 0 theorems proved, 0 not proved; {failed} other units not verified\.$", output);
     }
 
     private static (int Code, string Output) Verify(params string[] args)

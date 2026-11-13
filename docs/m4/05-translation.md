@@ -85,6 +85,9 @@ The shapes are the ones Lean 4.35.0's elaborator produces for the same Lean sour
 | `(int)a` on a `long` | `Int64.toInt32 a` |
 | `true`, `false` | `Bool.true`, `Bool.false` |
 
+Since the M6 follow-ups (owner decision 2026-11-12), `+`, `-`, `*` and unary `-` in C#'s default context still translate to these wrapping terms, but where Warrant proves something they must not overflow: a theorem statement's (#236), a `Spec` expression's (#183) and a verified method body's (#244) get an obligation at each such operation (docs/m6/06). A method body's definition is unchanged: its obligations are separate theorems, stated under the path to each operation, so a method whose arithmetic can overflow translates but is not verified, and its callers are skipped.
+The same operations inside an explicit `unchecked(...)` or `unchecked { }` translate to the same terms with no obligation: they wrap on purpose (VIR `unchecked`, docs/m4/04).
+
 `int.MinValue` is the literal `-2147483648`, which the table turns into `-(2147483648)`.
 `OfNat` wraps `2147483648` to `int.MinValue`, and negating `int.MinValue` gives `int.MinValue` again, so the result is right; a translation test pins it.
 
@@ -163,6 +166,7 @@ Join points appear in goals as `let`-bound functions, which the kernel and M5a's
 ### `Payout`
 
 ```csharp
+Spec.Requires(deductible >= 0);            // a claim, not a step (M6); it bounds loss - deductible (#244)
 if (loss <= deductible) return 0;          // rule 2: only the else side falls through
 var covered = loss - deductible;
 return covered > limit ? limit : covered;
@@ -194,13 +198,18 @@ The second test is emitted at `Int32`, because `PaymentStatus` is an open enum.
 [Verified]
 public static int Shipping(int weight, bool express, bool member)
 {
+    Spec.Requires(weight >= 0 && weight <= 1000000);
     var cost = weight * 2;
     var bonus = 0;
     if (express) { cost = cost + 15; bonus = 1; }   // rule 5: both sides fall through, two locals change
-    if (member) return cost - 5;                    // rule 2
-    return cost + bonus;
+    if (member) return unchecked(cost - 5);         // rule 2
+    return unchecked(cost + bonus);
 }
 ```
+
+The `Spec.Requires` bounds `weight * 2` and `cost + 15` (#244).
+After the join point, `cost` and `bonus` are its parameters, of which an overflow obligation knows nothing, so the corpus
+writes the last two operations `unchecked`; the term below is the same either way.
 
 ```lean
 fun (weight : Int32) (express member : Bool) =>
@@ -224,7 +233,7 @@ When only one local changes, rule 3 applies instead.
 ```csharp
 var fee = 10;
 if (rush) fee = fee * 2;     // rule 3: both sides fall through, one local changes
-return price + fee;
+return price + fee;          // Spec.Requires(price <= 1000000) bounds it (#244)
 ```
 
 ```lean

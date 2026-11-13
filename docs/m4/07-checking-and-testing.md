@@ -87,7 +87,7 @@ These are active tests, so a change of runtime or architecture fails now; the mo
 | Corpus outcomes | Every member in `tests/corpus/m4/` ends in the outcome `expected.json` gives it: translated, proved (and by which proof), false, or rejected with the expected diagnostic and construct name. |
 | Bundle roots | Every constant the translator and proof emitter can produce is in `lean/bundle-roots.txt` and in the bundle. A new operator added to the table without re-exporting fails here. |
 | Determinism | Extracting the corpus twice gives byte-identical VIR, translating it twice gives identical declarations, and the JSON assumption report is byte-identical across runs. |
-| Golden VIR | `Payout`'s VIR matches the committed `tests/Warrant.Vir.Tests/golden/payout.json`, and its unit hash is pinned, so the encoding cannot change without a visible diff. |
+| Golden VIR | `Payout`'s VIR, without the `Spec.Requires` and the caller-precondition assumption #244 added, matches the committed `tests/Warrant.Vir.Tests/golden/payout.json`, and its unit hash is pinned, so the encoding cannot change without a visible diff. |
 | Kernel round trip | The NDJSON written for the accepted corpus loads into an empty environment and checks again. |
 
 ## `warrant translate`
@@ -100,6 +100,7 @@ warrant translate <directory> [--out <file.ndjson>] [--report <file.md>] [--chec
 
 It compiles every `.cs` file under the directory with the `Warrant.Frontend` factory (chapter 3), extracts VIR, hands it to the engine, and prints one line per unit plus any diagnostics in the compiler's `file(line,col): error CODE: message` format.
 `--check-overflow` compiles the files as a project with `CheckForOverflowUnderflow` on would be compiled, and `--bundle` names a semantics bundle other than the one copied next to the CLI. A bundle that declares an axiom besides Lean's standard three, or declares one of them differently from Lean, does not load (chapter 1).
+Since M6 (#220) it also loads the attribute sidecar that sits beside the bundle, as `warrant verify` does, so it proves contracts as `verify` proves them; a missing sidecar, or one made for another bundle, is declined with exit code 2.
 The start and end of `warrant translate tests/corpus/m4/accepted`:
 
 ```text

@@ -72,7 +72,7 @@ The entry for the M5a accepted sample's `Sum` (*ran*; hashes shortened, the outc
 `match` says how `budgets` decide a hit: `AtLeast` for a proof (here the decrease proof's 16,896 tactic steps and 63 ms), `Exact` for an outcome that depends on the budgets.
 The outcome is the wire form of chapter 2, so its positions are node IDs and it carries the unit's assumptions, which is what the assumption report needs.
 
-The certificate is the lean4export NDJSON of exactly the declarations the unit admitted: its definition or theorem, and for a recursive method its definition, decrease theorems and equation lemma (about 109 KB for `Sum`).
+The certificate is the lean4export NDJSON of exactly the declarations the unit admitted: its definition or theorem, and for a recursive method its definition, decrease theorems and equation lemma (about 109 KB for `Sum`). Since entry format 2 (#236), a proved theorem's certificate also holds its statement's well-definedness theorems `T.$wd_k`, before the theorem; a reused theorem has each admitted again with its cached proof.
 Recursive methods get entries like theorems do: their decrease proofs run `omega`, so a second build that must run no tactics needs them, and a decrease proof that failed is a cached not-proved outcome.
 It refers to bundle and callee constants by name without including them, so it holds only the unit's own declarations.
 `verify --out` does not read it: it verifies without the cache and writes everything the run admitted (chapter 7).

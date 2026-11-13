@@ -66,9 +66,26 @@ public static partial class Pipeline
                     };
                 }
                 var budget = _budget = new TheoremBudget(options, shell.Budget);
-                return shell.Script is null && shell.Statement.Instance is not null
+                _searched = true;
+                _theorem = true;
+                // #236: the statement's well-definedness obligations, each by the default procedure as a contract's are,
+                // whatever proves the claim itself; the theorem is proved only when all of them are.
+                var wellDefined = new List<KernelDeclaration>();
+                _contractAssumptions = [];
+                foreach (var wd in translated.WellDefinedness)
+                {
+                    if (ProveWellDefined(unit, wd, display, assumptions, wellDefined, budget) is { } failure)
+                    {
+                        return failure;
+                    }
+                }
+                var outcome = shell.Script is null && shell.Statement.Instance is not null
                     ? Compute(unit, shell, display, assumptions, budget)
                     : RunScript(unit, shell, display, assumptions, budget);
+                // A pure callee's contract a well-definedness proof rests on is listed (#247).
+                return outcome is ProvedOutcome proved
+                    ? proved with { WellDefinedness = [.. wellDefined.Cast<TheoremDecl>()], Assumptions = [.. proved.Assumptions, .. _contractAssumptions.Distinct().Where(a => !proved.Assumptions.Contains(a))] }
+                    : outcome;
             }
             var admitted = new List<KernelDeclaration>();
             var definitionBudget = _budget = new TheoremBudget(options, null);
@@ -157,9 +174,10 @@ public static partial class Pipeline
         /// <summary>
         /// A recursive method (M5a KTD14, KTD15): each decrease theorem proved by the omega pipeline and admitted, then the
         /// definition, which refers to them, marked irreducible for Meta as Lean marks its well-founded definitions, then
-        /// the equation lemma with its bare <c>Nat.fix_eq</c> proof. A decrease theorem that is not proved is WRT0001 at
-        /// its call, with its goal; an equation lemma the kernel rejects fails the unit. All of it runs in the unit's one
-        /// budget, and running out of it anywhere is WRT0006 (M5b KTD11).
+        /// the equation lemma with its bare <c>Nat.fix_eq</c> proof, then, when its body has implicit arithmetic, the contract
+        /// obligation that states it does not overflow (#244). A decrease theorem that is not proved is WRT0001 at its call,
+        /// with its goal; an equation lemma the kernel rejects fails the unit. All of it runs in the unit's one budget, and
+        /// running out of it anywhere is WRT0006 (M5b KTD11).
         /// </summary>
         private UnitOutcome AdmitRecursive(
             EngineUnit unit,
@@ -216,6 +234,11 @@ public static partial class Pipeline
             }
 
             var equation = CachedProofs is null ? Equation() : AdmitCached(unit, recursion.Equation, display, assumptions, admitted, budget, Equation);
+            if (equation is null && translated.Contract is { } contract)
+            {
+                // #244: the obligations of its implicit arithmetic, after the definition they may name.
+                return AdmitContract(unit, translated, contract, assumptions, admitted, budget);
+            }
             return equation ?? new TranslatedOutcome(key, kind, display, assumptions, [.. admitted]);
         }
 
@@ -297,15 +320,25 @@ public static partial class Pipeline
 
         /// <summary>
         /// Admits one of a definition's or type's declarations into the run's fork and records <paramref name="key"/> as the
-        /// owner of its constants (KTD33): the fork keeps them even if a later step of the unit fails or runs out.
+        /// owner of its constants (KTD33): the fork keeps them even if a later step of the unit fails or runs out. A
+        /// theorem's well-definedness theorems (#236) go into its own fork only, and reach the run with its outcome.
         /// </summary>
         private void AddDeclaration(string key, KernelDeclaration declaration, List<KernelDeclaration> admitted, TheoremBudget budget)
         {
             Kernel.Kernel.Add(Env, declaration, budget.Kernel);
-            run.Admitted.Add(declaration);
-            run.Own(key, declaration);
+            if (!_theorem)
+            {
+                run.Admitted.Add(declaration);
+                run.Own(key, declaration);
+            }
             admitted.Add(declaration);
         }
+
+        /// <summary>
+        /// Whether the unit is a theorem, which runs on a worker in its own fork (KTD8): what it admits reaches the run
+        /// with its outcome, in <see cref="RunState"/>'s admission of its level, never from the worker.
+        /// </summary>
+        private bool _theorem;
 
         /// <summary>
         /// A closed theorem with no script (M4, KTD12): tries <c>rfl</c>, then <c>decide</c>; if neither is admitted, reduces

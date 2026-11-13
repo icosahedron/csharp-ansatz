@@ -323,6 +323,8 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         ("accepted", "M:Corpus.M6.Contracts.Quotient(System.Int32,System.Int32)"),
         ("accepted", "M:Corpus.M6.Contracts.Half(System.Int32)"),
         ("accepted", "M:Corpus.M6.Contracts.Sum(System.Int32,System.Int32)"),
+        // Spec.Implies in a Spec.Ensures (#213).
+        ("accepted", "M:Corpus.M6.Contracts.Successor(System.Int32)"),
         // Refuted contracts (M6 U14): the model is the body, whether or not the contract holds.
         ("refuted", "M:Corpus.M6.Refuted.Contracts.Ratio(System.Int32,System.Int32)"),
         ("refuted", "M:Corpus.M6.Refuted.Contracts.Neg(System.Int32)"),
@@ -334,6 +336,7 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         ("refuted", "M:Corpus.M6.Refuted.Contracts.Impossible(System.Int32)"),
         ("refuted", "M:Corpus.M6.Refuted.Contracts.QuotientOfAny(System.Int32,System.Int32)"),
         ("refuted", "M:Corpus.M6.Refuted.Contracts.SumUnbounded(System.Int32,System.Int32)"),
+        ("refuted", "M:Corpus.M6.Refuted.Contracts.Grown(System.Int32)"),
     ];
 
     /// <summary>

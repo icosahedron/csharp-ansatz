@@ -211,7 +211,7 @@ namespace Corpus.M6.Rejected.Dependencies
         public async Task<int> Ordered(int id) => Sum(b: await stock.Load(id), a: stock.Count(id));
 
         [Verified]
-        public static int Sum(int a, int b) => a + b;
+        public static int Sum(int a, int b) => unchecked(a + b);
 
         [Verified]
         public async Task Dropped(int id)

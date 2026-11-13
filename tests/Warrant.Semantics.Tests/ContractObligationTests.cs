@@ -251,9 +251,10 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
                     return x;
                 }
 
-                [Verified] public static int Caller(int y) => Positive(y + 1);
+                [Verified] public static int Caller(int y) => Positive(unchecked(y + 1));
             }
             """);
+        // unchecked: default-context y + 1 would be a site of its own before the call (#244).
         const string caller = "M:S.Caller(System.Int32)";
         var contract = Contract(translation, caller);
         Assert.True(contract.Raising);
@@ -342,7 +343,8 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     [Fact]
     public void APureMethodWithoutAContractHasNoObligationAndItsTranslationIsUnchanged()
     {
-        var (translation, _) = Translate("public static class S { [Verified] public static int Inc(int x) => x + 1; }");
+        // Nor implicit arithmetic, which must not overflow (#244): unchecked wraps on purpose.
+        var (translation, _) = Translate("public static class S { [Verified] public static int Inc(int x) => unchecked(x + 1); }");
         Assert.Null(translation.Find("M:S.Inc(System.Int32)")!.Contract);
     }
 
@@ -438,7 +440,7 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
                 public static int Add(int a, int b)
                 {
                     Spec.Ensures<int>(r => r == a + b);
-                    return a + b;
+                    return unchecked(a + b);
                 }
 
                 [Verified]
@@ -473,6 +475,83 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
         AssertPropositions(env, negate);
     }
 
+    /// <summary>
+    /// #213: <c>Spec.Implies(p, q)</c> in a contract evaluates <c>q</c> only under <c>p</c>, so the well-definedness and
+    /// overflow obligations of <c>q</c>'s operations (KTD26, #183) are under the guard <c>p</c>; a <c>Spec.Requires</c>
+    /// using it has its vacuity obligation over the implication.
+    /// </summary>
+    [Fact]
+    public void ImpliesInAContractGuardsItsConclusionsObligationsWithItsPremise()
+    {
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Inc(int x)
+                {
+                    Spec.Requires(Spec.Implies(x < 100, x + 1 > x));
+                    return x;
+                }
+
+                [Verified]
+                public static int Quot(int a, int b)
+                {
+                    Spec.Ensures<int>(r => Spec.Implies(b > 0, r == a / b));
+                    return 0;
+                }
+            }
+            """);
+        var inc = Contract(translation, "M:S.Inc(System.Int32)");
+        var wd = Assert.Single(inc.WellDefinedness);
+        Assert.Equal(SpecObligationKind.WellDefinedOperation, wd.Kind);
+        Assert.IsType<BinaryExpr>(wd.Node);
+        // ∀ σ x, x < 100 → ⦃⌜True⌝⦄ Warrant.Int32.addChecked σ x 1 ⦃⇓_ => ⌜True⌝, allowed⦄
+        Assert.Equal(3, wd.Binders);
+        Assert.Equal(Lt(Expr.BVar(0), I(100)), Assert.IsType<ForallExpr>(Under(wd.Theorem.Type, 2)).BinderType);
+        var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 3));
+        Assert.Equal(Expr.App(C("Warrant.Int32.addChecked"), Expr.BVar(2), Expr.BVar(1), I(1)), program);
+        // ∀ x, (x < 100 → x + 1 > x) → False
+        var vacuity = Assert.Single(inc.Vacuity);
+        Assert.Equal(2, vacuity.Binders);
+        var implication = Assert.IsType<ForallExpr>(Assert.IsType<ForallExpr>(Under(vacuity.Theorem.Type, 1)).BinderType);
+        Assert.Equal(Lt(Expr.BVar(0), I(100)), implication.BinderType);
+        Assert.Equal(C("False"), Under(vacuity.Theorem.Type, 2));
+        AssertPropositions(env, inc);
+
+        var quot = Contract(translation, "M:S.Quot(System.Int32,System.Int32)");
+        wd = Assert.Single(quot.WellDefinedness);
+        // ∀ σ a b r, b > 0 → ⦃⌜True⌝⦄ Warrant.Int32.div σ a b ⦃…⦄
+        Assert.Equal(5, wd.Binders);
+        Assert.Equal(Gt(Expr.BVar(1), I(0)), Assert.IsType<ForallExpr>(Under(wd.Theorem.Type, 4)).BinderType);
+        (program, _, _, _) = Triple(Under(wd.Theorem.Type, 5));
+        Assert.Equal(Expr.App(C("Warrant.Int32.div"), Expr.BVar(4), Expr.BVar(3), Expr.BVar(2)), program);
+        AssertPropositions(env, quot);
+    }
+
+    /// <summary>#213: <c>Spec.Implies</c> as a <c>bool</c> value in a contract is <c>!p || q</c>, with <c>q</c> under <c>p</c>.</summary>
+    [Fact]
+    public void ImpliesAsAValueInAContractGuardsItsConclusionWithItsPremise()
+    {
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static bool Same(int x, bool b)
+                {
+                    Spec.Ensures<bool>(r => r == Spec.Implies(x > 0, 10 / x > 0));
+                    return b;
+                }
+            }
+            """);
+        var contract = Contract(translation, "M:S.Same(System.Int32,System.Boolean)");
+        var wd = Assert.Single(contract.WellDefinedness);
+        // ∀ σ x b r, decide (x > 0) = true → ⦃⌜True⌝⦄ Warrant.Int32.div σ 10 x ⦃…⦄
+        Assert.Equal(5, wd.Binders);
+        var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 5));
+        Assert.Equal(Expr.App(C("Warrant.Int32.div"), Expr.BVar(4), I(10), Expr.BVar(3)), program);
+        AssertPropositions(env, contract);
+    }
+
     [Fact]
     public void AnUncheckedCastInASpecExpressionHasNoObligation()
     {
@@ -489,6 +568,226 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
             }
             """);
         Assert.Empty(Contract(translation, "M:S.Narrow(System.Int64)").WellDefinedness);
+    }
+
+    [Fact]
+    public void ExplicitUncheckedArithmeticInASpecExpressionWrapsWithNoObligation()
+    {
+        // #236: unchecked(...) wraps on purpose, so it has no obligation; its value is the wrapped one, as the default's.
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Add(int a, int b)
+                {
+                    Spec.Ensures<int>(r => r == unchecked(a + b));
+                    return unchecked(a + b);
+                }
+
+                [Verified]
+                public static int Plain(int a, int b)
+                {
+                    Spec.Ensures<int>(r => r == a + b);
+                    return a + b;
+                }
+            }
+            """);
+        var add = Contract(translation, "M:S.Add(System.Int32,System.Int32)");
+        Assert.Empty(add.WellDefinedness);
+        AssertPropositions(env, add);
+        var plain = Contract(translation, "M:S.Plain(System.Int32,System.Int32)");
+        // The Spec.Ensures's a + b, then the body's (#244).
+        Assert.Equal([SpecObligationKind.WellDefinedOperation, SpecObligationKind.NoOverflow], plain.WellDefinedness.Select(w => w.Kind));
+        // The same program: only the obligation differs.
+        static Expr Value(TranslatedUnit u) => Assert.IsType<DefinitionDecl>(Assert.Single(u.Declarations)).Value.Value;
+        Assert.Equal(Value(translation.Find("M:S.Plain(System.Int32,System.Int32)")!), Value(translation.Find("M:S.Add(System.Int32,System.Int32)")!));
+    }
+
+    [Fact]
+    public void ASpecAssertsArithmeticHasAnOverflowObligationUnderWhatIsKnownThereAndTheProgramIsUnchanged()
+    {
+        // #235: the obligation is f.$wd_k after the contract's own, over σ, the parameters, the facts known at the
+        // Spec.Assert (the Spec.Requires, the branch) and a local's value unfolded; the definition keeps wrapping.
+        var source = """
+            public static class S
+            {
+                [Verified]
+                public static int F(int a, int b)
+                {
+                    Spec.Requires(a < 1000);
+                    Spec.Ensures<int>(r => r == a - 1);
+                    var c = b;
+                    if (a > 0)
+                    {
+                        Spec.Assert(a * c >= unchecked(a * c));
+                    }
+                    return a;
+                }
+            }
+            """;
+        var (translation, env) = Translate(source);
+        var f = Contract(translation, "M:S.F(System.Int32,System.Int32)");
+        Assert.Equal(2, f.WellDefinedness.Length);
+        var wd = f.WellDefinedness[1];
+        Assert.Equal(2, wd.Index);
+        Assert.Equal("Cs.S.«F(System.Int32,System.Int32)».$wd_2", wd.Theorem.Name.ToString());
+        Assert.Equal(SpecObligationKind.WellDefinedOperation, wd.Kind);
+        Assert.Equal(VirOverflow.Wrap, Assert.IsType<BinaryExpr>(wd.Node).Overflow);
+        // ∀ σ a b (h : a < 1000) (h : 0 < a), ⦃⌜True⌝⦄ Warrant.Int32.mulChecked σ a b ⦃⇓_ => ⌜True⌝, allowed⦄
+        Assert.Equal(5, wd.Binders);
+        var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 5));
+        Assert.Equal(Expr.App(C("Warrant.Int32.mulChecked"), Expr.BVar(4), Expr.BVar(3), Expr.BVar(2)), program);
+        AssertPropositions(env, f);
+
+        // The same unit with the Spec.Assert's arithmetic unchecked has the same definition.
+        var (wrapped, _) = Translate(source.Replace("a * c >= unchecked(a * c)", "unchecked(a * c >= a * c)", StringComparison.Ordinal));
+        static Expr Value(TranslatedUnit u) => Assert.IsType<DefinitionDecl>(Assert.Single(u.Declarations)).Value.Value;
+        Assert.Equal(Value(translation.Find("M:S.F(System.Int32,System.Int32)")!), Value(wrapped.Find("M:S.F(System.Int32,System.Int32)")!));
+        Assert.Single(Contract(wrapped, "M:S.F(System.Int32,System.Int32)").WellDefinedness);
+    }
+
+    [Fact]
+    public void ASpecAssertAfterImplicitArithmeticKnowsTheBoundValueAndItsExactValue()
+    {
+        // #246: in a method that can raise, var s = a + b binds s by Warrant.Int32.addImplicit (#244), which continues only
+        // where the exact sum is in range. The Spec.Assert's obligation is over s, s = a + b and s.toInt = a.toInt + b.toInt.
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int F(int a, int b)
+                {
+                    Spec.Requires(a < 1000);
+                    var s = a + b;
+                    Spec.Assert(s - b == a);
+                    return s;
+                }
+            }
+            """);
+        var f = Contract(translation, "M:S.F(System.Int32,System.Int32)");
+        var wd = Assert.Single(f.WellDefinedness);
+        // ∀ σ a b (h : a < 1000) s (h : s = a + b) (h : s.toInt = a.toInt + b.toInt), ⦃⌜True⌝⦄ Warrant.Int32.subChecked σ s b ⦃…⦄
+        Assert.Equal(7, wd.Binders);
+        var type = wd.Theorem.Type;
+        var binders = new List<Expr>();
+        for (int i = 0; i < 7; i++)
+        {
+            var pi = Assert.IsType<ForallExpr>(type);
+            binders.Add(pi.BinderType);
+            type = pi.Body;
+        }
+        var add = Expr.App(
+            C("HAdd.hAdd", Level.Zero, Level.Zero, Level.Zero), Int32T, Int32T, Int32T,
+            Expr.App(C("instHAdd", Level.Zero), Int32T, C("instAddInt32")), Expr.BVar(3), Expr.BVar(2));
+        Assert.Equal(Expr.App(C("Eq", Level.One), Int32T, Expr.BVar(0), add), binders[5]);
+        Assert.Equal(C("Eq", Level.One), binders[6].GetAppFn());
+        Assert.Equal(C("Int"), binders[6].GetAppArgs()[0]);
+        var (program, _, _, _) = Triple(type);
+        Assert.Equal(Expr.App(C("Warrant.Int32.subChecked"), Expr.BVar(6), Expr.BVar(2), Expr.BVar(4)), program);
+        AssertPropositions(env, f);
+    }
+
+    [Fact]
+    public void APureBodysArithmeticHasAnOverflowObligationUnderThePathToItAndTheDefinitionIsUnchanged()
+    {
+        // #244: a pure method's implicit arithmetic is f.$wd_k of kind NoOverflow, after the contract's own, over σ, the
+        // parameters, the Spec.Requires, the branch taken and a guard inside the expression, a local's value unfolded; the
+        // definition keeps wrapping, so it is the same as with the arithmetic unchecked.
+        var source = """
+            public static class S
+            {
+                [Verified]
+                public static int F(int a, int b)
+                {
+                    Spec.Requires(a < 1000);
+                    var c = b;
+                    if (a > 0)
+                    {
+                        return b > 0 ? a * c : 0;
+                    }
+                    return 0;
+                }
+
+                [Verified]
+                public static int G(int a) => unchecked(a + 1);
+            }
+            """;
+        var (translation, env) = Translate(source);
+        var f = Contract(translation, "M:S.F(System.Int32,System.Int32)");
+        var wd = Assert.Single(f.WellDefinedness);
+        Assert.Equal(1, wd.Index);
+        Assert.Equal("Cs.S.«F(System.Int32,System.Int32)».$wd_1", wd.Theorem.Name.ToString());
+        Assert.Equal(SpecObligationKind.NoOverflow, wd.Kind);
+        Assert.Equal(VirOverflow.Wrap, Assert.IsType<BinaryExpr>(wd.Node).Overflow);
+        // ∀ σ a b (h : a < 1000) (h : 0 < a) (h : 0 < b), ⦃⌜True⌝⦄ Warrant.Int32.mulChecked σ a b ⦃⇓_ => ⌜True⌝, allowed⦄
+        Assert.Equal(6, wd.Binders);
+        var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 6));
+        Assert.Equal(Expr.App(C("Warrant.Int32.mulChecked"), Expr.BVar(5), Expr.BVar(4), Expr.BVar(3)), program);
+        AssertPropositions(env, f);
+
+        // A method with no contract and no implicit arithmetic still has no obligation.
+        Assert.Null(translation.Find("M:S.G(System.Int32)")!.Contract);
+
+        // The same unit with the arithmetic unchecked has the same definition and no body obligation.
+        var (wrapped, _) = Translate(source.Replace("a * c", "unchecked(a * c)", StringComparison.Ordinal));
+        static Expr Value(TranslatedUnit u) => Assert.IsType<DefinitionDecl>(Assert.Single(u.Declarations)).Value.Value;
+        Assert.Equal(Value(translation.Find("M:S.F(System.Int32,System.Int32)")!), Value(wrapped.Find("M:S.F(System.Int32,System.Int32)")!));
+        Assert.Empty(Contract(wrapped, "M:S.F(System.Int32,System.Int32)").WellDefinedness);
+    }
+
+    [Fact]
+    public void ATheoremStatementsArithmeticHasAnOverflowObligationUnderItsGuardsAndBinders()
+    {
+        // #236: a theorem's statement is translated as a Spec expression is: T.$wd_k over σ, the parameters, the
+        // variables of Spec.ForAll and the guards; the statement itself is the same term as without them.
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Half(int x)
+                {
+                    Spec.Requires(x >= 0);
+                    return x / 2;
+                }
+
+                [Theorem]
+                static Proof Guarded(int a) => Prove.That(Spec.Implies(a < 10, Spec.ForAll<int>(y => y * a == a * y)));
+
+                [Theorem]
+                static Proof Calls(int a) => Prove.That(a < 0 || Half(a) <= a);
+
+                [Theorem]
+                static Proof Wraps(int a) => Prove.That(unchecked(a + 1) != a);
+            }
+            """);
+        var guarded = translation.Find("M:S.Guarded(System.Int32)")!;
+        Assert.Equal(2, guarded.WellDefinedness.Length);
+        var wd = guarded.WellDefinedness[0];
+        Assert.Equal(SpecObligationKind.WellDefinedOperation, wd.Kind);
+        Assert.Equal("Cs.S.«Guarded(System.Int32)».$wd_1", wd.Theorem.Name.ToString());
+        Assert.Equal(BinaryOp.Mul, Assert.IsType<BinaryExpr>(wd.Node).Op);
+        // ∀ σ a (h : a < 10) y, ⦃⌜True⌝⦄ Warrant.Int32.mulChecked σ y a ⦃⇓_ => ⌜True⌝, allowed⦄
+        Assert.Equal(4, wd.Binders);
+        var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 4));
+        Assert.Equal(Expr.App(C("Warrant.Int32.mulChecked"), Expr.BVar(3), Expr.BVar(0), Expr.BVar(2)), program);
+        // The second is also under the first's exact value, (y * a).toInt = y.toInt * a.toInt (#244).
+        Assert.Equal(5, guarded.WellDefinedness[1].Binders);
+        Assert.Equal(Under(guarded.WellDefinedness[1].Theorem.Type, 5).GetAppArgs()[4].GetAppFn(), C("Warrant.Int32.mulChecked"));
+        foreach (var obligation in guarded.WellDefinedness)
+        {
+            AssertProposition(env, obligation.Theorem.Type);
+        }
+        AssertProposition(env, guarded.Theorem!.Type);
+
+        // The call to Half is under ¬(a < 0), the guard of the || that encloses it.
+        var calls = translation.Find("M:S.Calls(System.Int32)")!;
+        var call = Assert.Single(calls.WellDefinedness);
+        Assert.Equal(SpecObligationKind.CalleePrecondition, call.Kind);
+        Assert.IsType<CallExpr>(call.Node);
+        Assert.Equal(2, call.Binders);
+        AssertProposition(env, call.Theorem.Type);
+
+        Assert.Empty(translation.Find("M:S.Wraps(System.Int32)")!.WellDefinedness);
     }
 
     [Fact]

@@ -1,9 +1,13 @@
 namespace Warrant.Vir;
 
-/// <summary>Overflow behaviour of an arithmetic node or a unit (<c>wrap</c> or <c>checked</c>).</summary>
+/// <summary>Overflow behaviour of an arithmetic node or a unit (<c>wrap</c>, <c>checked</c> or <c>unchecked</c>).</summary>
 public enum VirOverflow
 {
-    /// <summary><c>wrap</c>: two's-complement wrapping, as in <c>unchecked</c> C#.</summary>
+    /// <summary>
+    /// <c>wrap</c>: C#'s default context, two's-complement wrapping. On a unit's facts, a project without overflow
+    /// checking. On a node, arithmetic in no <c>checked</c> or <c>unchecked</c> expression or block: its value is the
+    /// wrapped one, as the CLR computes it, and where Warrant proves something it must not overflow (#183, #236, #244).
+    /// </summary>
     Wrap,
 
     /// <summary>
@@ -12,6 +16,14 @@ public enum VirOverflow
     /// narrowing (a <see cref="ConvertExpr"/> from <c>int64</c> to <c>int32</c>). Never on a node in M4 or M5a.
     /// </summary>
     Checked,
+
+    /// <summary>
+    /// <c>unchecked</c>: wrapping on purpose, written as <c>unchecked(...)</c> or in an <c>unchecked { }</c> block, the
+    /// nearest such context around the node. Its value is the wrapped one, as for <see cref="Wrap"/>, with no obligation
+    /// that it does not overflow. Only on <c>+</c>, <c>-</c>, <c>*</c> and unary <c>-</c> on <c>int</c> and <c>long</c>, and
+    /// on narrowing; never on a unit's facts. Added to VIR version 3 before its release (#236).
+    /// </summary>
+    Unchecked,
 }
 
 /// <summary>Operator of a <see cref="UnaryExpr"/>.</summary>

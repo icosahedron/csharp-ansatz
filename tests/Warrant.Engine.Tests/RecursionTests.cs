@@ -24,7 +24,14 @@ public sealed class RecursionTests(EngineFixture engine) : IClassFixture<EngineF
         var translated = Assert.IsType<TranslatedOutcome>(outcome);
         var names = translated.Declarations.Select(NameOf).ToList();
         var name = LeanNames.ForKey(key).ToString();
-        Assert.Equal([$"{name}.$dec_1", name, $"{name}.$eq_def"], names);
+        // Add's b - 1 is default-context arithmetic: its obligation and the contract that carries it come after the
+        // equation lemma (#244). Sum's and SumLong's arithmetic is unchecked.
+        List<string> expected = [$"{name}.$dec_1", name, $"{name}.$eq_def"];
+        if (key.Contains(".Add(", StringComparison.Ordinal))
+        {
+            expected.AddRange([$"{name}.$wd_1", $"{name}.$contract"]);
+        }
+        Assert.Equal(expected, names);
     }
 
     [Fact]
@@ -60,7 +67,7 @@ public sealed class RecursionTests(EngineFixture engine) : IClassFixture<EngineF
                 {
                     Spec.Decreases(n);
                     if (n <= 0) return 0;
-                    return n + Sum(n - 1);
+                    return unchecked(n + Sum(n - 1));
                 }
 
                 [Theorem] static Proof SumOfThree() => Prove.That(Sum(3) == 6).By(Tactic.Simp());
@@ -91,7 +98,7 @@ public sealed class RecursionTests(EngineFixture engine) : IClassFixture<EngineF
                     Spec.Decreases(n);
                     if (n <= 1) return n;
                     var a = Fib(n - 1);
-                    return a + Fib(n - 2);
+                    return unchecked(a + Fib(n - 2));
                 }
             }
             """);
@@ -117,7 +124,7 @@ public sealed class RecursionTests(EngineFixture engine) : IClassFixture<EngineF
                 {
                     Spec.Decreases(n);
                     if (n <= 0) return 0;
-                    return n + Sum(n - 1);
+                    return unchecked(n + Sum(n - 1));
                 }
 
                 [Theorem] static Proof Unfolded(int n) => Prove.That(Sum(n) == n).By(Tactic.Unfold(nameof(Sum)));
@@ -236,10 +243,10 @@ public sealed class RecursionTests(EngineFixture engine) : IClassFixture<EngineF
                 {
                     Spec.Decreases(n);
                     if (n <= 0) return 0;
-                    return n + Sum(n - 1);
+                    return unchecked(n + Sum(n - 1));
                 }
 
-                [Verified] public static int Twice(int x) => x + x;
+                [Verified] public static int Twice(int x) => unchecked(x + x);
 
                 [Theorem] static Proof SumOfZero() => Prove.That(Sum(0) == 0).By(Tactic.Unfold(nameof(Sum)), Tactic.Simp());
             }

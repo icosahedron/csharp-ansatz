@@ -166,21 +166,32 @@ public static class Translator
                         var equationName = LeanNames.EquationLemma(unit.Key);
                         var equation = new TheoremShell(equationName, new BodyTranslator(types, callees).Equation(unit, name), null, null);
                         Declare(unit.Key, equationName, $"{display} (equation)", null);
-                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null, new RecursiveDefinition(decreases, equation, proof));
+                        // #244: its implicit arithmetic must not overflow, stated after the definition, which it may name.
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null, new RecursiveDefinition(decreases, equation, proof))
+                        {
+                            Contract = Contract(unit, name, display, types, callees, raising: false),
+                        };
                     }
                 case VirUnitKind.Function:
                     {
                         var (type, value) = new BodyTranslator(types, callees) { Contracted = true }.Function(unit);
                         var decl = TypeDeclarations.Definition(name, type, value, Regular);
                         Declare(unit.Key, name, display, decl.Value.Hints);
-                        // M6 KTD12: a pure unit has an obligation only when it has a contract; M4's and M5a's have none.
+                        // M6 KTD12: a pure unit has an obligation only when it has a contract or, #244, implicit arithmetic.
                         return new TranslatedUnit(unit.Key, unit.Kind, name, display, [decl], null) { Contract = Contract(unit, name, display, types, callees, raising: false) };
                     }
                 case VirUnitKind.Theorem:
                     {
-                        var (statement, claim) = new BodyTranslator(types, callees).StatementAndClaim(unit);
+                        var (statement, claim, wellDefinedness) = new BodyTranslator(types, callees).TheoremStatement(unit);
+                        foreach (var wd in wellDefinedness)
+                        {
+                            Declare(unit.Key, wd.Theorem.Name, $"{display} (well-definedness {wd.Index})", null);
+                        }
                         Declare(unit.Key, name, display, null);
-                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [], new TheoremShell(name, statement, unit.Script, unit.Budget, claim));
+                        return new TranslatedUnit(unit.Key, unit.Kind, name, display, [], new TheoremShell(name, statement, unit.Script, unit.Budget, claim))
+                        {
+                            WellDefinedness = wellDefinedness,
+                        };
                     }
                 case VirUnitKind.Type:
                     {
@@ -232,7 +243,7 @@ public static class Translator
 
         /// <summary>
         /// A function unit's contract obligation (M6 KTD12), with its names recorded; null for a pure unit without a
-        /// contract.
+        /// contract or implicit arithmetic (#244).
         /// </summary>
         private ContractObligation? Contract(VirUnit unit, Name name, string display, TypeTable types, CalleeEffects callees, bool raising)
         {
@@ -242,7 +253,7 @@ public static class Translator
                 // A script with nothing to prove would be dropped unread (M6 KTD16).
                 return unit.Script is null
                     ? null
-                    : throw new TranslationException(unit.Key, "it has a [ProofFor] script, but no contract obligation to prove: it has no Spec.Requires or Spec.Ensures and cannot raise.");
+                    : throw new TranslationException(unit.Key, "it has a [ProofFor] script, but no contract obligation to prove: it has no Spec.Requires or Spec.Ensures, no implicit int or long arithmetic, and cannot raise.");
             }
             foreach (var wd in contract.WellDefinedness)
             {

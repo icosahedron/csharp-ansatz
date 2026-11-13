@@ -546,8 +546,19 @@ public class ExtractionTests
         var unit = Corpus.Extract("accepted").Find("M:Payouts.PayoutRules.Payout(System.Int32,System.Int32,System.Int32)");
         Assert.NotNull(unit);
         var golden = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "golden", "payout.json"));
-        // The golden file records Roslyn 5.0.0, the compiler it was written with; the Roslyn version is provenance.
-        Assert.Equal(golden, VirWriter.Write(unit.Unit with { Facts = unit.Unit.Facts with { Roslyn = "5.0.0" } }));
+        // The golden file records Roslyn 5.0.0, the compiler it was written with; the Roslyn version is provenance. It is
+        // docs/m4/04's Payout, which predates the corpus member's Spec.Requires (#244): without it, and without the
+        // caller-precondition assumption it brings, the unit must match it.
+        var body = (BlockStmt)unit.Unit.Body!;
+        Assert.IsType<RequiresStmt>(body.Stmts[0]);
+        Assert.Equal(VirAssumptionKind.CallerPrecondition, Assert.Single(unit.Unit.Assumptions).Kind);
+        var m4 = unit.Unit with
+        {
+            Body = new BlockStmt(VirList.Of<VirStmt>([.. body.Stmts.Skip(1)])),
+            Assumptions = VirList<VirAssumption>.Empty,
+            Facts = unit.Unit.Facts with { Roslyn = "5.0.0" },
+        };
+        Assert.Equal(golden, VirWriter.Write(m4));
     }
 
     [Fact]
@@ -558,7 +569,7 @@ public class ExtractionTests
         int sub = nodes.ToList().FindIndex(n => n is BinaryExpr { Op: BinaryOp.Sub });
         Assert.True(unit.Spans.TryGetSpan(sub, out var span));
 
-        Assert.Equal(new VirSpan("accepted/PayoutRules.cs", 12, 23, 12, 40), span);
+        Assert.Equal(new VirSpan("accepted/PayoutRules.cs", 14, 23, 14, 40), span);
         Assert.Equal(nodes.Count, unit.Spans.Count);
         Assert.Equal(new VirSpan("accepted/PayoutRules.cs", 9, 23, 9, 29), unit.Location);
         Assert.Equal("Payouts.PayoutRules.Payout(int, int, int)", unit.DisplayName);

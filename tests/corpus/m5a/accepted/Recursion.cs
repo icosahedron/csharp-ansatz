@@ -10,7 +10,9 @@ public static class Recursion
     {
         Spec.Decreases(n);
         if (n <= 0) return 0;
-        return n + Sum(n - 1);
+        // Nothing is known of a recursive call's result where the sum's obligation would be stated, and the sum does
+        // overflow for large n, so it wraps on purpose (#244).
+        return unchecked(n + Sum(n - 1));
     }
 
     // Two parameters; the measure is the second.
@@ -19,7 +21,8 @@ public static class Recursion
     {
         Spec.Decreases(b);
         if (b <= 0) return a;
-        return Add(a + 1, b - 1);
+        // a + 1 overflows at int.MaxValue, and a recursive method has no Spec.Requires to exclude it (#244).
+        return Add(unchecked(a + 1), b - 1);
     }
 
     // A long measure.
@@ -28,6 +31,6 @@ public static class Recursion
     {
         Spec.Decreases(n);
         if (n <= 0) return 0;
-        return n + SumLong(n - 1);
+        return unchecked(n + SumLong(n - 1));
     }
 }

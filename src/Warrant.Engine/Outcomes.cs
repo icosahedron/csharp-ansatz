@@ -78,8 +78,14 @@ public sealed record ProvedOutcome(
     string Key, VirUnitKind UnitKind, string DisplayName, ImmutableArray<UnitAssumption> Assumptions, ProofKind By, TheoremDecl Certificate)
     : UnitOutcome(Key, UnitKind, DisplayName, Assumptions)
 {
-    /// <summary>The theorem, the only declaration a proved theorem admits.</summary>
-    public override ImmutableArray<KernelDeclaration> Declarations => [Certificate];
+    /// <summary>
+    /// The well-definedness theorems of its statement (#236), <c>T.$wd_k</c> in order, each proved before the theorem;
+    /// empty when the statement has none.
+    /// </summary>
+    public ImmutableArray<TheoremDecl> WellDefinedness { get; init; } = [];
+
+    /// <summary>The theorem's well-definedness theorems, then the theorem: the declarations a proved theorem admits.</summary>
+    public override ImmutableArray<KernelDeclaration> Declarations => [.. WellDefinedness, Certificate];
 }
 
 /// <summary>A theorem whose claim the kernel computes to <c>false</c> (WRT0001).</summary>

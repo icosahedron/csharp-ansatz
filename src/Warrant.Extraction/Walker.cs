@@ -373,7 +373,7 @@ internal sealed partial class Walker
                     }
                     var one = Track(new LitExpr(type, 1), syntax);
                     var op = inc.Kind == OperationKind.Increment ? BinaryOp.Add : BinaryOp.Sub;
-                    var overflow = inc.IsChecked ? VirOverflow.Checked : VirOverflow.Wrap;
+                    var overflow = Overflow(inc.IsChecked, syntax);
                     var value = Track(new BinaryExpr(type, op, overflow, Track(new LocalExpr(type, id), inc.Target.Syntax), one), syntax);
                     return Track(new AssignStmt(id, value), syntax);
                 }
@@ -637,6 +637,35 @@ internal sealed partial class Walker
         }
     }
 
+    /// <summary>
+    /// The overflow behaviour of <c>+</c>, <c>-</c>, <c>*</c>, unary <c>-</c> or a narrowing at <paramref name="syntax"/>
+    /// (#183, #236, #244): <c>checked</c> or <c>unchecked</c> as the nearest enclosing <c>checked</c>/<c>unchecked</c>
+    /// expression or block says, and otherwise the project's default, <c>checked</c> under CheckForOverflowUnderflow and
+    /// <c>wrap</c> without, which Roslyn's <paramref name="isChecked"/> gives. Explicit <c>unchecked</c> wraps on purpose;
+    /// the default <c>wrap</c> must not overflow where Warrant proves something.
+    /// </summary>
+    private static VirOverflow Overflow(bool isChecked, SyntaxNode syntax)
+    {
+        for (var node = syntax; node is not null and not MemberDeclarationSyntax; node = node.Parent)
+        {
+            var keyword = node switch
+            {
+                CheckedExpressionSyntax e => e.Keyword,
+                CheckedStatementSyntax s => s.Keyword,
+                _ => default,
+            };
+            if (keyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.UncheckedKeyword))
+            {
+                return VirOverflow.Unchecked;
+            }
+            if (keyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.CheckedKeyword))
+            {
+                return VirOverflow.Checked;
+            }
+        }
+        return isChecked ? VirOverflow.Checked : VirOverflow.Wrap;
+    }
+
     private VirExpr Arithmetic(
         BinaryOperatorKind kind, bool isChecked, bool isLifted, VirType type, ITypeSymbol? clrType, VirExpr left, IOperation rightOp, SyntaxNode syntax)
     {
@@ -686,7 +715,7 @@ internal sealed partial class Walker
         // `/` and `%` throw on a zero divisor and on MinValue / -1 in any context (KTD6), so their node is always `wrap`.
         // A theorem statement is a Prop: a raising `/` or `%` there is rejected through effect inference (KTD11), and one by
         // a constant other than 0 and -1 cannot raise, so it is pure and translates as Lean's `/` and `%` (M6 U9).
-        var overflow = isChecked && op is not (BinaryOp.Div or BinaryOp.Rem) ? VirOverflow.Checked : VirOverflow.Wrap;
+        var overflow = op is BinaryOp.Div or BinaryOp.Rem ? VirOverflow.Wrap : Overflow(isChecked, syntax);
         return Track(new BinaryExpr(type, op, overflow, left, right), syntax);
     }
 
@@ -878,10 +907,10 @@ internal sealed partial class Walker
                     }
                     var overflow = VirOverflow.Wrap;
 
-                    // Negating a decimal flips its sign bit, which cannot overflow (KTD7).
-                    if (u.OperatorKind == UnaryOperatorKind.Minus && u.IsChecked && type != VirType.Decimal)
+                    // Negating a decimal flips its sign bit, which cannot overflow (KTD7), and unary plus cannot either.
+                    if (u.OperatorKind == UnaryOperatorKind.Minus && type != VirType.Decimal)
                     {
-                        overflow = VirOverflow.Checked;
+                        overflow = Overflow(u.IsChecked, syntax);
                     }
                     var operand = Expr(u.Operand);
                     var op = u.OperatorKind == UnaryOperatorKind.Minus ? UnaryOp.Neg : UnaryOp.Plus;
@@ -948,7 +977,7 @@ internal sealed partial class Walker
         }
         if (from == VirType.Int64 && to == VirType.Int32)
         {
-            var overflow = c.IsChecked ? VirOverflow.Checked : VirOverflow.Wrap;
+            var overflow = Overflow(c.IsChecked, syntax);
             return Track(new ConvertExpr(from, to, overflow, Expr(c.Operand)), syntax);
         }
         if (Symbols.Shape(fromType) == TypeShape.OpenEnum && IsUnderlying(fromType, toType))
@@ -1006,9 +1035,14 @@ internal sealed partial class Walker
         }
         if (Symbols.IsNamed(target, "Warrant.Spec", "Implies"))
         {
-            if (!_inTheorem)
+            // A theorem statement, or a Spec.Requires or Spec.Ensures condition (#213), is a proposition.
+            if (!_inTheorem && _contractClaims == 0)
             {
-                throw Reject("Spec.Implies outside a theorem statement", syntax, id: DiagnosticIds.MalformedSpec);
+                throw Reject(
+                    "Spec.Implies outside a theorem statement",
+                    syntax,
+                    "Spec.Implies is accepted only in a theorem statement or a Spec.Requires or Spec.Ensures condition",
+                    id: DiagnosticIds.MalformedSpec);
             }
             var args = Arguments(target, call.Arguments, syntax);
             return Track(new ImpliesExpr(args[0], args[1]), syntax);

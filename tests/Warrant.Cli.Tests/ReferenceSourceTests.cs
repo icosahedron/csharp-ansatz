@@ -36,7 +36,7 @@ public sealed class ReferenceSourceTests : IDisposable
         public static class Painter
         {
             [Verified]
-            public static int Twice(int x) => x + x;
+            public static int Twice(int x) => unchecked(x + x);
         }
         """;
 

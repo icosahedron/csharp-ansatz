@@ -49,6 +49,13 @@ public enum VcKind
     /// <c>Spec.NoThrow</c> (#182).
     /// </summary>
     CalleeMayThrow,
+
+    /// <summary>
+    /// <c>+</c>, <c>-</c>, <c>*</c> or unary <c>-</c> on <c>int</c> or <c>long</c> in C#'s default context, in a verified
+    /// method's body, that may overflow (#244): the CLR would wrap, which Warrant treats as a mistake unless the code says
+    /// <c>unchecked</c>.
+    /// </summary>
+    ArithmeticOverflow,
 }
 
 /// <summary>A verification condition the default procedure did not prove (#90): WRT0001 at its node.</summary>
@@ -78,6 +85,7 @@ public static class VcKinds
         VcKind.DependencyPrecondition => "precondition of a dependency member at this call",
         VcKind.ReachableThrow => "an explicit throw is reachable under the Requires (Spec.NoThrow)",
         VcKind.CalleeMayThrow => "a callee without Spec.NoThrow may throw explicitly at this call (Spec.NoThrow)",
+        VcKind.ArithmeticOverflow => "arithmetic overflow: this int/long operation may overflow, where C# would wrap (write unchecked(...) if wrapping is intended)",
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 }
@@ -187,8 +195,14 @@ internal sealed class VcWalker
         _node = node;
         _self = self;
         _light = VcSimpSet.Light(m);
-        _noThrow = kind != VcKind.WellDefinedness && HasNoThrow(unit);
+        _noThrow = !IsOperation(kind) && HasNoThrow(unit);
     }
+
+    /// <summary>
+    /// Whether a walker of this kind proves that one operation does not raise (KTD26) or overflow (#244), so every leftover
+    /// is that, at the operation.
+    /// </summary>
+    private static bool IsOperation(VcKind kind) => kind is VcKind.WellDefinedness or VcKind.ArithmeticOverflow;
 
     /// <summary>Whether a function's body has <c>Spec.NoThrow</c> (#182).</summary>
     public static bool HasNoThrow(VirUnit unit) => unit.Body is BlockStmt block && block.Stmts.Any(s => s is NoThrowStmt);
@@ -207,6 +221,12 @@ internal sealed class VcWalker
     /// propagate an exception from the member, which the contract allows (KTD12, KTD20).
     /// </summary>
     public List<(string Member, int? Node)> ExternalCalls { get; } = [];
+
+    /// <summary>
+    /// The pure verified callees, by constant, whose <c>f.$contract_spec</c> <see cref="Prepare"/> made a hypothesis of a
+    /// leftover (#173): the proof may rest on their contracts, so the report lists them (KTD20, #223).
+    /// </summary>
+    public HashSet<Name> PureCallees { get; } = [];
 
     /// <summary>
     /// The model operations' rules: each <c>@[spec]</c> triple of the sidecar by the head constant of its program (KTD15),
@@ -782,10 +802,11 @@ internal sealed class VcWalker
                 "divideByZero" => (VcKind.DivisionByZero, site),
                 "invalidOperation" => (VcKind.NullRead, site),
                 "nullReference" => (NullKind(site), site),
-                "assertFailed" => (VcKind.Assert, site),
-                _ => (VcKind.Unsupported, site),
+                // A default-context operation's model fails as a Spec.Assert does where the CLR would wrap (#244).
+                "assertFailed" => (NodeAt(site) is BinaryExpr or UnaryExpr ? VcKind.ArithmeticOverflow : VcKind.Assert, site),
+                _ => (VcKind.Unsupported, site ?? _lastNode),
             };
-            Leftovers.Add(new(g, _kind == VcKind.WellDefinedness ? VcKind.WellDefinedness : kind, _kind == VcKind.WellDefinedness ? _node : node));
+            Leftovers.Add(new(g, IsOperation(_kind) ? _kind : kind, IsOperation(_kind) ? _node : node));
             return;
         }
     }
@@ -857,6 +878,7 @@ internal sealed class VcWalker
                     {
                         var value = ExprOps.MkApp(Expr.Const(spec.Name), x.GetAppArgs());
                         facts.Add((Name.From("hspec"), _m.InferType(value), value));
+                        PureCallees.Add(callee);
                     }
                     return null;
                 });

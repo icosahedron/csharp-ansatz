@@ -222,11 +222,12 @@ public sealed record OutcomeDto(OutcomeKind Kind, string Key, VirUnitKind UnitKi
     /// (M5b KTD14).
     /// </summary>
     /// <param name="declarations">
-    /// The unit's admitted declarations (its certificate): a proved theorem's theorem, a translated unit's declarations;
+    /// The unit's admitted declarations (its certificate): a proved theorem's well-definedness theorems and then the
+    /// theorem (#236), a translated unit's declarations;
     /// ignored for every other outcome.
     /// </param>
     /// <returns>The outcome.</returns>
-    /// <exception cref="FormatException">A field the outcome needs is missing or malformed, or a proved theorem's certificate does not hold exactly one theorem.</exception>
+    /// <exception cref="FormatException">A field the outcome needs is missing or malformed, or a proved theorem's certificate holds anything but theorems.</exception>
     public UnitOutcome ToOutcome(ImmutableArray<KernelDeclaration> declarations)
     {
         ImmutableArray<UnitAssumption> assumptions = [.. Assumptions.Select(a => new UnitAssumption(a.UnitKey, new VirAssumption(a.Kind, a.Subject)))];
@@ -236,7 +237,13 @@ public sealed record OutcomeDto(OutcomeKind Kind, string Key, VirUnitKind UnitKi
             OutcomeKind.Translated => new TranslatedOutcome(Key, UnitKind, DisplayName, assumptions, declarations),
             OutcomeKind.Proved => new ProvedOutcome(
                 Key, UnitKind, DisplayName, assumptions, By ?? throw new FormatException($"The proved outcome of {Key} has no proof kind."),
-                declarations is [TheoremDecl theorem] ? theorem : throw new FormatException($"The certificate of {Key} does not hold exactly one theorem.")),
+                declarations is [.., TheoremDecl theorem] && declarations.All(d => d is TheoremDecl)
+                    ? theorem
+                    : throw new FormatException($"The certificate of {Key} does not hold only theorems, the last its own."))
+            {
+                // #236: the statement's well-definedness theorems come before the theorem.
+                WellDefinedness = [.. declarations[..^1].Cast<TheoremDecl>()],
+            },
             OutcomeKind.False => new FalseOutcome(Key, UnitKind, DisplayName, assumptions, [.. Sides.Select(s => s.ToSide())]),
             OutcomeKind.NotProved => new NotProvedOutcome(Key, UnitKind, DisplayName, assumptions, Text(Message), Goals ?? "", Node, Counterexample)
             {

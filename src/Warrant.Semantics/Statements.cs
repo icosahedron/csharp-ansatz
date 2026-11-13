@@ -39,8 +39,12 @@ internal sealed partial class BodyTranslator
             // A call run for its effects (M6 U19): its program bound and its value dropped. A call that cannot raise has
             // no effect to keep.
             EvalStmt e when _sigma is not null => Bound(e.Value, env, new Next(rest.ResultType, _ => rest.Invoke(env))),
+            // A call that cannot raise has no effect to keep, though its arguments' arithmetic still must not overflow (#244).
+            EvalStmt e when IsPure(e.Value) && _overflowObligations => Discard(Value(e.Value, env), () => rest.Invoke(env)),
             EvalStmt e when IsPure(e.Value) => rest.Invoke(env),
-            // Claims, never run: the contract obligation states them (M6 KTD12, Contracts.cs).
+            // Claims, never run: the contract obligation states them (M6 KTD12, Contracts.cs). A Spec.Requires is a fact for
+            // the obligations of the Spec.Asserts after it (#235).
+            RequiresStmt r when Contracted && _facts is not null => WithFacts([(RequiresFact(r, env), true)], () => rest.Invoke(env)),
             RequiresStmt or EnsuresStmt when Contracted => rest.Invoke(env),
             // A claim about the exception postcondition, which the obligation states when the method can raise; a pure
             // method raises nothing, so it holds already (#182).
@@ -78,7 +82,33 @@ internal sealed partial class BodyTranslator
             hThen is null ? null : [[hThen], [hElse!]],
             (terms, type) => IfThenElse(type, c, hThen, terms[0], hElse, terms[1]),
             env,
-            k);
+            k,
+            [[c.Prop], [Expr.App(Init.Not, c.Prop)]]);
+    }
+
+    /// <summary>
+    /// A <c>Spec.Requires</c>'s condition as a proposition, for the obligations of the <c>Spec.Assert</c>s after it (#235),
+    /// translated as the contract states it, recording nothing.
+    /// </summary>
+    private Expr RequiresFact(RequiresStmt r, Env env)
+    {
+        var outer = _spec;
+        _spec = new SpecState(_assertSpecUnit!, null, []);
+        try
+        {
+            return Cond(r.Condition, env).Prop;
+        }
+        finally
+        {
+            _spec = outer;
+        }
+    }
+
+    /// <summary><paramref name="then"/>, after a value that is translated only for the obligations it records.</summary>
+    private static Expr Discard(Expr value, Func<Expr> then)
+    {
+        _ = value;
+        return then();
     }
 
     /// <summary>One statement, then <paramref name="k"/>.</summary>
@@ -102,7 +132,8 @@ internal sealed partial class BodyTranslator
     /// 3. neither contains a <c>return</c>, and they change exactly one local <c>x</c> that <paramref name="k"/> reads:
     ///    <c>let x := combine(x after each branch); k</c>;
     /// 4. neither contains a <c>return</c> or a call of the recursive method being translated, and they change no local
-    ///    <paramref name="k"/> reads: <paramref name="k"/> alone (a skipped call would leave its decrease unchecked);
+    ///    <paramref name="k"/> reads: <paramref name="k"/> alone (a skipped call would leave its decrease unchecked; nor,
+    ///    while a pure body's obligations are stated, implicit arithmetic, which must not overflow even unread, #244);
     /// 5. otherwise a join point over the locals <paramref name="k"/> reads and some branch changes.
     /// Each branch is translated with its <paramref name="hypotheses"/> in scope, when there are any. In a method that can
     /// raise, rules 3 and 4 do not apply: a branch that can raise can be neither dropped nor reduced to a value, so the
@@ -113,9 +144,11 @@ internal sealed partial class BodyTranslator
         IReadOnlyList<IReadOnlyList<Expr>>? hypotheses,
         Func<IReadOnlyList<Expr>, Expr, Expr> combine,
         Env env,
-        Continuation k)
+        Continuation k,
+        IReadOnlyList<IReadOnlyList<Expr>>? facts = null)
     {
-        Expr Branch(int i, Continuation then) => InScope(hypotheses?[i] ?? [], () => Statement(branches[i], env, then));
+        Expr Branch(int i, Continuation then) =>
+            InScope(hypotheses?[i] ?? [], () => WithFacts((facts?[i] ?? []).Select(f => (f, true)), () => Statement(branches[i], env, then)));
 
         int falling = branches.Count(FallsThrough);
         if (falling <= 1)
@@ -131,6 +164,7 @@ internal sealed partial class BodyTranslator
             .Order()
             .ToList();
         bool recurses = _selfKey is { } selfKey && branches.Any(b => Nodes(b).Any(n => n is CallExpr c && string.Equals(c.Target, selfKey, StringComparison.Ordinal)));
+        recurses |= _overflowObligations && branches.Any(b => BodyNodes(b).Any(n => n is VirExpr e && SpecOverflows(e)));
         if (_sigma is not null)
         {
             return JoinPoint(branches, Branch, combine, live, env, k);
@@ -166,7 +200,7 @@ internal sealed partial class BodyTranslator
         {
             inner = inner.Set(live[i], parameters[i]);
         }
-        var body = _lctx.MkLambda(parameters, InScope(parameters, () => k.Invoke(inner)));
+        var body = _lctx.MkLambda(parameters, InScope(parameters, () => WithFacts(parameters.Select(p => (p, false)), () => k.Invoke(inner))));
         var jp = _lctx.MkLetDecl(_ngen, JoinPointName, _lctx.MkPi(parameters, k.ResultType), body);
         var jump = new Jump(jp, live, k.ResultType);
         var unreachable = new Unreachable(k.ResultType);

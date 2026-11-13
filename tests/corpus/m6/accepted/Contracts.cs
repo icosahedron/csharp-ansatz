@@ -78,4 +78,12 @@ public static class Contracts
         Spec.Ensures<int>(r => r == a + b);
         return a + b;
     }
+
+    // Spec.Implies in a Spec.Ensures (#213): x + 1 is evaluated only under x < 1000, which keeps it from overflowing (#183).
+    [Verified]
+    public static int Successor(int x)
+    {
+        Spec.Ensures<int>(r => Spec.Implies(x < 1000, r == x + 1));
+        return x < 1000 ? x + 1 : x;
+    }
 }

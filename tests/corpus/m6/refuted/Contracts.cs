@@ -83,4 +83,12 @@ public static class Contracts
         Spec.Ensures<int>(r => r == a + b);
         return a + b;
     }
+
+    // Spec.Implies in a Spec.Ensures (#213) that is false: for x > 0 the result is x, not more than x.
+    [Verified]
+    public static int Grown(int x)
+    {
+        Spec.Ensures<int>(r => Spec.Implies(x > 0, r > x));
+        return x;
+    }
 }

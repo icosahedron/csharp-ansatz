@@ -34,7 +34,7 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
         Assert.Equal(103, Sidecar.DefEqNames.Count());
         Assert.Equal(401, Sidecar.Matchers.Count());
         Assert.Equal(77, Sidecar.Classes.Count());
-        Assert.Equal(33, Sidecar.SpecEntries.Count);
+        Assert.Equal(41, Sidecar.SpecEntries.Count);
     }
 
     [Fact]
@@ -42,7 +42,7 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
     {
         // M6 KTD15: from Std.Do, the structural rules and the operations of StateT and ExceptT; from the semantics library
         // (M6 U3), ClrM's throw and the raising integer models; the raising nullable reads and Math.Abs (M6 U16);
-        // decimal + and - (M6 U4).
+        // decimal + and - (M6 U4); default-context arithmetic in a body that can raise (#244).
         Assert.Equal(
             [
                 "Std.Do.Spec.pure", "Std.Do.Spec.bind", "Std.Do.Spec.map", "Std.Do.Spec.seq", "Std.Do.Spec.monadLift_ExceptT",
@@ -51,8 +51,10 @@ public sealed class SidecarTests(AttributeSidecarFixture fixture) : IClassFixtur
                 "Warrant.ClrM.throw_spec",
                 "Warrant.Int32.addChecked_spec", "Warrant.Int32.subChecked_spec", "Warrant.Int32.mulChecked_spec", "Warrant.Int32.negChecked_spec",
                 "Warrant.Int32.div_spec", "Warrant.Int32.rem_spec",
+                "Warrant.Int32.addImplicit_spec", "Warrant.Int32.subImplicit_spec", "Warrant.Int32.mulImplicit_spec", "Warrant.Int32.negImplicit_spec",
                 "Warrant.Int64.addChecked_spec", "Warrant.Int64.subChecked_spec", "Warrant.Int64.mulChecked_spec", "Warrant.Int64.negChecked_spec",
                 "Warrant.Int64.div_spec", "Warrant.Int64.rem_spec", "Warrant.Int64.toInt32Checked_spec",
+                "Warrant.Int64.addImplicit_spec", "Warrant.Int64.subImplicit_spec", "Warrant.Int64.mulImplicit_spec", "Warrant.Int64.negImplicit_spec",
                 "Warrant.Nullable.value_spec", "Warrant.Nullable.nonNull_spec", "Warrant.Decimal.add_spec", "Warrant.Decimal.sub_spec",
                 "Warrant.Int32.abs_spec", "Warrant.Int64.abs_spec",
             ],

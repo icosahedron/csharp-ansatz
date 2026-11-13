@@ -108,7 +108,7 @@ public sealed class VerifyTests : IDisposable
         Write("""
             public static class Increments
             {
-                [Verified] public static int Increment(int x) => x + 1;
+                [Verified] public static int Increment(int x) => unchecked(x + 1);
                 [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
             }
             """);
@@ -128,7 +128,7 @@ public sealed class VerifyTests : IDisposable
         Write("""
             public static class Increments
             {
-                [Verified] public static int Increment(int x) => x + 1;
+                [Verified] public static int Increment(int x) => unchecked(x + 1);
                 [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
                 [Theorem] static Proof Mismatch(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("Nat.zero")));
             }
@@ -175,7 +175,7 @@ public sealed class VerifyTests : IDisposable
         Write("""
             public static class C
             {
-                [Verified] public static int Twice(int x) => x + x;
+                [Verified] public static int Twice(int x) => unchecked(x + x);
                 [Theorem] static Proof Outside(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("Cs.C.«Twice(System.Int32)»")));
             }
             """);
@@ -450,9 +450,9 @@ public sealed class VerifyTests : IDisposable
         Write("""
             public static class Increments
             {
-                [Verified] public static int Increment(int x) => x + 1;
+                [Verified] public static int Increment(int x) => unchecked(x + 1);
                 [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
-                [Theorem] static Proof AddsOne(int x) => Prove.That(Increment(x) == x + 1).By(Tactic.Unfold(nameof(Increment)), Tactic.Omega());
+                [Theorem] static Proof AddsOne(int x) => Prove.That(Increment(x) == unchecked(x + 1)).By(Tactic.Unfold(nameof(Increment)), Tactic.Omega());
             }
             """);
         var cache = Path.Combine(project, "obj", "warrant", "cache");
@@ -476,9 +476,9 @@ public sealed class VerifyTests : IDisposable
         const string source = """
             public static class Increments
             {
-                [Verified] public static int Increment(int x) => x + 1;
+                [Verified] public static int Increment(int x) => unchecked(x + 1);
                 [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
-                [Theorem] static Proof AddsOne(int x) => Prove.That(Increment(x) == x + 1).By(Tactic.Unfold(nameof(Increment)), Tactic.Omega());
+                [Theorem] static Proof AddsOne(int x) => Prove.That(Increment(x) == unchecked(x + 1)).By(Tactic.Unfold(nameof(Increment)), Tactic.Omega());
             }
             """;
         var cache = Path.Combine(project, "obj", "warrant", "cache");
@@ -500,9 +500,9 @@ public sealed class VerifyTests : IDisposable
         Write("""
             public static class Increments
             {
-                [Verified] public static int Increment(int x) => x + 1;
+                [Verified] public static int Increment(int x) => unchecked(x + 1);
                 [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
-                [Theorem] static Proof AddsOne(int x) => Prove.That(Increment(x) == x + 1).By(Tactic.Unfold(nameof(Increment)), Tactic.Omega());
+                [Theorem] static Proof AddsOne(int x) => Prove.That(Increment(x) == unchecked(x + 1)).By(Tactic.Unfold(nameof(Increment)), Tactic.Omega());
             }
             """);
         var cache = Path.Combine(project, "obj", "warrant", "cache");

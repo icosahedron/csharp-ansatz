@@ -107,10 +107,11 @@ public sealed class M5bExitTests : IDisposable
             Assert.Equal(before.TacticRuns, after.TacticRuns);
             Assert.Equal(coldCode, warmCode);
             Assert.Equal(Diagnostics(cold), Diagnostics(warm));
-            // The cache holds an entry for every theorem and recursive method (accepted: seven and three; refuted: one and
-            // one; rejected: none), and each is reported from it.
+            // The cache holds an entry for every theorem, recursive method and method with an obligation (accepted: seven,
+            // three, and Increment, whose Spec.Requires bounds its x + 1 since #244; refuted: one and one; rejected: none),
+            // and each is reported from it.
             int entries = Directory.Exists(cache) ? Directory.GetFiles(cache, "*.json").Length : 0;
-            Assert.Equal(compilation switch { "accepted" => 10, "refuted" => 2, _ => 0 }, entries);
+            Assert.Equal(compilation switch { "accepted" => 11, "refuted" => 2, _ => 0 }, entries);
             if (entries > 0)
             {
                 Assert.True(before.TacticRuns > start, "the first verify ran no tactics, so the counter proves nothing");
@@ -147,9 +148,9 @@ public sealed class M5bExitTests : IDisposable
         var proved = UnitLines(recheck).Where(u => u.Outcome.StartsWith("proved", StringComparison.Ordinal)).Select(u => u.Name).ToList();
         Assert.Equal(7, proved.Count);
         Assert.All(proved, name => Assert.Equal("rechecked", timings.Single(t => t.Name == name).Source));
-        // The recursive methods' decrease proofs come from the cache and are checked again too.
+        // The recursive methods' decrease proofs and Increment's contract (#244) come from the cache and are checked again too.
         int rechecked = timings.Count(t => t.Source == "rechecked");
-        Assert.Equal(10, rechecked);
+        Assert.Equal(11, rechecked);
         Assert.Equal(rechecked, after.Rechecked - before.Rechecked);
         Assert.Contains($"{rechecked} rechecked", Summary(recheck), StringComparison.Ordinal);
     });
@@ -236,7 +237,7 @@ public sealed class M5bExitTests : IDisposable
         using var definition = new SourceDirectory("""
             public static class S
             {
-                [Verified] public static int Inc(int x) => x + 1;
+                [Verified] public static int Inc(int x) => unchecked(x + 1);
             }
             """);
         using var recursive = new SourceDirectory("""
@@ -247,7 +248,7 @@ public sealed class M5bExitTests : IDisposable
                 {
                     Spec.Decreases(n);
                     if (n <= 0) return 0;
-                    return n + Sum(n - 1);
+                    return unchecked(n + Sum(n - 1));
                 }
             }
             """);

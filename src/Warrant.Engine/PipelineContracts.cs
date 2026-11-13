@@ -78,6 +78,7 @@ public static partial class Pipeline
             UnitOutcome? Admit(TheoremShell shell, Func<UnitOutcome?> prove) =>
                 CachedProofs is null ? prove() : AdmitCached(unit, shell, display, assumptions, admitted, budget, prove);
 
+            _contractAssumptions = [];
             foreach (var wd in contract.WellDefinedness)
             {
                 if (Admit(wd.Theorem, () => ProveWellDefined(unit, wd, display, assumptions, admitted, budget)) is { } failure)
@@ -85,7 +86,6 @@ public static partial class Pipeline
                     return failure;
                 }
             }
-            _contractAssumptions = [];
             if (Admit(contract.Theorem, () => ProveContract(unit, translated.Name, contract, display, assumptions, admitted, budget)) is { } unproved)
             {
                 return unproved;
@@ -99,18 +99,22 @@ public static partial class Pipeline
 
         /// <summary>
         /// The assumptions the default procedure found the proof relies on (M6 KTD20, U12): each callee contract it used,
-        /// and each explicit throw it could not show unreachable, the method's own or a verified callee's.
+        /// the contract's proof or a well-definedness or no-overflow proof (#247), and each explicit throw it could not
+        /// show unreachable, the method's own or a verified callee's.
         /// </summary>
         private List<UnitAssumption> _contractAssumptions = [];
 
         /// <summary>
         /// The assumptions a walk relied on (KTD20, U12's <see cref="MayThrowSubject"/>): each verified callee's contract,
+        /// whether the walk used it at the call or a leftover assumed a pure callee's <c>$contract_spec</c> (#173, #223),
         /// each explicit throw it did not show unreachable (#92), each throw a verified callee it calls may raise, and an
         /// exception from each dependency member it calls, at the call (M6 U20). The members' contracts themselves are
         /// extraction's <c>ExternalContract</c> assumptions (KTD9), listed whether or not the walk reached the call (#223).
         /// </summary>
         private void Record(EngineUnit unit, VcWalker walker) =>
-            Record(unit, walker.Throws.Select(t => (t.Type, t.Node)), walker.ExternalCalls, walker.Calls);
+            Record(
+                unit, walker.Throws.Select(t => (t.Type, t.Node)), walker.ExternalCalls,
+                walker.Calls.Concat(walker.PureCallees.Select(c => run.KeyOfConstant(c)).OfType<string>().Select(k => (k, (int?)null))));
 
         private void Record(
             EngineUnit unit, IEnumerable<(string Type, int? Node)> throws, IEnumerable<(string Member, int? Node)> externalCalls,
@@ -250,6 +254,11 @@ public static partial class Pipeline
                 TacticFuelUsed = Math.Max(TacticFuelUsed, meta.Budget.FuelUsed);
                 if (!walker.Leftovers.Any(l => l.Kind == VcKind.Unsupported))
                 {
+                    // Readying the leftovers names the pure callees whose contracts they would assume (#173, #223).
+                    foreach (var leftover in walker.Leftovers)
+                    {
+                        walker.Prepare(leftover);
+                    }
                     Record(unit, walker);
                     return;
                 }
@@ -337,9 +346,9 @@ public static partial class Pipeline
 
         /// <summary>
         /// One well-definedness obligation (KTD26): a callee's precondition is a plain proposition, proved as a decrease
-        /// obligation is, by its binders introduced and omega; that a partial operation does not raise is a triple over its
-        /// model, proved by the default procedure (KTD13, KTD14) and reported at the operation. Null when it was admitted,
-        /// else the unit's outcome.
+        /// obligation is, by its binders introduced and omega; that a partial operation does not raise, or that a pure
+        /// body's implicit arithmetic does not overflow (#244), is a triple over its model, proved by the default procedure
+        /// (KTD13, KTD14) and reported at the operation. Null when it was admitted, else the unit's outcome.
         /// </summary>
         private UnitOutcome? ProveWellDefined(
             EngineUnit unit, SpecObligation wd, string display, ImmutableArray<UnitAssumption> assumptions,
@@ -350,11 +359,16 @@ public static partial class Pipeline
             if (wd.Kind != SpecObligationKind.CalleePrecondition)
             {
                 var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = run.Names };
+                var vc = wd.Kind == SpecObligationKind.NoOverflow ? VcKind.ArithmeticOverflow : VcKind.WellDefinedness;
+                int before = _contractAssumptions.Count;
                 var failure = Default(
-                    unit, wd.Theorem, wd.Binders, [], at, () => new VcWalker(meta, Attributes, unit.Unit, VcKind.WellDefinedness, at, null),
+                    unit, wd.Theorem, wd.Binders, [], at, () => new VcWalker(meta, Attributes, unit.Unit, vc, at, null),
                     (walker, g) => walker.WellDefined(g), display, assumptions, admitted, budget, meta, new GoalPrinter(Env, run.Names));
-                // Its walk relies on nothing the method's report lists: the operation is not run.
-                _contractAssumptions.Clear();
+                // The operation is not run, so no throw is reached; but the proof may rest on a pure callee's contract, its
+                // $contract_spec, which the report lists (#247).
+                var recorded = _contractAssumptions.GetRange(before, _contractAssumptions.Count - before);
+                _contractAssumptions.RemoveRange(before, recorded.Count);
+                _contractAssumptions.AddRange(recorded.Where(a => a.Assumption.Kind == VirAssumptionKind.CalleeContract));
                 return failure;
             }
             return Omega(unit, wd.Theorem, wd.Binders, at, "the precondition of a method called in a Spec expression", display, assumptions, admitted, budget);

@@ -401,6 +401,60 @@ public class ContractExtractionTests
         Assert.Equal("WRT0004 | Spec.Ensures whose condition is not a lambda", Only(result, "M:C.F(System.Int32)"));
     }
 
+    /// <summary>#213 (owner, 2026-11-12): <c>Spec.Implies</c> is accepted inside <c>Spec.Requires</c> and <c>Spec.Ensures</c>.</summary>
+    [Fact]
+    public void ImpliesInRequiresAndEnsuresBecomesAnImplication()
+    {
+        var result = Members("""
+                [Verified]
+                public static int F(int x)
+                {
+                    Spec.Requires(Spec.Implies(x > 0, x < 100));
+                    Spec.Ensures<int>(r => Spec.Implies(x > 0, r > 0));
+                    return x;
+                }
+            """);
+
+        Assert.Empty(result.Diagnostics);
+        var body = Assert.IsType<BlockStmt>(Unit(result, "M:C.F(System.Int32)").Body);
+        var zero = new LitExpr(VirType.Int32, 0);
+        var positive = new CompareExpr(CompareOp.Gt, CompareKind.Int, X, zero);
+        Assert.Equal(
+            [
+                new RequiresStmt(new ImpliesExpr(positive, new CompareExpr(CompareOp.Lt, CompareKind.Int, X, new LitExpr(VirType.Int32, 100)))),
+                new EnsuresStmt(0, "r", new ImpliesExpr(positive, new CompareExpr(CompareOp.Gt, CompareKind.Int, new LocalExpr(VirType.Int32, 0), zero))),
+                new ReturnStmt(X),
+            ],
+            body.Stmts);
+        Assert.Equal(
+            [new VirAssumption(VirAssumptionKind.CallerPrecondition, "M:C.F(System.Int32)")],
+            Unit(result, "M:C.F(System.Int32)").Assumptions);
+    }
+
+    /// <summary>#213 accepts <c>Spec.Implies</c> in contracts only: a <c>Spec.Assert</c> and code still reject it.</summary>
+    [Fact]
+    public void ImpliesInAnAssertOrInCodeIsStillMalformed()
+    {
+        var result = Members("""
+                [Verified]
+                public static int InAssert(int x)
+                {
+                    Spec.Assert(Spec.Implies(x > 0, x > -1));
+                    return x;
+                }
+
+                [Verified]
+                public static int InCode(int x)
+                {
+                    Spec.Ensures<int>(r => r == x);
+                    return Spec.Implies(x > 0, x > 1) ? 1 : 0;
+                }
+            """);
+
+        Assert.Equal("WRT0004 | Spec.Implies outside a theorem statement", Only(result, "M:C.InAssert(System.Int32)"));
+        Assert.Equal("WRT0004 | Spec.Implies outside a theorem statement", Only(result, "M:C.InCode(System.Int32)"));
+    }
+
     // ---- KTD11: raise-ability ----
 
     [Fact]

@@ -317,6 +317,61 @@ public class EffectExtractionTests
         Assert.Equal(VirOverflow.Checked, Assert.IsType<BinaryExpr>(increment.Value).Overflow);
     }
 
+    /// <summary>
+    /// The one rule for C# arithmetic (#183, #236, #244): explicit <c>unchecked</c> wraps on purpose, so its node is
+    /// <c>unchecked</c>, apart from the implicit default, <c>wrap</c>, which must not overflow.
+    /// </summary>
+    [Fact]
+    public void ExplicitUncheckedArithmeticIsUncheckedNotTheDefault()
+    {
+        Assert.Equal(
+            new BinaryExpr(VirType.Int32, BinaryOp.Add, VirOverflow.Unchecked, A, B),
+            Body("[Verified] public static int F(int a, int b) => unchecked(a + b);", "M:C.F(System.Int32,System.Int32)"));
+        Assert.Equal(
+            new BinaryExpr(VirType.Int32, BinaryOp.Add, VirOverflow.Wrap, A, B),
+            Body("[Verified] public static int F(int a, int b) => a + b;", "M:C.F(System.Int32,System.Int32)"));
+        Assert.Equal(
+            new UnaryExpr(VirType.Int64, UnaryOp.Neg, VirOverflow.Unchecked, new ParamExpr(VirType.Int64, 0)),
+            Body("[Verified] public static long F(long a) => unchecked(-a);", "M:C.F(System.Int64)"));
+        Assert.Equal(
+            new ConvertExpr(VirType.Int64, VirType.Int32, VirOverflow.Unchecked, new ParamExpr(VirType.Int64, 0)),
+            Body("[Verified] public static int F(long l) => unchecked((int)l);", "M:C.F(System.Int64)"));
+        // `/` throws whatever the context (KTD6): its node keeps one meaning.
+        Assert.Equal(
+            new BinaryExpr(VirType.Int32, BinaryOp.Div, VirOverflow.Wrap, A, B),
+            Body("[Verified] public static int F(int a, int b) => unchecked(a / b);", "M:C.F(System.Int32,System.Int32)"));
+    }
+
+    [Fact]
+    public void TheNearestCheckedOrUncheckedDecides()
+    {
+        // unchecked inside checked wraps; checked inside unchecked raises; a checked project's unchecked block wraps.
+        Assert.Equal(
+            new BinaryExpr(VirType.Int32, BinaryOp.Mul, VirOverflow.Unchecked, A, B),
+            Body("[Verified] public static int F(int a, int b) => checked(unchecked(a * b));", "M:C.F(System.Int32,System.Int32)"));
+        Assert.Equal(
+            new BinaryExpr(VirType.Int32, BinaryOp.Mul, VirOverflow.Checked, A, B),
+            Body("[Verified] public static int F(int a, int b) => unchecked(checked(a * b));", "M:C.F(System.Int32,System.Int32)"));
+        Assert.Equal(
+            new BinaryExpr(VirType.Int32, BinaryOp.Sub, VirOverflow.Unchecked, A, B),
+            Body("[Verified] public static int F(int a, int b) => unchecked(a - b);", "M:C.F(System.Int32,System.Int32)", checkOverflow: true));
+        var block = Assert.IsType<BlockStmt>(Body("""
+            [Verified]
+            public static int F(int a, int b)
+            {
+                var x = a;
+                unchecked
+                {
+                    x += b;
+                    x++;
+                }
+                return x;
+            }
+            """, "M:C.F(System.Int32,System.Int32)", checkOverflow: true));
+        var inner = Assert.IsType<BlockStmt>(block.Stmts[1]);
+        Assert.All(inner.Stmts, s => Assert.Equal(VirOverflow.Unchecked, Assert.IsType<BinaryExpr>(Assert.IsType<AssignStmt>(s).Value).Overflow));
+    }
+
     [Theory]
     [InlineData("x / x <= 1", "division")]
     [InlineData("x % -1 == 0", "remainder")]

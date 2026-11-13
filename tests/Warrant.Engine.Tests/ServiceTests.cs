@@ -26,12 +26,12 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
     private const string Lemmas = """
         public static class S
         {
-            [Verified] public static int Twice(int x) => x + x;
+            [Verified] public static int Twice(int x) => unchecked(x + x);
 
             [Theorem]
-            static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+            static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
 
-            [Theorem] static Proof User(int a) => Prove.That(Twice(a) == a + a).By(Tactic.Apply(nameof(Lemma)));
+            [Theorem] static Proof User(int a) => Prove.That(Twice(a) == unchecked(a + a)).By(Tactic.Apply(nameof(Lemma)));
         }
         """;
 
@@ -53,12 +53,12 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
     [Fact]
     public void SixteenIndependentTheoremsComeBackInRequestOrderTheSameEveryTime()
     {
-        var source = new StringBuilder("public static class S\n{\n    [Verified] public static int Inc(int x) => x + 1;\n");
+        var source = new StringBuilder("public static class S\n{\n    [Verified] public static int Inc(int x) => unchecked(x + 1);\n");
         for (int i = 0; i < 16; i++)
         {
             // Even theorems are proved; odd ones are not, with the counterexample x = 2147483647.
             source.Append(i % 2 == 0
-                ? string.Create(CultureInfo.InvariantCulture, $"    [Theorem] static Proof T{i:00}(int x) => Prove.That(Inc(x) + {i} == x + 1 + {i}).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());\n")
+                ? string.Create(CultureInfo.InvariantCulture, $"    [Theorem] static Proof T{i:00}(int x) => Prove.That(unchecked(Inc(x) + {i} == x + 1 + {i})).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());\n")
                 : string.Create(CultureInfo.InvariantCulture, $"    [Theorem] static Proof T{i:00}(int x) => Prove.That(Inc(x) > x).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());\n"));
         }
         source.Append('}');
@@ -141,7 +141,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
         var inputs = EngineCorpus.Inputs(EngineCorpus.Inline("""
             public static class S
             {
-                [Verified] public static int Inc(int x) => x + 1;
+                [Verified] public static int Inc(int x) => unchecked(x + 1);
                 [Theorem] static Proof One() => Prove.That(Inc(0) == 1);
                 [Theorem] static Proof Two() => Prove.That(Inc(1) == 2);
             }
@@ -170,7 +170,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
         Assert.Equal(OutcomeKind.Proved, proved["M:S.Lemma"].Kind);
         Assert.Equal(OutcomeKind.Proved, proved["M:S.User(System.Int32)"].Kind);
 
-        var failed = Verify(Lemmas.Replace("Twice(x) == x + x", "Twice(x) == x + x + 1", StringComparison.Ordinal)
+        var failed = Verify(Lemmas.Replace("Twice(x) == unchecked(x + x)", "Twice(x) == unchecked(x + x) + 1", StringComparison.Ordinal)
             .Replace("Tactic.Exact(Lean.Const(\"rfl\"))", "Tactic.Omega()", StringComparison.Ordinal));
         Assert.Equal(OutcomeKind.NotProved, failed["M:S.Lemma"].Kind);
         var user = failed["M:S.User(System.Int32)"];
@@ -185,14 +185,14 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
         const string source = """
             public static class S
             {
-                [Verified] public static int Twice(int x) => x + x;
+                [Verified] public static int Twice(int x) => unchecked(x + x);
 
                 [Theorem]
-                static Proof First() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+                static Proof First() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
 
-                [Theorem] static Proof Second() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Exact(nameof(First)));
+                [Theorem] static Proof Second() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Exact(nameof(First)));
 
-                [Theorem] static Proof Third() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Exact(nameof(Second)));
+                [Theorem] static Proof Third() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Exact(nameof(Second)));
             }
             """;
         // Requested last first: each theorem still runs after the one it names.
@@ -218,7 +218,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
             source.Append(CultureInfo.InvariantCulture, $"    [Theorem(TimeoutSeconds = 1)] static Proof Busy{i}() => Prove.That(A24({i}) > 0);\n");
         }
         source.Append("""
-                [Verified] public static int Increment(int x) => x + 1;
+                [Verified] public static int Increment(int x) => unchecked(x + 1);
                 [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x).By(Tactic.Unfold(nameof(Increment)), Tactic.Omega());
             }
             """);
@@ -243,7 +243,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
                 {
                     Spec.Decreases(n);
                     if (n <= 0) return 0;
-                    return n + Sum(n - 1);
+                    return unchecked(n + Sum(n - 1));
                 }
 
                 [Theorem] static Proof Outside(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("Cs.S.«Sum(System.Int32)».$eq_def")));
@@ -273,12 +273,12 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
         var outcomes = Verify("""
             public static class S
             {
-                [Verified] public static int Twice(int x) => x + x;
+                [Verified] public static int Twice(int x) => unchecked(x + x);
 
                 [Theorem]
-                static Proof ViaConst() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
+                static Proof ViaConst() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
 
-                [Theorem] static Proof User() => Prove.That(Spec.ForAll<int>(x => Twice(x) == x + x)).By(Tactic.Exact(Lean.Const("Cs.S.ViaConst")));
+                [Theorem] static Proof User() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Exact(Lean.Const("Cs.S.ViaConst")));
             }
             """);
         Assert.Equal(OutcomeKind.Proved, outcomes["M:S.ViaConst"].Kind);
@@ -320,7 +320,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
         var outcomes = Verify("""
             public static class S
             {
-                [Verified] public static int Twice(int x) => x + x;
+                [Verified] public static int Twice(int x) => unchecked(x + x);
 
                 [Theorem] static Proof Malformed(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("a..b")));
 
@@ -340,7 +340,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
         // The script fails at once (no hypothesis h); then each of the 343 combinations runs A20 in the kernel until its
         // million steps run out, far longer than the two seconds before the cancel.
         var source = Chain(20) + """
-                [Theorem] static Proof Search(int a, int b, int c) => Prove.That(A20(a) + b + c > a).By(Tactic.Exact("h"));
+                [Theorem] static Proof Search(int a, int b, int c) => Prove.That(unchecked(A20(a) + b + c) > a).By(Tactic.Exact("h"));
             }
             """;
         var inputs = EngineCorpus.Inputs(EngineCorpus.Inline(source));
@@ -382,7 +382,7 @@ public sealed class ServiceTests(EngineFixture engine, ServiceFixture fixture) :
     /// <summary><c>A0(x) = x + 1</c> and <c>A{k}(x) = A{k-1}(A{k-1}(x))</c>, which adds 2^k, in an open class <c>S</c>.</summary>
     private static string Chain(int depth)
     {
-        var source = new StringBuilder("public static class S\n{\n    [Verified] public static int A0(int x) => x + 1;\n");
+        var source = new StringBuilder("public static class S\n{\n    [Verified] public static int A0(int x) => unchecked(x + 1);\n");
         for (int k = 1; k <= depth; k++)
         {
             source.Append(CultureInfo.InvariantCulture, $"    [Verified] public static int A{k}(int x) => A{k - 1}(A{k - 1}(x));\n");

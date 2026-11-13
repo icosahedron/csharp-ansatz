@@ -98,7 +98,8 @@ Warrant: 53 verified units, 0 theorems proved, 0 not proved.
 ```
 
 A method's line says `translated` when its definition and its contract obligation are admitted: the CLI's words for
-proof outcomes name theorems only, and the summary counts theorems only (#225, chapter 8).
+proof outcomes name theorems only, and the summary's proved and not-proved figures count theorems; a method whose
+contract fails is counted after them, as `; n other units not verified` (#225, chapter 8).
 The report says what the proof rests on (`tests/corpus/m6/ProcessPayment.report.txt`, chapter 8):
 
 ```text
@@ -152,8 +153,8 @@ false one pass.
 | #216 | Theorems over `decimal` `Math.Max`/`Min` with parameters do not prove: nothing splits the `if` (chapter 3). |
 | #217 | `simp` does not compute a `decimal` literal's `units`, so `omega` cannot use it (chapter 3). |
 | #218 | A record with a nullable field fails translation (chapter 5). |
-| #220 | `warrant translate` passes no attribute sidecar, so it cannot prove contracts (chapter 7). |
-| #225 | The CLI summary counts only theorems as "not proved" (chapter 8). |
+| #220 | `warrant translate` passes no attribute sidecar, so it cannot prove contracts (chapter 7). Fixed after M6: it loads the sidecar as `verify` does. |
+| #225 | The CLI summary counts only theorems as "not proved" (chapter 8). Fixed after M6: other units not verified are counted. |
 
 Decided after M6's exit (owner, 2026-11-11):
 
@@ -161,12 +162,13 @@ Decided after M6's exit (owner, 2026-11-11):
 - #181: a property relating two calls of a method that can raise is stated as the `Spec.Ensures` of a verified method that makes both calls ([proofs that work](../proving/proofs-that-work.md)).
 - #182: `Spec.NoThrow()` proves that no explicit `throw` is reachable under the `Spec.Requires` (chapter 6).
 - #183: arithmetic in a `Spec` expression must not overflow; specs keep `int` and `long` and get no unbounded integer (chapter 6).
+- #213 (2026-11-12): `Spec.Implies` is accepted inside `Spec.Requires` and `Spec.Ensures`, and its premise guards the obligations of its conclusion (chapters 4 and 6).
+- 2026-11-12, one rule for C# arithmetic wherever Warrant proves something: default-context `int`/`long` `+ - *` and unary `-` must not overflow, explicit `unchecked` wraps with no obligation (VIR `unchecked`, chapter 4), `checked` raises. Built for theorem statements (#236), `Spec.Assert` conditions (#235) and verified method bodies (#244): a pure body's arithmetic gets closed obligations under the path to it, and in a body that can raise each operation is a site of the program that the VC walker proves with all it knows (chapters 5 to 7).
 
 Decisions that are the owner's, still open:
 
 | Ticket | Question |
 |---|---|
-| #213 | `Spec.Implies` inside `Spec.Requires` and `Spec.Ensures` (still WRT0004 there; chapter 4). |
 | #219 | A caller of a method whose contract is not proved is skipped, even when it needs only the definition (chapter 6). |
 | #221 | After a failed `Spec.Assert`, later VCs are proved from the asserted fact (chapter 7). |
 | #224 | A `[ProofFor]` script aimed at a false `Ensures` fails where the script fails, not at the `Ensures` line (chapter 7). |

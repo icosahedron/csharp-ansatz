@@ -43,8 +43,11 @@ public enum BudgetMatch
 public sealed record CacheEntry(
     int Format, string Toolchain, string Key, CacheKeyInputs Inputs, BudgetMatch Match, VerifyBudgets Budgets, OutcomeDto Outcome, string Certificate)
 {
-    /// <summary>The entry format this code writes and reads; a change invalidates every entry.</summary>
-    public const int FormatVersion = 1;
+    /// <summary>
+    /// The entry format this code writes and reads; a change invalidates every entry. 2 (#236): a proved theorem's
+    /// certificate holds its statement's well-definedness theorems before the theorem.
+    /// </summary>
+    public const int FormatVersion = 2;
 
     /// <summary>Whether the entry applies to a run of its unit with the given effective budgets.</summary>
     /// <param name="budgets">The unit's effective budgets now.</param>

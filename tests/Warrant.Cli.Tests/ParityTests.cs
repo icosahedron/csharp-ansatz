@@ -22,7 +22,7 @@ public sealed class ParityTests : IDisposable
     private readonly CscArgsProject project = new("""
         public static class Increments
         {
-            [Verified] public static int Increment(int x) => x + 1;
+            [Verified] public static int Increment(int x) => unchecked(x + 1);
             [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
             [Theorem] static Proof Mismatch(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("Nat.zero")));
             [Theorem] static Proof Two() => Prove.That(Increment(1) == 2);
@@ -55,7 +55,8 @@ public sealed class ParityTests : IDisposable
                 var (localCode, localOutput) = server.Verify([.. args, "--server", "off"], inProcess: inProcess);
 
                 Assert.DoesNotContain("verification server unavailable", serverOutput, StringComparison.Ordinal);
-                Assert.Contains("not proved. [server]", serverOutput, StringComparison.Ordinal);
+                // #225: a run with methods that were not verified counts them after the theorems.
+                Assert.Matches(@"not proved(; \d+ other units not verified)?\. \[server\]", serverOutput);
                 Assert.Equal(localCode, serverCode);
                 Assert.True(Comparable(localOutput) == Comparable(serverOutput), $"run {run}, {input}:\n--- in-process\n{localOutput}\n--- server\n{serverOutput}");
             }

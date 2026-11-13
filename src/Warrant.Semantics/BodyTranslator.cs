@@ -52,6 +52,13 @@ internal sealed partial class BodyTranslator
     {
         var binders = Binders(unit);
         var returns = ReturnType(unit);
+        if (_overflowObligations)
+        {
+            // #244: the body is translated once more, as the definition is, for the obligations its arithmetic records.
+            _assertSpecUnit = unit;
+            _spec = _assertSpec = new SpecState(
+                unit, _lctx.MkLocalDecl(_ngen, Name.From("σ"), Expr.Type), binders, _assertFirst, () => [.. _facts!], SpecObligationKind.NoOverflow);
+        }
         Expr body;
         switch (unit.Body)
         {
@@ -60,7 +67,13 @@ internal sealed partial class BodyTranslator
                 body = Statements(block.Stmts, 0, Env.Empty, End(unit, returns));
                 break;
             case VirExpr e when ReturnsNothing(unit) && e.Type != VirType.Unit:
-                // `=> F(x)` in a method that returns no value and cannot raise: nothing to run for its effects.
+                // `=> F(x)` in a method that returns no value and cannot raise: nothing to run for its effects, though its
+                // arithmetic still must not overflow (#244).
+                if (_overflowObligations)
+                {
+                    CollectLocals(e);
+                    Value(e, Env.Empty);
+                }
                 body = Init.UnitUnit;
                 break;
             case VirExpr e:
@@ -111,19 +124,45 @@ internal sealed partial class BodyTranslator
     /// </summary>
     public (Condition Statement, Condition? Claim) StatementAndClaim(VirUnit unit)
     {
+        var (statement, claim, _) = TheoremStatement(unit);
+        return (statement, claim);
+    }
+
+    /// <summary>
+    /// A theorem's statement and claim, as <see cref="StatementAndClaim(VirUnit)"/>, and the well-definedness obligations
+    /// of its statement (#236): the statement is translated as a <c>Spec</c> expression is, so <c>+</c>, <c>-</c>,
+    /// <c>*</c> and unary <c>-</c> on <c>int</c> and <c>long</c> in C#'s default context must not overflow, under the
+    /// guards of <c>&amp;&amp;</c>, <c>||</c>, <c>?:</c>, <c>??</c> and <c>Spec.Implies</c> and for every value of a
+    /// <c>Spec.ForAll</c> or <c>Spec.Exists</c> variable, and a call to a pure method with <c>Spec.Requires</c> must be
+    /// within it. Each is <c>T.$wd_k</c>, over a world <c>σ</c> and the theorem's parameters, as a contract's are.
+    /// Explicit <c>unchecked</c> arithmetic wraps with none. The statement itself is the same term as without them.
+    /// </summary>
+    public (Condition Statement, Condition? Claim, ImmutableArray<SpecObligation> WellDefinedness) TheoremStatement(VirUnit unit)
+    {
         var statement = unit.Statement ?? throw new TranslationException(unit.Key, "a theorem has no statement.");
+        var sigma = _lctx.MkLocalDecl(_ngen, Name.From("σ"), Expr.Type);
         foreach (var p in unit.Params ?? VirList<VirParam>.Empty)
         {
             _params.Add(_lctx.MkLocalDecl(_ngen, Name.From(p.Name), _types.Cic(p.Type)));
         }
         _quantified = _params.Count > 0 || Nodes(statement).Any(n => n is ForAllExpr or ExistsExpr);
-        var claim = Cond(statement, Env.Empty);
+        var spec = _spec = new SpecState(unit, sigma, _params);
+        Condition claim;
+        try
+        {
+            claim = Cond(statement, Env.Empty);
+        }
+        finally
+        {
+            _spec = null;
+        }
+        ImmutableArray<SpecObligation> wellDefinedness = [.. spec.WellDefinedness];
         if (_params.Count == 0)
         {
-            return (claim, null);
+            return (claim, null, wellDefinedness);
         }
         var decidable = claim.Instance is { } instance ? new Condition(_lctx.MkLambda(_params, claim.Prop), _lctx.MkLambda(_params, instance)) : null;
-        return (new Condition(_lctx.MkPi(_params, claim.Prop), null), decidable);
+        return (new Condition(_lctx.MkPi(_params, claim.Prop), null), decidable, wellDefinedness);
     }
 
     // ---- Values ----
@@ -341,14 +380,14 @@ internal sealed partial class BodyTranslator
     private Condition ForAll(ForAllExpr f, Env env)
     {
         var x = _lctx.MkLocalDecl(_ngen, Name.From(f.Name), _types.Cic(f.Domain));
-        return new Condition(_lctx.MkPi([x], Cond(f.Body, env.Set(f.Local, x)).Prop), null);
+        return new Condition(_lctx.MkPi([x], InBound(x, () => Cond(f.Body, env.Set(f.Local, x))).Prop), null);
     }
 
     /// <summary><c>Spec.Exists&lt;T&gt;(x =&gt; p)</c>: <c>@Exists T (fun (x : T) =&gt; P)</c>, with no instance (M5a KTD17).</summary>
     private Condition Exists(ExistsExpr e, Env env)
     {
         var x = _lctx.MkLocalDecl(_ngen, Name.From(e.Name), _types.Cic(e.Domain));
-        var body = _lctx.MkLambda([x], Cond(e.Body, env.Set(e.Local, x)).Prop);
+        var body = _lctx.MkLambda([x], InBound(x, () => Cond(e.Body, env.Set(e.Local, x))).Prop);
         return new Condition(Expr.App(Init.Exists, _types.Cic(e.Domain), body), null);
     }
 
@@ -408,10 +447,13 @@ internal sealed partial class BodyTranslator
 
     // ---- Helpers ----
 
-    /// <summary>Checks that arithmetic wraps; checked arithmetic that can overflow needs exceptions (M6).</summary>
+    /// <summary>
+    /// Checks that arithmetic wraps, in the default context or in an explicit <c>unchecked</c> one, whose values are the
+    /// same (#236); checked arithmetic that can overflow needs exceptions (M6).
+    /// </summary>
     private static void RequireWrap(VirOverflow overflow)
     {
-        if (overflow != VirOverflow.Wrap)
+        if (overflow is not (VirOverflow.Wrap or VirOverflow.Unchecked))
         {
             throw new TranslationException(null, "checked arithmetic needs exceptions.");
         }

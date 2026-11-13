@@ -35,9 +35,17 @@ Lean elaborates them, so the walker (chapter 7) meets the terms Lean would produ
 - **Short circuits.** `&&` and `||` bind their right operand only when it is evaluated; `&` and `|` bind both.
 - **Raising operations** map to chapter 2's models: checked `+ - *` and negation, `/`, `%`, checked narrowing
   (`toInt32Checked`) and `Math.Abs` on `int` and `long`; `decimal` `+` and `-` to chapter 3's.
+- **Default-context `+ - *` and negation** on `int` and `long` (VIR `wrap`) are sites too (#244):
+  `Warrant.Int32.addImplicit σ a b` and likewise (`lean/Warrant/Checked.lean`), which is `pure (a + b)` where the exact
+  result is in range and `ClrM.throw .assertFailed` where the CLR would wrap. So the method's obligation requires them
+  not to overflow, and the walker proves it with all it knows (chapter 6). The model agrees with the CLR wherever it
+  returns, and differs from it only on a path where such an operation would wrap, which the obligation excludes, as for
+  a `Spec.Assert`. Explicit `unchecked` arithmetic stays Lean's wrapping operation, a pure value.
 - **`throw new T(...)`** is `ClrM.throw (ClrExn.thrown "T:…")`, carrying the thrown type's key. The exception's
   arguments are not modelled; extraction only allows constants and parameters there, so evaluating them cannot fail.
 - **`Spec.Assert(c)`** is a check node, `(if c then pure () else ClrM.throw .assertFailed) >>= fun _ => rest` (KTD16).
+  Its condition's arithmetic wraps here as in C# and is not a site; that it must not overflow is a separate obligation
+  (#235, chapter 6).
   The model differs from C# only on a path where the assertion fails, which the method's obligation excludes.
 - **Branches.** `if` and `?:` keep their join points. A raising `switch` discriminant is bound; a pure discriminant
   that is not a variable is let-bound.

@@ -95,7 +95,7 @@ practical advantages:
   spec, and a typo is a compile error, not a verifier error.
 - `&&`, `==` and `!` already mean what you'd expect. Warrant reinterprets
   them as logic only inside specs.
-- The ones that return nothing (`Spec.Requires`, `Spec.Ensures`, `Spec.Assert`) are `[Conditional]`, so they don't exist in the compiled program. C# allows `[Conditional]` only on `void` methods, so value-returning helpers such as `Spec.Implies` and `Prove.That` stay in the IL; they are valid only inside theorem statements.
+- The ones that return nothing (`Spec.Requires`, `Spec.Ensures`, `Spec.Assert`) are `[Conditional]`, so they don't exist in the compiled program. C# allows `[Conditional]` only on `void` methods, so value-returning helpers such as `Spec.Implies` and `Prove.That` stay in the IL; they are valid only inside theorem statements, and `Spec.Implies` inside `Spec.Requires` and `Spec.Ensures` too.
 
 The cost is that C# attribute arguments must be constants, so specs can't live
 in attributes. They sit at the top of method bodies, in the Code Contracts

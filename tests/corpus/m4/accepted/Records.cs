@@ -16,13 +16,23 @@ public sealed record Claim(int Number, Payment Payment, Outcome Outcome);
 public static class Records
 {
     [Verified]
-    public static Point Move(Point p, int dx) => p with { X = p.X + dx };
+    public static Point Move(Point p, int dx)
+    {
+        // p.X + dx must not overflow (#244).
+        Spec.Requires(p.X > -1000000 && p.X < 1000000 && dx > -1000000 && dx < 1000000);
+        return p with { X = p.X + dx };
+    }
 
     [Verified]
     public static bool SamePlace(Point a, Point b) => a == b;
 
     [Verified]
-    public static int Distance(Point p) => (p.X < 0 ? -p.X : p.X) + (p.Y < 0 ? -p.Y : p.Y);
+    public static int Distance(Point p)
+    {
+        // Neither -p.X nor the sum may overflow (#244).
+        Spec.Requires(p.X > -1000000 && p.X < 1000000 && p.Y > -1000000 && p.Y < 1000000);
+        return (p.X < 0 ? -p.X : p.X) + (p.Y < 0 ? -p.Y : p.Y);
+    }
 
     // A record field of record type and one of closed-class type: both are assumed non-null.
     [Verified]

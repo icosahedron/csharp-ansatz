@@ -36,6 +36,13 @@ VIR goes to version 3, additively (KTD19, U6): new types (`decimal`, `unit`, `nu
 96-bit mantissa and scale, `NullExpr`, `IsNullExpr`, `UnwrapExpr` with a value or non-null kind, `CoalesceExpr`,
 `ThrowExpr`, `AwaitExpr`, `ExternalCallExpr`, `ModelledCallExpr`), statements (`throw`, `eval`, `requires`, `nothrow`
 (#182), `ensures`, `assert`), a function's optional dependencies, a contract unit kind and four assumption kinds.
+Before version 3 was released, the follow-ups to M6 added one more form to it rather than a version 4: the overflow
+value `unchecked` (#236), on `+`, `-`, `*`, unary `-` and `long` to `int` narrowing inside an explicit `unchecked(...)`
+expression or `unchecked { }` block, the nearest such context deciding (an `unchecked` inside a `checked` wraps, and the
+reverse raises).
+`wrap` is now only C#'s default context, which must not overflow where Warrant proves something (#183, #236; method
+bodies are #244); `unchecked` wraps on purpose, with no obligation; a unit's `facts` stay `wrap` or `checked`, and a
+reader rejects `unchecked` there.
 A unit that uses no version-3 form encodes as in version 2 apart from its `vir` field, which every unit's bytes contain,
 so every unit and closure hash changed once and every M5b cache entry was invalidated, as U1's new bundle hash did
 anyway.
@@ -82,7 +89,9 @@ theorem nor a `Spec.Ensures` can state it; whether M6 should offer a route is th
 - `/` and `%` on `int` and `long`, including `/=` and `%=`. They throw in any context, so they always carry `wrap`
   rather than `checked` (KTD6).
 - Checked arithmetic, from `checked(...)` or a `CheckForOverflowUnderflow` project: `+`, `-`, `*`, unary `-`, `++`/`--`
-  and `long` to `int` narrowing; widening still wraps.
+  and `long` to `int` narrowing; widening still wraps. The same operations inside an explicit `unchecked(...)` or
+  `unchecked { }` carry `unchecked` (#236), whatever the project's setting; elsewhere they carry the project's default,
+  `wrap` or `checked`.
 - `throw new T(...)` as a statement, a throw expression or a whole expression body, when every argument is a constant
   or a parameter and `T` is a `System` exception or a plain subclass of one. A user exception type is checked strictly:
   a non-constant field or property initialiser, a static constructor, a primary constructor, or a base that is not a
@@ -131,9 +140,10 @@ them, so a problem with the `[ProofFor]` method itself is reported on it: no suc
 `nameof` cannot tell apart), an `M` that is not verified, another signature or body, and a second `[ProofFor]` for
 `M`, which names the first.
 
-`Spec.Implies` is still accepted only in theorem statements: inside a `Spec.Requires` or `Spec.Ensures` it is WRT0004,
-although translation already handles it as a guard. Whether M6 should accept it there is the owner's open decision #213;
-until then write `!a || b`.
+`Spec.Implies` is accepted in theorem statements and, since the owner's decision on #213 (2026-11-12), inside a
+`Spec.Requires` or `Spec.Ensures` condition, where it becomes an `ImpliesExpr` as in a theorem statement and translation
+treats its premise as a guard of its conclusion (chapter 6). Anywhere else, `Spec.Assert` included, it is still WRT0004
+(`Spec.Implies outside a theorem statement`).
 
 ## Dependencies, contract classes and `async` (U18)
 

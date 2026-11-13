@@ -14,7 +14,8 @@ splits. They hold without side conditions, so the omega-prep set (docs/m5a/06) r
 
 None of these carries `@[simp]`; every name is a bundle root (`lean/bundle-roots.txt`).
 
-The second half of the file is the models of C#'s raising integer operations in `ClrM` (M6 U3, KTD4, KTD6), below.
+The second half of the file is the models of C#'s raising integer operations in `ClrM` (M6 U3, KTD4, KTD6), below,
+and of default-context arithmetic in a verified method that can raise, which must not overflow (#244).
 -/
 namespace Warrant
 
@@ -208,6 +209,90 @@ def rem {σ : Type} (a b : _root_.Int32) : ClrM σ _root_.Int32 :=
     · exact h.2.1 ‹_› ‹_›
     · exact h.2.2 ‹_› ‹_›
 
+/-! C#'s default-context `+`, `-`, `*` and unary `-` on `int` in a verified method that can raise (#244). The CLR
+wraps on overflow; Warrant requires that a verified method's own arithmetic never does unless it is written `unchecked`.
+So each model fails, as a `Spec.Assert` does (`assertFailed`, which no contract allows), where the exact result is out
+of range, and otherwise is Lean's wrapping operation, which is then the exact result. Its `@[spec]` lemma says so, so
+the goals after it read the value as a sum, difference or product rather than through `Int.bmod`, whose case split
+`omega` cannot always close. The differential harness skips an input where the model fails a `Spec.Assert` (#186), so
+it compares every input where no such operation overflows. -/
+
+/-- `a + b` is exact where it does not overflow. -/
+theorem toInt_add_of_range {a b : _root_.Int32} (h : ¬(a.toInt + b.toInt < -2147483648 ∨ 2147483647 < a.toInt + b.toInt)) : (a + b).toInt = a.toInt + b.toInt := by
+  rw [_root_.Int32.toInt_add]
+  exact Int.bmod_eq_of_le (by omega) (by omega)
+
+/-- C#'s default-context `a + b` on `int` (#244): `assertFailed` when the exact result is out of range. -/
+def addImplicit {σ : Type} (a b : _root_.Int32) : ClrM σ _root_.Int32 :=
+  if a.toInt + b.toInt < -2147483648 ∨ 2147483647 < a.toInt + b.toInt then ClrM.throw .assertFailed else pure (a + b)
+
+@[spec] theorem addImplicit_spec {σ : Type} (a b : _root_.Int32) {Q : PostCond _root_.Int32 (.except ClrExn (.arg σ .pure))} :
+    Triple (addImplicit a b)
+      (fun s => ⟨(a.toInt + b.toInt < -2147483648 ∨ 2147483647 < a.toInt + b.toInt → (Q.2.1 .assertFailed s).down) ∧
+        (¬(a.toInt + b.toInt < -2147483648 ∨ 2147483647 < a.toInt + b.toInt) → (a + b).toInt = a.toInt + b.toInt → (Q.1 (a + b) s).down)⟩) Q := by
+  intro s h
+  unfold addImplicit
+  split
+  · exact h.1 ‹_›
+  · exact h.2 ‹_› (toInt_add_of_range ‹_›)
+
+/-- `a - b` is exact where it does not overflow. -/
+theorem toInt_sub_of_range {a b : _root_.Int32} (h : ¬(a.toInt - b.toInt < -2147483648 ∨ 2147483647 < a.toInt - b.toInt)) : (a - b).toInt = a.toInt - b.toInt := by
+  rw [_root_.Int32.toInt_sub]
+  exact Int.bmod_eq_of_le (by omega) (by omega)
+
+/-- C#'s default-context `a - b` on `int` (#244): `assertFailed` when the exact result is out of range. -/
+def subImplicit {σ : Type} (a b : _root_.Int32) : ClrM σ _root_.Int32 :=
+  if a.toInt - b.toInt < -2147483648 ∨ 2147483647 < a.toInt - b.toInt then ClrM.throw .assertFailed else pure (a - b)
+
+@[spec] theorem subImplicit_spec {σ : Type} (a b : _root_.Int32) {Q : PostCond _root_.Int32 (.except ClrExn (.arg σ .pure))} :
+    Triple (subImplicit a b)
+      (fun s => ⟨(a.toInt - b.toInt < -2147483648 ∨ 2147483647 < a.toInt - b.toInt → (Q.2.1 .assertFailed s).down) ∧
+        (¬(a.toInt - b.toInt < -2147483648 ∨ 2147483647 < a.toInt - b.toInt) → (a - b).toInt = a.toInt - b.toInt → (Q.1 (a - b) s).down)⟩) Q := by
+  intro s h
+  unfold subImplicit
+  split
+  · exact h.1 ‹_›
+  · exact h.2 ‹_› (toInt_sub_of_range ‹_›)
+
+/-- `a * b` is exact where it does not overflow. -/
+theorem toInt_mul_of_range {a b : _root_.Int32} (h : ¬(a.toInt * b.toInt < -2147483648 ∨ 2147483647 < a.toInt * b.toInt)) : (a * b).toInt = a.toInt * b.toInt := by
+  rw [_root_.Int32.toInt_mul]
+  exact Int.bmod_eq_of_le (by omega) (by omega)
+
+/-- C#'s default-context `a * b` on `int` (#244): `assertFailed` when the exact result is out of range. -/
+def mulImplicit {σ : Type} (a b : _root_.Int32) : ClrM σ _root_.Int32 :=
+  if a.toInt * b.toInt < -2147483648 ∨ 2147483647 < a.toInt * b.toInt then ClrM.throw .assertFailed else pure (a * b)
+
+@[spec] theorem mulImplicit_spec {σ : Type} (a b : _root_.Int32) {Q : PostCond _root_.Int32 (.except ClrExn (.arg σ .pure))} :
+    Triple (mulImplicit a b)
+      (fun s => ⟨(a.toInt * b.toInt < -2147483648 ∨ 2147483647 < a.toInt * b.toInt → (Q.2.1 .assertFailed s).down) ∧
+        (¬(a.toInt * b.toInt < -2147483648 ∨ 2147483647 < a.toInt * b.toInt) → (a * b).toInt = a.toInt * b.toInt → (Q.1 (a * b) s).down)⟩) Q := by
+  intro s h
+  unfold mulImplicit
+  split
+  · exact h.1 ‹_›
+  · exact h.2 ‹_› (toInt_mul_of_range ‹_›)
+
+/-- `-a` is exact where it does not overflow. -/
+theorem toInt_neg_of_range {a : _root_.Int32} (h : ¬(-a.toInt < -2147483648 ∨ 2147483647 < -a.toInt)) : (-a).toInt = -a.toInt := by
+  rw [_root_.Int32.toInt_neg]
+  exact Int.bmod_eq_of_le (by omega) (by omega)
+
+/-- C#'s default-context `-a` on `int` (#244): `assertFailed` when the exact result is out of range. -/
+def negImplicit {σ : Type} (a : _root_.Int32) : ClrM σ _root_.Int32 :=
+  if -a.toInt < -2147483648 ∨ 2147483647 < -a.toInt then ClrM.throw .assertFailed else pure (-a)
+
+@[spec] theorem negImplicit_spec {σ : Type} (a : _root_.Int32) {Q : PostCond _root_.Int32 (.except ClrExn (.arg σ .pure))} :
+    Triple (negImplicit a)
+      (fun s => ⟨(-a.toInt < -2147483648 ∨ 2147483647 < -a.toInt → (Q.2.1 .assertFailed s).down) ∧
+        (¬(-a.toInt < -2147483648 ∨ 2147483647 < -a.toInt) → (-a).toInt = -a.toInt → (Q.1 (-a) s).down)⟩) Q := by
+  intro s h
+  unfold negImplicit
+  split
+  · exact h.1 ‹_›
+  · exact h.2 ‹_› (toInt_neg_of_range ‹_›)
+
 end Int32
 
 namespace Int64
@@ -321,6 +406,90 @@ def toInt32Checked {σ : Type} (x : _root_.Int64) : ClrM σ _root_.Int32 :=
   split
   · exact h.1 ‹_›
   · exact h.2 ‹_›
+
+/-! C#'s default-context `+`, `-`, `*` and unary `-` on `long` in a verified method that can raise (#244). The CLR
+wraps on overflow; Warrant requires that a verified method's own arithmetic never does unless it is written `unchecked`.
+So each model fails, as a `Spec.Assert` does (`assertFailed`, which no contract allows), where the exact result is out
+of range, and otherwise is Lean's wrapping operation, which is then the exact result. Its `@[spec]` lemma says so, so
+the goals after it read the value as a sum, difference or product rather than through `Int.bmod`, whose case split
+`omega` cannot always close. The differential harness skips an input where the model fails a `Spec.Assert` (#186), so
+it compares every input where no such operation overflows. -/
+
+/-- `a + b` is exact where it does not overflow. -/
+theorem toInt_add_of_range {a b : _root_.Int64} (h : ¬(a.toInt + b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt + b.toInt)) : (a + b).toInt = a.toInt + b.toInt := by
+  rw [_root_.Int64.toInt_add]
+  exact Int.bmod_eq_of_le (by omega) (by omega)
+
+/-- C#'s default-context `a + b` on `long` (#244): `assertFailed` when the exact result is out of range. -/
+def addImplicit {σ : Type} (a b : _root_.Int64) : ClrM σ _root_.Int64 :=
+  if a.toInt + b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt + b.toInt then ClrM.throw .assertFailed else pure (a + b)
+
+@[spec] theorem addImplicit_spec {σ : Type} (a b : _root_.Int64) {Q : PostCond _root_.Int64 (.except ClrExn (.arg σ .pure))} :
+    Triple (addImplicit a b)
+      (fun s => ⟨(a.toInt + b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt + b.toInt → (Q.2.1 .assertFailed s).down) ∧
+        (¬(a.toInt + b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt + b.toInt) → (a + b).toInt = a.toInt + b.toInt → (Q.1 (a + b) s).down)⟩) Q := by
+  intro s h
+  unfold addImplicit
+  split
+  · exact h.1 ‹_›
+  · exact h.2 ‹_› (toInt_add_of_range ‹_›)
+
+/-- `a - b` is exact where it does not overflow. -/
+theorem toInt_sub_of_range {a b : _root_.Int64} (h : ¬(a.toInt - b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt - b.toInt)) : (a - b).toInt = a.toInt - b.toInt := by
+  rw [_root_.Int64.toInt_sub]
+  exact Int.bmod_eq_of_le (by omega) (by omega)
+
+/-- C#'s default-context `a - b` on `long` (#244): `assertFailed` when the exact result is out of range. -/
+def subImplicit {σ : Type} (a b : _root_.Int64) : ClrM σ _root_.Int64 :=
+  if a.toInt - b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt - b.toInt then ClrM.throw .assertFailed else pure (a - b)
+
+@[spec] theorem subImplicit_spec {σ : Type} (a b : _root_.Int64) {Q : PostCond _root_.Int64 (.except ClrExn (.arg σ .pure))} :
+    Triple (subImplicit a b)
+      (fun s => ⟨(a.toInt - b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt - b.toInt → (Q.2.1 .assertFailed s).down) ∧
+        (¬(a.toInt - b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt - b.toInt) → (a - b).toInt = a.toInt - b.toInt → (Q.1 (a - b) s).down)⟩) Q := by
+  intro s h
+  unfold subImplicit
+  split
+  · exact h.1 ‹_›
+  · exact h.2 ‹_› (toInt_sub_of_range ‹_›)
+
+/-- `a * b` is exact where it does not overflow. -/
+theorem toInt_mul_of_range {a b : _root_.Int64} (h : ¬(a.toInt * b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt * b.toInt)) : (a * b).toInt = a.toInt * b.toInt := by
+  rw [_root_.Int64.toInt_mul]
+  exact Int.bmod_eq_of_le (by omega) (by omega)
+
+/-- C#'s default-context `a * b` on `long` (#244): `assertFailed` when the exact result is out of range. -/
+def mulImplicit {σ : Type} (a b : _root_.Int64) : ClrM σ _root_.Int64 :=
+  if a.toInt * b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt * b.toInt then ClrM.throw .assertFailed else pure (a * b)
+
+@[spec] theorem mulImplicit_spec {σ : Type} (a b : _root_.Int64) {Q : PostCond _root_.Int64 (.except ClrExn (.arg σ .pure))} :
+    Triple (mulImplicit a b)
+      (fun s => ⟨(a.toInt * b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt * b.toInt → (Q.2.1 .assertFailed s).down) ∧
+        (¬(a.toInt * b.toInt < -9223372036854775808 ∨ 9223372036854775807 < a.toInt * b.toInt) → (a * b).toInt = a.toInt * b.toInt → (Q.1 (a * b) s).down)⟩) Q := by
+  intro s h
+  unfold mulImplicit
+  split
+  · exact h.1 ‹_›
+  · exact h.2 ‹_› (toInt_mul_of_range ‹_›)
+
+/-- `-a` is exact where it does not overflow. -/
+theorem toInt_neg_of_range {a : _root_.Int64} (h : ¬(-a.toInt < -9223372036854775808 ∨ 9223372036854775807 < -a.toInt)) : (-a).toInt = -a.toInt := by
+  rw [_root_.Int64.toInt_neg]
+  exact Int.bmod_eq_of_le (by omega) (by omega)
+
+/-- C#'s default-context `-a` on `long` (#244): `assertFailed` when the exact result is out of range. -/
+def negImplicit {σ : Type} (a : _root_.Int64) : ClrM σ _root_.Int64 :=
+  if -a.toInt < -9223372036854775808 ∨ 9223372036854775807 < -a.toInt then ClrM.throw .assertFailed else pure (-a)
+
+@[spec] theorem negImplicit_spec {σ : Type} (a : _root_.Int64) {Q : PostCond _root_.Int64 (.except ClrExn (.arg σ .pure))} :
+    Triple (negImplicit a)
+      (fun s => ⟨(-a.toInt < -9223372036854775808 ∨ 9223372036854775807 < -a.toInt → (Q.2.1 .assertFailed s).down) ∧
+        (¬(-a.toInt < -9223372036854775808 ∨ 9223372036854775807 < -a.toInt) → (-a).toInt = -a.toInt → (Q.1 (-a) s).down)⟩) Q := by
+  intro s h
+  unfold negImplicit
+  split
+  · exact h.1 ‹_›
+  · exact h.2 ‹_› (toInt_neg_of_range ‹_›)
 
 end Int64
 

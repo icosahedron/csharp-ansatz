@@ -438,8 +438,11 @@ internal static class VerifyCommand
         int proved = theorems.Count(u => u.Kind == OutcomeKind.Proved);
         // A cancelled theorem is unreported, not unproved (M5b R6).
         int notProved = theorems.Count(u => u.Kind is not (OutcomeKind.Proved or OutcomeKind.Cancelled));
+        // #225: a method, type or contract whose definition or contract obligation was not admitted, counted apart from the
+        // theorems so a run whose contracts fail does not read as clean.
+        int notVerified = outcomes.Count(u => u.UnitKind != VirUnitKind.Theorem && u.Kind is not (OutcomeKind.Translated or OutcomeKind.Proved or OutcomeKind.Cancelled));
         // The path is named only when the server was asked for, so the default output stays M5a's (KTD27).
-        report.Summary(outcomes.Count, proved, notProved, response.Counters.Hits, response.Counters.Rechecked, settings.UseServer == true ? path : null);
+        report.Summary(outcomes.Count, proved, notProved, notVerified, response.Counters.Hits, response.Counters.Rechecked, settings.UseServer == true ? path : null);
         if (settings.Timings)
         {
             if (execution.Connection is { } connection)
@@ -757,9 +760,11 @@ internal static class VerifyCommand
 
         /// <summary>
         /// The summary line; it says how many results came from the result cache when any did, how many of those the
-        /// kernel checked again when any were, and, when given, the path the results came by (M5b R8, R11, KTD27).
+        /// kernel checked again when any were, and, when given, the path the results came by (M5b R8, R11, KTD27). The
+        /// proved and not-proved figures count theorems; the other units that were not verified (a method whose contract
+        /// failed, say) follow them when there are any (#225).
         /// </summary>
-        public void Summary(int units, int proved, int notProved, int fromCache = 0, int rechecked = 0, string? path = null)
+        public void Summary(int units, int proved, int notProved, int notVerified = 0, int fromCache = 0, int rechecked = 0, string? path = null)
         {
             var cached = (fromCache, rechecked) switch
             {
@@ -767,7 +772,8 @@ internal static class VerifyCommand
                 (> 0, _) => string.Create(CultureInfo.InvariantCulture, $" ({fromCache} from cache)"),
                 _ => "",
             };
-            var text = string.Create(CultureInfo.InvariantCulture, $"Warrant: {units} verified units, {proved} theorems proved{cached}, {notProved} not proved.");
+            var others = notVerified > 0 ? string.Create(CultureInfo.InvariantCulture, $"; {notVerified} other units not verified") : "";
+            var text = string.Create(CultureInfo.InvariantCulture, $"Warrant: {units} verified units, {proved} theorems proved{cached}, {notProved} not proved{others}.");
             if (path is not null)
             {
                 text += $" [{path}]";

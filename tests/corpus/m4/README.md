@@ -66,3 +66,24 @@ Their keys are unchanged, and the M6 corpus README gives each one's M6 outcome.
 `CallsUnmodelled` (`Math.Sign`) replaces `CallsUnverified`, so the corpus still has a WRT0005 member.
 `Tally.Current`, an instance property of a class, replaces `Counter.Next`, so the corpus still has an `instance member of a class`: M6 accepts a class's verified instance methods, which may call dependencies, and `Counter.Next` is now rejected for reading a field (`member access on this`).
 `ComparesWithNull` stays: its parameter is not declared nullable, so it is assumed non-null and comparing it with `null` is still rejected as `null`.
+
+## Arithmetic that must not overflow (#244)
+
+Since the M6 follow-ups a verified method's own `int` and `long` arithmetic in C#'s default context must not overflow
+(docs/m6/06), so the members that did unbounded arithmetic changed, each keeping its M4 outcome and its translation of
+the arithmetic (the wrapped value, whose term is the same with or without `unchecked`):
+
+| Member | Change | Why |
+|---|---|---|
+| `Payout` | `Spec.Requires(deductible >= 0)` | `loss - deductible` overflows for a negative deductible. |
+| `Discounted` | `Spec.Requires(discount >= 0)` | `price - discount` likewise. |
+| `Locals.Fee` | `Spec.Requires(price <= 1000000)` | `price + fee`. |
+| `Locals.Shipping` | `Spec.Requires(weight >= 0 && weight <= 1000000)`; the last two operations `unchecked` | `weight * 2` and `cost + 15` are bounded; after the join point `cost` and `bonus` are its parameters, which carry no value into an obligation. |
+| `Locals.Steps` | `unchecked { }` around the steps | `StepsAddThree` is about the wrap at `int.MaxValue`. |
+| `Locals.Bucket` | `unchecked(result + 1)` | `result` reaches the `+` through a join point. |
+| `Operators.LongSubtract`, `LongMultiply` | `unchecked` | Operator wiring over the whole range; a product of two variables is beyond `omega`. |
+| `Records.Move`, `Records.Distance` | `Spec.Requires` bounds on the coordinates (and `dx`) | `p.X + dx`; `-p.X` overflows at `int.MinValue`, and the sum. |
+| `Increments.Increment`, `IncrementLong` (accepted and refuted) | `unchecked(x + 1)` | They are about the wrap (`WrapsAtMax`, `NeverWraps`). |
+
+The theorems that call `Payout` and `Discounted` with constants also show that the constants meet the precondition
+(#236). No member moved and no outcome changed.

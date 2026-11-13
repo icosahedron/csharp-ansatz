@@ -62,6 +62,26 @@ public class VersionThreeTests
         Assert.NotEqual(VirHash.OfUnit(Samples.Guard()), VirHash.OfUnit(without));
     }
 
+    [Fact]
+    public void ExplicitUncheckedIsItsOwnSpellingAndNeverAUnitsFact()
+    {
+        // #236: unchecked(...) wraps on purpose; the default context's `wrap` must not overflow. Added to version 3.
+        var a = new ParamExpr(VirType.Int32, 0);
+        var unit = Samples.Payout() with { Body = new BinaryExpr(VirType.Int32, BinaryOp.Add, VirOverflow.Unchecked, a, a) };
+        var json = VirWriter.WriteString(unit);
+
+        Assert.Contains(J("""{`binary`:{`type`:`int32`,`op`:`add`,`overflow`:`unchecked`,"""), json, StringComparison.Ordinal);
+        Assert.Equal(unit, VirReader.Read(Encoding.UTF8.GetBytes(json)));
+        Assert.Equal(3, unit.Vir);
+        var wrapped = unit with { Body = new BinaryExpr(VirType.Int32, BinaryOp.Add, VirOverflow.Wrap, a, a) };
+        Assert.NotEqual(VirHash.OfUnit(unit), VirHash.OfUnit(wrapped));
+
+        // A project's setting is wrap or checked.
+        var forged = json.Replace(J("`facts`:{`overflow`:`wrap`"), J("`facts`:{`overflow`:`unchecked`"), StringComparison.Ordinal);
+        Assert.NotEqual(json, forged);
+        Assert.Throws<FormatException>(() => VirReader.Read(Encoding.UTF8.GetBytes(forged)));
+    }
+
     [Theory]
     [InlineData("0.0000000000000000000000000001")]
     [InlineData("7.9228162514264337593543950335")]

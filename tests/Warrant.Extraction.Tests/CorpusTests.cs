@@ -143,7 +143,8 @@ public class CorpusTests
         }
     }
 
-    private const string M4VirAtVersion1 = "17845076f4fda166e0409d5d374dbfbd6a89580b26c3f8e501b8df6d6f033994";
+    // Re-pinned for #244, whose corpus edits (Spec.Requires bounds and unchecked arithmetic) change the members' VIR.
+    private const string M4VirAtVersion1 = "971b127ea74263115059c8ed53b06b22c9ff0775be27b06b1714245f8c95cf0a";
 
     [Fact]
     public void EveryM4UnitsVirIsUnchangedApartFromTheVersion()
@@ -161,8 +162,9 @@ public class CorpusTests
         Assert.Equal(M4VirAtVersion1, hash);
     }
 
-    // The M5a corpus's VIR at version 2 (M5a), pinned before VIR version 3 (M6 U6, KTD19) so a change shows here.
-    private const string M5aVirAtVersion2 = "d20be30369777df2ca1c4f9e607bc2303a2e26c8714699e5433da4feba1d5525";
+    // The M5a corpus's VIR at version 2 (M5a), pinned before VIR version 3 (M6 U6, KTD19) so a change shows here; re-pinned
+    // for #244, whose corpus edits (a Spec.Requires bound and unchecked arithmetic) change the members' VIR.
+    private const string M5aVirAtVersion2 = "ed714fa22d324188a9b5577117d742f38eed8e03dcbf23ed1ccd239e3e5062ba";
 
     [Fact]
     public void EveryM5aUnitsVirIsUnchangedApartFromTheVersion()

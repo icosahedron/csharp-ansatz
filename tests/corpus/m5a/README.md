@@ -34,3 +34,18 @@ Extraction's tests check what extraction decides: which members become units and
 | `refuted/Recursion.cs` | `Bad` | A recursion whose decrease obligation fails. |
 | `rejected/Recursion.cs` | `IsEven`, `IsOdd`, `Factorial`, `Countdown`, `Nested` | Mutual recursion, recursion without `Spec.Decreases`, `Spec.Decreases` not first, nested recursion (WRT0002). |
 | `rejected/Scripts.cs` | `UnfoldsAnOverload`, `SimpWithAString`, `ForAllInCode` | A `nameof` of an overloaded method, a string literal where a lemma is expected, and `Spec.ForAll` outside a theorem (WRT0004). |
+
+## Arithmetic that must not overflow (#244)
+
+Since the M6 follow-ups a verified method's own `int` and `long` arithmetic in C#'s default context must not overflow
+(docs/m6/06). No outcome changed:
+
+| Member | Change | Why |
+|---|---|---|
+| `accepted` `Increment` | `Spec.Requires(x < int.MaxValue)` | `x + 1`; `LargerBelowMax`'s premise is the precondition, which the theorem's well-definedness obligation checks. |
+| `refuted` `Increment` | `unchecked(x + 1)` | `AlwaysLarger` is about the wrap: still false, with the counterexample `x = 2147483647`. |
+| `Sum`, `SumLong` | `unchecked(n + Sum(n - 1))` | Nothing is known of a recursive call's result where the obligation is stated, and the sums do overflow for large `n`. |
+| `Add` | `unchecked(a + 1)` | `a + 1` overflows at `int.MaxValue`, and a recursive method has no `Spec.Requires`. Its `b - 1` keeps its obligation, proved under `b > 0`, so `Add` admits `$wd_1` and `$contract` after its equation lemma. |
+| `rejected` `Scale` (both) | `unchecked(x + x)` | Helpers of the rejected scripts. |
+
+`Bad`'s `n - 1` has an obligation too, but its decrease obligation fails first, so it is refuted for the same reason.

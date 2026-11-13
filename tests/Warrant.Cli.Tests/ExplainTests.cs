@@ -16,7 +16,7 @@ public sealed class ExplainTests : IDisposable
         public static class Increments
         {
             [Verified]
-            public static int Increment(int x) => x + 1;
+            public static int Increment(int x) => unchecked(x + 1);
 
             [Theorem]
             static Proof AlwaysLarger(int x) =>
@@ -29,7 +29,7 @@ public sealed class ExplainTests : IDisposable
                      .By(Tactic.Unfold(nameof(Increment)), Tactic.Simp(), Tactic.Omega());
 
             [Verified]
-            public static int Unrelated(int x) => x * 2;
+            public static int Unrelated(int x) => unchecked(x * 2);
         }
         """;
 

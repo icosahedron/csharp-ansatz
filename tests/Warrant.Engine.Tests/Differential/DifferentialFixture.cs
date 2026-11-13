@@ -24,7 +24,8 @@ public sealed class DifferentialFixture : IDisposable
         Bundle = EngineFixture.SharedBundle.Value;
         Compilation = EngineCorpus.Compile("accepted");
         Extraction = EngineCorpus.Extract(Compilation);
-        Run = Pipeline.Run(EngineCorpus.Inputs(Extraction), Bundle, KernelLimits.Corpus);
+        // With the sidecar, as the build runs: a verified method's arithmetic has obligations the default procedure proves (#244).
+        Run = Pipeline.Run(EngineCorpus.Inputs(Extraction), Bundle, Options);
         Run.Environment.Freeze();
         Assembly = CorpusAssembly.Load(Compilation);
         var definitions = Extraction.Units.Where(u => u.Unit.Definition is not null).ToDictionary(u => u.Key, u => u.Unit.Definition!, StringComparer.Ordinal);
@@ -34,6 +35,18 @@ public sealed class DifferentialFixture : IDisposable
     }
 
     public SemanticsBundle Bundle { get; }
+
+    /// <summary>
+    /// The engine options of the corpus runs: the corpus kernel fuel and the attribute sidecar. The fuel budgets decide; the
+    /// wall-clock timeout is raised so that a unit whose obligations take a second or two alone (Records.Distance's) is
+    /// not undecided when the whole test project runs in parallel beside it.
+    /// </summary>
+    public EngineOptions Options { get; } = EngineOptions.Default with
+    {
+        Kernel = KernelLimits.Corpus,
+        Attributes = EngineFixture.SharedSidecar.Value,
+        Timeout = TimeSpan.FromMinutes(5),
+    };
 
     internal CSharpCompilation Compilation { get; }
 

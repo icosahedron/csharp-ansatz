@@ -1,4 +1,4 @@
-// Theorems that translate but are false: `warrant translate` reports WRT0001 and exits 1.
+// Theorems that translate but are false: `warrant translate` reports WRT0001 and exits 1. Increment wraps on purpose, unchecked (#244).
 using Warrant;
 
 namespace Corpus.Refuted;
@@ -6,7 +6,7 @@ namespace Corpus.Refuted;
 public static class Increments
 {
     [Verified]
-    public static int Increment(int x) => x + 1;
+    public static int Increment(int x) => unchecked(x + 1);
 
     [Theorem]
     static Proof NeverWraps() => Prove.That(Increment(int.MaxValue) > int.MaxValue);

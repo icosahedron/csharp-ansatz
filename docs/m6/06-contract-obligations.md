@@ -12,7 +12,8 @@ operations and contract hypotheses.
 ## The triple
 
 A verified function gets a contract obligation when it has a `Spec.Requires` or `Spec.Ensures`, when it can raise
-(KTD11), or when it calls a function that has a `Spec.Requires` (KTD12):
+(KTD11), when it calls a function that has a `Spec.Requires` (KTD12), or when its body has default-context `int` or
+`long` arithmetic (#244, below):
 
 ```text
 f.$contract : ∀ (σ : Type) params,
@@ -30,7 +31,10 @@ f.$contract : ∀ (σ : Type) params,
   which excludes the explicit throws too (below).
 - The `WP` instance is the one instance resolution finds for `ClrM σ`.
 
-A pure unit without a contract gets no obligation, so M4's and M5a's declarations are unchanged.
+A pure unit without a contract and without implicit arithmetic gets no obligation, so its declarations are M4's and
+M5a's. One whose body has `+`, `-`, `*` or unary `-` on `int` or `long` in C#'s default context gets one since #244,
+whose triple is trivial and whose well-definedness obligations say the arithmetic does not overflow (below); a
+recursive method included, after its equation lemma.
 
 Contracts are total about implicit exceptions and partial about explicit ones.
 `Ensures` holds on every normal return, and a path that ends in an explicit `throw` or a dependency's exception
@@ -151,11 +155,94 @@ So `Spec.Ensures<int>(r => r == a + b)` fails at its `a + b` with nothing boundi
 (`ArithmeticInEnsuresThatCanOverflowFailsAtTheEnsuresLineAndProvesWhenBounded`; in the corpus, `SumUnbounded` in
 `refuted/Contracts.cs`).
 Specs keep C#'s bounded types: there is no unbounded integer and no widening to `long`.
+Only C#'s default context has the obligation: arithmetic inside an explicit `unchecked(...)` or `unchecked { }` (VIR
+`unchecked`, chapter 4) wraps on purpose and has none, and `checked` arithmetic is a partial operation as before
+(`ExplicitUncheckedArithmeticInASpecExpressionWrapsWithNoObligation`).
 An explicit unchecked cast such as `(int)l` is left as written, since a narrowing cast is a deliberate truncation.
-The rule covers `Spec.Requires` and `Spec.Ensures`, in a method and in a contract-class member; `Spec.Assert` is a
-statement in the body and its condition still wraps.
+The rule covers `Spec.Requires` and `Spec.Ensures`, in a method and in a contract-class member, and a `Spec.Assert`'s
+condition (#235, below).
 A callee's `Spec.Requires`, stated at a call site in a caller's `Spec` expression, adds no obligation of its own there:
 the callee's own `$wd` obligations cover it.
+
+**`Spec.Assert` conditions (#235).** A `Spec.Assert` is a statement inside the program, and its condition's
+arithmetic stays the wrapping operation there: the CLR compiles `Spec.Assert` out, so a checked model would raise where
+the CLR does not, and the differential harness (whose `Contracts.Average` comparison relies on the wrap) would disagree.
+Instead its default-context `+`, `-`, `*` and unary `-` get `$wd` obligations of the same kind as a `Spec.Ensures`'s,
+numbered after the contract's own: the method's program is translated once more, by `AssertObligations`, with each
+`Spec.Assert`'s condition translated as a `Spec` expression, and each obligation is closed over the world, `self` and
+the parameters, the values bound by `bind` and join points before the `Spec.Assert`, and the facts known there: the
+`Spec.Requires`, the condition of each `if` branch taken, and the conditions of the `Spec.Assert`s before it, then the
+guards inside the condition; a local's `let` is unfolded into its value.
+A value bound by an implicit operation (#244, below), such as `var s = a + b;`, comes with what its model guarantees
+wherever the program continues, since the model continues only where the exact result is in range: `s = a + b` and
+`s.toInt = a.toInt + b.toInt` (#246; likewise for `-`, `*`, unary `-` and `long`), so `Spec.Assert(s - b == a)` proves
+under bounds on `a` and `b`.
+What a VC walk would learn from a callee's `Spec.Ensures` or a model's case is not among the facts, so assert the fact
+first (`Spec.Assert(b >= 0 && b <= 100)`) and the next `Spec.Assert` may use it.
+The program, its definition and the differential harness are unchanged.
+A failing obligation is reported at the operation with this chapter's wording
+(`ArithmeticInASpecAssertThatCanOverflowFailsAtTheOperationAndProvesWhenKnownBounded`,
+`ASpecAssertsArithmeticHasAnOverflowObligationUnderWhatIsKnownThereAndTheProgramIsUnchanged`,
+`ASpecAssertAfterImplicitArithmeticKnowsTheBoundValueAndItsExactValue`).
+
+**Theorem statements (#236).** A `[Theorem]`'s statement follows the same rule, since theorems and code should agree
+(owner decision 2026-11-12): it is translated with a world `σ` and a `SpecState` of its own, so its default-context
+arithmetic and its calls to pure methods with `Spec.Requires` get `T.$wd_k` obligations over `σ`, the theorem's
+parameters and the guards, including `Spec.Implies` and the variable of each enclosing `Spec.ForAll` or `Spec.Exists`
+(the obligation holds for every value of it).
+The statement itself is the same term as before.
+The engine proves each by the default procedure, as a contract's are, before and independently of the theorem's script,
+`rfl` or `decide`; the theorem is proved only when all of them are, its certificate holds them before the theorem, and
+one that fails is the theorem's WRT0001 at the operation with this chapter's wording
+(`ArithmeticInATheoremThatCanOverflowFailsAtTheOperationAndProvesWhenBounded`,
+`ATheoremStatementsArithmeticHasAnOverflowObligationUnderItsGuardsAndBinders`).
+As for contracts, they are not listed in the assumption report.
+
+**Method bodies (#244).** The one rule reaches a verified method's own code (owner decision 2026-11-12): implicit
+`+`, `-`, `*` and unary `-` on `int` and `long` (C#'s default context, VIR `wrap`, which `++`, `--` and compound
+assignment also are) must not overflow, explicit `unchecked(...)` and `unchecked { }` wrap with no obligation, and
+`checked` raises as before. The value is still the wrapped one, the CLR's, so the model stays faithful; the proof shows
+the wrap never happens. A failure is WRT0001 at the operation, `arithmetic overflow` (chapter 7).
+
+- *A pure method* keeps its definition. `OverflowObligations` translates its body once more, as the definition is
+  translated but with the whole body treated as a `Spec` expression, and each implicit operation records an
+  obligation of kind `NoOverflow`, `f.$wd_k` after the contract's own `Spec` obligations:
+
+  ```text
+  f.$wd_k : ∀ σ self params [join-point parameters], facts → guards → ⦃⌜True⌝⦄ checked op σ args ⦃⇓_ => ⌜True⌝; allowed⦄
+  ```
+
+  The facts are what the path to the operation knows: the `Spec.Requires`, the condition of each `if` branch taken and
+  of each `switch` section taken over an integer or open enum; the guards are those inside the expression (`&&`, `||`,
+  `?:`, `??`, a switch expression's arm over an integer or open enum); a local's `let` is unfolded into its value.
+  A join point's parameters are bound with nothing known of them, so a value merged after an `if` that changes two
+  locals, or a `switch` with a `return` in it, is unknown at the operation that reads it. A pure callee's
+  `Spec.Ensures` is known through its `f.$contract_spec`, which the default procedure adds for every application of it
+  in a goal (chapter 7). A call of a recursive method to itself is its own constant, which the obligations, admitted
+  after the definition, can name; nothing is known of its value, so arithmetic on a recursive result fails unless it
+  is `unchecked` (recursive methods have no `Spec.Requires`). Once an operation's obligation holds, its exact value
+  `(a op b).toInt = a.toInt op b.toInt` is a fact for the obligations after it on the same path, inside the guard it
+  was under; `omega` reasons through the wrap-around's `Int.bmod` only by its real shadow, which cannot close nested
+  arithmetic such as `a * 3 - b` even under tight bounds (`ANestedProductIsBoundedThroughItsExactValueNotItsWrapAround`).
+  The same facts serve a `Spec` expression's arithmetic.
+  `omega` reads only linear arithmetic: a product of two variables is never bounded by it, so such a product needs
+  `unchecked` or a `[ProofFor]` script.
+- *A method that can raise* has the operation as a site of its program instead: `Warrant.Int32.addImplicit σ a b` and
+  likewise for `-`, `*`, unary `-` and `long` (`lean/Warrant/Checked.lean`), which is `pure (a + b)` where the exact
+  result is in range and `throw .assertFailed` where the CLR would wrap. `assertFailed` is not allowed, so the contract
+  obligation itself requires the operation not to overflow, and the VC walker proves it with everything it knows there:
+  the path, a callee's `Spec.Ensures` and a dependency's contract (closed obligations, as for `Spec.Assert` conditions,
+  would miss these). The `@[spec]` lemma gives the walk the exact value on the normal path. The differential harness
+  skips an input whose model fails a `Spec.Assert` (#186), so it still compares every input where no implicit
+  operation overflows, and the model agrees with the CLR wherever it returns. A `Spec.Assert`'s condition is not a
+  site: it keeps its own obligations (#235, above).
+
+Callers of a method whose obligation fails are skipped (#219), as for any contract that is not proved
+(`ArithmeticInAPureBodyThatCanOverflowFailsAtTheOperationAndProvesWhenBounded`,
+`ARecursiveMethodsArithmeticHasObligationsAndItsRecursiveResultIsUnknown`,
+`ArithmeticInABodyThatCanRaiseIsCheckedByTheWalkWithEverythingItKnows`,
+`APureBodysArithmeticHasAnOverflowObligationUnderThePathToItAndTheDefinitionIsUnchanged`,
+`ImplicitArithmeticInARaisingBodyIsASiteThatFailsAsAnAssertWhereTheClrWouldWrap`).
 
 ## Unsatisfiable contracts
 

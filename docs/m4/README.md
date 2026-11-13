@@ -37,6 +37,7 @@ public static class PayoutRules
     [Verified]
     public static int Payout(int loss, int deductible, int limit)
     {
+        Spec.Requires(deductible >= 0);   // since #244: loss - deductible must not overflow
         if (loss <= deductible) return 0;
         var covered = loss - deductible;
         return covered > limit ? limit : covered;

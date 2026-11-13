@@ -382,7 +382,7 @@ scripts/export-semantics.sh /tmp/bundle.ndjson.gz   # or anywhere else
 
 The script uses the same Lean 4.35.0 toolchain and lean4export `5a9a355` as
 step 5 (on Windows, see `scripts/lib/lean-toolchain.sh` for how the toolchain
-is found), builds the library with `lake build`, and exports the 641 roots in
+is found), builds the library with `lake build`, and exports the 660 roots in
 `lean/bundle-roots.txt` with their dependency closure. It exports with
 `--export-mdata`, so the `no_index` markers simp needs survive. It fails if a
 root does not exist or if anything depends on `sorryAx`. The output is
@@ -390,7 +390,7 @@ deterministic: with an unchanged `lean/`, it is byte-identical to the
 committed file. Check the counts independently with:
 
 ```sh
-python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 4,125 constants
+python3 scripts/count-export.py tests/data/warrant-semantics.ndjson.gz   # 4,165 constants
 ```
 
 After the bundle, regenerate the pinned declarations the engine embeds (the
@@ -580,12 +580,13 @@ every new model); all 4 pass
 ([docs/m6/08](docs/m6/08-reports-and-testing.md#the-exit-criterion-as-tests)).
 On `accepted/` the verify ends with
 `Warrant: 53 verified units, 0 theorems proved, 0 not proved.`: a method whose
-contract is proved is listed as `translated`, and the summary counts theorems
-only (GitHub #225). `report/report.md` holds `ProcessPayment`'s block as
+contract is proved is listed as `translated`, and the summary's proved and
+not-proved figures count theorems. On `refuted/` it ends with
+`Warrant: 36 verified units, 0 theorems proved, 0 not proved; 26 other units not verified.`:
+the methods whose contracts fail are counted after the theorems (GitHub #225). `report/report.md` holds `ProcessPayment`'s block as
 `tests/corpus/m6/ProcessPayment.report.txt` shows it, with the real kernel and
-bundle names in its first line. Use `verify`, not
-`translate`, for contracts: `translate` loads no attribute sidecar and cannot
-prove them (GitHub #220).
+bundle names in its first line. `translate` loads the same attribute sidecar
+and proves the same contracts (GitHub #220).
 
 ### 8. Cross-check against Lean's own kernel
 

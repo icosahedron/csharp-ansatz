@@ -21,7 +21,7 @@ The additions already known are:
 - **M5a:** binders and quantifiers, for `Spec.ForAll`, `Spec.Exists` and theorems with parameters; proof hints, for `.By(...)`; `decreases`.
   M5a added them as schema version 2 (docs/m5a/01): `forall` and `exists` expressions, a `decreases` statement, and a theorem's `params`, `script` and `budget`. A unit that uses none of them encodes as below apart from its `vir` field.
 - **M6:** contracts, `throw`, `null`, `await` and calls to externals.
-  M6 added them as schema version 3 (plan M6 U6, KTD19): `decimal`, `unit`, `nullable` and `task` types; `div` and `rem`, and `checked` on arithmetic and narrowing nodes; `decimal`, `null`, `isnull`, `unwrap`, `coalesce`, `throw`, `await`, `external` and `modelled` expressions; `throw`, `eval`, `requires`, `nothrow` (#182), `ensures` and `assert` statements; a function's `dependencies`; `contract` units; and four assumption kinds. The shapes are in `src/Warrant.Vir` until the M6 chapters describe them. A unit that uses none of them encodes as below apart from its `vir` field, and a reader rejects a unit whose `vir` is newer than its own.
+  M6 added them as schema version 3 (plan M6 U6, KTD19): `decimal`, `unit`, `nullable` and `task` types; `div` and `rem`, and `checked` and (added before version 3's release, #236) `unchecked` on arithmetic and narrowing nodes; `decimal`, `null`, `isnull`, `unwrap`, `coalesce`, `throw`, `await`, `external` and `modelled` expressions; `throw`, `eval`, `requires`, `nothrow` (#182), `ensures` and `assert` statements; a function's `dependencies`; `contract` units; and four assumption kinds. The shapes are in `src/Warrant.Vir` until the M6 chapters describe them. A unit that uses none of them encodes as below apart from its `vir` field, and a reader rejects a unit whose `vir` is newer than its own.
 - **M7:** loops, heap reads and writes, object creation and regions.
 
 ## Units
@@ -40,7 +40,7 @@ A unit is a member, a theorem or a type (KTD21); M6 adds contract units.
 | `statement` | For a theorem, the claim as an expression. |
 | `definition` | For a type unit, the type: a record's fields, an enum's members, a closed type's members. |
 | `assumptions` | Chapter 3's list. |
-| `facts` | What changes the meaning of the unit beyond its text: `overflow` (`wrap` or `checked`), the language version, the extractor version and the Roslyn version. |
+| `facts` | What changes the meaning of the unit beyond its text: `overflow` (the project's setting, `wrap` or `checked`), the language version, the extractor version and the Roslyn version. |
 | `deps` | The keys of the units this one calls or whose types it mentions, sorted. |
 
 Types are units because a record or an enum is used by many members and must be translated once, from one place.
@@ -68,7 +68,7 @@ Every expression node has a type and a node ID.
 |---|---|
 | `lit{type, value}` | The value as a decimal string, so 64-bit values survive any JSON reader. |
 | `param{index}`, `local{id}`, `self` | |
-| `unary{op, overflow}`, `binary{op, overflow}` | `op` is `neg`, `plus`, `add`, `sub`, `mul`; `overflow` is always `wrap` in M4, but it is a field, so M6 can add `checked` without a new node. |
+| `unary{op, overflow}`, `binary{op, overflow}` | `op` is `neg`, `plus`, `add`, `sub`, `mul`; `overflow` is always `wrap` in M4, but it is a field, so M6 can add `checked` without a new node; version 3 also has `unchecked`, for explicit `unchecked` C# (#236). |
 | `logical{op}` | `and`/`or`, short-circuit, and `and-eager`/`or-eager`/`xor` for `&`, `\|`, `^` on `bool`. Kept as nodes rather than lowered to `if`, so that M6 can treat a right-hand side that throws. |
 | `not` | |
 | `compare{op, kind}` | `kind` is `int`, `enum`, `bool`, `record` or `closed`, so translation never re-derives what `==` means. |
@@ -136,7 +136,7 @@ Extraction's own diagnostics carry source locations directly, because they are p
 
 ## The running example in VIR
 
-`Payout`'s unit as M4 wrote it, laid out for reading (the canonical form has no whitespace; it is `tests/Warrant.Vir.Tests/golden/payout.json`, which since M6 has `"vir": 3` and is otherwise the same):
+`Payout`'s unit as M4 wrote it, laid out for reading (the canonical form has no whitespace; it is `tests/Warrant.Vir.Tests/golden/payout.json`, which since M6 has `"vir": 3` and is otherwise the same; the corpus member has since gained a `Spec.Requires`, #244, which the extraction test leaves out when it compares them):
 
 ```json
 {

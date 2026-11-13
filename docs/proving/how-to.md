@@ -754,9 +754,10 @@ describes the fall-through path, because early exits are where these bugs live.
 
 `Warrant.Build` fails the build when a required proof fails, so a normal
 `dotnet build` in CI is enough. Check the build log for the summary line,
-`Warrant: n verified units, n theorems proved, n not proved.` (it counts
-theorems only, so a failing contract shows as an error and a failed build, not
-in "not proved", GitHub #225); a project that
+`Warrant: n verified units, n theorems proved, n not proved.` (the proved and
+not-proved figures count theorems; when a method's contract or another
+non-theorem unit fails, the line adds `; n other units not verified`, GitHub
+#225); a project that
 references `Warrant` without `Warrant.Build`, or turns `WarrantEnabled` off,
 gets warning WRT0011 instead.
 

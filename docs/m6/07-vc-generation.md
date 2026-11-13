@@ -73,7 +73,8 @@ For each:
 
 1. If the obligation's program is `pure (f params)`, the pure unit under proof is unfolded, as `Tactic.Unfold` does, and
    for each application of a pure verified callee with `Spec.Ensures` the instance of its `$contract_spec` is added as a
-   hypothesis; the callee's body is not unfolded (#173).
+   hypothesis; the callee's body is not unfolded (#173). Each such callee is recorded as a `CalleeContract`, since the
+   proof may rest on its contract (#223).
 2. The VC simp set runs (KTD14, `VcSimpSet.cs`): Warrant's default set plus `Std.Do`'s one-state assertion lemmas
    (`SPred.entails_1`, `apply_pure_cons`, `down_pure_nil`, `and_cons`/`and_nil`, `or_cons`/`or_nil`), the
    `PredTrans.apply_*` equations, the equations of `ClrExn.Allowed` and `ClrExn.External`, and for a nullable `Spec.Ensures` meeting a
@@ -151,8 +152,9 @@ In a theorem's script it is `unsupported script argument`.
   shape with `c.Id` and the contract's `c.Id == id` proves.
 - #227: a `bool` postcondition that needs a case split on a `bool` parameter (`r => !flagged || r`) is left to `omega`,
   which does not split `Bool`s, and fails; stated as `r == (…)` it proves.
-- #220 (fixed with #244): `warrant translate` loads the attribute sidecar beside the bundle, as `warrant verify` does,
-  so it runs the default procedure; it declines when the sidecar is missing.
+- #220 (fixed after M6): `warrant translate` loaded no attribute sidecar, so it could not run the default procedure and
+  reported a contract that `warrant verify` proves as not proved. It now loads the sidecar beside the bundle, as
+  `verify` does.
 - #244: `omega` reads only linear arithmetic, so a product of two variables (`a * b`) is never bounded by it, however
   tight the `Spec.Requires`; write it `unchecked` or prove it with a `[ProofFor]` script. A pure method's join point
   parameter (a local merged after branches that change two locals, or after a `switch` with a `return`) carries no

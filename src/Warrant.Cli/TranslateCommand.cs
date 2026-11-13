@@ -81,16 +81,18 @@ internal static class TranslateCommand
 
         try
         {
-            return Translate(directory, outPath, reportPath, bundlePath, sidecarPath, checkOverflow, output);
+            // The sidecar first: it names the bundle it was made for, so a mismatched pair is declined before the slow load.
+            var sidecar = Sidecar.Load(sidecarPath, OutcomeText.FileSha256(bundlePath));
+            return Translate(directory, outPath, reportPath, bundlePath, sidecar, checkOverflow, output);
         }
-        catch (Exception ex) when (ex is Lean4ExportFormatException or InvalidDataException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is SidecarFormatException or Lean4ExportFormatException or InvalidDataException or IOException or UnauthorizedAccessException)
         {
             error.WriteLine($"declined: {ex.Message}");
             return 2;
         }
     }
 
-    private static int Translate(string directory, string? outPath, string? reportPath, string bundlePath, string sidecarPath, bool checkOverflow, TextWriter output)
+    private static int Translate(string directory, string? outPath, string? reportPath, string bundlePath, Sidecar sidecar, bool checkOverflow, TextWriter output)
     {
         var root = Path.GetFullPath(directory);
         var files = SourceFiles(root);
@@ -109,7 +111,6 @@ internal static class TranslateCommand
             return 1;
         }
 
-        var sidecar = Sidecar.Load(sidecarPath, OutcomeText.FileSha256(bundlePath));
         var bundle = SemanticsBundle.Load(bundlePath);
         var inputs = extraction.Units.Select(u => new EngineUnit(u.Unit, u.DisplayName, u.Spans)).ToList();
         var result = Pipeline.Run(inputs, bundle, EngineOptions.Default with { Kernel = KernelLimits.Corpus, Attributes = sidecar });

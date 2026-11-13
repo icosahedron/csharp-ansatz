@@ -798,7 +798,10 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
             public static int DivideOpaque(int a, int x) => a / Opaque(x);
             """);
         var result = Run(source);
-        Proved(result.Find("M:S.Divide(System.Int32,System.Int32)"));
+        var divide = result.Find("M:S.Divide(System.Int32,System.Int32)");
+        Proved(divide);
+        // #223: the proof rests on Floor's contract (its $contract_spec), so the report lists it.
+        Assert.Contains(divide!.Assumptions, a => a.Assumption == new VirAssumption(VirAssumptionKind.CalleeContract, "M:S.Floor(System.Int32)") && a.UnitKey == "M:S.Divide(System.Int32,System.Int32)");
         var opaque = Assert.IsType<NotProvedOutcome>(result.Find("M:S.DivideOpaque(System.Int32,System.Int32)"));
         Assert.Equal(VcKind.DivisionByZero, opaque.Vcs[0].Kind);
     }

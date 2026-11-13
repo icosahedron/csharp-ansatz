@@ -98,6 +98,10 @@ public sealed class M6CorpusTests
         Assert.Matches($@"(?m)^{dependencies}\(83,\d+\): error WRT0001: The contract of 'ICounter\.Count\(\)' could not be proved: The contract is unsatisfiable: ", output);
         // #228: an awaited call to a verified method is checked against its Spec.Requires like any other call.
         Assert.Matches($@"(?m)^{dependencies}\(108,\d+\): error WRT0001: The contract of 'Steps\.Run\(int\)' could not be proved: precondition of a callee at this call: ", output);
+        // #225: the summary counts the methods whose contracts failed, not only theorems.
+        var failed = Regex.Count(output, @"(?m)^  \S.*  (unproved|undecided|internal|failed|skipped)\b");
+        Assert.True(failed > 0, output);
+        Assert.Matches($@"(?m)^Warrant: \d+ verified units, 0 theorems proved, 0 not proved; {failed} other units not verified\.$", output);
     }
 
     private static (int Code, string Output) Verify(params string[] args)

@@ -100,6 +100,7 @@ warrant translate <directory> [--out <file.ndjson>] [--report <file.md>] [--chec
 
 It compiles every `.cs` file under the directory with the `Warrant.Frontend` factory (chapter 3), extracts VIR, hands it to the engine, and prints one line per unit plus any diagnostics in the compiler's `file(line,col): error CODE: message` format.
 `--check-overflow` compiles the files as a project with `CheckForOverflowUnderflow` on would be compiled, and `--bundle` names a semantics bundle other than the one copied next to the CLI. A bundle that declares an axiom besides Lean's standard three, or declares one of them differently from Lean, does not load (chapter 1).
+Since M6 (#220) it also loads the attribute sidecar that sits beside the bundle, as `warrant verify` does, so it proves contracts as `verify` proves them; a missing sidecar, or one made for another bundle, is declined with exit code 2.
 The start and end of `warrant translate tests/corpus/m4/accepted`:
 
 ```text

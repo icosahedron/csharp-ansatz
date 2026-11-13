@@ -21,8 +21,11 @@ M6 adds four kinds (KTD20), rendered by `src/Warrant.Engine/Reports/` under two 
   it at run time, and a caller Warrant does not verify can pass anything. A method that unverified code calls and that
   must not misbehave on bad input should check it with a guard that throws, which the proof covers, rather than rely on
   `Spec.Requires`.
+- `CalleeContract` is each verified callee whose contract the proof may use: one the walker applied at a call, and a
+  pure callee whose `$contract_spec` a leftover VC assumed (chapter 7, #223).
 - `ExternalContract` quotes the contract class's `Spec` calls (design §8.4) and adds "this method proves its
-  Spec.Requires at each call" when the member has one.
+  Spec.Requires at each call" when the member has one. Extraction lists one for every member a method calls, so a
+  proof closed straight from a member's contract hypothesis (`Size() => counter.Count()`) lists it too (#223).
 - `MayThrow` is each explicit `throw` the walker could not show unreachable, each call to a dependency (whose exception
   the contract allows), and each call to a verified callee that may throw, naming the call and the callee's throw site
   (#70). A throw proved unreachable is not listed (#92), and neither is any explicit throw of a method with
@@ -48,8 +51,11 @@ build.
 
 A unit's status word is still M5a's: a function whose definition and contract obligation are admitted is `TRANSLATED`,
 and `VERIFIED` is for theorems.
-The CLI's per-unit lines say `translated` for it, and the summary line counts theorems only, so a run whose contracts
-fail ends with "0 not proved" and exit code 1 (#225); the diagnostics and the exit code are right.
+The CLI's per-unit lines say `translated` for it. The summary line's proved and not-proved figures count theorems; the
+other units that were not verified, such as methods whose contracts fail, follow them (#225):
+`warrant verify tests/corpus/m6/refuted --server off` ends with
+`Warrant: 36 verified units, 0 theorems proved, 0 not proved; 26 other units not verified.` and exit code 1. The clause
+is left out when there are none, so a run with no such failure prints the M5a line.
 
 ## Differential tests
 

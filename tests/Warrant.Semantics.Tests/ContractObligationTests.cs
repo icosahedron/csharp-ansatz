@@ -20,9 +20,9 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
 
     private static Expr I(int n) => Literals.Int32(n);
 
-    private (Translation Translation, KernelEnvironment Env) Translate(string source)
+    private (Translation Translation, KernelEnvironment Env) Translate(string source, params string[] allowedWarnings)
     {
-        var translation = TranslationCorpus.Translate(TranslationCorpus.Inline("using System;\n" + source), bundle.Env);
+        var translation = TranslationCorpus.Translate(TranslationCorpus.Inline("using System;\n" + source, allowedWarnings), bundle.Env);
         return (translation, TranslationCorpus.Admit(bundle, translation));
     }
 
@@ -192,7 +192,8 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     [Fact]
     public void NoThrowOnAPureMethodChangesNothing()
     {
-        // A pure method raises nothing, so NoThrow holds of it already and its obligation is the one without (#182).
+        // A pure method raises nothing, so NoThrow holds of it already and its obligation is the one without (#182);
+        // extraction warns that it states nothing there (WRT0013, #239).
         var (translation, env) = Translate("""
             public static class S
             {
@@ -211,7 +212,7 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
                     return x;
                 }
             }
-            """);
+            """, "WRT0013");
         var half = Contract(translation, "M:S.Half(System.Int32)");
         Assert.False(half.Raising);
         AssertOnlyExplicitAndExternalExceptionsAllowed(Triple(Under(half.Theorem.Type, half.Binders)).Exceptions);

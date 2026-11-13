@@ -10,8 +10,8 @@ using Warrant.Vir;
 namespace Warrant.Analyzers;
 
 /// <summary>
-/// Reports extraction's diagnostics while the developer types (M5b R18, KTD22, docs/m5b/06): WRT0002 to WRT0005 and
-/// WRT0009 for each <c>[Verified]</c> member, <c>[Theorem]</c>, <c>[ProofFor]</c> method, <c>[Closed]</c> type and
+/// Reports extraction's diagnostics while the developer types (M5b R18, KTD22, docs/m5b/06): WRT0002 to WRT0005,
+/// WRT0009 and the warning WRT0013 for each <c>[Verified]</c> member, <c>[Theorem]</c>, <c>[ProofFor]</c> method, <c>[Closed]</c> type and
 /// <c>[ContractFor]</c> class (whose contract class is read only from the compilation being analysed, as the build reads it), and WRT0008 for the
 /// compilation. It runs the extractor's own rules through <see cref="Diagnoser"/>, so it reports what the build
 /// reports, at the same place. It does no I/O and never reports proof results.
@@ -47,12 +47,17 @@ public sealed class WarrantAnalyzer : DiagnosticAnalyzer
     /// <summary>WRT0009: a <c>[Closed]</c> class without the closed shape.</summary>
     public static readonly DiagnosticDescriptor NotClosedShape = Error(DiagnosticIds.NotClosedShape, "[Closed] class without the closed shape");
 
+    /// <summary>WRT0013: a <c>Spec</c> statement that states nothing, such as <c>Spec.NoThrow</c> on a method that cannot raise (#239).</summary>
+    public static readonly DiagnosticDescriptor IneffectiveSpec = new(
+        DiagnosticIds.IneffectiveSpec, "A Spec statement that states nothing", "{0}", Category, DiagnosticSeverity.Warning,
+        isEnabledByDefault: true, helpLinkUri: HelpLink);
+
     private static readonly ImmutableDictionary<string, DiagnosticDescriptor> ById =
-        new[] { Unsupported, CallsTheorem, MalformedSpec, NotVerified, UnnamedClosedValue, NotClosedShape }.ToImmutableDictionary(d => d.Id);
+        new[] { Unsupported, CallsTheorem, MalformedSpec, NotVerified, UnnamedClosedValue, NotClosedShape, IneffectiveSpec }.ToImmutableDictionary(d => d.Id);
 
     /// <inheritdoc/>
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } =
-        ImmutableArray.Create(Unsupported, CallsTheorem, MalformedSpec, NotVerified, UnnamedClosedValue, NotClosedShape);
+        ImmutableArray.Create(Unsupported, CallsTheorem, MalformedSpec, NotVerified, UnnamedClosedValue, NotClosedShape, IneffectiveSpec);
 
     private static DiagnosticDescriptor Error(string id, string title) =>
         new(id, title, "{0}", Category, DiagnosticSeverity.Error, isEnabledByDefault: true, helpLinkUri: HelpLink);

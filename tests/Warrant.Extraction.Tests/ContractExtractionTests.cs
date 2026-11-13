@@ -230,9 +230,60 @@ public class ContractExtractionTests
                 }
             """);
 
-        Assert.Empty(result.Diagnostics);
+        Assert.Empty(result.DiagnosticsFor("M:C.Only(System.Int32)"));
         Assert.Equal(new NoThrowStmt(), Assert.IsType<BlockStmt>(Unit(result, "M:C.Only(System.Int32)").Body).Stmts[0]);
+        // Down cannot raise, so its Spec.NoThrow states nothing: a warning, and the unit is still translated (#239).
+        Assert.Equal(ExtractionSeverity.Warning, Single(result, "M:C.Down(System.Int32)").Severity);
         Assert.Equal(new NoThrowStmt(), Assert.IsType<BlockStmt>(Unit(result, "M:C.Down(System.Int32)").Body).Stmts[1]);
+    }
+
+    [Fact]
+    public void NoThrowOnAMethodThatCannotRaiseIsAWarningAtTheStatement()
+    {
+        // #239: a method that cannot raise has no exception case, so Spec.NoThrow holds already and changes nothing.
+        var result = Members("""
+                [Verified]
+                public static int Half(int x)
+                {
+                    Spec.Requires(x >= 0);
+                    Spec.NoThrow();
+                    return x / 2;
+                }
+
+                [Verified]
+                public static int Guard(int b)
+                {
+                    Spec.Requires(b != 0);
+                    Spec.NoThrow();
+                    if (b == 0)
+                    {
+                        throw new ArgumentException("b");
+                    }
+                    return b;
+                }
+
+                [Verified]
+                public static int Caller(int b)
+                {
+                    Spec.Requires(b != 0);
+                    Spec.NoThrow();
+                    return Guard(b);
+                }
+            """);
+
+        var d = Single(result, "M:C.Half(System.Int32)");
+        Assert.Equal("WRT0013 | Spec.NoThrow on a method that cannot raise", d.Id + " | " + d.Construct);
+        Assert.Equal(DiagnosticIds.IneffectiveSpec, d.Id);
+        Assert.Equal(ExtractionSeverity.Warning, d.Severity);
+        Assert.Equal(
+            "C.Half(int): Spec.NoThrow states nothing here, since the method cannot raise an exception, so its contract is "
+            + "the same without it. Remove it, or add WRT0013 to NoWarn.",
+            d.Message);
+        Assert.NotNull(d.Location);
+        Assert.NotNull(Unit(result, "M:C.Half(System.Int32)"));
+        // A method that can raise, by its own throw or through a callee, gets none.
+        Assert.Empty(result.DiagnosticsFor("M:C.Guard(System.Int32)"));
+        Assert.Empty(result.DiagnosticsFor("M:C.Caller(System.Int32)"));
     }
 
     [Theory]

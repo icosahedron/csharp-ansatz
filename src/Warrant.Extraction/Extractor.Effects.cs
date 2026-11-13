@@ -32,7 +32,31 @@ public static partial class Extractor
                     VirUnitKind.Contract => RaisingClaim(c, analysis),
                     _ => RaisingFunction(c, analysis),
                 };
+                if (c.Rejection is null && c.Kind == VirUnitKind.Function && IneffectiveNoThrow(c, analysis) is { } warning)
+                {
+                    _diagnostics.Add(warning);
+                }
             }
+        }
+
+        /// <summary>
+        /// WRT0013 (#239): <c>Spec.NoThrow</c> on a method that cannot raise states nothing, since its contract has no
+        /// exception case (docs/m6/06); the method still translates, with the obligation it has without it.
+        /// </summary>
+        private static ExtractionDiagnostic? IneffectiveNoThrow(Candidate c, EffectAnalysis analysis)
+        {
+            if (analysis.IsRaising(c.Key) || c.Body is not BlockStmt block || block.Stmts.FirstOrDefault(s => s is NoThrowStmt) is not { } noThrow)
+            {
+                return null;
+            }
+            const string construct = "Spec.NoThrow on a method that cannot raise";
+            return new ExtractionDiagnostic(
+                DiagnosticIds.IneffectiveSpec,
+                ExtractionSeverity.Warning,
+                construct,
+                c.Key,
+                At(c, noThrow, c.Symbol) is { } at ? Symbols.Span(at) : null,
+                $"{Symbols.Display(c.Symbol)}: Spec.NoThrow states nothing here, since the method cannot raise an exception, so its contract is the same without it. Remove it, or add {DiagnosticIds.IneffectiveSpec} to NoWarn.");
         }
 
         /// <summary>A unit as effect inference reads it: its body or statement, without assumptions or dependencies.</summary>

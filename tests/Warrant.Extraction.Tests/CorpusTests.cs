@@ -92,7 +92,7 @@ public class CorpusTests
                 Assert.Equal(wanted, got);
                 foreach (var d in diagnostics)
                 {
-                    var severity = d.Id == DiagnosticIds.UnnamedClosedValue ? ExtractionSeverity.Warning : ExtractionSeverity.Error;
+                    var severity = d.Id is DiagnosticIds.UnnamedClosedValue or DiagnosticIds.IneffectiveSpec ? ExtractionSeverity.Warning : ExtractionSeverity.Error;
                     Assert.Equal(severity, d.Severity);
                     Assert.NotNull(d.Location);
                 }

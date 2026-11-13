@@ -100,13 +100,19 @@ public static class CorpusCompilations
     /// <summary>The compilation extraction reads for a named M4 corpus compilation.</summary>
     public static CSharpCompilation Compile(string name) => CorpusSet.M4.Compile(name);
 
-    /// <summary>Compiles and extracts one in-memory source file, which must extract without diagnostics.</summary>
-    public static ExtractionResult Inline(string source)
+    /// <summary>
+    /// Compiles and extracts one in-memory source file, which must extract without diagnostics, apart from warnings whose
+    /// code is in <paramref name="allowedWarnings"/>.
+    /// </summary>
+    public static ExtractionResult Inline(string source, params string[] allowedWarnings)
     {
         var result = Extractor.Extract(CompilationFactory.Create([new SourceFile("Test.cs", "using Warrant;\n" + source)], checkOverflow: false));
+        var unexpected = result.Diagnostics
+            .Where(d => d.Severity != ExtractionSeverity.Warning || !allowedWarnings.Contains(d.Id, StringComparer.Ordinal))
+            .ToList();
         Assert.True(
-            result.Diagnostics.Count == 0,
-            string.Join("\n", result.Diagnostics.Select(d => $"{d.Id} {d.MemberKey} {d.Construct} {d.Message}")));
+            unexpected.Count == 0,
+            string.Join("\n", unexpected.Select(d => $"{d.Id} {d.MemberKey} {d.Construct} {d.Message}")));
         return result;
     }
 }

@@ -11,3 +11,4 @@ WRT0004 | Warrant | Error | WarrantAnalyzer, malformed specification
 WRT0005 | Warrant | Error | WarrantAnalyzer, call to a member that is not verified
 WRT0008 | Warrant | Warning | WarrantAnalyzer, a [Closed] enum can hold an unnamed value
 WRT0009 | Warrant | Error | WarrantAnalyzer, [Closed] class without the closed shape
+WRT0013 | Warrant | Warning | WarrantAnalyzer, a Spec statement that states nothing

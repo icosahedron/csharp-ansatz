@@ -87,7 +87,7 @@ These are active tests, so a change of runtime or architecture fails now; the mo
 | Corpus outcomes | Every member in `tests/corpus/m4/` ends in the outcome `expected.json` gives it: translated, proved (and by which proof), false, or rejected with the expected diagnostic and construct name. |
 | Bundle roots | Every constant the translator and proof emitter can produce is in `lean/bundle-roots.txt` and in the bundle. A new operator added to the table without re-exporting fails here. |
 | Determinism | Extracting the corpus twice gives byte-identical VIR, translating it twice gives identical declarations, and the JSON assumption report is byte-identical across runs. |
-| Golden VIR | `Payout`'s VIR matches the committed `tests/Warrant.Vir.Tests/golden/payout.json`, and its unit hash is pinned, so the encoding cannot change without a visible diff. |
+| Golden VIR | `Payout`'s VIR, without the `Spec.Requires` and the caller-precondition assumption #244 added, matches the committed `tests/Warrant.Vir.Tests/golden/payout.json`, and its unit hash is pinned, so the encoding cannot change without a visible diff. |
 | Kernel round trip | The NDJSON written for the accepted corpus loads into an empty environment and checks again. |
 
 ## `warrant translate`

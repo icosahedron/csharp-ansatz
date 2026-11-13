@@ -33,8 +33,11 @@ and unary `-` on `int` and `long` in C#'s default context must not overflow, and
 Each is a well-definedness theorem `T.$wd_k`, proved by M6's default procedure before the theorem, whatever proves the
 claim; the theorem is proved only when every one of them is, and one that fails is WRT0001 at the operation, `well-definedness of a Spec expression`.
 The statement's own term does not change.
-An M4 statement such as `Increment(int.MaxValue) == int.MinValue` has no arithmetic of its own (the wrap is in the
-method's body, which #244 covers) and is unaffected; a statement that wraps on purpose writes `unchecked(...)`.
+An M4 statement such as `Increment(int.MaxValue) == int.MinValue` has no arithmetic of its own and is unaffected; the
+wrap is in the method's body, which since #244 must not overflow either, so the corpus's `Increment` wraps on purpose
+with `unchecked(x + 1)`. A statement that wraps on purpose writes `unchecked(...)` too.
+A statement that calls a method with a `Spec.Requires` (the corpus's `Payout` and `Discounted` gained one with #244)
+gets a well-definedness obligation that the arguments satisfy it, which constant arguments do.
 
 ## The two proofs
 

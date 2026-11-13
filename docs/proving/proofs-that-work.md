@@ -57,7 +57,11 @@ static Proof AtMostOneHundred(int x) =>
 
 ```csharp
 [Verified]
-public static int Increment(int x) => x + 1;
+public static int Increment(int x)
+{
+    Spec.Requires(x < int.MaxValue);
+    return x + 1;
+}
 
 [Theorem]
 static Proof LargerBelowMax(int x) =>
@@ -65,8 +69,11 @@ static Proof LargerBelowMax(int x) =>
          .By(Tactic.Unfold(nameof(Increment)), Tactic.Simp(), Tactic.Omega());
 ```
 
-`x + 1` wraps like the CLR's `int`, so the guard is needed. Without it (`tests/corpus/m5a/refuted/Increment.cs`),
-the proof fails with the counterexample:
+`x + 1` would wrap like the CLR's `int` at `int.MaxValue`, which a verified method's own arithmetic may not do
+(GitHub #244), so `Increment` states the bound as its precondition, and the theorem's guard is that precondition: a
+theorem may only ask about a method within its `Spec.Requires`. To reason about the wrap itself, write it on purpose:
+with `Increment(int x) => unchecked(x + 1)` and no guard (`tests/corpus/m5a/refuted/Increment.cs`), the proof fails
+with the counterexample:
 
 ```text
 error WRT0001: Theorem 'Increments.AlwaysLarger(int)' could not be proved: omega could not prove the goal. Counterexample: x = 2147483647.
@@ -180,11 +187,14 @@ public static int Sum(int n)
 {
     Spec.Decreases(n);
     if (n <= 0) return 0;
-    return n + Sum(n - 1);
+    return unchecked(n + Sum(n - 1));
 }
 ```
 
-`Sum` becomes a well-founded definition over `Int.toNat n`. Warrant proves the decrease obligation
+`Sum` becomes a well-founded definition over `Int.toNat n`. Its `n + Sum(n - 1)` is `unchecked`: nothing is known of
+a recursive call's result where the no-overflow obligation is stated, a recursive method has no `Spec.Requires`, and
+the sum does overflow for large `n`. Without `unchecked` the method fails at that `+` with `arithmetic overflow`
+(`ARecursiveMethodsArithmeticHasObligationsAndItsRecursiveResultIsUnknown`); `n - 1` alone, under `n > 0`, is proved. Warrant proves the decrease obligation
 `Sum.$dec_1` with `omega`, and derives the equation lemma `Sum.$eq_def` that `Unfold` uses. `Add(a, b)` (measure:
 the second parameter) and `SumLong(long n)` are proved terminating the same way. A call that does not decrease
 is reported at the call (`tests/corpus/m5a/refuted/Recursion.cs`):
@@ -329,13 +339,67 @@ public static int Sum(int a, int b)
 ```
 
 Proved (`Sum` in `tests/corpus/m6/accepted/Contracts.cs`). `+`, `-`, `*` and unary `-` on `int` and `long` in a
-`Spec.Requires` or `Spec.Ensures` must not overflow, even though the method's own `a + b` wraps (GitHub #183): an
+`Spec.Requires` or `Spec.Ensures` must not overflow (GitHub #183), as the method's own `a + b` must not (#244): an
 overflowing spec almost always states something its author did not mean. Each one is a well-definedness condition, proved
 under the `Spec.Requires` before it, and here the bounds keep `a + b` inside `int`. Without the `Spec.Requires` the build
 fails at the `a + b` in `Spec.Ensures` with `well-definedness of a Spec expression` (`SumUnbounded` in
 `tests/corpus/m6/refuted/Contracts.cs`, `ArithmeticInEnsuresThatCanOverflowFailsAtTheEnsuresLineAndProvesWhenBounded`).
 Specs keep C#'s `int` and `long`: there is no unbounded integer, so bound the operands rather than widening them. An
 explicit `(int)` cast still truncates as in C#. A `Spec.Assert` condition follows the same rule (#235).
+
+### A bounded method
+
+```csharp
+[Verified]
+public static int Steps(int a)
+{
+    Spec.Requires(a < 100 && a > -100);
+    var x = a;
+    x += 5;
+    x++;
+    x--;
+    x *= 2;
+    return -x;
+}
+```
+
+Proved. A verified method's own `+`, `-`, `*`, unary `-`, `++`, `--` and compound assignment on `int` and `long` must
+not overflow (GitHub #244): C# would wrap, which is almost always a bug. Each operation is a condition, proved under
+what is known on the way to it: the `Spec.Requires`, the `if` branch and `switch` section taken, the guard of a `?:`,
+`&&` or `||` around it, and the value of each local, here each step's exact value. Without the `Spec.Requires` the
+build fails at `x += 5` with `arithmetic overflow`. A guard works as well as a precondition: `a < 1000 ? a + 1 : 0`
+is proved with none. When wrapping is the point (a hash, a checksum), write `unchecked(...)` or `unchecked { }`,
+which has no condition (`ArithmeticInAPureBodyThatCanOverflowFailsAtTheOperationAndProvesWhenBounded`).
+`omega` reads linear arithmetic only, so `a * b` of two variables is not bounded by any `Spec.Requires`; a value
+merged from two branches that change two locals reaches the operation unknown.
+
+### Arithmetic bounded by a callee's `Spec.Ensures`
+
+```csharp
+[Verified]
+public static int Bound(int x)
+{
+    Spec.Requires(x >= 0);
+    Spec.Ensures<int>(r => r >= 0 && r <= 100);
+    return x > 100 ? 100 : x;
+}
+
+[Verified]
+public static int ByCallee(int a)
+{
+    Spec.Requires(a >= 0);
+    var n = Bound(a);
+    return n + 1;
+}
+```
+
+Proved: `Bound`'s `Spec.Ensures` says `n <= 100`, so `n + 1` cannot overflow. A call to a method with a
+`Spec.Requires`, or to one that can throw, is a step the VC walk sees (chapter 7 of docs/m6), and each implicit
+operation after it is checked there with everything the walk knows: the callee's `Spec.Ensures`, a dependency's
+contract, the path. A pure callee with only a `Spec.Ensures` (`Cap(x)` with `r >= 0 && r <= 100`) bounds `Cap(a) * 2`
+the same way (`ByCallee`, `ByRaisingCallee` and `ByCallee` in
+`ArithmeticInABodyThatCanRaiseIsCheckedByTheWalkWithEverythingItKnows` and
+`ArithmeticInAPureBodyThatCanOverflowFailsAtTheOperationAndProvesWhenBounded`).
 
 ### A null guard
 
@@ -370,8 +434,8 @@ public static int Average(int a, int b)
 
 Proved (`tests/corpus/m6/accepted/Contracts.cs`): the asserted fact is a condition at the `Spec.Assert`, proved by its
 script, and the code after it may use it. Its `a + b` must not overflow (GitHub #235), which the `Spec.Requires` rules
-out; without it the build fails at that `a + b` with `well-definedness of a Spec expression`, though the program's own
-`a + b` still wraps (`ArithmeticInASpecAssertThatCanOverflowFailsAtTheOperationAndProvesWhenKnownBounded`). What the
+out; without it the build fails at that `a + b` with `well-definedness of a Spec expression`, and at the program's own
+`a + b` with `arithmetic overflow` (#244) (`ArithmeticInASpecAssertThatCanOverflowFailsAtTheOperationAndProvesWhenKnownBounded`). What the
 obligation knows is the `Spec.Requires`, the branch the `Spec.Assert` is in and the `Spec.Assert`s before it: to use a
 callee's `Spec.Ensures`, assert it first. `Spec.Assert(b != 0); return a / b;` with no `Spec.Requires` fails at the
 `Spec.Assert` line with `Spec.Assert` (`AFailingAssertFailsAtItsLineAndTheDivisionAfterItUsesTheAssertedFact`).

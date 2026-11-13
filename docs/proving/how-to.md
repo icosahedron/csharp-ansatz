@@ -45,8 +45,11 @@ methods and tactics, see the [reference](reference.md).
 public static class Prices
 {
     [Verified]
-    public static int Discounted(int price, int discount) =>
-        discount >= price ? 0 : price - discount;
+    public static int Discounted(int price, int discount)
+    {
+        Spec.Requires(discount >= 0);
+        return discount >= price ? 0 : price - discount;
+    }
 }
 
 static class PriceTheorems
@@ -59,7 +62,10 @@ static class PriceTheorems
 }
 ```
 
-This one is proved (`proved (script)`).
+This one is proved (`proved (script)`). The `Spec.Requires` is there because a
+verified method's own arithmetic must not overflow (M6, GitHub #244): with a
+negative `discount`, `price - discount` could pass `int.MaxValue`. See
+[Deal with overflow](#deal-with-overflow).
 
 Write the claim as an implication when it only holds for some inputs. A
 theorem with no `Spec.Implies` claims something for *every* `int`, including
@@ -70,35 +76,32 @@ negative ones and `int.MaxValue`.
 *M5a.*
 
 A failed proof is a build error (WRT0001) in up to three parts. This is the
-previous guide's theorem with only `price >= 0` as its condition, in a file
+previous guide's theorem with only `discount >= 0` as its condition, in a file
 `Pricing.cs` that starts with `using Warrant;` and `namespace Pricing;`:
 
 ```text
-Pricing.cs(18,75): error WRT0001: Theorem 'PriceTheorems.DiscountNeverIncreasesPrice(int, int)' could not be proved: omega could not prove the goal. Counterexample: price = 0, discount = -1.
+Pricing.cs(21,75): error WRT0001: Theorem 'PriceTheorems.DiscountNeverIncreasesPrice(int, int)' could not be proved: omega could not prove the goal. Counterexample: price = -1, discount = 0.
   a possible counterexample may satisfy the constraints
-    0 ≤ b ≤ 2147483647
-    b + 4294967296*c ≥ 1
-    -2147483648 ≤ a ≤ 2147483647
-    a + 4294967296*c ≤ -1
-    0 ≤ a + b + 4294967296*c ≤ 2147483647
+    -2147483648 ≤ b ≤ -1
+    0 ≤ a ≤ 2147483647
+    a - b ≥ 0
   where
    a := discount.toInt
-   b := if (price.toInt - discount.toInt) % ↑(2 ^ 32) < (↑(2 ^ 32) + 1) / 2 then (price.toInt - discount.toInt) % ↑(2 ^ 32) else (price.toInt - discount.toInt) % ↑(2 ^ 32) - ↑(2 ^ 32)
-   c := (price.toInt - discount.toInt) / 4294967296
+   b := price.toInt
 
   price discount : Int32
-  ⊢ 0 ≤ price → (if price ≤ discount then 0 else price - discount) ≤ price
+  ⊢ 0 ≤ discount → (if price ≤ discount then 0 else price - discount) ≤ price
 ```
 
 The location is the tactic that failed, here `Tactic.Omega()`.
 
 - **Counterexample.** On the first line, if the engine found one. Believe it
   first: run the method with those values in a unit test. Usually the claim is
-  missing a condition (here, `discount >= 0`: `Discounted(0, -1)` is 1).
+  missing a condition (here, `price >= 0`: `Discounted(-1, 0)` is 0, more than
+  the price).
 - **The tactic's explanation.** The indented lines after the first are the
   failing tactic's own message. For `omega` they are constraints over atoms
-  (`a`, `b`, …) that describe where it could not rule out a failure; an `if`
-  of `%` terms like `b` is how `int` wrap-around looks over `Int`.
+  (`a`, `b`, …) that describe where it could not rule out a failure.
 - **Unsolved goal.** The last block. Above the line `⊢` are the facts the
   prover had: the theorem's parameters and any hypotheses. Below it is what it
   still had to show; a `Spec.Implies` condition that no `Tactic.Intro` moved
@@ -403,17 +406,36 @@ because each framework ships with its own build of that project.
 
 ## Deal with overflow
 
-*M5a for unchecked, M6 for checked.*
+*M6.*
 
-`int` arithmetic wraps around, as the CLR does. When a proof fails with a
-counterexample near `int.MaxValue` or `int.MinValue`, choose one:
+C# `int` and `long` arithmetic wraps around in its default context, and
+Warrant models it as the CLR runs it. But a wrap that nobody wrote on purpose is
+a bug, so wherever Warrant proves something there is one rule (GitHub #183,
+#235, #236, #244): `+`, `-`, `*`, unary `-`, `++`, `--` and compound assignment
+on `int` and `long` must not overflow. In a `[Verified]` method's body a
+possible overflow fails the build at the operation:
 
-- **Rule it out.** Add the bound the business logic already guarantees:
-  `Spec.Requires(amount <= 1_000_000_000)` (M6). Each verified caller now has
-  to show it.
+```text
+error WRT0001: The contract of 'Prices.Discounted(int, int)' could not be proved: arithmetic overflow: this int/long operation may overflow, where C# would wrap (write unchecked(...) if wrapping is intended): …
+```
+
+The condition is proved under what is known at the operation: the method's
+`Spec.Requires`, the `if` branch and `switch` section taken, the guard of a
+`?:`, `&&` or `||` around it, earlier operations' values, and the
+`Spec.Ensures` of a method called before it. When one fails, choose:
+
+- **Bound it.** Add the bound the business logic already guarantees:
+  `Spec.Requires(discount >= 0)`, `Spec.Requires(amount <= 1_000_000_000)`.
+  Each verified caller now has to show it, and a theorem that calls the method
+  has to stay inside it (a `Spec.Implies` condition). A guard in the code
+  (`if (x < 1000) return x + 1;`) or a callee's `Spec.Ensures` works too
+  ([proofs that work](proofs-that-work.md#a-bounded-method)).
+- **Say it wraps on purpose** with `unchecked(...)` or an `unchecked { }`
+  block, for hash codes, checksums and code whose point is the wrap-around.
+  Explicit `unchecked` has no condition and keeps C#'s wrapped value.
 - **Use a wider type** for the intermediate value (`long`), if that's what the
   code should have done anyway.
-- **Use `checked`** (M6). Then overflow throws `OverflowException` instead of
+- **Use `checked`**. Then overflow throws `OverflowException` instead of
   wrapping, and the method's contract obligation has to show it can't happen:
   a contract cannot allow an implicit exception. With
   `Spec.Requires(a >= 0 && a <= 1_000_000 && b >= 0 && b <= 1_000_000)`,
@@ -421,10 +443,16 @@ counterexample near `int.MaxValue` or `int.MinValue`, choose one:
   `a + b` with `overflow in a checked operation`. If the code should throw on
   overflow, throw explicitly (next guide).
 
+The default procedure's `omega` reads linear arithmetic only: `a * b` of two
+variables is never bounded by it, so write such a product `unchecked` or prove
+it with a `[ProofFor]` script. It also knows nothing of a recursive call's
+result (a recursive method has no `Spec.Requires`), nor of a local whose value
+is merged from two branches that each change two locals.
+
 In a project with `<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>`,
 all arithmetic is checked, and Warrant follows the project setting.
 
-In what you state, overflow is never silent (GitHub #183, #236): `+`, `-`,
+In what you state, overflow is never silent either (GitHub #183, #235, #236): `+`, `-`,
 `*` and unary `-` on `int` and `long` in a `Spec.Requires`, a `Spec.Ensures`,
 a `Spec.Assert` or a `[Theorem]`'s statement must not overflow, and a possible overflow fails
 the proof at that operation with `well-definedness of a Spec expression`.

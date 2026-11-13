@@ -136,7 +136,7 @@ Extraction's own diagnostics carry source locations directly, because they are p
 
 ## The running example in VIR
 
-`Payout`'s unit as M4 wrote it, laid out for reading (the canonical form has no whitespace; it is `tests/Warrant.Vir.Tests/golden/payout.json`, which since M6 has `"vir": 3` and is otherwise the same):
+`Payout`'s unit as M4 wrote it, laid out for reading (the canonical form has no whitespace; it is `tests/Warrant.Vir.Tests/golden/payout.json`, which since M6 has `"vir": 3` and is otherwise the same; the corpus member has since gained a `Spec.Requires`, #244, which the extraction test leaves out when it compares them):
 
 ```json
 {

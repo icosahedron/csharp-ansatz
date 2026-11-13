@@ -67,12 +67,40 @@ public static class PayoutRules
 
 ```text
 verifying 1 file(s) in .
+  Payouts.PayoutRules.Payout(int, int, int)  unproved
+./Payouts.cs(12,23): error WRT0001: The contract of 'PayoutRules.Payout(int, int, int)' could not be proved: arithmetic overflow: this int/long operation may overflow, where C# would wrap (write unchecked(...) if wrapping is intended): omega could not prove the goal:
+  case h.left
+  loss deductible limit : Int32
+  h : loss.toInt - deductible.toInt < -2147483648 ∨ 2147483647 < loss.toInt - deductible.toInt
+  h : deductible < loss
+  ⊢ False
+Warrant: 1 verified units, 0 theorems proved, 0 not proved.
+```
+
+Before you have claimed anything, Warrant already has one question about the
+method: can `loss - deductible` (line 12, column 23) overflow? In C# it would
+silently wrap around, and Warrant treats that as a bug unless the code says
+`unchecked`. Under what it knows there (`deductible < loss`, from the `if`), it
+cannot rule it out: with `loss = int.MaxValue` and `deductible = -1` the
+difference does not fit in an `int`.
+
+A deductible is never negative, so say so with a precondition, as the first line
+of the method:
+
+```csharp
+        Spec.Requires(deductible >= 0);
+```
+
+Verify again:
+
+```text
+verifying 1 file(s) in .
   Payouts.PayoutRules.Payout(int, int, int)  translated
 Warrant: 1 verified units, 0 theorems proved, 0 not proved.
 ```
 
-Nothing has been proved yet. Warrant has only checked that the method is
-inside the supported subset and translated it.
+The method is checked: its arithmetic cannot overflow under its precondition.
+Nothing has been proved about what it computes yet.
 
 ### Step 3: prove a fact about one input
 
@@ -103,7 +131,9 @@ Warrant: 3 verified units, 2 theorems proved, 0 not proved.
 
 These look like unit tests, and for now they are: each one checks one input.
 The difference is that they are checked by evaluating the translated method
-inside the kernel, not by running it (`rfl`). Notice that you never call a
+inside the kernel, not by running it (`rfl`). Each also checks that its
+arguments meet `Payout`'s precondition: a theorem may only ask about a method
+where the method's own `Spec.Requires` holds. Notice that you never call a
 `[Theorem]` method yourself; calling one is error WRT0003.
 
 ### Step 4: prove something for every input
@@ -127,32 +157,23 @@ verifying 1 file(s) in .
   Payouts.PayoutTheorems.CappedAtTheLimit()                    proved (rfl)
   Payouts.PayoutTheorems.NothingBelowTheDeductible()           proved (rfl)
   Payouts.PayoutTheorems.PayoutIsNeverNegative(int, int, int)  unproved
-./Payouts.cs(30,76): error WRT0001: Theorem 'PayoutTheorems.PayoutIsNeverNegative(int, int, int)' could not be proved: omega could not prove the goal. Counterexample: loss = 0, deductible = -1, limit = -1.
+./Payouts.cs(30,20): error WRT0001: Theorem 'PayoutTheorems.PayoutIsNeverNegative(int, int, int)' could not be proved: omega could not prove the goal:
   a possible counterexample may satisfy the constraints
-    -2147483648 ≤ c ≤ -1
-    b - c ≥ 1
-    0 ≤ b ≤ 2147483647
-    b + 4294967296*d ≥ 1
-    -2147483648 ≤ a ≤ 2147483647
-    -2147483648 ≤ a + b + 4294967296*d ≤ 2147483647
+    -2147483648 ≤ a ≤ -1
   where
    a := deductible.toInt
-   b := if (loss.toInt - deductible.toInt) % ↑(2 ^ 32) < (↑(2 ^ 32) + 1) / 2 then (loss.toInt - deductible.toInt) % ↑(2 ^ 32) else (loss.toInt - deductible.toInt) % ↑(2 ^ 32) - ↑(2 ^ 32)
-   c := limit.toInt
-   d := (loss.toInt - deductible.toInt) / 4294967296
 
   loss deductible limit : Int32
-  ⊢ 0 ≤ if loss ≤ deductible then 0 else if limit < loss - deductible then limit else loss - deductible
+  ⊢ deductible ≥ 0
 Warrant: 4 verified units, 2 theorems proved, 1 not proved.
 ```
 
-The location (line 30, column 76) is `Tactic.Omega()`, the step that failed.
-Read the first line and the last block first. The counterexample is right:
-with `loss = 0`, `deductible = -1` and `limit = -1`, `covered` is 1, which is
-more than the limit, so the method returns the limit, -1. The goal is what
-`omega` was asked to prove, after `Unfold` and `Simp`; the constraints in
-between are `omega`'s description of where it could not rule out a failure.
-The theorem was wrong, not the proof.
+The location (line 30, column 20) is the call `PayoutRules.Payout(...)`, and the
+goal is `Payout`'s precondition: the theorem asks about every `deductible`,
+including the negative ones `Payout` does not accept. Read the first line and
+the last block first; the constraints in between are `omega`'s description of
+where it could not rule out a failure, here every negative deductible. The
+theorem was wrong, not the proof.
 
 ### Step 5: state what you actually mean
 
@@ -174,24 +195,28 @@ Warrant: 4 verified units, 3 theorems proved, 0 not proved.
 ```
 
 Now try removing `deductible >= 0` from the condition, leaving
-`Spec.Implies(limit >= 0, …)`, and verify again. The counterexample this time
-is less obvious:
+`Spec.Implies(limit >= 0, …)`, and verify again. The precondition fails again,
+now with the premise `limit ≥ 0` among the hypotheses:
 
 ```text
-… could not be proved: omega could not prove the goal. Counterexample: loss = 0, deductible = -2147483648, limit = 0.
+… could not be proved: omega could not prove the goal:
+  …
+  loss deductible limit : Int32
+  h : limit ≥ 0
+  ⊢ deductible ≥ 0
 ```
 
-`loss - deductible` is `0 - int.MinValue`, which is `int.MaxValue + 1` and
-wraps around to `int.MinValue` in C#. That is not more than the limit, so the
-method returns it. Warrant models `int` the way the CLR runs it, so it finds
-the overflow that a proof about mathematical integers would have missed.
-Put the condition back.
+Without the precondition, `loss - deductible` could be `0 - int.MinValue`, which
+is `int.MaxValue + 1` and wraps around to `int.MinValue` in C#. Warrant models
+`int` the way the CLR runs it, but it does not let a verified method or a
+theorem lean on the wrap-around by accident: arithmetic that may overflow is an
+error unless it is written `unchecked(...)`. Put the condition back.
 
 ### Step 6: one more, without help
 
 Write a theorem that the payout never exceeds the limit when the limit is
-non-negative. Use the same proof script. (Hint: does it need `deductible >= 0`?
-Try it without, and read the counterexample if it fails.)
+non-negative. Use the same proof script. (Hint: what does `Payout`'s
+precondition ask of the theorem?)
 
 ## Part 2: a method that reads from a database
 
@@ -276,14 +301,9 @@ find out the proof doesn't cover it.
 
 ### Step 9: check the proof used your contract
 
-Delete `p.Deductible >= 0 &&` from the contract and build. The postcondition
-now fails:
-
-```text
-    loss = 0, p.Deductible = -5, p.Limit = 10
-```
-
-With a negative deductible, a zero loss still produces a payout. Now put it back
+Delete `p.Deductible >= 0 &&` from the contract and build. The call to
+`Payout` now fails its precondition, `deductible >= 0`: nothing says a stored
+deductible is not negative. Now put it back
 and delete `&& p.Limit >= 0` instead. The build still passes: the postcondition
 never needed the limit. Experiments like this show which assumptions a proof
 actually depends on. Put the contract back as it was.
@@ -291,8 +311,8 @@ actually depends on. Put the contract back as it was.
 ## What you've done
 
 You marked a method `[Verified]`, proved concrete and universal theorems about
-it, read a counterexample (including an overflow), turned a false claim into a
-true one, wrote a postcondition, and verified a method against a database
+it, bounded its arithmetic so it cannot overflow, read a failed goal, turned a
+false claim into a true one, wrote a postcondition, and verified a method against a database
 contract.
 
 Next:

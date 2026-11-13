@@ -64,8 +64,9 @@ carries them, and M6 adds a `spec` kind (KTD15):
 a triple from `mvcgen`'s spec map, or an equation from its simp set.
 The sidecar's format goes to 2 (`Sidecar.FormatVersion`); a format-1 sidecar is refused.
 `scripts/export-attributes.sh` imports `Std.Do`, and `src/Warrant.Meta/Attributes/Sidecar.cs` parses the kind.
-The sidecar now has 33 `spec` entries: 13 from `Std.Do`, 14 from U3 (`ClrM.throw` and the raising integer models), 4
-from U16 (the raising nullable reads and `Math.Abs`) and 2 from U4 (`decimal` `+` and `-`).
+The sidecar now has 41 `spec` entries: 13 from `Std.Do`, 14 from U3 (`ClrM.throw` and the raising integer models), 4
+from U16 (the raising nullable reads and `Math.Abs`), 2 from U4 (`decimal` `+` and `-`) and 8 from #244 (default-context
+`+ - *` and negation on `int` and `long` in a method that can raise).
 
 The walker reads them by the head constant of the program it is looking at (chapter 7).
 That is the only place a model operation's spec comes from: `SpecTable` names the structural rules and nothing else.

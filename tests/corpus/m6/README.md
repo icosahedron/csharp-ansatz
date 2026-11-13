@@ -48,6 +48,15 @@ These members were rejected in the M4 corpus for a construct M6 supports. U7, U1
 | `Corpus.Rejected.Statements.Decimals` | WRT0002 `decimal` | proved (accepted) |
 | `Corpus.Rejected.Counter.Next` | WRT0002 `instance member of a class` | WRT0002 `member access on this` (rejected): U18 accepts a class's instance methods, and this one reads a field that is not a dependency |
 
+## Arithmetic that must not overflow (#244)
+
+Since #244 a verified method's own `int` and `long` arithmetic in C#'s default context must not overflow (docs/m6/06).
+Three members changed, keeping their outcomes: `Lookups.Neighbour` in `refuted/Dependencies.cs` gained
+`Spec.Requires(id < int.MaxValue)` for its `id + 1` (it still fails at its postcondition, its goal now listing the bound
+and the exact value of `id + 1`, and the members below it moved down a line); `Contracts.Next` and
+`Dependencies.Store.Sum` in `rejected/`, helpers of rejected members, write their arithmetic `unchecked`. The accepted
+members' arithmetic was already bounded (`Sum`, `Average`, `Steps.Next`).
+
 ## Files
 
 | File | Members | Why it is here |

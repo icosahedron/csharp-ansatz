@@ -114,6 +114,7 @@ hypotheses and its goal after the VC simp set:
 | `Unsupported` | a program shape the VC walker has no rule for (reported where the walk last was, #223) |
 | `ReachableThrow` | an explicit throw is reachable under the Requires (Spec.NoThrow) (reported at the `throw`, #182) |
 | `CalleeMayThrow` | a callee without Spec.NoThrow may throw explicitly at this call (Spec.NoThrow) (#182) |
+| `ArithmeticOverflow` | arithmetic overflow: this int/long operation may overflow, where C# would wrap (write unchecked(...) if wrapping is intended) (#244: a default-context operation in a method's body, reported at it; in a method that can raise, the walker maps its model's `assertFailed` at an arithmetic node to this kind) |
 
 From the M6 corpus (*ran*, as `docs/proving/proofs-that-work.md` shows it):
 
@@ -150,5 +151,9 @@ In a theorem's script it is `unsupported script argument`.
   shape with `c.Id` and the contract's `c.Id == id` proves.
 - #227: a `bool` postcondition that needs a case split on a `bool` parameter (`r => !flagged || r`) is left to `omega`,
   which does not split `Bool`s, and fails; stated as `r == (…)` it proves.
-- #220: `warrant translate` loads no attribute sidecar, so it cannot run the default procedure, and reports a contract
-  that `warrant verify` proves as not proved. Use `warrant verify`.
+- #220 (fixed with #244): `warrant translate` loads the attribute sidecar beside the bundle, as `warrant verify` does,
+  so it runs the default procedure; it declines when the sidecar is missing.
+- #244: `omega` reads only linear arithmetic, so a product of two variables (`a * b`) is never bounded by it, however
+  tight the `Spec.Requires`; write it `unchecked` or prove it with a `[ProofFor]` script. A pure method's join point
+  parameter (a local merged after branches that change two locals, or after a `switch` with a `return`) carries no
+  value into the obligations after it, and a recursive call's result is unknown (chapter 6).

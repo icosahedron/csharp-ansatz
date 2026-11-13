@@ -106,8 +106,17 @@ guards of `&&`, `||`, `?:`, `??` and `Spec.Implies` and for every value of a `Sp
 (docs/m4/06, docs/m6/06): `Prove.That(Spec.ForAll<int>(y => y + 0 == y))` still proves, since `y + 0` never overflows,
 while `Prove.That(x + 1 - 1 == x)` fails at `x + 1` until a `Spec.Implies` bounds `x`.
 `AlwaysLarger` above is unaffected: its statement `Increment(x) > x` has no arithmetic of its own, so it still fails
-with its counterexample; the `x + 1` is in `Increment`'s body (#244).
+with its counterexample.
 Explicit `unchecked(...)` wraps on purpose and has no obligation.
+
+## Arithmetic in a method's body (since #244)
+
+The `x + 1` is in `Increment`'s body, and since #244 a verified method's own default-context arithmetic must not
+overflow either (docs/m6/06). The corpus's refuted `Increment` is about the wrap, so it is written
+`unchecked(x + 1)` and `AlwaysLarger` keeps its counterexample; the accepted one has `Spec.Requires(x < int.MaxValue)`,
+which `LargerBelowMax`'s premise meets. `Sum` and `SumLong` above write their sum `unchecked`, since nothing is known of a
+recursive call's result where its obligation is stated (and the sums do overflow for large `n`); `Add`'s `a + 1` is
+`unchecked` and its `b - 1` is proved under `b > 0` (tests/corpus/m5a/README.md).
 
 ## What M5a deliberately leaves out
 

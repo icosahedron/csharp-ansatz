@@ -36,8 +36,17 @@ public sealed class DifferentialFixture : IDisposable
 
     public SemanticsBundle Bundle { get; }
 
-    /// <summary>The engine options of the corpus runs: the corpus kernel fuel and the attribute sidecar.</summary>
-    public EngineOptions Options { get; } = EngineOptions.Default with { Kernel = KernelLimits.Corpus, Attributes = EngineFixture.SharedSidecar.Value };
+    /// <summary>
+    /// The engine options of the corpus runs: the corpus kernel fuel and the attribute sidecar. The fuel budgets decide; the
+    /// wall-clock timeout is raised so that a unit whose obligations take a second or two alone (Records.Distance's) is
+    /// not undecided when the whole test project runs in parallel beside it.
+    /// </summary>
+    public EngineOptions Options { get; } = EngineOptions.Default with
+    {
+        Kernel = KernelLimits.Corpus,
+        Attributes = EngineFixture.SharedSidecar.Value,
+        Timeout = TimeSpan.FromMinutes(5),
+    };
 
     internal CSharpCompilation Compilation { get; }
 

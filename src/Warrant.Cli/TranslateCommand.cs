@@ -4,7 +4,9 @@ using Warrant.Engine;
 using Warrant.Engine.Reports;
 using Warrant.Extraction;
 using Warrant.Frontend;
+using Warrant.Kernel;
 using Warrant.Lean4Export;
+using Warrant.Meta;
 using Warrant.Vir;
 
 /// <summary>
@@ -68,10 +70,18 @@ internal static class TranslateCommand
             error.WriteLine($"declined: semantics bundle '{bundlePath}' not found");
             return 2;
         }
+        // The default procedure needs the sidecar's @[spec] lemmas, and since #244 every method with implicit int or long
+        // arithmetic has obligations it proves, so translate loads it as verify does (#220).
+        var sidecarPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(bundlePath))!, SemanticsBundle.SidecarFileName);
+        if (!File.Exists(sidecarPath))
+        {
+            error.WriteLine($"declined: attribute sidecar '{sidecarPath}' not found; it ships beside the semantics bundle");
+            return 2;
+        }
 
         try
         {
-            return Translate(directory, outPath, reportPath, bundlePath, checkOverflow, output);
+            return Translate(directory, outPath, reportPath, bundlePath, sidecarPath, checkOverflow, output);
         }
         catch (Exception ex) when (ex is Lean4ExportFormatException or InvalidDataException or IOException or UnauthorizedAccessException)
         {
@@ -80,7 +90,7 @@ internal static class TranslateCommand
         }
     }
 
-    private static int Translate(string directory, string? outPath, string? reportPath, string bundlePath, bool checkOverflow, TextWriter output)
+    private static int Translate(string directory, string? outPath, string? reportPath, string bundlePath, string sidecarPath, bool checkOverflow, TextWriter output)
     {
         var root = Path.GetFullPath(directory);
         var files = SourceFiles(root);
@@ -99,9 +109,10 @@ internal static class TranslateCommand
             return 1;
         }
 
+        var sidecar = Sidecar.Load(sidecarPath, OutcomeText.FileSha256(bundlePath));
         var bundle = SemanticsBundle.Load(bundlePath);
         var inputs = extraction.Units.Select(u => new EngineUnit(u.Unit, u.DisplayName, u.Spans)).ToList();
-        var result = Pipeline.Run(inputs, bundle);
+        var result = Pipeline.Run(inputs, bundle, EngineOptions.Default with { Kernel = KernelLimits.Corpus, Attributes = sidecar });
 
         int width = result.Units.Select(u => u.DisplayName.Length).DefaultIfEmpty(0).Max();
         foreach (var unit in result.Units)

@@ -22,7 +22,7 @@ public sealed class ParityTests : IDisposable
     private readonly CscArgsProject project = new("""
         public static class Increments
         {
-            [Verified] public static int Increment(int x) => x + 1;
+            [Verified] public static int Increment(int x) => unchecked(x + 1);
             [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
             [Theorem] static Proof Mismatch(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("Nat.zero")));
             [Theorem] static Proof Two() => Prove.That(Increment(1) == 2);

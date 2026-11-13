@@ -23,10 +23,11 @@ public static class Operators
     public static int UnaryPlus(int x) => +x;
 
     [Verified]
-    public static long LongSubtract(long a, long b) => a - b;
+    // Operator wiring over the whole range, so the arithmetic wraps on purpose (#244).
+    public static long LongSubtract(long a, long b) => unchecked(a - b);
 
     [Verified]
-    public static long LongMultiply(long a, long b) => a * b;
+    public static long LongMultiply(long a, long b) => unchecked(a * b);
 
     [Verified]
     public static bool LongLess(long a, long b) => a < b;

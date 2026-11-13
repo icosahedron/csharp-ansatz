@@ -50,7 +50,7 @@ public sealed class CounterexampleTests(EngineFixture engine) : IClassFixture<En
     /// <summary><c>A0(x) = x + 1</c> and <c>A{k}(x) = A{k-1}(A{k-1}(x))</c>, which adds 2^k.</summary>
     private static string Chain(int depth)
     {
-        var source = new StringBuilder("    [Verified] public static int A0(int x) => x + 1;\n");
+        var source = new StringBuilder("    [Verified] public static int A0(int x) => unchecked(x + 1);\n");
         for (int k = 1; k <= depth; k++)
         {
             source.Append(CultureInfo.InvariantCulture, $"    [Verified] public static int A{k}(int x) => A{k - 1}(A{k - 1}(x));\n");

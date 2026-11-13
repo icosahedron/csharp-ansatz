@@ -49,7 +49,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var result = Run("""
             public static class S
             {
-                [Verified] public static int Inc(int x) => x + 1;
+                [Verified] public static int Inc(int x) => unchecked(x + 1);
                 [Theorem] static Proof Vacuous() => Prove.That(Spec.Implies(Inc(1) > 5, Inc(1) > 100));
             }
             """);
@@ -99,7 +99,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var extraction = EngineCorpus.Inline("""
             public static class S
             {
-                [Verified] public static int Inc(int x) => x + 1;
+                [Verified] public static int Inc(int x) => unchecked(x + 1);
                 [Theorem] static Proof Larger() => Prove.That(Inc(41) > 41);
             }
             """);
@@ -130,7 +130,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var result = Run("""
             public static class S
             {
-                [Verified] public static int Inc(int x) => x + 1;
+                [Verified] public static int Inc(int x) => unchecked(x + 1);
                 [Theorem] static Proof A() => Prove.That(Inc(1) == 3);
                 [Theorem] static Proof B() => Prove.That(Inc(1) == 2);
                 [Verified] public static int Twice(int x) => Inc(Inc(x));
@@ -149,7 +149,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var extraction = EngineCorpus.Inline("""
             public static class S
             {
-                [Verified] public static int Inc(int x) => x + 1;
+                [Verified] public static int Inc(int x) => unchecked(x + 1);
                 [Verified] public static int Twice(int x) => Inc(Inc(x));
                 [Verified] public static int Id(int x) => x;
                 [Theorem] static Proof UsesTwice() => Prove.That(Twice(1) == 3);
@@ -253,7 +253,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var inputs = extraction.Units
             .Select(u => new EngineUnit(VirReader.Read(VirWriter.Write(u.Unit)), u.DisplayName, u.Spans))
             .ToList();
-        var fromJson = Pipeline.Run(inputs, engine.Bundle);
+        var fromJson = Pipeline.Run(inputs, engine.Bundle, engine.Options);
         var direct = engine.Run("accepted");
         Assert.Equal(
             direct.Units.Select(u => (u.Key, Describe(u))),
@@ -421,7 +421,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var result = Script("""
             public static class Increments
             {
-                [Verified] public static int Increment(int x) => x + 1;
+                [Verified] public static int Increment(int x) => unchecked(x + 1);
                 [Theorem] static Proof AlwaysLarger(int x) => Prove.That(Increment(x) > x);
             }
             """);
@@ -443,7 +443,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         const string Source = """
             public static class Increments
             {
-                [Verified] public static int Increment(int x) => x + 1;
+                [Verified] public static int Increment(int x) => unchecked(x + 1);
 
                 [Theorem]
                 static Proof AlwaysLarger(int x) =>
@@ -643,8 +643,8 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var result = Script("""
             public static class S
             {
-                [Verified] public static int Abs(int x) => x < 0 ? -x : x;
-                [Verified] public static long AbsLong(long x) => x < 0 ? -x : x;
+                [Verified] public static int Abs(int x) => x < 0 ? unchecked(-x) : x;
+                [Verified] public static long AbsLong(long x) => x < 0 ? unchecked(-x) : x;
 
                 [Theorem]
                 static Proof AbsIsNonNegativeAboveMin(int x) =>
@@ -937,7 +937,7 @@ public sealed class TheoremTests(EngineFixture engine) : IClassFixture<EngineFix
         var result = Script("""
             public static class S
             {
-                [Verified] public static int Twice(int x) => x + x;
+                [Verified] public static int Twice(int x) => unchecked(x + x);
 
                 [Theorem]
                 static Proof TwiceIsDoubling() =>

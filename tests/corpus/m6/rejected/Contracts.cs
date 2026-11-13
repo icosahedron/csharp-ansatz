@@ -87,7 +87,7 @@ public static class Contracts
     public static int Checked(int x) => x >= 0 ? x : throw new ArgumentException("negative");
 
     [Verified]
-    public static int Next(int x) => Checked(x) + 1;
+    public static int Next(int x) => unchecked(Checked(x) + 1);
 
     [Theorem]
     static Proof NextIsPositive(int x) => Prove.That(Next(x) > 0);

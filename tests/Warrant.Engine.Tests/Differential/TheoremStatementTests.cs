@@ -36,7 +36,7 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
     {
         var compilation = EngineCorpus.Compile("refuted");
         var extraction = EngineCorpus.Extract(compilation);
-        var claims = Agree(compilation, extraction, Pipeline.Run(EngineCorpus.Inputs(extraction), corpus.Bundle, KernelLimits.Corpus));
+        var claims = Agree(compilation, extraction, Pipeline.Run(EngineCorpus.Inputs(extraction), corpus.Bundle, corpus.Options));
         Assert.Equal(2, claims.Count);
         Assert.All(claims, c => Assert.False(c.Value));
     }
@@ -50,7 +50,7 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
 
                 public static class Implications
                 {
-                    [Verified] public static int Inc(int x) => x + 1;
+                    [Verified] public static int Inc(int x) => unchecked(x + 1);
 
                     [Theorem] static Proof TrueImpliesTrue() => Prove.That(Spec.Implies(Inc(1) == 2, Inc(2) == 3));
                     [Theorem] static Proof TrueImpliesFalse() => Prove.That(Spec.Implies(Inc(1) == 2, Inc(2) == 4));
@@ -73,7 +73,7 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
             checkOverflow: false);
         var extraction = EngineCorpus.Extract(compilation);
         Assert.Empty(extraction.Diagnostics);
-        var claims = Agree(compilation, extraction, Pipeline.Run(EngineCorpus.Inputs(extraction), corpus.Bundle, KernelLimits.Corpus));
+        var claims = Agree(compilation, extraction, Pipeline.Run(EngineCorpus.Inputs(extraction), corpus.Bundle, corpus.Options));
         Assert.Equal(
             new Dictionary<string, bool>
             {
@@ -110,7 +110,7 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
 
                 public static class Quantified
                 {
-                    [Verified] public static int Increment(int x) => x + 1;
+                    [Verified] public static int Increment(int x) => unchecked(x + 1);
 
                     [Verified] public static bool Flip(bool b) => !b;
 
@@ -138,7 +138,7 @@ public sealed class TheoremStatementTests(DifferentialFixture corpus)
             checkOverflow: false);
         var extraction = EngineCorpus.Extract(compilation);
         Assert.Empty(extraction.Diagnostics);
-        var run = Pipeline.Run(EngineCorpus.Inputs(extraction), corpus.Bundle, KernelLimits.Corpus);
+        var run = Pipeline.Run(EngineCorpus.Inputs(extraction), corpus.Bundle, corpus.Options);
         var translation = Translator.Translate(extraction.Units.Select(u => u.Unit), corpus.Bundle.Env);
 
         var (claimsCompilation, _) = ClaimsCompilation(compilation);

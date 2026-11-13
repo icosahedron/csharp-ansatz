@@ -18,16 +18,16 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
     private const string Source = """
         public static class S
         {
-            [Verified] public static int Inc(int x) => x + 1;
+            [Verified] public static int Inc(int x) => unchecked(x + 1);
 
-            [Verified] public static int Twice(int x) => x + x;
+            [Verified] public static int Twice(int x) => unchecked(x + x);
 
             [Verified]
             public static int Sum(int n)
             {
                 Spec.Decreases(n);
                 if (n <= 0) return 0;
-                return n + Sum(n - 1);
+                return unchecked(n + Sum(n - 1));
             }
 
             [Theorem] static Proof IncAddsOne(int x) => Prove.That(Inc(x) == unchecked(x + 1)).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());
@@ -197,7 +197,7 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
         const string source = """
             public static class S
             {
-                [Verified] public static int Twice(int x) => x + x;
+                [Verified] public static int Twice(int x) => unchecked(x + x);
 
                 [Theorem] static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Exact("h"));
 
@@ -353,7 +353,7 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
     {
         var service = NewService();
         service.Verify(Request(Units(Source)));
-        var edited = Units(Source.Replace("Inc(int x) => x + 1;", "Inc(int x) => 1 + x;", StringComparison.Ordinal));
+        var edited = Units(Source.Replace("Inc(int x) => unchecked(x + 1);", "Inc(int x) => unchecked(1 + x);", StringComparison.Ordinal));
 
         var recheck = service.Verify(Request(edited) with { Recheck = true });
 
@@ -389,7 +389,7 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
             {
                 Spec.Decreases(n);
                 if (n <= 0) return 0;
-                return n + Sum(n - 1);
+                return unchecked(n + Sum(n - 1));
             }
 
             [Theorem] static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => x == x)).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));

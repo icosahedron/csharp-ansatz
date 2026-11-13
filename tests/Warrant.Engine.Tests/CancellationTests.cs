@@ -15,7 +15,7 @@ public sealed class CancellationTests(EngineFixture engine) : IClassFixture<Engi
     private const string Fast = """
         public static class S
         {
-            [Verified] public static int Inc(int x) => x + 1;
+            [Verified] public static int Inc(int x) => unchecked(x + 1);
             [Theorem] static Proof Larger() => Prove.That(Inc(41) > 41);
             [Theorem] static Proof Scripted(int a) => Prove.That(a == a).By(Tactic.Exact(Lean.Const("rfl")));
         }
@@ -45,7 +45,7 @@ public sealed class CancellationTests(EngineFixture engine) : IClassFixture<Engi
         // A{k}(x) = A{k-1}(A{k-1}(x)) adds 2^k to x, and deciding A30(0) > 0 takes the kernel far longer than the two
         // seconds before the cancel; with unlimited kernel fuel and time, only the token stops it. The engine runs Early
         // before Slow and Then after it (units in key order).
-        var source = new StringBuilder("public static class S\n{\n    [Verified] public static int A0(int x) => x + 1;\n");
+        var source = new StringBuilder("public static class S\n{\n    [Verified] public static int A0(int x) => unchecked(x + 1);\n");
         for (int k = 1; k <= 30; k++)
         {
             source.Append(CultureInfo.InvariantCulture, $"    [Verified] public static int A{k}(int x) => A{k - 1}(A{k - 1}(x));\n");

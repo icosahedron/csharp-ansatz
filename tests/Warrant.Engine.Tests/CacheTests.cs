@@ -20,16 +20,16 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
     private const string Increments = """
         public static class S
         {
-            [Verified] public static int Inc(int x) => x + 1;
+            [Verified] public static int Inc(int x) => unchecked(x + 1);
 
-            [Verified] public static int Dec(int x) => x - 1;
+            [Verified] public static int Dec(int x) => unchecked(x - 1);
 
             [Verified]
             public static int Sum(int n)
             {
                 Spec.Decreases(n);
                 if (n <= 0) return 0;
-                return n + Sum(n - 1);
+                return unchecked(n + Sum(n - 1));
             }
 
             [Theorem] static Proof IncAddsOne(int x) => Prove.That(Inc(x) == unchecked(x + 1)).By(Tactic.Unfold(nameof(Inc)), Tactic.Omega());
@@ -117,7 +117,7 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
     public void EditingACalleesBodyChangesItsCallersKeyAndNoOtherUnits()
     {
         var units = Units(Increments);
-        var edited = Units(Increments.Replace("Inc(int x) => x + 1;", "Inc(int x) => 1 + x;", StringComparison.Ordinal));
+        var edited = Units(Increments.Replace("Inc(int x) => unchecked(x + 1);", "Inc(int x) => unchecked(1 + x);", StringComparison.Ordinal));
         var before = CacheKeyInputs.ForUnits(units, Hashes.Bundle, Hashes.Sidecar);
         var after = CacheKeyInputs.ForUnits(edited, Hashes.Bundle, Hashes.Sidecar);
         string Key(Dictionary<string, CacheKeyInputs> keys, string unit) => keys[unit].Key(Toolchain.Identity);
@@ -381,7 +381,7 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
                 {
                     Spec.Decreases(n);
                     if (n <= 0) return 0;
-                    return n + Sum(n - 1);
+                    return unchecked(n + Sum(n - 1));
                 }
 
                 [Verified]
@@ -544,7 +544,7 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
         const string source = """
             public static class S
             {
-                [Verified] public static int Twice(int x) => x + x;
+                [Verified] public static int Twice(int x) => unchecked(x + x);
 
                 [Theorem]
                 static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Twice(x) == unchecked(x + x))).By(Tactic.Intro("x"), Tactic.Exact(Lean.Const("rfl")));
@@ -570,7 +570,7 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
         const string source = """
             public static class S
             {
-                [Verified] public static int Inc(int x) => x + 1;
+                [Verified] public static int Inc(int x) => unchecked(x + 1);
 
                 [Theorem] static Proof Lemma() => Prove.That(Spec.ForAll<int>(x => Inc(x) == unchecked(x + 1))).By(Tactic.Intro("x"), Tactic.Unfold(nameof(Inc)), Tactic.Omega());
 
@@ -628,7 +628,7 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
         // runs out and decide is accepted, a proof that more fuel would have found another way.
         var source = new StringBuilder(ServiceChain(7));
         source.Append("""
-                [Verified] public static int Twice(int x) => x + x;
+                [Verified] public static int Twice(int x) => unchecked(x + x);
 
                 [Theorem] static Proof Doubled() => Prove.That(Twice(A6(0)) == A7(0));
             }
@@ -853,7 +853,7 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
     /// <summary><c>A0(x) = x + 1</c> and <c>A{k}(x) = A{k-1}(A{k-1}(x))</c>, in an open class <c>S</c>.</summary>
     private static string ServiceChain(int depth)
     {
-        var source = new StringBuilder("public static class S\n{\n    [Verified] public static int A0(int x) => x + 1;\n");
+        var source = new StringBuilder("public static class S\n{\n    [Verified] public static int A0(int x) => unchecked(x + 1);\n");
         for (int k = 1; k <= depth; k++)
         {
             source.Append(System.Globalization.CultureInfo.InvariantCulture, $"    [Verified] public static int A{k}(int x) => A{k - 1}(A{k - 1}(x));\n");

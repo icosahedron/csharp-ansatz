@@ -8,6 +8,8 @@ public static class PayoutRules
     [Verified]
     public static int Payout(int loss, int deductible, int limit)
     {
+        // A deductible is never negative, so loss - deductible cannot overflow (#244).
+        Spec.Requires(deductible >= 0);
         if (loss <= deductible) return 0;
         var covered = loss - deductible;
         return covered > limit ? limit : covered;

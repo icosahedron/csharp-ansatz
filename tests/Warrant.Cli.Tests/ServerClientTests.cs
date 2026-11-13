@@ -169,7 +169,7 @@ internal sealed class SourceDirectory : IDisposable
     public const string Fast = """
         public static class S
         {
-            [Verified] public static int Inc(int x) => x + 1;
+            [Verified] public static int Inc(int x) => unchecked(x + 1);
             [Theorem] static Proof Larger() => Prove.That(Inc(41) > 41);
         }
         """;
@@ -180,7 +180,7 @@ internal sealed class SourceDirectory : IDisposable
     /// </summary>
     public static string Slow()
     {
-        var source = new StringBuilder("public static class S\n{\n    [Verified] public static int A0(int x) => x + 1;\n");
+        var source = new StringBuilder("public static class S\n{\n    [Verified] public static int A0(int x) => unchecked(x + 1);\n");
         for (int k = 1; k <= 30; k++)
         {
             source.Append(CultureInfo.InvariantCulture, $"    [Verified] public static int A{k}(int x) => A{k - 1}(A{k - 1}(x));\n");

@@ -9,6 +9,8 @@ public static class Locals
     [Verified]
     public static int Fee(int price, bool rush)
     {
+        // price + fee must not overflow (#244).
+        Spec.Requires(price <= 1000000);
         var fee = 10;
         if (rush) fee = fee * 2;
         return price + fee;
@@ -18,6 +20,8 @@ public static class Locals
     [Verified]
     public static int Shipping(int weight, bool express, bool member)
     {
+        // weight * 2 + 15 must not overflow (#244).
+        Spec.Requires(weight >= 0 && weight <= 1000000);
         var cost = weight * 2;
         var bonus = 0;
         if (express)
@@ -25,8 +29,9 @@ public static class Locals
             cost = cost + 15;
             bonus = 1;
         }
-        if (member) return cost - 5;
-        return cost + bonus;
+        // cost and bonus reach here through a join point, whose parameters carry no value into an obligation (#244).
+        if (member) return unchecked(cost - 5);
+        return unchecked(cost + bonus);
     }
 
     // Both branches can fall through and neither changes a local the rest reads, but the
@@ -49,10 +54,14 @@ public static class Locals
     [Verified]
     public static int Steps(int x)
     {
+        // Wraps on purpose (StepsAddThree), so the block is unchecked (#244).
         var n = x;
-        n += 3;
-        n++;
-        n -= 1;
+        unchecked
+        {
+            n += 3;
+            n++;
+            n -= 1;
+        }
         return n;
     }
 
@@ -69,7 +78,8 @@ public static class Locals
             case >= 5 and < 9:
                 return 20;
         }
-        return result + 1;
+        // result is 0 or 10, but a join point's parameter carries no value into the obligation (#244), so unchecked.
+        return unchecked(result + 1);
     }
 
     [Theorem]

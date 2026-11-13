@@ -6,10 +6,10 @@ namespace Corpus.Rejected;
 public static class Scripts
 {
     [Verified]
-    public static int Scale(int x) => x + x;
+    public static int Scale(int x) => unchecked(x + x);
 
     [Verified]
-    public static long Scale(long x) => x + x;
+    public static long Scale(long x) => unchecked(x + x);
 
     // nameof of an overloaded method names no single member.
     [Theorem]

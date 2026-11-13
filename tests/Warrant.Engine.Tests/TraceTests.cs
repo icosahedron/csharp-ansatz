@@ -11,7 +11,7 @@ public sealed class TraceTests(EngineFixture engine) : IClassFixture<EngineFixtu
     private const string Source = """
         public static class S
         {
-            [Verified] public static int Inc(int x) => x + 1;
+            [Verified] public static int Inc(int x) => unchecked(x + 1);
 
             [Verified] public static bool Flip(bool b) => !b;
 

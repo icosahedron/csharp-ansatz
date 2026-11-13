@@ -123,6 +123,7 @@ public sealed class ExternalCallTests(EngineFixture engine) : IClassFixture<Engi
             [Verified]
             public async Task<bool> Neighbour(int id)
             {
+                Spec.Requires(id < int.MaxValue);
                 Spec.Ensures<bool>(r => r);
                 var p = await store.GetPayment(id + 1);
                 return p is null || p.Id == id;

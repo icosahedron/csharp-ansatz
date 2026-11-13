@@ -302,6 +302,56 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Equal(0, recheck.Counters.TacticRuns);
     }
 
+    private const string BoundedSource = """
+        public static class S
+        {
+            [Theorem] static Proof Bounded(int a) => Prove.That(Spec.Implies(a < 1000 && a > -1000, a + 1 > a)).By(Tactic.Intro("h"), Tactic.Omega());
+        }
+        """;
+
+    private const string Bounded = "M:S.Bounded(System.Int32)";
+
+    [Fact]
+    public void RecheckOfATheoremWhoseCertificateLacksAWellDefinednessTheoremReportsWrt0010AndDeletesTheEntry()
+    {
+        // #248: PipelineCache.Reuse refuses a theorem whose certificate holds no proof of one of its statement's $wd_k.
+        var units = Units(BoundedSource);
+        NewService().Verify(Request(units));
+        Tamper(units, Bounded, TheoremDropped(Certificate(units, Bounded), "$wd_1"));
+
+        var recheck = NewService().Verify(Request(units) with { Recheck = true });
+
+        var rejected = Result(recheck, Bounded);
+        Assert.Equal(OutcomeKind.Failed, rejected.Outcome.Kind);
+        Assert.Equal(InternalErrorOutcome.Code, rejected.Outcome.Code);
+        Assert.StartsWith("cached certificate for 'S.Bounded(int)' was rejected by the kernel: ", rejected.Outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("it holds no proof of Cs.S.«Bounded(System.Int32)».$wd_1", rejected.Outcome.Message, StringComparison.Ordinal);
+        Assert.False(rejected.FromCache);
+        Assert.False(rejected.Rechecked);
+        Assert.Equal(0, recheck.Counters.TacticRuns);
+        Assert.False(File.Exists(FileResultCache.PathOf(Dir, KeyOf(units, Bounded))));
+    }
+
+    [Fact]
+    public void RecheckOfATheoremWhoseWellDefinednessProofTheKernelRejectsReportsWrt0010AndDeletesTheEntry()
+    {
+        // #248: the $wd_1 proof replaced by its own statement, which the kernel rejects.
+        var units = Units(BoundedSource);
+        NewService().Verify(Request(units));
+        Tamper(units, Bounded, ProofReplacedByStatement(Certificate(units, Bounded), "$wd_1"));
+
+        var recheck = NewService().Verify(Request(units) with { Recheck = true });
+
+        var rejected = Result(recheck, Bounded);
+        Assert.Equal(OutcomeKind.Failed, rejected.Outcome.Kind);
+        Assert.Equal(InternalErrorOutcome.Code, rejected.Outcome.Code);
+        Assert.StartsWith("cached certificate for 'S.Bounded(int)' was rejected by the kernel: ", rejected.Outcome.Message, StringComparison.Ordinal);
+        Assert.False(rejected.FromCache);
+        Assert.False(rejected.Rechecked);
+        Assert.Equal(0, recheck.Counters.TacticRuns);
+        Assert.False(File.Exists(FileResultCache.PathOf(Dir, KeyOf(units, Bounded))));
+    }
+
     [Fact]
     public void RecheckOfAnEntryWhoseProofWasReplacedByAnotherTheoremsReportsWrt0010AndDeletesTheEntry()
     {
@@ -518,6 +568,30 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
             {
                 theorem["value"] = theorem["type"]!.GetValue<long>();
                 lines[i] = line.ToJsonString();
+                return string.Join('\n', lines);
+            }
+        }
+        throw new InvalidOperationException($"The certificate has no theorem named ...{component}.");
+    }
+
+    /// <summary>A certificate without its theorem with the given last name component: still well-formed NDJSON.</summary>
+    private static string TheoremDropped(string certificate, string component)
+    {
+        var lines = certificate.Split('\n').ToList();
+        var names = new Dictionary<long, string>();
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (lines[i].Length == 0 || JsonNode.Parse(lines[i]) is not JsonObject line)
+            {
+                continue;
+            }
+            if (line["str"] is JsonObject str && line["in"] is JsonValue id)
+            {
+                names[id.GetValue<long>()] = str["str"]!.GetValue<string>();
+            }
+            if (line["thm"] is JsonObject theorem && names.GetValueOrDefault(theorem["name"]!.GetValue<long>()) == component)
+            {
+                lines.RemoveAt(i);
                 return string.Join('\n', lines);
             }
         }

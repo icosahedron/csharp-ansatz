@@ -351,7 +351,9 @@ internal sealed partial class BodyTranslator
         var arithmetic = overflows || recursesWithin ? OverflowObligations(unit, spec.WellDefinedness.Count) : [];
         if (recursesWithin)
         {
-            // Fail closed (#256): the body assumes the Spec.Requires, so every call to itself must have been checked.
+            // Fail closed (#256): the body assumes the Spec.Requires, so every call to itself must have been checked. This is
+            // defence only: no translation path now drops a call (Branches keeps every branch with one, and extraction
+            // rejects a dropped call to itself), so no test reaches it except by undoing that rule (done by hand for PR #265).
             var checkedCalls = arithmetic.Where(o => o.Kind == SpecObligationKind.CalleePrecondition).Select(o => o.Node).ToHashSet(ReferenceEqualityComparer.Instance);
             int missed = BodyNodes(unit.Body!).Count(n => n is CallExpr c && string.Equals(c.Target, unit.Key, StringComparison.Ordinal) && !checkedCalls.Contains(n));
             if (missed > 0)

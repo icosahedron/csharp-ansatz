@@ -231,6 +231,15 @@ public sealed class OverflowGapTests(EngineFixture engine) : IClassFixture<Engin
             }
 
             [Verified]
+            public static int Mixed(int n, int k)
+            {
+                Spec.Decreases(n);
+                Spec.Requires(n >= 0 && k <= 1000);
+                if (n <= 0) return 0;
+                return Mixed(n - 1, 7);
+            }
+
+            [Verified]
             public static int CallsAdd() => Add(1, 2);
 
             [Verified]
@@ -239,6 +248,8 @@ public sealed class OverflowGapTests(EngineFixture engine) : IClassFixture<Engin
         var result = Run(source);
         Proved(result.Find("M:S.Add(System.Int32,System.Int32)"));
         Proved(result.Find("M:S.CallsAdd"));
+        // A precondition with a conjunct about constants only (7 <= 1000) and one about the parameters (round-2 review).
+        Proved(result.Find("M:S.Mixed(System.Int32,System.Int32)"));
         // The sum of n results is not bounded without Spec.Ensures (#256's follow-up), so its + still fails.
         const string sum = "M:S.Sum(System.Int32)";
         Assert.Equal((VcKind.ArithmeticOverflow, "n + Sum(n - 1)"), Failure(source, sum, result.Find(sum)));
@@ -288,5 +299,25 @@ public sealed class OverflowGapTests(EngineFixture engine) : IClassFixture<Engin
         const string drop2 = "M:S.Drop2(System.Int32,System.Int32)";
         Assert.Equal("Drop2(unchecked(n - 1), int.MaxValue)", Text(source, drop2, NotProvedAt(result.Find(drop2))));
         Assert.IsType<SkippedOutcome>(result.Find("M:S.CallsDrop1"));
+    }
+
+    [Fact]
+    public void AKernelTimeOutOnAnObligationNamesItByItsDisplayName()
+    {
+        // #272: a time-out while the kernel checks an obligation's proof names the obligation as the reports do, never by
+        // its Lean constant. 10,000 kernel steps check the definition but not the first no-overflow proof.
+        var source = Wrap("""
+            [Verified]
+            public static int F(int a)
+            {
+                Spec.Requires(a >= 0 && a <= 1000);
+                return a * 2 + 1;
+            }
+            """);
+        var options = engine.Options with { Kernel = Kernel.KernelLimits.Corpus with { Fuel = 10_000 } };
+        var outcome = Pipeline.Run(EngineCorpus.Inputs(EngineCorpus.Inline(source)), engine.Bundle, options).Find("M:S.F(System.Int32)");
+        var undecided = Assert.IsType<UndecidedOutcome>(outcome);
+        Assert.Contains("the kernel checked F (well-definedness 1)", undecided.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("Cs.", undecided.Reason, StringComparison.Ordinal);
     }
 }

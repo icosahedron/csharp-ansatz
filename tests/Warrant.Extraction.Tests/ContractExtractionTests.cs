@@ -342,10 +342,22 @@ public class ContractExtractionTests
                     if (n > 0) { Ev(n / 2); }
                     return 0;
                 }
+
+                [Verified]
+                public static int Id(int x) => x;
+
+                [Verified]
+                public static int Inside(int n)
+                {
+                    Spec.Decreases(n);
+                    if (n > 0) { Id(Inside(n / 2)); }
+                    return 0;
+                }
             """);
 
         Assert.Equal("WRT0002 | Spec.Requires calling its own method", Only(result, "M:C.Down(System.Int32)"));
         Assert.Equal("WRT0002 | recursive call as a statement", Only(result, "M:C.Ev(System.Int32)"));
+        Assert.Equal("WRT0002 | recursive call as a statement", Only(result, "M:C.Inside(System.Int32)"));
     }
 
     [Fact]

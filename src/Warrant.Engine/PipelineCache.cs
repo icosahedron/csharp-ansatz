@@ -318,7 +318,7 @@ public static partial class Pipeline
                 }
                 catch (KernelResourceException ex) when (budget.StopsCachedCheck(run.Recheck, ex, options.CancellationToken))
                 {
-                    return budget.Undecided(unit.Unit.Key, unit.Unit.Kind, display, assumptions, ex, $"the kernel checked the cached proof of {shell.Name}");
+                    return budget.Undecided(unit.Unit.Key, unit.Unit.Kind, display, assumptions, ex, $"the kernel checked the cached proof of {Shown(shell.Name)}");
                 }
                 catch (KernelException ex)
                 {

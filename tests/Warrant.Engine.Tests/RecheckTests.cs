@@ -460,7 +460,7 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
 
         var recheck = NewService().Run(Request(units, tiny) with { Recheck = true });
 
-        foreach (var (key, activity) in new[] { (Sum, "the kernel checked the cached proof of Cs.S.«Sum(System.Int32)».$dec_1"), (Lemma, "the kernel checked the cached proof") })
+        foreach (var (key, activity) in new[] { (Sum, "the kernel checked the cached proof of Sum (decrease 1)"), (Lemma, "the kernel checked the cached proof") })
         {
             var undecided = Assert.IsType<UndecidedOutcome>(recheck.Result.Find(key)); // WRT0006, not WRT0010
             Assert.Equal(ExhaustedBudget.KernelFuel, undecided.Exhausted);

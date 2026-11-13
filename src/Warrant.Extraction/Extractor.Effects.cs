@@ -99,14 +99,14 @@ public static partial class Extractor
                         $"{name}: its Spec.Requires calls {name} again, so the precondition has no meaning.");
                 }
                 var dropped = Descendants(body).OfType<EvalStmt>()
-                    .FirstOrDefault(e => e.Value is CallExpr call && string.Equals(call.Target, c.Key, StringComparison.Ordinal));
+                    .FirstOrDefault(e => Descendants(e.Value).Any(n => n is CallExpr call && string.Equals(call.Target, c.Key, StringComparison.Ordinal)));
                 if (dropped is not null)
                 {
                     return new Rejection(
                         DiagnosticIds.Unsupported,
                         "recursive call as a statement",
                         At(c, dropped, c.Symbol),
-                        $"{name}: a call to itself whose result is dropped computes nothing in a method that cannot raise; use its result or remove it.");
+                        $"{name}: a statement whose result is dropped calls the method itself, which computes nothing in a method that cannot raise; use the result or remove the call.");
                 }
             }
             if (analysis.IsRecursive(c.Key) && analysis.CauseOf(c.Key) is { } cause)

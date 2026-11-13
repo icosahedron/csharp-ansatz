@@ -472,7 +472,13 @@ public static partial class Pipeline
             try
             {
                 current = meta.IntroN(goal.Id, binders).Goal;
-                meta.OmegaTactic(current.Value);
+                // The VC simp set first, as the default procedure's leftovers get it: it decides a conjunct about constants
+                // only, such as `7 ≤ 1000` in a recursive call's precondition, which omega alone does not (#256).
+                if (meta.SimpAll(current.Value, VcSimpSet.Context(meta)) is { } rest)
+                {
+                    current = rest.Goal;
+                    meta.OmegaTactic(current.Value);
+                }
                 proof = meta.InstantiateMVars(goal);
                 TacticFuelUsed = Math.Max(TacticFuelUsed, meta.Budget.FuelUsed);
             }
@@ -502,6 +508,12 @@ public static partial class Pipeline
             return AdmitProof(unit, shell, proof, $"the kernel rejected the proof Warrant built for {shell.Name}", display, assumptions, admitted, budget);
         }
 
+        /// <summary>
+        /// A generated declaration as messages name it (#272): its display name, such as <c>F(int) (well-definedness 1)</c>,
+        /// never its Lean constant.
+        /// </summary>
+        private string Shown(Name name) => run.Names.Constant?.Invoke(name) ?? "a generated proof";
+
         /// <summary>Admits a proved obligation into the run's fork. Null when it was admitted, else the unit's outcome.</summary>
         private UnitOutcome? AdmitProof(
             EngineUnit unit, TheoremShell shell, Expr proof, string rejected, string display, ImmutableArray<UnitAssumption> assumptions,
@@ -514,7 +526,7 @@ public static partial class Pipeline
             }
             catch (KernelResourceException ex)
             {
-                return budget.Undecided(unit.Unit.Key, unit.Unit.Kind, display, assumptions, ex, $"the kernel checked {shell.Name}");
+                return budget.Undecided(unit.Unit.Key, unit.Unit.Kind, display, assumptions, ex, $"the kernel checked {Shown(shell.Name)}");
             }
             catch (KernelException ex)
             {

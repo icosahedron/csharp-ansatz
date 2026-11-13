@@ -220,7 +220,9 @@ the wrap never happens. A failure is WRT0001 at the operation, `arithmetic overf
   A join point's parameters (a value merged after an `if` that changes two locals, or a `switch` with a `return` in
   it) are known by their value on each incoming path (#255): the branches are translated before the join point's
   body, each jump records `∃ ys, facts ∧ x₁ = v₁ ∧ …` over the facts its path added since the branch point and the
-  values it passes (an `int` or `long` as `x.toInt = v.toInt`), with `ys` the parameters of join points inside the
+  values it passes (an `int` or `long` as `x.toInt = v.toInt`, through the exact values of the path's implicit
+  operations, `x.toInt = a.toInt + 15` rather than `(a + 15).toInt`, an exact-value fact kept only where something still
+  mentions its operation, #272), with `ys` the parameters of join points inside the
   branch, and the join point's parameters are bound with the disjunction of those as a fact. Each disjunct holds on its
   path, and the body runs only after one of the jumps, so the fact holds wherever the body's obligations are used. The
   term this translation builds is discarded; the definition's join point is unchanged. A pure callee's
@@ -234,8 +236,8 @@ the wrap never happens. A failure is WRT0001 at the operation, `arithmetic overf
   makes it raise, KTD11), and a call to itself does not make the method raise. So by well-founded induction on the
   `Spec.Decreases` measure every execution that starts within the `Spec.Requires` stays within it, and the body's
   obligations hold of each. These obligations are stated whenever the method calls itself, even with no implicit
-  arithmetic, and no branch that calls a method with `Spec.Requires` is dropped while they are (rule 4 of chapter 5's
-  placement rules keeps it, as it keeps one with implicit arithmetic). The translation fails closed: if some call of
+  arithmetic, and no branch that calls a method with `Spec.Requires` is dropped while they are (rule 4 of the placement rules in
+  docs/m4/05-translation.md keeps it, as it keeps one with implicit arithmetic). The translation fails closed: if some call of
   the method to itself in its body has no such obligation, the unit is a translation error, not a proof. Extraction
   rejects the two shapes with no value to check at: a `Spec.Requires` that calls its own method, and a call to itself
   as a statement, whose result is dropped (`Spec.Requires calling its own method`, `recursive call as a statement`).

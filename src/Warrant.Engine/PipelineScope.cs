@@ -225,7 +225,7 @@ public static partial class Pipeline
                 }
                 catch (KernelResourceException ex)
                 {
-                    return budget.Undecided(key, kind, display, assumptions, ex, $"the kernel checked the equation lemma {recursion.Equation.Name}");
+                    return budget.Undecided(key, kind, display, assumptions, ex, $"the kernel checked the equation lemma {Shown(recursion.Equation.Name)}");
                 }
                 catch (KernelException ex)
                 {

@@ -254,15 +254,34 @@ internal sealed partial class BodyTranslator
     private Expr PathFact(List<int> live, List<Expr> parameters, Env env, int from)
     {
         var entries = _facts!.Skip(from).ToList();
-        var parts = entries.Where(e => e.IsFact).Select(e => Zeta(e.Value)).ToList();
+        var parts = new List<Expr>();
+        // The exact values this path's implicit operations were found to have (`(a + 15).toInt = a.toInt + 15`, #244): an
+        // int parameter's value is stated through them, `x.toInt = a.toInt + 15`, so omega need not read the operation
+        // through the wrap-around (#272), and such a fact is kept only where something else still mentions its operation.
+        var exact = new Dictionary<Expr, Expr>();
+        foreach (var known in entries.Where(e => e.IsFact).Select(e => Zeta(e.Value)))
+        {
+            if (known.GetAppFn() == Init.Eq && known.GetAppArgs() is [var t, var lhs, var rhs] && t == Init.Int
+                && (lhs.GetAppFn() == Init.Int32ToInt || lhs.GetAppFn() == Init.Int64ToInt))
+            {
+                exact.TryAdd(lhs, rhs);
+            }
+            else
+            {
+                parts.Add(known);
+            }
+        }
+        Expr Exactly(Expr e) => Warrant.Kernel.ExprOps.Replace(e, (x, _) => exact.TryGetValue(x, out var v) ? Exactly(v) : null);
         for (int i = 0; i < live.Count; i++)
         {
             var type = Local(live[i]).Init.Type;
             var value = Zeta(env.Get(live[i]));
             parts.Add(type == VirType.Int32 || type == VirType.Int64
-                ? Expr.App(Init.Eq, Init.Int, ToInt(_types.Underlying(type), parameters[i]), ToInt(_types.Underlying(type), value))
+                ? Expr.App(Init.Eq, Init.Int, ToInt(_types.Underlying(type), parameters[i]), Exactly(ToInt(_types.Underlying(type), value)))
                 : Expr.App(Init.Eq, _types.Cic(type), parameters[i], value));
         }
+        var mentioned = exact.Where(x => parts.Any(p => Warrant.Kernel.ExprOps.Find(p, (y, _) => y == x.Key.GetAppArgs()[0]) is not null)).ToList();
+        parts.InsertRange(0, mentioned.Select(x => Expr.App(Init.Eq, Init.Int, x.Key, x.Value)));
         var fact = parts.Count == 0 ? Init.PropTrue : parts.SkipLast(1).Reverse().Aggregate(parts[^1], (acc, p) => Expr.App(Init.And, p, acc));
         foreach (var y in entries.Where(e => !e.IsFact).Select(e => e.Value).Reverse())
         {

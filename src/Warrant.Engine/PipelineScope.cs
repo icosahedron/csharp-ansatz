@@ -71,6 +71,7 @@ public static partial class Pipeline
                 // #236: the statement's well-definedness obligations, each by the default procedure as a contract's are,
                 // whatever proves the claim itself; the theorem is proved only when all of them are.
                 var wellDefined = new List<KernelDeclaration>();
+                _contractAssumptions = [];
                 foreach (var wd in translated.WellDefinedness)
                 {
                     if (ProveWellDefined(unit, wd, display, assumptions, wellDefined, budget) is { } failure)
@@ -81,7 +82,10 @@ public static partial class Pipeline
                 var outcome = shell.Script is null && shell.Statement.Instance is not null
                     ? Compute(unit, shell, display, assumptions, budget)
                     : RunScript(unit, shell, display, assumptions, budget);
-                return outcome is ProvedOutcome proved ? proved with { WellDefinedness = [.. wellDefined.Cast<TheoremDecl>()] } : outcome;
+                // A pure callee's contract a well-definedness proof rests on is listed (#247).
+                return outcome is ProvedOutcome proved
+                    ? proved with { WellDefinedness = [.. wellDefined.Cast<TheoremDecl>()], Assumptions = [.. proved.Assumptions, .. _contractAssumptions.Distinct().Where(a => !proved.Assumptions.Contains(a))] }
+                    : outcome;
             }
             var admitted = new List<KernelDeclaration>();
             var definitionBudget = _budget = new TheoremBudget(options, null);

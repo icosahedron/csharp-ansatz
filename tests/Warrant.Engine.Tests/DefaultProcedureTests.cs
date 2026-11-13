@@ -940,6 +940,34 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
         Assert.Equal(VcKind.DivisionByZero, opaque.Vcs[0].Kind);
     }
 
+    [Fact]
+    public void ACalleeContractUsedOnlyByANoOverflowProofIsListed()
+    {
+        // #247: G's and the theorem's H(x) + 1 cannot overflow only by H's Spec.Ensures (its $contract_spec), which only
+        // the no-overflow and well-definedness proofs use; the report lists H's contract for both.
+        var source = Wrap("""
+            [Verified]
+            public static int H(int x)
+            {
+                Spec.Ensures<int>(r => r < 100);
+                return x < 0 ? 0 : 1;
+            }
+
+            [Verified]
+            public static int G(int x) => H(x) + 1;
+
+            [Theorem]
+            static Proof T(int x) => Prove.That(Spec.Implies(H(x) + 1 > 0, H(x) + 1 > 0)).By(Tactic.Intro("h"), Tactic.Omega());
+            """);
+        var result = Run(source);
+        var g = result.Find("M:S.G(System.Int32)");
+        Proved(g);
+        Assert.Contains(g!.Assumptions, a => a.Assumption == new VirAssumption(VirAssumptionKind.CalleeContract, "M:S.H(System.Int32)") && a.UnitKey == "M:S.G(System.Int32)");
+        var t = Assert.IsType<ProvedOutcome>(result.Find("M:S.T(System.Int32)"));
+        Assert.NotEmpty(t.WellDefinedness);
+        Assert.Contains(t.Assumptions, a => a.Assumption == new VirAssumption(VirAssumptionKind.CalleeContract, "M:S.H(System.Int32)") && a.UnitKey == "M:S.T(System.Int32)");
+    }
+
     // ---- robustness ----
 
     [Fact]

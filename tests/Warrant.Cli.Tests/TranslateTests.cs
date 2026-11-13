@@ -125,6 +125,28 @@ public sealed partial class TranslateTests
     }
 
     [Fact]
+    public void ASidecarMadeForAnotherBundleIsDeclined()
+    {
+        // #220, #249: the sidecar names the bundle it was made for by SHA-256; a bundle whose hash differs is declined.
+        var work = Directory.CreateTempSubdirectory("warrant-cli-");
+        try
+        {
+            var bundle = Path.Combine(work.FullName, SemanticsBundle.FileName);
+            File.WriteAllText(bundle, "not the bundle the sidecar was made for\n");
+            File.Copy(Path.Combine(AppContext.BaseDirectory, SemanticsBundle.SidecarFileName), Path.Combine(work.FullName, SemanticsBundle.SidecarFileName));
+            var (code, output) = Translate(Path.Combine(Corpus, "accepted"), "--bundle", bundle);
+            Assert.Equal(2, code);
+            Assert.StartsWith("declined: ", output, StringComparison.Ordinal);
+            Assert.Contains("the sidecar was made for the bundle with SHA-256 ", output, StringComparison.Ordinal);
+            Assert.Contains(Engine.Reports.OutcomeText.FileSha256(bundle), output, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            work.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void AMissingDirectoryIsDeclined()
     {
         var (code, _) = Translate(Path.Combine(Corpus, "no-such-directory"));

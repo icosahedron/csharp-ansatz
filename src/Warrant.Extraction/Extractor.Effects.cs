@@ -33,6 +33,49 @@ public static partial class Extractor
                     _ => RaisingFunction(c, analysis),
                 };
             }
+            _effects = analysis;
+        }
+
+        /// <summary>The effect inference <see cref="RejectEffects"/> made, which <see cref="WarnIneffectiveSpecs"/> reads.</summary>
+        private EffectAnalysis? _effects;
+
+        /// <summary>
+        /// WRT0013 for every function still accepted once every rejection is made (after <c>RejectDependents</c>), so a
+        /// method rejected for a rejected callee gets none (#239).
+        /// </summary>
+        private void WarnIneffectiveSpecs()
+        {
+            if (_effects is not { } analysis)
+            {
+                return;
+            }
+            foreach (var c in _candidates.Values.Where(c => c.Kind == VirUnitKind.Function && c.Rejection is null).OrderBy(c => c.Key, StringComparer.Ordinal))
+            {
+                if (IneffectiveNoThrow(c, analysis) is { } warning)
+                {
+                    _diagnostics.Add(warning);
+                }
+            }
+        }
+
+        /// <summary>
+        /// WRT0013 (#239): <c>Spec.NoThrow</c> on a method that cannot raise states nothing, since its contract has no
+        /// exception case (docs/m6/06); the method still translates, with the obligation it has without it.
+        /// </summary>
+        private static ExtractionDiagnostic? IneffectiveNoThrow(Candidate c, EffectAnalysis analysis)
+        {
+            if (analysis.IsRaising(c.Key) || c.Body is not BlockStmt block || block.Stmts.FirstOrDefault(s => s is NoThrowStmt) is not { } noThrow)
+            {
+                return null;
+            }
+            const string construct = "Spec.NoThrow on a method that cannot raise";
+            return new ExtractionDiagnostic(
+                DiagnosticIds.IneffectiveSpec,
+                ExtractionSeverity.Warning,
+                construct,
+                c.Key,
+                At(c, noThrow, c.Symbol) is { } at ? Symbols.Span(at) : null,
+                $"{Symbols.Display(c.Symbol)}: Spec.NoThrow states nothing here, since the method cannot raise an exception, so its contract is the same without it. Remove it, or add {DiagnosticIds.IneffectiveSpec} to NoWarn.");
         }
 
         /// <summary>A unit as effect inference reads it: its body or statement, without assumptions or dependencies.</summary>

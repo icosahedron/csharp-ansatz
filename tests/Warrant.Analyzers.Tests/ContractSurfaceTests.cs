@@ -295,6 +295,13 @@ public sealed class ContractSurfaceTests
                 return x;
             }
 
+            [Verified]
+            public static int Idle(int x)
+            {
+                Spec.NoThrow();
+                return x;
+            }
+
             [Verified] public static int Scale(int x, int d) => x / d;
 
             [Verified]
@@ -351,6 +358,7 @@ public sealed class ContractSurfaceTests
                 "WRT0002 | recursion with effects",
                 "WRT0002 | Spec.Ensures type argument that is not the return type",
                 "WRT0002 | Spec.Ensures without the result",
+                "WRT0013 | Spec.NoThrow on a method that cannot raise",
                 "WRT0002 | Spec expression calling a raising method",
                 "WRT0002 | theorem calling a raising method",
                 "WRT0002 | division",

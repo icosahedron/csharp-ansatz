@@ -209,7 +209,7 @@ Both packages use `build/`, not `buildTransitive/`, so an application that only 
 | Code | Meaning in M5a |
 |---|---|
 | WRT0001 | A theorem, or a decrease obligation, was not proved. Shows the remaining goals, and a counterexample when the search finds one. |
-| WRT0002 to WRT0005, WRT0008, WRT0009 | As in M4, raised by extraction. WRT0002 now also names `recursion without Spec.Decreases`, `mutual recursion`, `nested recursion`, `Spec.Decreases not first` and `lambda with statements`; WRT0004 covers malformed scripts and quantifiers (chapter 1). |
+| WRT0002 to WRT0005, WRT0008, WRT0009 | As in M4, raised by extraction. WRT0002 now also names `recursion without Spec.Decreases`, `mutual recursion`, `nested recursion`, `Spec.Decreases not first` and `lambda with statements`; WRT0004 covers malformed scripts and quantifiers (chapter 1). From M6 extraction also raises the warning WRT0013, a `Spec` statement that states nothing (`Spec.NoThrow` on a method that cannot raise, #239). |
 | WRT0006 | A theorem ran out of kernel fuel, tactic fuel or time; the message says which. |
 | WRT0010 | Internal error: the kernel rejected a term Warrant built, the engine could not translate or admit a unit, Meta failed unexpectedly, or the CLI failed. Report it as a bug. |
 | WRT0011 (warning) | Verification is not enabled for a project that references `Warrant`. |

@@ -37,8 +37,8 @@ internal static class TranslationCorpus
             .Where(p => p.Value.TryGetProperty("by", out _))
             .ToDictionary(p => p.Name, p => p.Value.GetProperty("by").GetString()!, StringComparer.Ordinal);
 
-    /// <summary>Compiles and extracts one in-memory source file, which must extract without diagnostics.</summary>
-    public static ExtractionResult Inline(string source) => CorpusCompilations.Inline(source);
+    /// <summary>Compiles and extracts one in-memory source file, which must extract without diagnostics but the allowed warnings.</summary>
+    public static ExtractionResult Inline(string source, params string[] allowedWarnings) => CorpusCompilations.Inline(source, allowedWarnings);
 
     public static Translation Translate(ExtractionResult result, KernelEnvironment bundle) =>
         Translator.Translate(

@@ -22,7 +22,7 @@ M5a's build task will not use the corpus settings: it takes the references, defi
 Until then no defines are known, so code under `#if` could be code that no real build runs, or could declare an overload or a type that changes what other code binds to.
 Extraction therefore collects the symbols every `#if` and `#elif` condition tests, extracts the compilation once for each combination of them that compiles (a combination that does not compile is not a real build), and keeps a unit only if its VIR is byte-for-byte the same in all of them.
 A unit that differs is WRT0002 `preprocessor conditional`, and its users are rejected as depending on it; a proof about a unit that is kept holds in every build.
-Warnings (WRT0008) from every combination are reported. More than six symbols (64 combinations) is WRT0002 for the whole compilation.
+Warnings (WRT0008) from every combination are reported; WRT0013 (M6) only for a unit that is kept, since it is about a method that is translated. More than six symbols (64 combinations) is WRT0002 for the whole compilation.
 MSBuildWorkspace is not used: it would add an MSBuild dependency to the tests for no benefit while the inputs are a fixed corpus.
 
 The factory and extraction are separate assemblies because they have different Roslyn constraints:

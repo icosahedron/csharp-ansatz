@@ -182,7 +182,8 @@ public static partial class Extractor
 
     /// <summary>
     /// The first result without the units whose VIR differs in another result, or that depend on one; with the warnings
-    /// of every result, since a WRT0008 in any build is a way to break a closed assumption.
+    /// of every result, since a WRT0008 in any build is a way to break a closed assumption, except WRT0013, which is kept
+    /// only for the units that are kept (#239).
     /// </summary>
     private static ExtractionResult Agreeing(List<ExtractionResult> results, List<string> symbols)
     {
@@ -231,6 +232,10 @@ public static partial class Extractor
                 diagnostics.Add(warning);
             }
         }
+        // WRT0013 is about a unit that is translated (#239): one a combination rejects, or that does not agree across
+        // combinations, gets none, though a combination in which it cannot raise reported it.
+        var keptKeys = new HashSet<string>(kept.Select(u => u.Key), StringComparer.Ordinal);
+        diagnostics.RemoveAll(d => d.Id == DiagnosticIds.IneffectiveSpec && (d.MemberKey is null || !keptKeys.Contains(d.MemberKey)));
         return new ExtractionResult(kept, Sort(diagnostics), hasCompileErrors: false);
     }
 
@@ -412,6 +417,7 @@ public static partial class Extractor
             RejectCycles();
             RejectEffects();
             RejectDependents();
+            WarnIneffectiveSpecs();
 
             foreach (var c in _candidates.Values.Where(c => c.Rejection is not null).OrderBy(c => c.Key, StringComparer.Ordinal))
             {
@@ -482,6 +488,7 @@ public static partial class Extractor
             RejectCycles();
             RejectEffects();
             RejectDependents();
+            WarnIneffectiveSpecs();
             foreach (var c in _candidates.Values.Where(c => c.Rejection is not null).OrderBy(c => c.Key, StringComparer.Ordinal))
             {
                 Report(c.Key, c.Rejection!);

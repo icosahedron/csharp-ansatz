@@ -97,4 +97,9 @@ public static class DiagnosticIds
 
     /// <summary>A <c>[Closed]</c> class without the closed shape.</summary>
     public const string NotClosedShape = "WRT0009";
+
+    /// <summary>
+    /// A <c>Spec</c> statement that states nothing (a warning): <c>Spec.NoThrow</c> on a method that cannot raise (#239).
+    /// </summary>
+    public const string IneffectiveSpec = "WRT0013";
 }

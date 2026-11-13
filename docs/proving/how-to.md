@@ -558,8 +558,13 @@ fails at the division twice: `division by zero` and
 
   An exception from a dependency is still allowed and listed. A verified
   method it calls that can throw needs `Spec.NoThrow` too, or the build fails
-  at the call; a caller without `Spec.NoThrow` uses its contract as before.
-  `Spec.NoThrow` is not valid in a `[ContractFor]` class.
+  at the call (`a callee without Spec.NoThrow may throw explicitly at this
+  call`), even when the arguments rule its throws out: the caller sees only
+  the callee's contract. Give the callee `Spec.NoThrow` with a
+  `Spec.Requires` the call meets; that `Spec.Requires` then binds every
+  other caller of the callee too, which must meet it at each call. A caller
+  without `Spec.NoThrow` uses its contract as before. `Spec.NoThrow` is not valid in a `[ContractFor]` class,
+  and on a method that cannot raise it states nothing (warning WRT0013).
 - A method that throws on every path proves any `Spec.Ensures`, since it
   never returns normally; the report lists the throw.
 - `try`/`catch` is rejected (WRT0002 `try`), and no milestone schedules it.

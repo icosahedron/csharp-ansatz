@@ -78,6 +78,7 @@ public static partial class Pipeline
             UnitOutcome? Admit(TheoremShell shell, Func<UnitOutcome?> prove) =>
                 CachedProofs is null ? prove() : AdmitCached(unit, shell, display, assumptions, admitted, budget, prove);
 
+            _contractAssumptions = [];
             foreach (var wd in contract.WellDefinedness)
             {
                 if (Admit(wd.Theorem, () => ProveWellDefined(unit, wd, display, assumptions, admitted, budget)) is { } failure)
@@ -85,7 +86,6 @@ public static partial class Pipeline
                     return failure;
                 }
             }
-            _contractAssumptions = [];
             if (Admit(contract.Theorem, () => ProveContract(unit, translated.Name, contract, display, assumptions, admitted, budget)) is { } unproved)
             {
                 return unproved;
@@ -99,7 +99,8 @@ public static partial class Pipeline
 
         /// <summary>
         /// The assumptions the default procedure found the proof relies on (M6 KTD20, U12): each callee contract it used,
-        /// and each explicit throw it could not show unreachable, the method's own or a verified callee's.
+        /// the contract's proof or a well-definedness or no-overflow proof (#247), and each explicit throw it could not
+        /// show unreachable, the method's own or a verified callee's.
         /// </summary>
         private List<UnitAssumption> _contractAssumptions = [];
 
@@ -359,11 +360,15 @@ public static partial class Pipeline
             {
                 var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = run.Names };
                 var vc = wd.Kind == SpecObligationKind.NoOverflow ? VcKind.ArithmeticOverflow : VcKind.WellDefinedness;
+                int before = _contractAssumptions.Count;
                 var failure = Default(
                     unit, wd.Theorem, wd.Binders, [], at, () => new VcWalker(meta, Attributes, unit.Unit, vc, at, null),
                     (walker, g) => walker.WellDefined(g), display, assumptions, admitted, budget, meta, new GoalPrinter(Env, run.Names));
-                // Its walk relies on nothing the method's report lists: the operation is not run.
-                _contractAssumptions.Clear();
+                // The operation is not run, so no throw is reached; but the proof may rest on a pure callee's contract, its
+                // $contract_spec, which the report lists (#247).
+                var recorded = _contractAssumptions.GetRange(before, _contractAssumptions.Count - before);
+                _contractAssumptions.RemoveRange(before, recorded.Count);
+                _contractAssumptions.AddRange(recorded.Where(a => a.Assumption.Kind == VirAssumptionKind.CalleeContract));
                 return failure;
             }
             return Omega(unit, wd.Theorem, wd.Binders, at, "the precondition of a method called in a Spec expression", display, assumptions, admitted, budget);

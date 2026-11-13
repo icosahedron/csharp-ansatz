@@ -22,7 +22,8 @@ M6 adds four kinds (KTD20), rendered by `src/Warrant.Engine/Reports/` under two 
   must not misbehave on bad input should check it with a guard that throws, which the proof covers, rather than rely on
   `Spec.Requires`.
 - `CalleeContract` is each verified callee whose contract the proof may use: one the walker applied at a call, and a
-  pure callee whose `$contract_spec` a leftover VC assumed (chapter 7, #223).
+  pure callee whose `$contract_spec` a leftover VC assumed (chapter 7, #223), including a leftover of a
+  well-definedness or no-overflow obligation (chapter 6), for a method and for a theorem's statement (#247).
 - `ExternalContract` quotes the contract class's `Spec` calls (design §8.4) and adds "this method proves its
   Spec.Requires at each call" when the member has one. Extraction lists one for every member a method calls, so a
   proof closed straight from a member's contract hypothesis (`Size() => counter.Count()`) lists it too (#223).

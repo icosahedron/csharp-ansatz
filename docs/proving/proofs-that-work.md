@@ -462,6 +462,22 @@ obligation knows is the `Spec.Requires`, the branch the `Spec.Assert` is in and 
 callee's `Spec.Ensures`, assert it first. `Spec.Assert(b != 0); return a / b;` with no `Spec.Requires` fails at the
 `Spec.Assert` line with `Spec.Assert` (`AFailingAssertFailsAtItsLineAndTheDivisionAfterItUsesTheAssertedFact`).
 
+A local computed by the method's own arithmetic carries its value into a later `Spec.Assert` (GitHub #246):
+
+```csharp
+[Verified]
+public static int Sum(int a, int b)
+{
+    Spec.Requires(a < 1000 && a > -1000 && b < 1000 && b > -1000);
+    var sum = a + b;
+    Spec.Assert(sum - b == a);
+    return sum;
+}
+```
+
+Proved: the program continues past `a + b` only where it does not overflow, so `sum - b` is `a` and stays in range
+(`ArithmeticInASpecAssertThatCanOverflowFailsAtTheOperationAndProvesWhenKnownBounded`'s `ByImplicitLocal`).
+
 ### No reachable throw: `Spec.NoThrow`
 
 ```csharp

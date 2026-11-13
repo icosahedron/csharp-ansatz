@@ -516,10 +516,31 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
                 Spec.Assert(unchecked(a + 0) == a);
                 return a;
             }
+
+            [Verified]
+            public static int ByImplicitLocal(int a, int b)
+            {
+                Spec.Requires(a < 1000 && a > -1000 && b < 1000 && b > -1000);
+                var sum = a + b;
+                Spec.Assert(sum - b == a);
+                return sum;
+            }
+
+            [Verified]
+            public static int ByImplicitNegation(int a)
+            {
+                Spec.Requires(a < 1000 && a > -1000);
+                var neg = -a;
+                Spec.Assert(neg + a == 0);
+                return neg;
+            }
             """);
         var result = Run(source);
         const string unbounded = "M:S.Unbounded(System.Int32,System.Int32)";
         Assert.Equal((VcKind.WellDefinedness, "a + b"), Failure(source, unbounded, result.Find(unbounded)));
+        // #246: a local bound by implicit arithmetic (#244) carries its value and exact value into the obligation.
+        Proved(result.Find("M:S.ByImplicitLocal(System.Int32,System.Int32)"));
+        Proved(result.Find("M:S.ByImplicitNegation(System.Int32)"));
         Proved(result.Find("M:S.ByRequires(System.Int32,System.Int32)"));
         Proved(result.Find("M:S.ByBranch(System.Int32)"));
         Proved(result.Find("M:S.ByAssertAndLocal(System.Int32)"));
@@ -917,6 +938,34 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
         Assert.Contains(divide!.Assumptions, a => a.Assumption == new VirAssumption(VirAssumptionKind.CalleeContract, "M:S.Floor(System.Int32)") && a.UnitKey == "M:S.Divide(System.Int32,System.Int32)");
         var opaque = Assert.IsType<NotProvedOutcome>(result.Find("M:S.DivideOpaque(System.Int32,System.Int32)"));
         Assert.Equal(VcKind.DivisionByZero, opaque.Vcs[0].Kind);
+    }
+
+    [Fact]
+    public void ACalleeContractUsedOnlyByANoOverflowProofIsListed()
+    {
+        // #247: G's and the theorem's H(x) + 1 cannot overflow only by H's Spec.Ensures (its $contract_spec), which only
+        // the no-overflow and well-definedness proofs use; the report lists H's contract for both.
+        var source = Wrap("""
+            [Verified]
+            public static int H(int x)
+            {
+                Spec.Ensures<int>(r => r < 100);
+                return x < 0 ? 0 : 1;
+            }
+
+            [Verified]
+            public static int G(int x) => H(x) + 1;
+
+            [Theorem]
+            static Proof T(int x) => Prove.That(Spec.Implies(H(x) + 1 > 0, H(x) + 1 > 0)).By(Tactic.Intro("h"), Tactic.Omega());
+            """);
+        var result = Run(source);
+        var g = result.Find("M:S.G(System.Int32)");
+        Proved(g);
+        Assert.Contains(g!.Assumptions, a => a.Assumption == new VirAssumption(VirAssumptionKind.CalleeContract, "M:S.H(System.Int32)") && a.UnitKey == "M:S.G(System.Int32)");
+        var t = Assert.IsType<ProvedOutcome>(result.Find("M:S.T(System.Int32)"));
+        Assert.NotEmpty(t.WellDefinedness);
+        Assert.Contains(t.Assumptions, a => a.Assumption == new VirAssumption(VirAssumptionKind.CalleeContract, "M:S.H(System.Int32)") && a.UnitKey == "M:S.T(System.Int32)");
     }
 
     // ---- robustness ----

@@ -173,12 +173,17 @@ numbered after the contract's own: the method's program is translated once more,
 the parameters, the values bound by `bind` and join points before the `Spec.Assert`, and the facts known there: the
 `Spec.Requires`, the condition of each `if` branch taken, and the conditions of the `Spec.Assert`s before it, then the
 guards inside the condition; a local's `let` is unfolded into its value.
+A value bound by an implicit operation (#244, below), such as `var s = a + b;`, comes with what its model guarantees
+wherever the program continues, since the model continues only where the exact result is in range: `s = a + b` and
+`s.toInt = a.toInt + b.toInt` (#246; likewise for `-`, `*`, unary `-` and `long`), so `Spec.Assert(s - b == a)` proves
+under bounds on `a` and `b`.
 What a VC walk would learn from a callee's `Spec.Ensures` or a model's case is not among the facts, so assert the fact
 first (`Spec.Assert(b >= 0 && b <= 100)`) and the next `Spec.Assert` may use it.
 The program, its definition and the differential harness are unchanged.
 A failing obligation is reported at the operation with this chapter's wording
 (`ArithmeticInASpecAssertThatCanOverflowFailsAtTheOperationAndProvesWhenKnownBounded`,
-`ASpecAssertsArithmeticHasAnOverflowObligationUnderWhatIsKnownThereAndTheProgramIsUnchanged`).
+`ASpecAssertsArithmeticHasAnOverflowObligationUnderWhatIsKnownThereAndTheProgramIsUnchanged`,
+`ASpecAssertAfterImplicitArithmeticKnowsTheBoundValueAndItsExactValue`).
 
 **Theorem statements (#236).** A `[Theorem]`'s statement follows the same rule, since theorems and code should agree
 (owner decision 2026-11-12): it is translated with a world `σ` and a `SpecState` of its own, so its default-context

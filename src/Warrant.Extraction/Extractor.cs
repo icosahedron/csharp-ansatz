@@ -182,7 +182,8 @@ public static partial class Extractor
 
     /// <summary>
     /// The first result without the units whose VIR differs in another result, or that depend on one; with the warnings
-    /// of every result, since a WRT0008 in any build is a way to break a closed assumption.
+    /// of every result, since a WRT0008 in any build is a way to break a closed assumption, except WRT0013, which is kept
+    /// only for the units that are kept (#239).
     /// </summary>
     private static ExtractionResult Agreeing(List<ExtractionResult> results, List<string> symbols)
     {

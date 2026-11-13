@@ -3,7 +3,9 @@
 > Part of the [M5b design](README.md). Decisions: KTD21 to KTD23; Key Decision on what analyzers report.
 
 Some mistakes need no proof search to find.
-A `[Verified]` method that uses an unsupported construct (WRT0002), calls a theorem (WRT0003), has a malformed proof script (WRT0004) or calls an unmodelled member (WRT0005) is rejected by extraction before anything is translated, and so is a `[Closed]` type without the closed shape (WRT0009) or a value that can reach a `[Closed]` enum unnamed (WRT0008). From M6 the analyzer also reports the warning WRT0013 for a `Spec` statement that states nothing (`Spec.NoThrow` on a method that cannot raise, #239); the method is still translated.
+A `[Verified]` method that uses an unsupported construct (WRT0002), calls a theorem (WRT0003), has a malformed proof script (WRT0004) or calls an unmodelled member (WRT0005) is rejected by extraction before anything is translated, and so is a `[Closed]` type without the closed shape (WRT0009) or a value that can reach a `[Closed]` enum unnamed (WRT0008). From M6 the analyzer also reports the warning WRT0013 for a `Spec` statement that states nothing (`Spec.NoThrow` on a method that cannot raise, #239); the method is still translated. Like every analyzer diagnostic it is
+worked out for the IDE's one configuration: a build that compares `#if` combinations may reject the method instead,
+and then reports no WRT0013.
 In M5a the developer finds out only when the build runs.
 `Warrant.Analyzers` reports the same diagnostics as they type.
 

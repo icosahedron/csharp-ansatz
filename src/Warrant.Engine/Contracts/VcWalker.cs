@@ -133,9 +133,6 @@ internal sealed class VcWalker
     private static readonly Name PredTransApply = Name.Parse("Std.Do.PredTrans.apply");
     private static readonly Name AndName = Name.Parse("And");
     private static readonly Name EqName = Name.Parse("Eq");
-    private static readonly Name AllowedName = Name.Parse("Warrant.ClrExn.Allowed");
-    private static readonly Name ExternalName = Name.Parse("Warrant.ClrExn.External");
-    private static readonly Name ClrExnName = Name.Parse("Warrant.ClrExn");
     private static readonly Name H = Name.From("h");
     private static readonly Name S = Name.From("s");
     private static readonly Name Sigma = Name.From("σ");
@@ -545,7 +542,7 @@ internal sealed class VcWalker
         }
         e = Strip(_m.InstantiateMVars(e));
         var ctor = (e.GetAppFn() as ConstExpr)?.Name;
-        if (ctor is null || ctor.ToString() is not ("Warrant.ClrExn.thrown" or "Warrant.ClrExn.external"))
+        if (ctor is null || (ctor != ClrExnNames.Thrown && ctor != ClrExnNames.ExternalException))
         {
             Leaf(h, node);
             return;
@@ -555,7 +552,7 @@ internal sealed class VcWalker
         {
             return;
         }
-        if (_noThrow && ctor.ToString() == "Warrant.ClrExn.thrown")
+        if (_noThrow && ctor == ClrExnNames.Thrown)
         {
             // ClrExn.External (thrown T) is False: the VC is that the path conditions are contradictory, stated without
             // the world, so the failure shows only them.
@@ -599,7 +596,7 @@ internal sealed class VcWalker
     {
         // A callee with Spec.NoThrow states ClrExn.External as its exception postcondition (#182).
         bool external = _m.Env.Find(contract)?.Type is { } type
-            && ExprOps.Find(type, (x, _) => x is ConstExpr { Name: var n } && n == ExternalName) is not null;
+            && ExprOps.Find(type, (x, _) => x is ConstExpr { Name: var n } && n == ClrExnNames.External) is not null;
         var rule = pure && _noThrow ? SpecTable.CallPure : external ? SpecTable.CallExternal : SpecTable.Call;
         Consequence(g, rule, ExprOps.MkApp(Expr.Const(contract), args), contract.ToString(), VcKind.CalleePrecondition, node, () =>
         {
@@ -795,15 +792,16 @@ internal sealed class VcWalker
                 Each(Rule(g, () => _m.ApplyConst(g, SpecTable.Resume)), g, site, Walk);
                 return;
             }
-            var (kind, node) = Exception(target) switch
+            var exception = Exception(target);
+            var (kind, node) = exception switch
             {
                 null => (_kind, _node),
-                "overflow" => (VcKind.Overflow, site),
-                "divideByZero" => (VcKind.DivisionByZero, site),
-                "invalidOperation" => (VcKind.NullRead, site),
-                "nullReference" => (NullKind(site), site),
+                _ when exception == ClrExnNames.Overflow => (VcKind.Overflow, site),
+                _ when exception == ClrExnNames.DivideByZero => (VcKind.DivisionByZero, site),
+                _ when exception == ClrExnNames.InvalidOperation => (VcKind.NullRead, site),
+                _ when exception == ClrExnNames.NullReference => (NullKind(site), site),
                 // A default-context operation's model fails as a Spec.Assert does where the CLR would wrap (#244).
-                "assertFailed" => (NodeAt(site) is BinaryExpr or UnaryExpr ? VcKind.ArithmeticOverflow : VcKind.Assert, site),
+                _ when exception == ClrExnNames.AssertFailed => (NodeAt(site) is BinaryExpr or UnaryExpr ? VcKind.ArithmeticOverflow : VcKind.Assert, site),
                 _ => (VcKind.Unsupported, site ?? _lastNode),
             };
             Leftovers.Add(new(g, IsOperation(_kind) ? _kind : kind, IsOperation(_kind) ? _node : node));
@@ -813,16 +811,17 @@ internal sealed class VcWalker
 
     /// <summary>
     /// The <c>ClrExn</c> constructor a goal <c>ClrExn.Allowed e</c>, or <c>ClrExn.External e</c> under <c>Spec.NoThrow</c>
-    /// (#182), names, as its last name component; null when the goal is not one.
+    /// (#182), names (one of <see cref="ClrExnNames.Constructors"/>, a name under <see cref="ClrExnNames.Type"/>); null when
+    /// the goal is not one.
     /// </summary>
-    private static string? Exception(Expr target)
+    private static Name? Exception(Expr target)
     {
-        string? found = null;
+        Name? found = null;
         ExprOps.Replace(target, (x, _) =>
         {
-            if (found is null && (x.HeadIs(AllowedName) || x.HeadIs(ExternalName)) && x.GetAppArgs() is [var e] && e.GetAppFn() is ConstExpr c && c.Name.Prefix == ClrExnName)
+            if (found is null && (x.HeadIs(ClrExnNames.Allowed) || x.HeadIs(ClrExnNames.External)) && x.GetAppArgs() is [var e] && e.GetAppFn() is ConstExpr c && c.Name.Prefix == ClrExnNames.Type)
             {
-                found = c.Name.ToString()[(ClrExnName.ToString().Length + 1)..];
+                found = c.Name;
             }
             return null;
         });

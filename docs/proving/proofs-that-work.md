@@ -335,7 +335,7 @@ under the `Spec.Requires` before it, and here the bounds keep `a + b` inside `in
 fails at the `a + b` in `Spec.Ensures` with `well-definedness of a Spec expression` (`SumUnbounded` in
 `tests/corpus/m6/refuted/Contracts.cs`, `ArithmeticInEnsuresThatCanOverflowFailsAtTheEnsuresLineAndProvesWhenBounded`).
 Specs keep C#'s `int` and `long`: there is no unbounded integer, so bound the operands rather than widening them. An
-explicit `(int)` cast still truncates as in C#, and a `Spec.Assert` condition still wraps.
+explicit `(int)` cast still truncates as in C#. A `Spec.Assert` condition follows the same rule (#235).
 
 ### A null guard
 
@@ -369,7 +369,11 @@ public static int Average(int a, int b)
 ```
 
 Proved (`tests/corpus/m6/accepted/Contracts.cs`): the asserted fact is a condition at the `Spec.Assert`, proved by its
-script, and the code after it may use it. `Spec.Assert(b != 0); return a / b;` with no `Spec.Requires` fails at the
+script, and the code after it may use it. Its `a + b` must not overflow (GitHub #235), which the `Spec.Requires` rules
+out; without it the build fails at that `a + b` with `well-definedness of a Spec expression`, though the program's own
+`a + b` still wraps (`ArithmeticInASpecAssertThatCanOverflowFailsAtTheOperationAndProvesWhenKnownBounded`). What the
+obligation knows is the `Spec.Requires`, the branch the `Spec.Assert` is in and the `Spec.Assert`s before it: to use a
+callee's `Spec.Ensures`, assert it first. `Spec.Assert(b != 0); return a / b;` with no `Spec.Requires` fails at the
 `Spec.Assert` line with `Spec.Assert` (`AFailingAssertFailsAtItsLineAndTheDivisionAfterItUsesTheAssertedFact`).
 
 ### No reachable throw: `Spec.NoThrow`

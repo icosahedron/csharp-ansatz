@@ -158,6 +158,56 @@ internal sealed partial class BodyTranslator
     /// </summary>
     public bool TagSites { get; init; }
 
+    /// <summary>
+    /// While stating the obligations of the <c>Spec.Assert</c>s' conditions (#235, <see cref="AssertObligations"/>), what
+    /// is in scope at the current point of the program, outermost first: values bound by <c>bind</c> and join points'
+    /// parameters, and facts known there; null otherwise. A <c>let</c> is unfolded instead.
+    /// </summary>
+    private List<(Expr Value, bool IsFact)>? _facts;
+
+    /// <summary>The number of the contract's own well-definedness obligations, which the <c>Spec.Assert</c>s' come after.</summary>
+    private int _assertFirst;
+
+    /// <summary>The state the <c>Spec.Assert</c>s' conditions are translated in, while <see cref="_facts"/> is set.</summary>
+    private SpecState? _assertSpec;
+
+    /// <summary>The unit whose <c>Spec.Assert</c>s' obligations are being stated, while <see cref="_facts"/> is set.</summary>
+    private VirUnit? _assertSpecUnit;
+
+    /// <summary>Translates with <paramref name="entries"/> in scope, while <see cref="_facts"/> is kept.</summary>
+    private T WithFacts<T>(IEnumerable<(Expr Value, bool IsFact)> entries, Func<T> translate)
+    {
+        if (_facts is not { } facts)
+        {
+            return translate();
+        }
+        int count = facts.Count;
+        facts.AddRange(entries);
+        try
+        {
+            return translate();
+        }
+        finally
+        {
+            facts.RemoveRange(count, facts.Count - count);
+        }
+    }
+
+    /// <summary>Translates under <paramref name="guard"/> inside a <c>Spec</c> expression; as is outside one.</summary>
+    private T Guarded<T>(Expr guard, Func<T> translate) => _spec is null ? translate() : InGuard(guard, translate);
+
+    /// <summary>
+    /// Records, in a <c>Spec.Assert</c>'s condition (#235), that default-context arithmetic does not overflow: the checked
+    /// model <paramref name="program"/> at the world does not raise.
+    /// </summary>
+    private void RecordOverflow(VirExpr e, Func<Expr, Expr> program)
+    {
+        if (_spec is { } spec && SpecOverflows(e))
+        {
+            spec.Operation(this, e, e.Type, program);
+        }
+    }
+
     /// <summary>The VIR node IDs of the unit being translated, while <see cref="TagSites"/> is set.</summary>
     private Dictionary<VirNode, int>? _nodeIds;
 
@@ -193,6 +243,11 @@ internal sealed partial class BodyTranslator
         _sigma = _lctx.MkLocalDecl(_ngen, Name.From("σ"), Expr.Type, BinderInfo.Implicit);
         var operations = Operations(unit, _sigma);
         var binders = Binders(unit);
+        if (_facts is not null)
+        {
+            _assertSpecUnit = unit;
+            _assertSpec =new SpecState(unit, _lctx.MkLocalDecl(_ngen, Name.From("σ"), Expr.Type), binders, _assertFirst, () => [.. _facts]);
+        }
         var returns = Monadic.Type(_sigma, ReturnType(unit));
         Expr body;
         switch (unit.Body)
@@ -247,7 +302,7 @@ internal sealed partial class BodyTranslator
         var alpha = _types.Cic(type);
         var v = _lctx.MkLocalDecl(_ngen, k.Name ?? ValueName, alpha);
         _bound.Add(v);
-        var rest = k.Apply(v);
+        var rest = WithFacts([(v, false)], () => k.Apply(v));
         return Monadic.Bind(_sigma!, alpha, Monadic.ValueType(k.ResultM), x, _lctx.MkLambda([v], rest));
     }
 
@@ -270,16 +325,28 @@ internal sealed partial class BodyTranslator
             case UnaryExpr { Op: UnaryOp.Neg } u:
                 {
                     var prim = _types.Underlying(u.Type);
-                    return Bound(u.Operand, env, Then(a => Effects.Construct(u) is null
-                        ? Finish(Operators.Neg(prim, a), u.Type, k)
-                        : Emit(Site(u, Expr.App(NegChecked(prim), _sigma!, a)), u.Type, k)));
+                    return Bound(u.Operand, env, Then(a =>
+                    {
+                        if (Effects.Construct(u) is null)
+                        {
+                            RecordOverflow(u, sigma => Expr.App(NegChecked(prim), sigma, a));
+                            return Finish(Operators.Neg(prim, a), u.Type, k);
+                        }
+                        return Emit(Site(u, Expr.App(NegChecked(prim), _sigma!, a)), u.Type, k);
+                    }));
                 }
             case BinaryExpr b:
                 {
                     var prim = _types.Underlying(b.Type);
-                    return Bound(b.L, env, Then(l => Bound(b.R, env, Then(r => Effects.Construct(b) is null
-                        ? Finish(Operators.Binary(b.Op, prim, l, r), b.Type, k)
-                        : Emit(Site(b, Monadic.Binary(b.Op, prim, _sigma!, l, r)), b.Type, k)))));
+                    return Bound(b.L, env, Then(l => Bound(b.R, env, Then(r =>
+                    {
+                        if (Effects.Construct(b) is null)
+                        {
+                            RecordOverflow(b, sigma => Monadic.Binary(b.Op, prim, sigma, l, r));
+                            return Finish(Operators.Binary(b.Op, prim, l, r), b.Type, k);
+                        }
+                        return Emit(Site(b, Monadic.Binary(b.Op, prim, _sigma!, l, r)), b.Type, k);
+                    }))));
                 }
             case LogicalExpr { Op: LogicalOp.And or LogicalOp.Or } l when !IsPure(l.R):
                 {
@@ -287,7 +354,7 @@ internal sealed partial class BodyTranslator
                     var boolM = M(VirType.Bool);
                     return CondBound(l.L, env, result, c =>
                     {
-                        var right = Bound(l.R, env, null);
+                        var right = Guarded(l.Op == LogicalOp.And ? c.Prop : Expr.App(Init.Not, c.Prop), () => Bound(l.R, env, null));
                         var decided = Monadic.Pure(_sigma!, Init.Bool, Literals.Bool(l.Op == LogicalOp.Or));
                         var term = l.Op == LogicalOp.And ? Operators.Ite(boolM, c, right, decided) : Operators.Ite(boolM, c, decided, right);
                         return Emit(term, VirType.Bool, k);
@@ -312,10 +379,16 @@ internal sealed partial class BodyTranslator
                 if (IsPure(c.Then) && IsPure(c.Else))
                 {
                     return CondBound(c.C, env, result, cond =>
-                        Finish(Operators.Ite(_types.Cic(c.Type), cond, Value(c.Then, env), Value(c.Else, env)), c.Type, k));
+                        Finish(Operators.Ite(
+                            _types.Cic(c.Type), cond,
+                            Guarded(cond.Prop, () => Value(c.Then, env)),
+                            Guarded(Expr.App(Init.Not, cond.Prop), () => Value(c.Else, env))), c.Type, k));
                 }
                 return CondBound(c.C, env, result, cond =>
-                    Emit(Operators.Ite(M(c.Type), cond, Bound(c.Then, env, null), Bound(c.Else, env, null)), c.Type, k));
+                    Emit(Operators.Ite(
+                        M(c.Type), cond,
+                        Guarded(cond.Prop, () => Bound(c.Then, env, null)),
+                        Guarded(Expr.App(Init.Not, cond.Prop), () => Bound(c.Else, env, null))), c.Type, k));
             case ExternalCallExpr x when x.Type is not TaskType:
                 return External(x, x.Type, env, result, k);
             case AwaitExpr a:
@@ -354,9 +427,13 @@ internal sealed partial class BodyTranslator
                 return Bound(u.Operand, env, Then(a =>
                     Emit(Site(u, Expr.App(u.Kind == UnwrapKind.Value ? Init.NullableValue : Init.NullableNonNull, _sigma!, _types.Cic(u.Type), a)), u.Type, k)));
             case CoalesceExpr c:
-                return Bound(c.L, env, Then(l => IsPure(c.R)
-                    ? Finish(Coalesce(c, l, Value(c.R, env)), c.Type, k)
-                    : Emit(RaisingCoalesce(c, l, Bound(c.R, env, null)), c.Type, k)));
+                return Bound(c.L, env, Then(l =>
+                {
+                    var isNull = Conditions.IsTrue(Nullables.IsNone(_types.Cic(Nullables.ValueType(c.L.Type)), l)).Prop;
+                    return IsPure(c.R)
+                        ? Finish(Coalesce(c, l, Guarded(isNull, () => Value(c.R, env))), c.Type, k)
+                        : Emit(RaisingCoalesce(c, l, Guarded(isNull, () => Bound(c.R, env, null))), c.Type, k);
+                }));
             case ModelledCallExpr m:
                 return BoundAll(m.Args, env, result, args => Effects.Construct(m) is null
                     ? Finish(Modelled(m, args), m.Type, k)
@@ -398,7 +475,9 @@ internal sealed partial class BodyTranslator
                     k(l.Op == LogicalOp.AndEager ? Conditions.And(x, y) : Conditions.Or(x, y))));
             case LogicalExpr { Op: LogicalOp.And or LogicalOp.Or } l when IsPure(l.R):
                 return CondBound(l.L, env, result, x =>
-                    k(l.Op == LogicalOp.And ? Conditions.And(x, Cond(l.R, env)) : Conditions.Or(x, Cond(l.R, env))));
+                    k(l.Op == LogicalOp.And
+                        ? Conditions.And(x, Guarded(x.Prop, () => Cond(l.R, env)))
+                        : Conditions.Or(x, Guarded(Expr.App(Init.Not, x.Prop), () => Cond(l.R, env)))));
             default:
                 return Bound(e, env, new Next(result, v => k(Conditions.IsTrue(v))));
         }
@@ -425,18 +504,40 @@ internal sealed partial class BodyTranslator
 
     /// <summary>
     /// <c>Spec.Assert(c)</c> (KTD16): <c>(if c then pure () else throw assertFailed) &gt;&gt;= fun _ =&gt; k</c>. Its script is
-    /// the VC walker's (U11), not translation's.
+    /// the VC walker's (U11), not translation's. While the <c>Spec.Assert</c>s' obligations are stated (#235), its condition
+    /// is translated as a <c>Spec</c> expression, which records them, and the rest of the program knows <c>c</c>.
     /// </summary>
-    private Expr Assert(AssertStmt a, Env env, Continuation k) =>
-        CondBound(a.Condition, env, k.ResultType, c =>
+    private Expr Assert(AssertStmt a, Env env, Continuation k)
+    {
+        var outer = _spec;
+        _spec = _assertSpec;
+        try
         {
-            var sigma = _sigma!;
-            var check = Site(a, Operators.Ite(Monadic.Type(sigma, Init.Unit), c,
-                Monadic.Pure(sigma, Init.Unit, Init.UnitUnit),
-                Monadic.Throw(sigma, Init.Unit, Init.ClrExnAssertFailed)));
-            var unit = _lctx.MkLocalDecl(_ngen, Name.From("_"), Init.Unit);
-            return Monadic.Bind(sigma, Init.Unit, Monadic.ValueType(k.ResultType), check, _lctx.MkLambda([unit], k.Invoke(env)));
-        });
+            return CondBound(a.Condition, env, k.ResultType, c =>
+            {
+                var inner = _spec;
+                _spec = outer;
+                try
+                {
+                    var sigma = _sigma!;
+                    var check = Site(a, Operators.Ite(Monadic.Type(sigma, Init.Unit), c,
+                        Monadic.Pure(sigma, Init.Unit, Init.UnitUnit),
+                        Monadic.Throw(sigma, Init.Unit, Init.ClrExnAssertFailed)));
+                    var unit = _lctx.MkLocalDecl(_ngen, Name.From("_"), Init.Unit);
+                    var rest = WithFacts([(c.Prop, true)], () => k.Invoke(env));
+                    return Monadic.Bind(sigma, Init.Unit, Monadic.ValueType(k.ResultType), check, _lctx.MkLambda([unit], rest));
+                }
+                finally
+                {
+                    _spec = inner;
+                }
+            });
+        }
+        finally
+        {
+            _spec = outer;
+        }
+    }
 
     /// <summary>
     /// <c>l ?? r</c> when <c>r</c> can raise, as in <c>x ?? throw …</c>: <c>match l with | none =&gt; r | some v =&gt; pure v</c>,

@@ -351,6 +351,69 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
     }
 
     [Fact]
+    public void ArithmeticInASpecAssertThatCanOverflowFailsAtTheOperationAndProvesWhenKnownBounded()
+    {
+        // #235: a Spec.Assert's condition is a Spec expression; what is known where it stands (the Spec.Requires, the
+        // branch taken, an earlier Spec.Assert, a local's value) bounds it.
+        var source = Wrap("""
+            [Verified]
+            public static int Unbounded(int a, int b)
+            {
+                Spec.Assert(a + b == b + a);
+                return a;
+            }
+
+            [Verified]
+            public static int ByRequires(int a, int b)
+            {
+                Spec.Requires(a < 1000 && a > -1000 && b < 1000 && b > -1000);
+                Spec.Assert(a + b == b + a);
+                return a;
+            }
+
+            [Verified]
+            public static int ByBranch(int a)
+            {
+                if (a < 1000 && a > -1000)
+                {
+                    Spec.Assert(a + 1 > a);
+                }
+                return a;
+            }
+
+            [Verified]
+            public static int ByAssertAndLocal(int a)
+            {
+                var b = Cap(a);
+                Spec.Assert(b >= 0 && b <= 100);
+                Spec.Assert(b * 2 == b + b);
+                return a;
+            }
+
+            [Verified]
+            public static int Cap(int x)
+            {
+                Spec.Ensures<int>(r => r >= 0 && r <= 100);
+                return x < 0 ? 0 : x > 100 ? 100 : x;
+            }
+
+            [Verified]
+            public static int Wraps(int a)
+            {
+                Spec.Assert(unchecked(a + 0) == a);
+                return a;
+            }
+            """);
+        var result = Run(source);
+        const string unbounded = "M:S.Unbounded(System.Int32,System.Int32)";
+        Assert.Equal((VcKind.WellDefinedness, "a + b"), Failure(source, unbounded, result.Find(unbounded)));
+        Proved(result.Find("M:S.ByRequires(System.Int32,System.Int32)"));
+        Proved(result.Find("M:S.ByBranch(System.Int32)"));
+        Proved(result.Find("M:S.ByAssertAndLocal(System.Int32)"));
+        Proved(result.Find("M:S.Wraps(System.Int32)"));
+    }
+
+    [Fact]
     public void AnUnsatisfiableRequiresIsReportedAtItsLine()
     {
         var source = Wrap("""

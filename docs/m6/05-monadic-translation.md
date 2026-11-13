@@ -38,6 +38,7 @@ Lean elaborates them, so the walker (chapter 7) meets the terms Lean would produ
 - **`throw new T(...)`** is `ClrM.throw (ClrExn.thrown "T:…")`, carrying the thrown type's key. The exception's
   arguments are not modelled; extraction only allows constants and parameters there, so evaluating them cannot fail.
 - **`Spec.Assert(c)`** is a check node, `(if c then pure () else ClrM.throw .assertFailed) >>= fun _ => rest` (KTD16).
+  Its condition's arithmetic wraps here as in C#; that it must not overflow is a separate obligation (#235, chapter 6).
   The model differs from C# only on a path where the assertion fails, which the method's obligation excludes.
 - **Branches.** `if` and `?:` keep their join points. A raising `switch` discriminant is bound; a pure discriminant
   that is not a variable is let-bound.

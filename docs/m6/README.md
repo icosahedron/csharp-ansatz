@@ -161,6 +161,7 @@ Decided after M6's exit (owner, 2026-11-11):
 - #181: a property relating two calls of a method that can raise is stated as the `Spec.Ensures` of a verified method that makes both calls ([proofs that work](../proving/proofs-that-work.md)).
 - #182: `Spec.NoThrow()` proves that no explicit `throw` is reachable under the `Spec.Requires` (chapter 6).
 - #183: arithmetic in a `Spec` expression must not overflow; specs keep `int` and `long` and get no unbounded integer (chapter 6).
+- 2026-11-12, one rule for C# arithmetic wherever Warrant proves something: default-context `int`/`long` `+ - *` and unary `-` must not overflow, explicit `unchecked` wraps with no obligation (VIR `unchecked`, chapter 4), `checked` raises. Built for theorem statements (#236) and `Spec.Assert` conditions (#235) (chapter 6); method bodies are #244.
 
 Decisions that are the owner's, still open:
 

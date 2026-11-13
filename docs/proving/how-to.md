@@ -239,7 +239,9 @@ Pricing.cs(24,44): error WRT0001: The contract of 'Prices.Refund(int)' could not
   code itself wraps. `Spec.Ensures<int>(r => r == a + b)` alone fails at
   `a + b`; bound each operand in `Spec.Requires` and it proves
   ([proofs that work](proofs-that-work.md#arithmetic-in-a-contract)). An
-  explicit `(int)` cast still truncates, and `Spec.Assert` still wraps.
+  explicit `(int)` cast still truncates. The same holds in a `Spec.Assert`
+  condition (GitHub #235), bounded by the `Spec.Requires`, the branch it is
+  in and earlier `Spec.Assert`s.
 - `Spec.Implies` is not accepted inside a contract yet (GitHub #213); write
   `!a || b`.
 - The calls are `[Conditional("WARRANT_CONTRACTS")]`: they don't exist in the
@@ -423,8 +425,8 @@ In a project with `<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>`,
 all arithmetic is checked, and Warrant follows the project setting.
 
 In what you state, overflow is never silent (GitHub #183, #236): `+`, `-`,
-`*` and unary `-` on `int` and `long` in a `Spec.Requires`, a `Spec.Ensures`
-or a `[Theorem]`'s statement must not overflow, and a possible overflow fails
+`*` and unary `-` on `int` and `long` in a `Spec.Requires`, a `Spec.Ensures`,
+a `Spec.Assert` or a `[Theorem]`'s statement must not overflow, and a possible overflow fails
 the proof at that operation with `well-definedness of a Spec expression`.
 Bound the operands (`Spec.Implies(x < 1000 && x > -1000, ...)` in a theorem,
 `Spec.Requires` in a method), or, when the claim is about wrapping, write

@@ -155,10 +155,26 @@ Only C#'s default context has the obligation: arithmetic inside an explicit `unc
 `unchecked`, chapter 4) wraps on purpose and has none, and `checked` arithmetic is a partial operation as before
 (`ExplicitUncheckedArithmeticInASpecExpressionWrapsWithNoObligation`).
 An explicit unchecked cast such as `(int)l` is left as written, since a narrowing cast is a deliberate truncation.
-The rule covers `Spec.Requires` and `Spec.Ensures`, in a method and in a contract-class member; `Spec.Assert` is a
-statement in the body and its condition still wraps.
+The rule covers `Spec.Requires` and `Spec.Ensures`, in a method and in a contract-class member, and a `Spec.Assert`'s
+condition (#235, below).
 A callee's `Spec.Requires`, stated at a call site in a caller's `Spec` expression, adds no obligation of its own there:
 the callee's own `$wd` obligations cover it.
+
+**`Spec.Assert` conditions (#235).** A `Spec.Assert` is a statement inside the program, and its condition's
+arithmetic stays the wrapping operation there: the CLR compiles `Spec.Assert` out, so a checked model would raise where
+the CLR does not, and the differential harness (whose `Contracts.Average` comparison relies on the wrap) would disagree.
+Instead its default-context `+`, `-`, `*` and unary `-` get `$wd` obligations of the same kind as a `Spec.Ensures`'s,
+numbered after the contract's own: the method's program is translated once more, by `AssertObligations`, with each
+`Spec.Assert`'s condition translated as a `Spec` expression, and each obligation is closed over the world, `self` and
+the parameters, the values bound by `bind` and join points before the `Spec.Assert`, and the facts known there: the
+`Spec.Requires`, the condition of each `if` branch taken, and the conditions of the `Spec.Assert`s before it, then the
+guards inside the condition; a local's `let` is unfolded into its value.
+What a VC walk would learn from a callee's `Spec.Ensures` or a model's case is not among the facts, so assert the fact
+first (`Spec.Assert(b >= 0 && b <= 100)`) and the next `Spec.Assert` may use it.
+The program, its definition and the differential harness are unchanged.
+A failing obligation is reported at the operation with this chapter's wording
+(`ArithmeticInASpecAssertThatCanOverflowFailsAtTheOperationAndProvesWhenKnownBounded`,
+`ASpecAssertsArithmeticHasAnOverflowObligationUnderWhatIsKnownThereAndTheProgramIsUnchanged`).
 
 **Theorem statements (#236).** A `[Theorem]`'s statement follows the same rule, since theorems and code should agree
 (owner decision 2026-11-12): it is translated with a world `σ` and a `SpecState` of its own, so its default-context

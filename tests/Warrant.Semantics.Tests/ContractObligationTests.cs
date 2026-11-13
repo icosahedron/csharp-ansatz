@@ -524,6 +524,49 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     }
 
     [Fact]
+    public void ASpecAssertsArithmeticHasAnOverflowObligationUnderWhatIsKnownThereAndTheProgramIsUnchanged()
+    {
+        // #235: the obligation is f.$wd_k after the contract's own, over σ, the parameters, the facts known at the
+        // Spec.Assert (the Spec.Requires, the branch) and a local's value unfolded; the definition keeps wrapping.
+        var source = """
+            public static class S
+            {
+                [Verified]
+                public static int F(int a, int b)
+                {
+                    Spec.Requires(a < 1000);
+                    Spec.Ensures<int>(r => r == a - 1);
+                    var c = b;
+                    if (a > 0)
+                    {
+                        Spec.Assert(a * c >= unchecked(a * c));
+                    }
+                    return a;
+                }
+            }
+            """;
+        var (translation, env) = Translate(source);
+        var f = Contract(translation, "M:S.F(System.Int32,System.Int32)");
+        Assert.Equal(2, f.WellDefinedness.Length);
+        var wd = f.WellDefinedness[1];
+        Assert.Equal(2, wd.Index);
+        Assert.Equal("Cs.S.«F(System.Int32,System.Int32)».$wd_2", wd.Theorem.Name.ToString());
+        Assert.Equal(SpecObligationKind.WellDefinedOperation, wd.Kind);
+        Assert.Equal(VirOverflow.Wrap, Assert.IsType<BinaryExpr>(wd.Node).Overflow);
+        // ∀ σ a b (h : a < 1000) (h : 0 < a), ⦃⌜True⌝⦄ Warrant.Int32.mulChecked σ a b ⦃⇓_ => ⌜True⌝, allowed⦄
+        Assert.Equal(5, wd.Binders);
+        var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 5));
+        Assert.Equal(Expr.App(C("Warrant.Int32.mulChecked"), Expr.BVar(4), Expr.BVar(3), Expr.BVar(2)), program);
+        AssertPropositions(env, f);
+
+        // The same unit with the Spec.Assert's arithmetic unchecked has the same definition.
+        var (wrapped, _) = Translate(source.Replace("a * c >= unchecked(a * c)", "unchecked(a * c >= a * c)", StringComparison.Ordinal));
+        static Expr Value(TranslatedUnit u) => Assert.IsType<DefinitionDecl>(Assert.Single(u.Declarations)).Value.Value;
+        Assert.Equal(Value(translation.Find("M:S.F(System.Int32,System.Int32)")!), Value(wrapped.Find("M:S.F(System.Int32,System.Int32)")!));
+        Assert.Single(Contract(wrapped, "M:S.F(System.Int32,System.Int32)").WellDefinedness);
+    }
+
+    [Fact]
     public void ATheoremStatementsArithmeticHasAnOverflowObligationUnderItsGuardsAndBinders()
     {
         // #236: a theorem's statement is translated as a Spec expression is: T.$wd_k over σ, the parameters, the

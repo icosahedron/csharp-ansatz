@@ -332,10 +332,35 @@ internal sealed partial class BodyTranslator
             specLemma = new TheoremShell(LeanNames.ContractSpec(unit.Key), new Condition(Closed(_lctx.MkPi(specFVars, conclusion)), null), null, null);
         }
 
+        // #235: a Spec.Assert's condition is a Spec expression, but it sits inside the program.
+        var asserts = raising && unit.Body is { } body && Nodes(body).Any(n => n is AssertStmt) ? AssertObligations(unit, spec.WellDefinedness.Count) : [];
         return new ContractObligation(
             theorem, all.Count, [.. all.Select(x => _lctx.Get(x).UserName)], operations.Count, unit.Script, specLemma, specBinders,
-            [.. spec.WellDefinedness], [.. vacuity], raising);
+            [.. spec.WellDefinedness, .. asserts], [.. vacuity], raising);
     }
+
+    /// <summary>
+    /// The well-definedness obligations of the conditions of a method's <c>Spec.Assert</c>s (#235): the method's program
+    /// translated once more, as a check of nothing, with each <c>Spec.Assert</c>'s condition translated as a <c>Spec</c>
+    /// expression is, so its default-context <c>int</c> and <c>long</c> arithmetic must not overflow. Each is
+    /// <c>f.$wd_k</c>, numbered after the contract's first <paramref name="first"/>, over a world, <c>self</c> and the
+    /// parameters, the values bound before the <c>Spec.Assert</c> and the facts known there (the <c>Spec.Requires</c>, the
+    /// branches taken and the <c>Spec.Assert</c>s before it), then the guards inside its condition. The program and its
+    /// definition are unchanged: the CLR compiles <c>Spec.Assert</c> out, and its arithmetic wraps there.
+    /// </summary>
+    private ImmutableArray<SpecObligation> AssertObligations(VirUnit unit, int first)
+    {
+        var t = new BodyTranslator(_types, _callees) { Contracted = true, _facts = [], _assertFirst = first };
+        t.MonadicFunction(unit);
+        return [.. t._assertSpec?.WellDefinedness ?? []];
+    }
+
+    /// <summary>
+    /// <paramref name="e"/> with every local definition it mentions replaced by its value, again and again, so a statement
+    /// built from it binds no <c>let</c>.
+    /// </summary>
+    private Expr Zeta(Expr e) =>
+        e.HasFVar ? ExprOps.Replace(e, (x, _) => x is FVarExpr f && _lctx.Find(f.Id)?.Value is { } v ? Zeta(v) : null) : e;
 
     /// <summary>A statement must mention no free variable: everything it names is bound in it.</summary>
     private static Expr Closed(Expr statement) =>
@@ -562,8 +587,13 @@ internal sealed partial class BodyTranslator
         }
     }
 
-    /// <summary>The state of a <c>Spec</c> expression's translation: its guards, and the obligations it has recorded.</summary>
-    private sealed class SpecState(VirUnit unit, Expr? sigma, IReadOnlyList<Expr> binders)
+    /// <summary>
+    /// The state of a <c>Spec</c> expression's translation: its guards, and the obligations it has recorded. For the
+    /// conditions of a method's <c>Spec.Assert</c>s (#235), <paramref name="facts"/> gives what is in scope at the
+    /// <c>Spec.Assert</c>, outer binders after <paramref name="binders"/>, and its obligations are numbered after the
+    /// <paramref name="first"/> of the contract's own.
+    /// </summary>
+    private sealed class SpecState(VirUnit unit, Expr? sigma, IReadOnlyList<Expr> binders, int first = 0, Func<IReadOnlyList<(Expr Value, bool IsFact)>>? facts = null)
     {
         /// <summary>
         /// The conditions under which the expression being translated is evaluated, outermost first, and among them the
@@ -610,10 +640,12 @@ internal sealed partial class BodyTranslator
 
         private void Add(BodyTranslator t, SpecObligationKind kind, VirNode node, IReadOnlyList<Expr> world, Expr claim)
         {
-            var hyps = Guards.Select(g => Bound.Contains(g) ? g : t._lctx.MkLocalDecl(t._ngen, GuardName, g)).ToList();
-            List<Expr> fvars = [.. world, .. binders, .. Result is { } r ? [r] : Array.Empty<Expr>(), .. hyps];
-            int index = WellDefinedness.Count + 1;
-            var statement = Closed(t._lctx.MkPi(fvars, claim));
+            // In a Spec.Assert (#235), the values in scope and the facts known there; a local's let is unfolded.
+            var outer = (facts?.Invoke() ?? []).Select(f => f.IsFact ? t._lctx.MkLocalDecl(t._ngen, GuardName, t.Zeta(f.Value)) : f.Value).ToList();
+            var hyps = Guards.Select(g => Bound.Contains(g) ? g : t._lctx.MkLocalDecl(t._ngen, GuardName, t.Zeta(g))).ToList();
+            List<Expr> fvars = [.. world, .. binders, .. Result is { } r ? [r] : Array.Empty<Expr>(), .. outer, .. hyps];
+            int index = first + WellDefinedness.Count + 1;
+            var statement = Closed(t._lctx.MkPi(fvars, t.Zeta(claim)));
             var shell = new TheoremShell(LeanNames.WellDefined(unit.Key, index), new Condition(statement, null), null, null);
             WellDefinedness.Add(new SpecObligation(index, kind, shell, node, fvars.Count));
         }

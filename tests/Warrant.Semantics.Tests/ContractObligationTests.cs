@@ -647,6 +647,47 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     }
 
     [Fact]
+    public void ASpecAssertAfterImplicitArithmeticKnowsTheBoundValueAndItsExactValue()
+    {
+        // #246: in a method that can raise, var s = a + b binds s by Warrant.Int32.addImplicit (#244), which continues only
+        // where the exact sum is in range. The Spec.Assert's obligation is over s, s = a + b and s.toInt = a.toInt + b.toInt.
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int F(int a, int b)
+                {
+                    Spec.Requires(a < 1000);
+                    var s = a + b;
+                    Spec.Assert(s - b == a);
+                    return s;
+                }
+            }
+            """);
+        var f = Contract(translation, "M:S.F(System.Int32,System.Int32)");
+        var wd = Assert.Single(f.WellDefinedness);
+        // ∀ σ a b (h : a < 1000) s (h : s = a + b) (h : s.toInt = a.toInt + b.toInt), ⦃⌜True⌝⦄ Warrant.Int32.subChecked σ s b ⦃…⦄
+        Assert.Equal(7, wd.Binders);
+        var type = wd.Theorem.Type;
+        var binders = new List<Expr>();
+        for (int i = 0; i < 7; i++)
+        {
+            var pi = Assert.IsType<ForallExpr>(type);
+            binders.Add(pi.BinderType);
+            type = pi.Body;
+        }
+        var add = Expr.App(
+            C("HAdd.hAdd", Level.Zero, Level.Zero, Level.Zero), Int32T, Int32T, Int32T,
+            Expr.App(C("instHAdd", Level.Zero), Int32T, C("instAddInt32")), Expr.BVar(3), Expr.BVar(2));
+        Assert.Equal(Expr.App(C("Eq", Level.One), Int32T, Expr.BVar(0), add), binders[5]);
+        Assert.Equal(C("Eq", Level.One), binders[6].GetAppFn());
+        Assert.Equal(C("Int"), binders[6].GetAppArgs()[0]);
+        var (program, _, _, _) = Triple(type);
+        Assert.Equal(Expr.App(C("Warrant.Int32.subChecked"), Expr.BVar(6), Expr.BVar(2), Expr.BVar(4)), program);
+        AssertPropositions(env, f);
+    }
+
+    [Fact]
     public void APureBodysArithmeticHasAnOverflowObligationUnderThePathToItAndTheDefinitionIsUnchanged()
     {
         // #244: a pure method's implicit arithmetic is f.$wd_k of kind NoOverflow, after the contract's own, over σ, the

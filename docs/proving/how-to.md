@@ -244,7 +244,8 @@ Pricing.cs(24,44): error WRT0001: The contract of 'Prices.Refund(int)' could not
   ([proofs that work](proofs-that-work.md#arithmetic-in-a-contract)). An
   explicit `(int)` cast still truncates. The same holds in a `Spec.Assert`
   condition (GitHub #235), bounded by the `Spec.Requires`, the branch it is
-  in and earlier `Spec.Assert`s.
+  in, earlier `Spec.Assert`s and the value of a local such as `var s = a + b;`
+  (GitHub #246).
 - `Spec.Implies(a, b)` is accepted inside `Spec.Requires` and `Spec.Ensures`
   (GitHub #213). `b` is read only when `a` holds, so a division or an
   addition in `b` has to be safe only under `a`

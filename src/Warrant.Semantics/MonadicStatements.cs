@@ -334,8 +334,12 @@ internal sealed partial class BodyTranslator
     /// <summary>The value <paramref name="v"/> of type <paramref name="type"/> handed on: <c>k v</c>, or <c>pure v</c> with no continuation.</summary>
     private Expr Finish(Expr v, VirType type, Next? k) => k is null ? Monadic.Pure(_sigma!, _types.Cic(type), v) : k.Apply(v);
 
-    /// <summary>The program <paramref name="x"/>, whose value has type <paramref name="type"/>, then <paramref name="k"/>: <c>x &gt;&gt;= fun v =&gt; k v</c>, or <c>x</c> itself.</summary>
-    private Expr Emit(Expr x, VirType type, Next? k)
+    /// <summary>
+    /// The program <paramref name="x"/>, whose value has type <paramref name="type"/>, then <paramref name="k"/>:
+    /// <c>x &gt;&gt;= fun v =&gt; k v</c>, or <c>x</c> itself. While <see cref="_facts"/> is kept, <paramref name="facts"/>
+    /// gives what is known of <c>v</c> wherever <c>k</c> runs, which must hold for every value <c>x</c> can continue with.
+    /// </summary>
+    private Expr Emit(Expr x, VirType type, Next? k, Func<Expr, IEnumerable<Expr>>? facts = null)
     {
         if (k is null)
         {
@@ -344,8 +348,26 @@ internal sealed partial class BodyTranslator
         var alpha = _types.Cic(type);
         var v = _lctx.MkLocalDecl(_ngen, k.Name ?? ValueName, alpha);
         _bound.Add(v);
-        var rest = WithFacts([(v, false)], () => k.Apply(v));
+        IEnumerable<(Expr, bool)> entries = [(v, false)];
+        if (_facts is not null && facts is not null)
+        {
+            entries = [.. entries, .. facts(v).Select(f => (f, true))];
+        }
+        var rest = WithFacts(entries, () => k.Apply(v));
         return Monadic.Bind(_sigma!, alpha, Monadic.ValueType(k.ResultM), x, _lctx.MkLambda([v], rest));
+    }
+
+    /// <summary>
+    /// What is known of the value <c>v</c> of an implicit operation (#244) wherever the program continues after it (#246):
+    /// its model (<c>Warrant.Int32.addImplicit</c> and the like) continues only where the exact result is in range, with
+    /// Lean's wrapping operation's value <paramref name="wrapped"/>, which is then the exact result <paramref name="exact"/>
+    /// over <c>Int</c>. So <c>v = wrapped</c> and <c>v.toInt = exact</c>.
+    /// </summary>
+    private Func<Expr, IEnumerable<Expr>> ImplicitFacts(VirType type, Expr wrapped, Expr exact)
+    {
+        var prim = _types.Underlying(type);
+        var alpha = _types.Cic(type);
+        return v => [Expr.App(Init.Eq, alpha, v, wrapped), Exact(prim, v, exact)];
     }
 
     /// <summary>
@@ -371,7 +393,8 @@ internal sealed partial class BodyTranslator
                     {
                         if (IsImplicitSite(u))
                         {
-                            return Emit(Site(u, Monadic.NegImplicit(prim, _sigma!, a)), u.Type, k);
+                            return Emit(Site(u, Monadic.NegImplicit(prim, _sigma!, a)), u.Type, k,
+                                ImplicitFacts(u.Type, Operators.Neg(prim, a), Expr.App(Init.Neg, Init.Int, Init.IntNeg, ToInt(prim, a))));
                         }
                         if (Effects.Construct(u) is null)
                         {
@@ -388,7 +411,8 @@ internal sealed partial class BodyTranslator
                     {
                         if (IsImplicitSite(b))
                         {
-                            return Emit(Site(b, Monadic.Implicit(b.Op, prim, _sigma!, l, r)), b.Type, k);
+                            return Emit(Site(b, Monadic.Implicit(b.Op, prim, _sigma!, l, r)), b.Type, k,
+                                ImplicitFacts(b.Type, Operators.Binary(b.Op, prim, l, r), ExactBinary(b.Op, ToInt(prim, l), ToInt(prim, r))));
                         }
                         if (Effects.Construct(b) is null)
                         {

@@ -516,10 +516,31 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
                 Spec.Assert(unchecked(a + 0) == a);
                 return a;
             }
+
+            [Verified]
+            public static int ByImplicitLocal(int a, int b)
+            {
+                Spec.Requires(a < 1000 && a > -1000 && b < 1000 && b > -1000);
+                var sum = a + b;
+                Spec.Assert(sum - b == a);
+                return sum;
+            }
+
+            [Verified]
+            public static int ByImplicitNegation(int a)
+            {
+                Spec.Requires(a < 1000 && a > -1000);
+                var neg = -a;
+                Spec.Assert(neg + a == 0);
+                return neg;
+            }
             """);
         var result = Run(source);
         const string unbounded = "M:S.Unbounded(System.Int32,System.Int32)";
         Assert.Equal((VcKind.WellDefinedness, "a + b"), Failure(source, unbounded, result.Find(unbounded)));
+        // #246: a local bound by implicit arithmetic (#244) carries its value and exact value into the obligation.
+        Proved(result.Find("M:S.ByImplicitLocal(System.Int32,System.Int32)"));
+        Proved(result.Find("M:S.ByImplicitNegation(System.Int32)"));
         Proved(result.Find("M:S.ByRequires(System.Int32,System.Int32)"));
         Proved(result.Find("M:S.ByBranch(System.Int32)"));
         Proved(result.Find("M:S.ByAssertAndLocal(System.Int32)"));

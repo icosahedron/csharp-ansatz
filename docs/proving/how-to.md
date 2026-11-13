@@ -325,11 +325,16 @@ public sealed class Claims(IClaimStore store)
 Contracts are **never** global axioms. A wrong contract can't be used to prove
 something unrelated; it only weakens the proofs that use it.
 
-Not yet: a `CancellationToken` parameter and a bare `return;` in a `Task`
-method are rejected (GitHub #215), and a field of a nullable result read after
-a null test (`claim.Amount` above, rather than `claim.Id`) is sometimes not
-related to what the walk learned about it, so a true `Spec.Ensures` about it
-fails (GitHub #226).
+A `CancellationToken` parameter may be passed on to a dependency call
+(`store.Find(claimId, ct)`) or a verified method: the proof treats it as a
+value it cannot look at, and cancellation as one more exception a call may
+raise. Reading a token (`ct.IsCancellationRequested`) or making one
+(`default`, `CancellationToken.None`) is rejected. A bare `return;` in a
+`void` or `Task` method is fine.
+
+Any field of a nullable result may be read after the null test, as often as
+you like: `if (claim is null || claim.Amount < 0) return 0; return
+claim.Amount;` proves `r >= 0` (GitHub #226).
 
 ## Work with enums and closed sets
 
@@ -448,10 +453,12 @@ The condition is proved under what is known at the operation: the method's
   overflow, throw explicitly (next guide).
 
 The default procedure's `omega` reads linear arithmetic only: `a * b` of two
-variables is never bounded by it, so write such a product `unchecked` or prove
-it with a `[ProofFor]` script. It also knows nothing of a recursive call's
-result (a recursive method has no `Spec.Requires`), nor of a local whose value
-is merged from two branches that each change two locals.
+variables is never bounded by it (GitHub #257). It also knows nothing of a
+recursive call's result (a recursive method has no `Spec.Requires`, #256), nor
+of a local whose value is merged from two branches that each change two locals
+(#255). These are gaps in the checker, not in your code: prove such an
+operation with a `[ProofFor]` script, or wait for the fix. Write `unchecked`
+only where wrapping is what the code means; it removes the check.
 
 In a project with `<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>`,
 all arithmetic is checked, and Warrant follows the project setting.

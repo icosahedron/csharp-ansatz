@@ -1,4 +1,4 @@
-Corpus.M6.Effects.Closed(int)                                             TRANSLATED   (kernel: Warrant test, bundle: warrant-semantics test)
+Corpus.M6.Effects.Closed(int)                                                                             TRANSLATED   (kernel: Warrant test, bundle: warrant-semantics test)
   Assumed (exceptions):
     - Corpus.M6.Effects.Closed(int) may throw System.InvalidOperationException (the throw at accepted/Effects.cs:40); its proof says nothing about a call that ends in it
   Assumed (global):

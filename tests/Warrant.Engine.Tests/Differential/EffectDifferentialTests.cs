@@ -298,6 +298,13 @@ public sealed class EffectDifferentialTests(M6DifferentialFixture corpus, ITestO
         ("accepted", "M:Corpus.M6.Nullables.Use(Corpus.M6.Payment)"),
         ("accepted", "M:Corpus.M6.Nullables.Guarded(Corpus.M6.Payment)"),
         ("accepted", "M:Corpus.M6.Nullables.IdOrZero(Corpus.M6.Payment)"),
+        // Records with nullable fields (#218): $eq against the CLR's generated Equals, and the fields read and updated.
+        ("accepted", "M:Corpus.M6.Refunds.SameFee(Corpus.M6.Fee,Corpus.M6.Fee)"),
+        ("accepted", "M:Corpus.M6.Refunds.SameRefund(Corpus.M6.Refund,Corpus.M6.Refund)"),
+        ("accepted", "M:Corpus.M6.Refunds.DaysOrZero(Corpus.M6.Fee)"),
+        ("accepted", "M:Corpus.M6.Refunds.Waived(Corpus.M6.Fee)"),
+        ("accepted", "M:Corpus.M6.Refunds.OriginalIdOrZero(Corpus.M6.Refund)"),
+        ("refuted", "M:Corpus.M6.Refuted.Refunds.OriginalId(Corpus.M6.Refuted.Refund)"),
         ("refuted", "M:Corpus.M6.Refuted.Decimals.AddFee(System.Decimal)"),
         ("refuted", "M:Corpus.M6.Refuted.Decimals.Difference(System.Decimal,System.Decimal)"),
         ("refuted", "M:Corpus.Rejected.Arithmetic.CheckedAdd(System.Int32,System.Int32)"),

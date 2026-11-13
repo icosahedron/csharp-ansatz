@@ -65,4 +65,14 @@ public sealed class PaymentLookup(IPaymentStore store)
         var p = await store.GetPayment(id);
         return p is null || p.Id == id;
     }
+
+    // #226: two field reads after the null test, each its own case of the result; the contract's fact is about the first.
+    [Verified]
+    public async Task<int> IdIfPending(int id)
+    {
+        Spec.Ensures<int>(r => r == 0 || r == id);
+        var p = await store.GetPayment(id);
+        if (p is null || p.Status != PaymentStatus.Pending) return 0;
+        return p.Id;
+    }
 }

@@ -220,13 +220,14 @@ the wrap never happens. A failure is WRT0001 at the operation, `arithmetic overf
   `Spec.Ensures` is known through its `f.$contract_spec`, which the default procedure adds for every application of it
   in a goal (chapter 7). A call of a recursive method to itself is its own constant, which the obligations, admitted
   after the definition, can name; nothing is known of its value, so arithmetic on a recursive result fails unless it
-  is `unchecked` (recursive methods have no `Spec.Requires`). Once an operation's obligation holds, its exact value
+  is `unchecked` (recursive methods have no `Spec.Requires` yet, GitHub #256). Once an operation's obligation holds, its exact value
   `(a op b).toInt = a.toInt op b.toInt` is a fact for the obligations after it on the same path, inside the guard it
   was under; `omega` reasons through the wrap-around's `Int.bmod` only by its real shadow, which cannot close nested
   arithmetic such as `a * 3 - b` even under tight bounds (`ANestedProductIsBoundedThroughItsExactValueNotItsWrapAround`).
   The same facts serve a `Spec` expression's arithmetic.
-  `omega` reads only linear arithmetic: a product of two variables is never bounded by it, so such a product needs
-  `unchecked` or a `[ProofFor]` script.
+  `omega` reads only linear arithmetic: a product of two variables is never bounded by it, so such a product fails
+  unless a `[ProofFor]` script proves it (GitHub #257). `unchecked` states that wrapping is intended; it is not the
+  way around a gap. The other gaps: join points (#255), recursive methods (#256), closed-enum arms (#258).
 - *A method that can raise* has the operation as a site of its program instead: `Warrant.Int32.addImplicit σ a b` and
   likewise for `-`, `*`, unary `-` and `long` (`lean/Warrant/Checked.lean`), which is `pure (a + b)` where the exact
   result is in range and `throw .assertFailed` where the CLR would wrap. `assertFailed` is not allowed, so the contract

@@ -21,6 +21,12 @@ namespace Warrant.Engine.Tests.Differential;
 /// </summary>
 internal sealed class Inputs(Values values)
 {
+    /// <summary>
+    /// The values of a <c>CancellationToken</c> parameter (#215): one never cancelled and one already cancelled. The model
+    /// has one value for both, so a method whose behaviour the token changed would disagree with it.
+    /// </summary>
+    private static readonly IReadOnlyList<object?> Tokens = [CancellationToken.None, new CancellationToken(true)];
+
     /// <summary>The boundary values of a type.</summary>
     public IReadOnlyList<object?> Boundaries(VirType type)
     {
@@ -36,6 +42,8 @@ internal sealed class Inputs(Values values)
                 return [.. Generators.DecimalBoundaries.Cast<object?>()];
             case NullableType n:
                 return [null, .. Boundaries(n.Value)];
+            case OpaqueType:
+                return Tokens;
         }
         var key = ((RefType)type).Key;
         var clr = values.Assembly.TypeOf(key);
@@ -69,6 +77,8 @@ internal sealed class Inputs(Values values)
                 return Generators.DecimalValues.Select(v => (object?)v);
             case NullableType n:
                 return Gen.Frequency<object?>((1, Gen.Constant<object?>(null)), (3, Random(n.Value)));
+            case OpaqueType:
+                return Gen.Elements<object?>([.. Tokens]);
         }
         var key = ((RefType)type).Key;
         var clr = values.Assembly.TypeOf(key);
@@ -135,6 +145,8 @@ internal sealed class Inputs(Values values)
                 return Generators.ShrinkDecimal((decimal)value!).Select(v => (object?)v);
             case NullableType n:
                 return value is null ? [] : [null, .. Shrink(n.Value, value)];
+            case OpaqueType:
+                return ((CancellationToken)value!).IsCancellationRequested ? [CancellationToken.None] : [];
         }
         var key = ((RefType)type).Key;
         var clr = values.Assembly.TypeOf(key);

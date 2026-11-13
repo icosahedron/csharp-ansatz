@@ -36,6 +36,11 @@ public abstract record VirType
     /// <param name="result">The awaited type; <see cref="Unit"/> for a non-generic <c>Task</c> or <c>ValueTask</c>.</param>
     /// <returns>The type <c>task{result}</c>.</returns>
     public static TaskType Task(VirType result) => new(result);
+
+    /// <summary>An opaque type: a parameter the method only passes on, never reads (#215).</summary>
+    /// <param name="key">The CLR type's key; only <c>T:System.Threading.CancellationToken</c> is extracted.</param>
+    /// <returns>The type <c>opaque{key}</c>.</returns>
+    public static OpaqueType Opaque(string key) => new(key);
 }
 
 /// <summary>The primitive VIR types. New members are added at the end, so the existing values keep their numbers.</summary>
@@ -78,3 +83,11 @@ public sealed record NullableType(VirType Value) : VirType;
 /// </summary>
 /// <param name="Result">The awaited type.</param>
 public sealed record TaskType(VirType Result) : VirType;
+
+/// <summary>
+/// An opaque type (#215), encoded as <c>{"opaque":key}</c>: a <c>CancellationToken</c> parameter of a verified method or a
+/// contract member. Its only use is to be passed on as an argument; nothing reads, compares, builds or stores it, so a
+/// model that cannot tell its values apart (translation binds it as <c>Unit</c>) loses nothing a proof could depend on.
+/// </summary>
+/// <param name="Key">The CLR type's key, e.g. <c>T:System.Threading.CancellationToken</c>.</param>
+public sealed record OpaqueType(string Key) : VirType;

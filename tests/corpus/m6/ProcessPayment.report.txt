@@ -1,4 +1,4 @@
-Corpus.M6.Payments.PaymentService.ProcessPayment(int)                     TRANSLATED   (kernel: Warrant test, bundle: warrant-semantics test)
+Corpus.M6.Payments.PaymentService.ProcessPayment(int)                                                     TRANSLATED   (kernel: Warrant test, bundle: warrant-semantics test)
   Assumed (parameters):
     - store is not null
     - store.GetPayment() is not null

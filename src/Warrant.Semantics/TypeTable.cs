@@ -28,6 +28,10 @@ internal sealed class TypeTable
         NullableType n => Nullables.Option(Cic(n.Value)),
         // A task is not a value: a call returning one is awaited where it is made, and its result is the value (M6 KTD22).
         TaskType => throw new TranslationException(null, $"a {type} is not a value; only its awaited result is."),
+        // A CancellationToken is only passed on (#215): extraction rejects every other use, so the model gives it the one
+        // value of Unit. Cancellation is the world's business: a dependency that observes it raises an exception, which
+        // its program may do whatever the token (KTD4, KTD12).
+        OpaqueType => Init.Unit,
         _ => throw new TranslationException(null, $"unknown type {type}."),
     };
 

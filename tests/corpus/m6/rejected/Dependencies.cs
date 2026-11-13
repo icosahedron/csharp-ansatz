@@ -26,6 +26,7 @@ namespace Corpus.M6.Rejected.Dependencies
         int Count(int id);
         Task<int> Load(int id);
         Task Save(int id);
+        Task<int> LoadWithin(int id, System.Threading.CancellationToken ct);
         int Size { get; }
     }
 
@@ -58,6 +59,8 @@ namespace Corpus.M6.Rejected.Dependencies
 
         public Task Save(int id) => default!;
 
+        public abstract Task<int> LoadWithin(int id, System.Threading.CancellationToken ct);
+
         public abstract int Size { get; }
     }
 
@@ -67,6 +70,7 @@ namespace Corpus.M6.Rejected.Dependencies
         public abstract int Count(int id);
         public abstract Task<int> Load(int id);
         public abstract Task Save(int id);
+        public abstract Task<int> LoadWithin(int id, System.Threading.CancellationToken ct);
         public abstract int Size { get; }
     }
 
@@ -200,12 +204,9 @@ namespace Corpus.M6.Rejected.Dependencies
         [Verified]
         public async void Fire(int id) => await stock.Save(id);
 
+        // #215: a token is passed on as the parameter it is; one the method makes has no model.
         [Verified]
-        public async Task Early(int id)
-        {
-            if (id < 0) return;
-            await stock.Save(id);
-        }
+        public async Task<int> Uncancelled(int id) => await stock.LoadWithin(id, default);
 
         [Verified]
         public async Task<int> Ordered(int id) => Sum(b: await stock.Load(id), a: stock.Count(id));

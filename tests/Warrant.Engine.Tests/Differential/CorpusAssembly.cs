@@ -54,6 +54,7 @@ internal sealed class CorpusAssembly : IDisposable
         // int? is Nullable<int>; a nullable reference is the reference type itself (M6 KTD5).
         NullableType { Value: PrimitiveType } n => typeof(Nullable<>).MakeGenericType(TypeOf(n.Value)),
         NullableType n => TypeOf(n.Value),
+        OpaqueType { Key: "T:System.Threading.CancellationToken" } => typeof(CancellationToken),
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, null),
     };
 

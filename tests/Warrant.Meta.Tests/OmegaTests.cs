@@ -342,4 +342,32 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
         Assert.Equal(goal.Id, ex.Goal);
         Assert.StartsWith("omega could not prove the goal:\na possible counterexample may satisfy the constraints\n", ex.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void ANestedProductIsBoundedThroughItsExactValueNotItsWrapAround()
+    {
+        // #244: -1000 < a < 1000 → (a * 3).toInt - 5 is in int's range. Through the wrap-around alone (toInt_mul's
+        // Int.bmod) omega's real shadow, Lean's omega having no dark or grey shadow, leaves a possible counterexample; the
+        // product's exact value (a * 3).toInt = a.toInt * 3, which the obligations after it assume once its own holds,
+        // closes it.
+        const string t = "Int32";
+        Expr ToInt(Expr x) => Expr.App(C(t + ".toInt"), x);
+        Expr Product(Expr a) => Op(t, "HMul.hMul", "instHMul", "instMul", a, Lit(t, 3));
+        var lo = Expr.App(C("Neg.neg", Level.Zero), IntT, C("Int.instNegInt"), IntTerms.Lit(2147483648));
+        var hi = IntTerms.Lit(2147483647);
+        Expr Claim(Expr a, bool exact)
+        {
+            var x = IntTerms.Sub(ToInt(Product(a)), IntTerms.Cast(NatLit(5)));
+            var overflow = IntTerms.Arrow(Expr.App(C("Or"), IntTerms.Lt(x, lo), IntTerms.Lt(hi, x)), C("False"));
+            var bounded = Expr.App(C("And"), Cmp(t, "LT.lt", "instLT", a, Lit(t, 1000)), Cmp(t, "LT.lt", "instLT", SLit(t, -1000), a));
+            return IntTerms.Arrow(bounded, exact
+                ? IntTerms.Arrow(IntTerms.Eq(IntT, ToInt(Product(a)), IntTerms.Mul(ToInt(a), IntTerms.Lit(3))), overflow)
+                : overflow);
+        }
+        var m = fixture.NewMeta();
+        var goal = m.MkFreshExprSyntheticOpaqueMVar(IntTerms.ForallN(C(t), ["a"], v => Claim(v[0], exact: false)));
+        var ex = Assert.Throws<TacticException>(() => m.OmegaTactic(goal.Id));
+        Assert.StartsWith("omega could not prove the goal:\na possible counterexample may satisfy the constraints\n", ex.Message, StringComparison.Ordinal);
+        PrepProves(IntTerms.ForallN(C(t), ["a"], v => Claim(v[0], exact: true)));
+    }
 }

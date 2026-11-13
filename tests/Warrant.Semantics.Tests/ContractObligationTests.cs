@@ -251,9 +251,10 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
                     return x;
                 }
 
-                [Verified] public static int Caller(int y) => Positive(y + 1);
+                [Verified] public static int Caller(int y) => Positive(unchecked(y + 1));
             }
             """);
+        // unchecked: default-context y + 1 would be a site of its own before the call (#244).
         const string caller = "M:S.Caller(System.Int32)";
         var contract = Contract(translation, caller);
         Assert.True(contract.Raising);
@@ -342,7 +343,8 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     [Fact]
     public void APureMethodWithoutAContractHasNoObligationAndItsTranslationIsUnchanged()
     {
-        var (translation, _) = Translate("public static class S { [Verified] public static int Inc(int x) => x + 1; }");
+        // Nor implicit arithmetic, which must not overflow (#244): unchecked wraps on purpose.
+        var (translation, _) = Translate("public static class S { [Verified] public static int Inc(int x) => unchecked(x + 1); }");
         Assert.Null(translation.Find("M:S.Inc(System.Int32)")!.Contract);
     }
 
@@ -438,7 +440,7 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
                 public static int Add(int a, int b)
                 {
                     Spec.Ensures<int>(r => r == a + b);
-                    return a + b;
+                    return unchecked(a + b);
                 }
 
                 [Verified]
@@ -517,7 +519,8 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
         Assert.Empty(add.WellDefinedness);
         AssertPropositions(env, add);
         var plain = Contract(translation, "M:S.Plain(System.Int32,System.Int32)");
-        Assert.Single(plain.WellDefinedness);
+        // The Spec.Ensures's a + b, then the body's (#244).
+        Assert.Equal([SpecObligationKind.WellDefinedOperation, SpecObligationKind.NoOverflow], plain.WellDefinedness.Select(w => w.Kind));
         // The same program: only the obligation differs.
         static Expr Value(TranslatedUnit u) => Assert.IsType<DefinitionDecl>(Assert.Single(u.Declarations)).Value.Value;
         Assert.Equal(Value(translation.Find("M:S.Plain(System.Int32,System.Int32)")!), Value(translation.Find("M:S.Add(System.Int32,System.Int32)")!));
@@ -567,6 +570,54 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
     }
 
     [Fact]
+    public void APureBodysArithmeticHasAnOverflowObligationUnderThePathToItAndTheDefinitionIsUnchanged()
+    {
+        // #244: a pure method's implicit arithmetic is f.$wd_k of kind NoOverflow, after the contract's own, over σ, the
+        // parameters, the Spec.Requires, the branch taken and a guard inside the expression, a local's value unfolded; the
+        // definition keeps wrapping, so it is the same as with the arithmetic unchecked.
+        var source = """
+            public static class S
+            {
+                [Verified]
+                public static int F(int a, int b)
+                {
+                    Spec.Requires(a < 1000);
+                    var c = b;
+                    if (a > 0)
+                    {
+                        return b > 0 ? a * c : 0;
+                    }
+                    return 0;
+                }
+
+                [Verified]
+                public static int G(int a) => unchecked(a + 1);
+            }
+            """;
+        var (translation, env) = Translate(source);
+        var f = Contract(translation, "M:S.F(System.Int32,System.Int32)");
+        var wd = Assert.Single(f.WellDefinedness);
+        Assert.Equal(1, wd.Index);
+        Assert.Equal("Cs.S.«F(System.Int32,System.Int32)».$wd_1", wd.Theorem.Name.ToString());
+        Assert.Equal(SpecObligationKind.NoOverflow, wd.Kind);
+        Assert.Equal(VirOverflow.Wrap, Assert.IsType<BinaryExpr>(wd.Node).Overflow);
+        // ∀ σ a b (h : a < 1000) (h : 0 < a) (h : 0 < b), ⦃⌜True⌝⦄ Warrant.Int32.mulChecked σ a b ⦃⇓_ => ⌜True⌝, allowed⦄
+        Assert.Equal(6, wd.Binders);
+        var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 6));
+        Assert.Equal(Expr.App(C("Warrant.Int32.mulChecked"), Expr.BVar(5), Expr.BVar(4), Expr.BVar(3)), program);
+        AssertPropositions(env, f);
+
+        // A method with no contract and no implicit arithmetic still has no obligation.
+        Assert.Null(translation.Find("M:S.G(System.Int32)")!.Contract);
+
+        // The same unit with the arithmetic unchecked has the same definition and no body obligation.
+        var (wrapped, _) = Translate(source.Replace("a * c", "unchecked(a * c)", StringComparison.Ordinal));
+        static Expr Value(TranslatedUnit u) => Assert.IsType<DefinitionDecl>(Assert.Single(u.Declarations)).Value.Value;
+        Assert.Equal(Value(translation.Find("M:S.F(System.Int32,System.Int32)")!), Value(wrapped.Find("M:S.F(System.Int32,System.Int32)")!));
+        Assert.Empty(Contract(wrapped, "M:S.F(System.Int32,System.Int32)").WellDefinedness);
+    }
+
+    [Fact]
     public void ATheoremStatementsArithmeticHasAnOverflowObligationUnderItsGuardsAndBinders()
     {
         // #236: a theorem's statement is translated as a Spec expression is: T.$wd_k over σ, the parameters, the
@@ -601,7 +652,9 @@ public sealed class ContractObligationTests(SemanticsBundleFixture bundle) : ICl
         Assert.Equal(4, wd.Binders);
         var (program, _, _, _) = Triple(Under(wd.Theorem.Type, 4));
         Assert.Equal(Expr.App(C("Warrant.Int32.mulChecked"), Expr.BVar(3), Expr.BVar(0), Expr.BVar(2)), program);
-        Assert.Equal(Under(guarded.WellDefinedness[1].Theorem.Type, 4).GetAppArgs()[4].GetAppFn(), C("Warrant.Int32.mulChecked"));
+        // The second is also under the first's exact value, (y * a).toInt = y.toInt * a.toInt (#244).
+        Assert.Equal(5, guarded.WellDefinedness[1].Binders);
+        Assert.Equal(Under(guarded.WellDefinedness[1].Theorem.Type, 5).GetAppArgs()[4].GetAppFn(), C("Warrant.Int32.mulChecked"));
         foreach (var obligation in guarded.WellDefinedness)
         {
             AssertProposition(env, obligation.Theorem.Type);

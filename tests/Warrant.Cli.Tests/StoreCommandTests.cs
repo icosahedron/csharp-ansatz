@@ -146,7 +146,7 @@ public sealed class StoreCommandTests : IDisposable
         Assert.Equal(count, reader.ConstantCount);
         Assert.Equal(declarations.Take(100), reader.ReadAll());
         using var fresh = StoreReader.Open(Store);
-        Assert.Equal(4125, fresh.ConstantCount);
+        Assert.Equal(4165, fresh.ConstantCount);
     }
 
     [Fact]

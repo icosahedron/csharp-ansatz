@@ -26,6 +26,14 @@ public enum SpecObligationKind
     /// Proving it shows the contract unsatisfiable, which fails the method.
     /// </summary>
     Vacuity,
+
+    /// <summary>
+    /// An implicit <c>int</c> or <c>long</c> <c>+</c>, <c>-</c>, <c>*</c> or unary <c>-</c> in a pure method's body does not
+    /// overflow (#244): <c>∀ σ params scope facts, ⦃⌜True⌝⦄ op σ args ⦃⇓_ =&gt; ⌜True⌝, allowed⦄</c>, where <c>op</c> is the
+    /// operation's checked model and the facts are those known on the path to it: the <c>Spec.Requires</c>, the branches
+    /// and switch sections taken, and the guards inside the expression. The definition keeps the wrapped value.
+    /// </summary>
+    NoOverflow,
 }
 
 /// <summary>
@@ -252,7 +260,7 @@ internal sealed partial class BodyTranslator
 
     /// <summary>
     /// The contract obligation of a function unit (KTD12), or null when it needs none: a pure method with neither
-    /// <c>Spec.Requires</c> nor <c>Spec.Ensures</c>.
+    /// <c>Spec.Requires</c> nor <c>Spec.Ensures</c> nor implicit arithmetic in its body (#244).
     /// </summary>
     /// <param name="unit">The function unit.</param>
     /// <param name="function">The unit's constant.</param>
@@ -265,7 +273,9 @@ internal sealed partial class BodyTranslator
         // Spec.NoThrow (#182) narrows the exception postcondition of a method that can raise; a pure one raises nothing, so
         // it already holds and the obligation is the one without it.
         bool noThrow = raising && stmts.Any(s => s is NoThrowStmt);
-        if (!raising && requires.Count == 0 && ensures.Count == 0)
+        // #244: a pure method's own implicit arithmetic must not overflow; a raising method's is a site of its program.
+        bool overflows = !raising && unit.Body is { } code && BodyNodes(code).Any(n => n is VirExpr e && SpecOverflows(e));
+        if (!raising && requires.Count == 0 && ensures.Count == 0 && !overflows)
         {
             return null;
         }
@@ -334,9 +344,10 @@ internal sealed partial class BodyTranslator
 
         // #235: a Spec.Assert's condition is a Spec expression, but it sits inside the program.
         var asserts = raising && unit.Body is { } body && Nodes(body).Any(n => n is AssertStmt) ? AssertObligations(unit, spec.WellDefinedness.Count) : [];
+        var arithmetic = overflows ? OverflowObligations(unit, spec.WellDefinedness.Count) : [];
         return new ContractObligation(
             theorem, all.Count, [.. all.Select(x => _lctx.Get(x).UserName)], operations.Count, unit.Script, specLemma, specBinders,
-            [.. spec.WellDefinedness, .. asserts], [.. vacuity], raising);
+            [.. spec.WellDefinedness, .. asserts, .. arithmetic], [.. vacuity], raising);
     }
 
     /// <summary>
@@ -353,6 +364,45 @@ internal sealed partial class BodyTranslator
         var t = new BodyTranslator(_types, _callees) { Contracted = true, _facts = [], _assertFirst = first };
         t.MonadicFunction(unit);
         return [.. t._assertSpec?.WellDefinedness ?? []];
+    }
+
+    /// <summary>
+    /// The obligations that a pure method's implicit arithmetic does not overflow (#244): its body translated once more, as
+    /// a check of nothing, with every statement and expression translated as the definition translates it, and each
+    /// default-context <c>int</c> and <c>long</c> <c>+</c>, <c>-</c>, <c>*</c> and unary <c>-</c> recording
+    /// <c>f.$wd_k</c> of kind <see cref="SpecObligationKind.NoOverflow"/>, numbered after the contract's first
+    /// <paramref name="first"/>. Each is over a world, <c>self</c> and the parameters, the join points' parameters before
+    /// it and the facts known there (the <c>Spec.Requires</c>, the branches and switch sections taken), then the guards
+    /// inside the expression (<c>&amp;&amp;</c>, <c>||</c>, <c>?:</c>, <c>??</c>, a switch expression's arms); locals' lets
+    /// are unfolded. A call of a recursive method to itself is the method's constant applied, which the obligations, proved
+    /// after the definition, can name, though nothing about its value is known there. The definition is unchanged: its
+    /// value is the wrapped one, as the CLR's is.
+    /// </summary>
+    private ImmutableArray<SpecObligation> OverflowObligations(VirUnit unit, int first)
+    {
+        var t = new BodyTranslator(_types, _callees) { Contracted = true, _facts = [], _assertFirst = first, _overflowObligations = true };
+        t.Function(unit);
+        return [.. t._assertSpec?.WellDefinedness ?? []];
+    }
+
+    /// <summary>
+    /// The nodes of a method's body that run: all of them but the conditions of <c>Spec.Requires</c>, <c>Spec.Ensures</c>
+    /// and <c>Spec.Assert</c> and the measure of <c>Spec.Decreases</c>, which are claims.
+    /// </summary>
+    private static IEnumerable<VirNode> BodyNodes(VirNode node)
+    {
+        if (node is RequiresStmt or EnsuresStmt or AssertStmt or DecreasesStmt)
+        {
+            yield break;
+        }
+        yield return node;
+        foreach (var child in VirTree.Children(node))
+        {
+            foreach (var n in BodyNodes(child))
+            {
+                yield return n;
+            }
+        }
     }
 
     /// <summary>
@@ -420,14 +470,24 @@ internal sealed partial class BodyTranslator
                     var l = Value(b.L, env);
                     var r = Value(b.R, env);
                     spec.Operation(this, e, b.Type, sigma => Monadic.Binary(b.Op, prim, sigma, l, r));
-                    return Operators.Binary(b.Op, prim, l, r);
+                    var value = Operators.Binary(b.Op, prim, l, r);
+                    if (SpecOverflows(e))
+                    {
+                        spec.Known(this, Exact(prim, value, ExactBinary(b.Op, ToInt(prim, l), ToInt(prim, r))));
+                    }
+                    return value;
                 }
             case UnaryExpr { Op: UnaryOp.Neg } u:
                 {
                     var prim = _types.Underlying(u.Type);
                     var a = Value(u.Operand, env);
                     spec.Operation(this, e, u.Type, sigma => Expr.App(NegChecked(prim), sigma, a));
-                    return Operators.Neg(prim, a);
+                    var value = Operators.Neg(prim, a);
+                    if (SpecOverflows(e))
+                    {
+                        spec.Known(this, Exact(prim, value, Expr.App(Init.Neg, Init.Int, Init.IntNeg, ToInt(prim, a))));
+                    }
+                    return value;
                 }
             case ConvertExpr c:
                 {
@@ -454,6 +514,31 @@ internal sealed partial class BodyTranslator
             default:
                 throw new TranslationException(null, $"the {construct} cannot appear in a Spec expression, which is a proposition (M6 KTD26).");
         }
+    }
+
+    /// <summary>
+    /// <c>v.toInt = exact</c>: an implicit operation's value <paramref name="value"/> is its exact value
+    /// <paramref name="exact"/>, over <c>Int</c>, where its obligation holds (#244). The obligations after it on the same
+    /// path assume it, so <c>omega</c> reads a nested operation's operand as a sum or product rather than through the
+    /// wrap-around (<c>Int.bmod</c>), whose case split it cannot always close.
+    /// </summary>
+    private static Expr Exact(VirPrimitive prim, Expr value, Expr exact) =>
+        Expr.App(Init.Eq, Init.Int, ToInt(prim, value), exact);
+
+    /// <summary><c>Int32.toInt v</c> or <c>Int64.toInt v</c>.</summary>
+    private static Expr ToInt(VirPrimitive prim, Expr v) => Expr.App(prim == VirPrimitive.Int32 ? Init.Int32ToInt : Init.Int64ToInt, v);
+
+    /// <summary><c>a + b</c>, <c>a - b</c> or <c>a * b</c> over <c>Int</c>.</summary>
+    private static Expr ExactBinary(BinaryOp op, Expr a, Expr b)
+    {
+        var (h, hInst, inst) = op switch
+        {
+            BinaryOp.Add => (Init.HAdd, Init.InstHAdd, Init.IntAdd),
+            BinaryOp.Sub => (Init.HSub, Init.InstHSub, Init.IntSub),
+            BinaryOp.Mul => (Init.HMul, Init.InstHMul, Init.IntMul),
+            _ => throw new ArgumentOutOfRangeException(nameof(op)),
+        };
+        return Expr.App(h, Init.Int, Init.Int, Init.Int, Expr.App(hInst, Init.Int, inst), a, b);
     }
 
     /// <summary>
@@ -589,11 +674,14 @@ internal sealed partial class BodyTranslator
 
     /// <summary>
     /// The state of a <c>Spec</c> expression's translation: its guards, and the obligations it has recorded. For the
-    /// conditions of a method's <c>Spec.Assert</c>s (#235), <paramref name="facts"/> gives what is in scope at the
-    /// <c>Spec.Assert</c>, outer binders after <paramref name="binders"/>, and its obligations are numbered after the
-    /// <paramref name="first"/> of the contract's own.
+    /// conditions of a method's <c>Spec.Assert</c>s (#235) and a pure method's body (#244), <paramref name="facts"/> gives
+    /// what is in scope at the point being translated, outer binders after <paramref name="binders"/>, and its obligations
+    /// are numbered after the <paramref name="first"/> of the contract's own. A partial operation records an obligation of
+    /// kind <paramref name="operations"/>.
     /// </summary>
-    private sealed class SpecState(VirUnit unit, Expr? sigma, IReadOnlyList<Expr> binders, int first = 0, Func<IReadOnlyList<(Expr Value, bool IsFact)>>? facts = null)
+    private sealed class SpecState(
+        VirUnit unit, Expr? sigma, IReadOnlyList<Expr> binders, int first = 0, Func<IReadOnlyList<(Expr Value, bool IsFact)>>? facts = null,
+        SpecObligationKind operations = SpecObligationKind.WellDefinedOperation)
     {
         /// <summary>
         /// The conditions under which the expression being translated is evaluated, outermost first, and among them the
@@ -625,7 +713,27 @@ internal sealed partial class BodyTranslator
             var truth = Triples.Pure(sigma, Init.PropTrue);
             var claim = Triples.Triple(sigma, alpha, program(sigma), truth,
                 Triples.Post(sigma, alpha, Expr.Lam(Name.From("r"), alpha, truth)));
-            Add(t, SpecObligationKind.WellDefinedOperation, node, [sigma], claim);
+            Add(t, operations, node, [sigma], claim);
+        }
+
+        /// <summary>
+        /// Records <paramref name="fact"/>, which the obligation just recorded makes true where it holds (an operation's
+        /// exact value, #244), for the obligations after it on the same path: inside a guard, until the guard ends; outside
+        /// one, among the facts of the program point when they are kept (#235, #244), else for the rest of the expression.
+        /// Nothing is recorded for a callee's precondition.
+        /// </summary>
+        public void Known(BodyTranslator t, Expr fact)
+        {
+            if (sigma is null)
+            {
+                return;
+            }
+            if (Guards.Count == 0 && t._facts is { } kept)
+            {
+                kept.Add((fact, true));
+                return;
+            }
+            Guards.Add(fact);
         }
 
         /// <summary>Records that the call <paramref name="node"/> is within its callee's precondition <paramref name="requires"/>.</summary>

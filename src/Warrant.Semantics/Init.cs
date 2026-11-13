@@ -79,6 +79,13 @@ internal static class Init
     public static readonly Expr IntToNat = C("Int.toNat");
     public static readonly Expr Int32ToInt = C("Int32.toInt");
     public static readonly Expr Int64ToInt = C("Int64.toInt");
+
+    // An implicit operation's exact value (#244): `(a + b).toInt = a.toInt + b.toInt` over Int.
+    public static readonly Expr Int = C("Int");
+    public static readonly Expr IntAdd = C("Int.instAdd");
+    public static readonly Expr IntSub = C("Int.instSub");
+    public static readonly Expr IntMul = C("Int.instMul");
+    public static readonly Expr IntNeg = C("Int.instNegInt");
     public static readonly Expr LtNat = C("instLTNat");
 
     public static readonly Expr BoolAnd = C("Bool.and");
@@ -113,6 +120,16 @@ internal static class Init
     public static readonly Expr Int64Div = C("Warrant.Int64.div");
     public static readonly Expr Int64Rem = C("Warrant.Int64.rem");
     public static readonly Expr Int64ToInt32Checked = C("Warrant.Int64.toInt32Checked");
+
+    // Default-context arithmetic in a verified method that can raise (#244): assertFailed where the CLR would wrap.
+    public static readonly Expr Int32AddImplicit = C("Warrant.Int32.addImplicit");
+    public static readonly Expr Int32SubImplicit = C("Warrant.Int32.subImplicit");
+    public static readonly Expr Int32MulImplicit = C("Warrant.Int32.mulImplicit");
+    public static readonly Expr Int32NegImplicit = C("Warrant.Int32.negImplicit");
+    public static readonly Expr Int64AddImplicit = C("Warrant.Int64.addImplicit");
+    public static readonly Expr Int64SubImplicit = C("Warrant.Int64.subImplicit");
+    public static readonly Expr Int64MulImplicit = C("Warrant.Int64.mulImplicit");
+    public static readonly Expr Int64NegImplicit = C("Warrant.Int64.negImplicit");
 
     // Nullable values and Math on int and long (M6 U16; plan M6 KTD5, KTD23, lean/Warrant/Nullable.lean and Math.lean):
     // T? is Option T at level 0, null is none and a T converted to T? is some. The Nullable models take the world and the

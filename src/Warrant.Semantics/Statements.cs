@@ -39,6 +39,8 @@ internal sealed partial class BodyTranslator
             // A call run for its effects (M6 U19): its program bound and its value dropped. A call that cannot raise has
             // no effect to keep.
             EvalStmt e when _sigma is not null => Bound(e.Value, env, new Next(rest.ResultType, _ => rest.Invoke(env))),
+            // A call that cannot raise has no effect to keep, though its arguments' arithmetic still must not overflow (#244).
+            EvalStmt e when IsPure(e.Value) && _overflowObligations => Discard(Value(e.Value, env), () => rest.Invoke(env)),
             EvalStmt e when IsPure(e.Value) => rest.Invoke(env),
             // Claims, never run: the contract obligation states them (M6 KTD12, Contracts.cs). A Spec.Requires is a fact for
             // the obligations of the Spec.Asserts after it (#235).
@@ -102,6 +104,13 @@ internal sealed partial class BodyTranslator
         }
     }
 
+    /// <summary><paramref name="then"/>, after a value that is translated only for the obligations it records.</summary>
+    private static Expr Discard(Expr value, Func<Expr> then)
+    {
+        _ = value;
+        return then();
+    }
+
     /// <summary>One statement, then <paramref name="k"/>.</summary>
     private Expr Statement(VirStmt s, Env env, Continuation k) =>
         s is BlockStmt b ? Statements(b.Stmts, 0, env, k) : Statements([s], 0, env, k);
@@ -123,7 +132,8 @@ internal sealed partial class BodyTranslator
     /// 3. neither contains a <c>return</c>, and they change exactly one local <c>x</c> that <paramref name="k"/> reads:
     ///    <c>let x := combine(x after each branch); k</c>;
     /// 4. neither contains a <c>return</c> or a call of the recursive method being translated, and they change no local
-    ///    <paramref name="k"/> reads: <paramref name="k"/> alone (a skipped call would leave its decrease unchecked);
+    ///    <paramref name="k"/> reads: <paramref name="k"/> alone (a skipped call would leave its decrease unchecked; nor,
+    ///    while a pure body's obligations are stated, implicit arithmetic, which must not overflow even unread, #244);
     /// 5. otherwise a join point over the locals <paramref name="k"/> reads and some branch changes.
     /// Each branch is translated with its <paramref name="hypotheses"/> in scope, when there are any. In a method that can
     /// raise, rules 3 and 4 do not apply: a branch that can raise can be neither dropped nor reduced to a value, so the
@@ -154,6 +164,7 @@ internal sealed partial class BodyTranslator
             .Order()
             .ToList();
         bool recurses = _selfKey is { } selfKey && branches.Any(b => Nodes(b).Any(n => n is CallExpr c && string.Equals(c.Target, selfKey, StringComparison.Ordinal)));
+        recurses |= _overflowObligations && branches.Any(b => BodyNodes(b).Any(n => n is VirExpr e && SpecOverflows(e)));
         if (_sigma is not null)
         {
             return JoinPoint(branches, Branch, combine, live, env, k);

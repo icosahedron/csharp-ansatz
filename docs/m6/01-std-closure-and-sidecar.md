@@ -46,6 +46,7 @@ How the bundle grew, unit by unit (counts from `scripts/count-export.py`, `tests
 | U11 | | 4,109 | the walker's rules in `lean/Warrant/Vc.lean` |
 | U20 | 630 | 4,112 | three simp lemmas for a nullable `Spec.Ensures` meeting a constructor |
 | #182 | 641 | 4,125 | `Spec.NoThrow`: `ClrExn.External`, its equations, `ClrExn.allowed_of_external`, `Vc.callExternal`, `Vc.callPure` |
+| #244 | 660 | 4,165 | the models of default-context `+ - *` and unary `-` in a body that can raise, and `Int.instAdd`, `Int.instSub`, `Int.instMul` |
 
 No unit added an axiom.
 

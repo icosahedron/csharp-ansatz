@@ -573,6 +573,27 @@ Warrant.Int64.rem
 Warrant.Int64.rem_spec
 Warrant.Int64.toInt32Checked
 Warrant.Int64.toInt32Checked_spec
+# Default-context arithmetic in a verified method that can raise, which must not overflow (#244, Checked.lean), and
+# the Int instances of an implicit operation's exact value, which a pure method's obligations state:
+Warrant.Int32.addImplicit
+Warrant.Int32.addImplicit_spec
+Warrant.Int32.subImplicit
+Warrant.Int32.subImplicit_spec
+Warrant.Int32.mulImplicit
+Warrant.Int32.mulImplicit_spec
+Warrant.Int32.negImplicit
+Warrant.Int32.negImplicit_spec
+Warrant.Int64.addImplicit
+Warrant.Int64.addImplicit_spec
+Warrant.Int64.subImplicit
+Warrant.Int64.subImplicit_spec
+Warrant.Int64.mulImplicit
+Warrant.Int64.mulImplicit_spec
+Warrant.Int64.negImplicit
+Warrant.Int64.negImplicit_spec
+Int.instAdd
+Int.instSub
+Int.instMul
 
 # Nullable values and Math on int and long (M6 U16; plan M6 KTD5, KTD23, lean/Warrant/Nullable.lean and Math.lean):
 # a nullable value is an Option (null is none, a T converted to T? is some), the raising reads with their @[spec]

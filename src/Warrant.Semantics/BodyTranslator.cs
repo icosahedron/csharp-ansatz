@@ -52,6 +52,13 @@ internal sealed partial class BodyTranslator
     {
         var binders = Binders(unit);
         var returns = ReturnType(unit);
+        if (_overflowObligations)
+        {
+            // #244: the body is translated once more, as the definition is, for the obligations its arithmetic records.
+            _assertSpecUnit = unit;
+            _spec = _assertSpec = new SpecState(
+                unit, _lctx.MkLocalDecl(_ngen, Name.From("σ"), Expr.Type), binders, _assertFirst, () => [.. _facts!], SpecObligationKind.NoOverflow);
+        }
         Expr body;
         switch (unit.Body)
         {
@@ -60,7 +67,13 @@ internal sealed partial class BodyTranslator
                 body = Statements(block.Stmts, 0, Env.Empty, End(unit, returns));
                 break;
             case VirExpr e when ReturnsNothing(unit) && e.Type != VirType.Unit:
-                // `=> F(x)` in a method that returns no value and cannot raise: nothing to run for its effects.
+                // `=> F(x)` in a method that returns no value and cannot raise: nothing to run for its effects, though its
+                // arithmetic still must not overflow (#244).
+                if (_overflowObligations)
+                {
+                    CollectLocals(e);
+                    Value(e, Env.Empty);
+                }
                 body = Init.UnitUnit;
                 break;
             case VirExpr e:

@@ -414,6 +414,211 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
     }
 
     [Fact]
+    public void ArithmeticInAPureBodyThatCanOverflowFailsAtTheOperationAndProvesWhenBounded()
+    {
+        // #244: a verified method's own default-context arithmetic must not overflow either. What is known at the
+        // operation bounds it: the Spec.Requires, the branch or arm taken, a guard inside the expression, a local's value
+        // and a pure callee's Spec.Ensures. Explicit unchecked wraps with no obligation. A method without a contract gets
+        // its obligations too, and its callers are skipped when one fails.
+        var source = Wrap("""
+            [Verified]
+            public static int Unbounded(int a, int b) => a + b;
+
+            [Verified]
+            public static int CallsUnbounded(int a) => Unbounded(a, 1) / 2;
+
+            [Verified]
+            public static int ByRequires(int a, int b)
+            {
+                Spec.Requires(a < 1000 && a > -1000 && b < 1000 && b > -1000);
+                return a * 3 - b;
+            }
+
+            [Verified]
+            public static int ByGuard(int a) => a < 1000 ? a + 1 : 0;
+
+            [Verified]
+            public static long ByIf(long a)
+            {
+                if (a > 0)
+                {
+                    return -a;
+                }
+                return 0;
+            }
+
+            [Verified]
+            public static int BySwitch(int a)
+            {
+                switch (a)
+                {
+                    case < 100 and > -100:
+                        return a * 3;
+                    default:
+                        return 0;
+                }
+            }
+
+            [Verified]
+            public static int ByArm(int a) => a switch { 5 => a + 1, _ => 0 };
+
+            [Verified]
+            public static int ByCallee(int a)
+            {
+                var b = Cap(a);
+                return b * 2;
+            }
+
+            [Verified]
+            public static int Cap(int x)
+            {
+                Spec.Ensures<int>(r => r >= 0 && r <= 100);
+                return x < 0 ? 0 : x > 100 ? 100 : x;
+            }
+
+            [Verified]
+            public static int Steps(int a)
+            {
+                Spec.Requires(a < 100 && a > -100);
+                var x = a;
+                x += 5;
+                x++;
+                x--;
+                x *= 2;
+                return -x;
+            }
+
+            [Verified]
+            public static int Wraps(int a) => unchecked(a * 31 + 7);
+
+            [Verified]
+            public static int StepUnbounded(int a)
+            {
+                var x = a;
+                x++;
+                return x;
+            }
+            """);
+        var result = Run(source);
+        const string unbounded = "M:S.Unbounded(System.Int32,System.Int32)";
+        Assert.Equal((VcKind.ArithmeticOverflow, "a + b"), Failure(source, unbounded, result.Find(unbounded)));
+        Assert.StartsWith("arithmetic overflow", VcKinds.Text(VcKind.ArithmeticOverflow), StringComparison.Ordinal);
+        var caller = Assert.IsType<SkippedOutcome>(result.Find("M:S.CallsUnbounded(System.Int32)"));
+        Assert.EndsWith("whose contract is not proved.", caller.Reason, StringComparison.Ordinal);
+        Proved(result.Find("M:S.ByRequires(System.Int32,System.Int32)"));
+        Proved(result.Find("M:S.ByGuard(System.Int32)"));
+        Proved(result.Find("M:S.ByIf(System.Int64)"));
+        Proved(result.Find("M:S.BySwitch(System.Int32)"));
+        Proved(result.Find("M:S.ByArm(System.Int32)"));
+        Proved(result.Find("M:S.ByCallee(System.Int32)"));
+        Proved(result.Find("M:S.Steps(System.Int32)"));
+        Assert.IsType<TranslatedOutcome>(result.Find("M:S.Wraps(System.Int32)"));
+        const string step = "M:S.StepUnbounded(System.Int32)";
+        Assert.Equal((VcKind.ArithmeticOverflow, "x++;"), Failure(source, step, result.Find(step)));
+    }
+
+    [Fact]
+    public void ARecursiveMethodsArithmeticHasObligationsAndItsRecursiveResultIsUnknown()
+    {
+        // #244: a recursive method still translates; its arithmetic is bounded by the path to it, but nothing is known of
+        // a recursive call's result, so arithmetic on one fails unless it is written unchecked.
+        var source = Wrap("""
+            [Verified]
+            public static int Count(int n)
+            {
+                Spec.Decreases(n);
+                if (n <= 0) return 0;
+                return Count(n - 1);
+            }
+
+            [Verified]
+            public static int Sum(int n)
+            {
+                Spec.Decreases(n);
+                if (n <= 0) return 0;
+                return n + Sum(n - 1);
+            }
+
+            [Verified]
+            public static int SumWrapping(int n)
+            {
+                Spec.Decreases(n);
+                if (n <= 0) return 0;
+                return unchecked(n + SumWrapping(n - 1));
+            }
+            """);
+        var result = Run(source);
+        Proved(result.Find("M:S.Count(System.Int32)"));
+        const string sum = "M:S.Sum(System.Int32)";
+        Assert.Equal((VcKind.ArithmeticOverflow, "n + Sum(n - 1)"), Failure(source, sum, result.Find(sum)));
+        Proved(result.Find("M:S.SumWrapping(System.Int32)"));
+    }
+
+    [Fact]
+    public void ArithmeticInABodyThatCanRaiseIsCheckedByTheWalkWithEverythingItKnows()
+    {
+        // #244: in a method that can raise, an implicit operation is a site of the program, so the VC walk proves it does
+        // not overflow with all it knows there, a callee's Spec.Ensures among it. checked still raises OverflowException.
+        var source = Wrap("""
+            [Verified]
+            public static int Unbounded(int a, int b)
+            {
+                if (b == 0) throw new System.ArgumentException();
+                return a + b;
+            }
+
+            [Verified]
+            public static int ByCallee(int a)
+            {
+                Spec.Requires(a >= 0);
+                var n = Bound(a);
+                return n + 1;
+            }
+
+            [Verified]
+            public static int Bound(int x)
+            {
+                Spec.Requires(x >= 0);
+                Spec.Ensures<int>(r => r >= 0 && r <= 100);
+                return x > 100 ? 100 : x;
+            }
+
+            [Verified]
+            public static int ByRaisingCallee(int a) => Raises(a) * 3;
+
+            [Verified]
+            public static int Raises(int x)
+            {
+                Spec.Ensures<int>(r => r >= 0 && r <= 100);
+                if (x < 0) throw new System.ArgumentException();
+                return x > 100 ? 100 : x;
+            }
+
+            [Verified]
+            public static int Wraps(int a)
+            {
+                if (a == 0) throw new System.ArgumentException();
+                return unchecked(a + 1);
+            }
+
+            [Verified]
+            public static int Checked(int a)
+            {
+                if (a == 0) throw new System.ArgumentException();
+                return checked(a + 1);
+            }
+            """);
+        var result = Run(source);
+        const string unbounded = "M:S.Unbounded(System.Int32,System.Int32)";
+        Assert.Equal((VcKind.ArithmeticOverflow, "a + b"), Failure(source, unbounded, result.Find(unbounded)));
+        Proved(result.Find("M:S.ByCallee(System.Int32)"));
+        Proved(result.Find("M:S.ByRaisingCallee(System.Int32)"));
+        Proved(result.Find("M:S.Wraps(System.Int32)"));
+        const string isChecked = "M:S.Checked(System.Int32)";
+        Assert.Equal((VcKind.Overflow, "a + 1"), Failure(source, isChecked, result.Find(isChecked)));
+    }
+
+    [Fact]
     public void AnUnsatisfiableRequiresIsReportedAtItsLine()
     {
         var source = Wrap("""
@@ -539,9 +744,10 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
                 Spec.Ensures<int>(r => r > 0);
                 var q = checked(a * 2);
                 var v = c.Value;
-                return q + v;
+                return unchecked(q + v);
             }
             """);
+        // unchecked keeps the sum out of it: default-context arithmetic would be a fourth VC (#244).
         var outcome = Assert.IsType<NotProvedOutcome>(Run(source).Find("M:S.Three(System.Int32,System.Int32,System.Nullable{System.Int32})"));
         Assert.Equal([VcKind.Overflow, VcKind.NullRead, VcKind.Postcondition], outcome.Vcs.Select(v => v.Kind));
         Assert.Equal(

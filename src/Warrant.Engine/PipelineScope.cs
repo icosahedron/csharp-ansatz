@@ -170,9 +170,10 @@ public static partial class Pipeline
         /// <summary>
         /// A recursive method (M5a KTD14, KTD15): each decrease theorem proved by the omega pipeline and admitted, then the
         /// definition, which refers to them, marked irreducible for Meta as Lean marks its well-founded definitions, then
-        /// the equation lemma with its bare <c>Nat.fix_eq</c> proof. A decrease theorem that is not proved is WRT0001 at
-        /// its call, with its goal; an equation lemma the kernel rejects fails the unit. All of it runs in the unit's one
-        /// budget, and running out of it anywhere is WRT0006 (M5b KTD11).
+        /// the equation lemma with its bare <c>Nat.fix_eq</c> proof, then, when its body has implicit arithmetic, the contract
+        /// obligation that states it does not overflow (#244). A decrease theorem that is not proved is WRT0001 at its call,
+        /// with its goal; an equation lemma the kernel rejects fails the unit. All of it runs in the unit's one budget, and
+        /// running out of it anywhere is WRT0006 (M5b KTD11).
         /// </summary>
         private UnitOutcome AdmitRecursive(
             EngineUnit unit,
@@ -229,6 +230,11 @@ public static partial class Pipeline
             }
 
             var equation = CachedProofs is null ? Equation() : AdmitCached(unit, recursion.Equation, display, assumptions, admitted, budget, Equation);
+            if (equation is null && translated.Contract is { } contract)
+            {
+                // #244: the obligations of its implicit arithmetic, after the definition they may name.
+                return AdmitContract(unit, translated, contract, assumptions, admitted, budget);
+            }
             return equation ?? new TranslatedOutcome(key, kind, display, assumptions, [.. admitted]);
         }
 

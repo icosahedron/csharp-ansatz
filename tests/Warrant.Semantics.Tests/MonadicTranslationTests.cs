@@ -85,6 +85,48 @@ public sealed class MonadicTranslationTests(SemanticsBundleFixture bundle) : ICl
         Assert.Equal(Expr.App(C("Warrant.ClrM"), Expr.BVar(parameters.Length), returns), body);
     }
 
+    // ---- Default-context arithmetic in a body that can raise (#244) ----
+
+    [Fact]
+    public void ImplicitArithmeticInARaisingBodyIsASiteThatFailsAsAnAssertWhereTheClrWouldWrap()
+    {
+        // The model is the wrapped value where the exact one is in range, and assertFailed where the CLR would wrap, which
+        // the differential harness skips as it does a failed Spec.Assert (#186); unchecked wraps, and a Spec.Assert's
+        // condition, which the CLR compiles out, keeps wrapping too (#235).
+        var (translation, env) = Translate("""
+            public static class S
+            {
+                [Verified]
+                public static int Next(int x)
+                {
+                    if (x < 0) throw new ArgumentException();
+                    return x + 1;
+                }
+
+                [Verified]
+                public static int Wraps(int x)
+                {
+                    if (x < 0) throw new ArgumentException();
+                    return unchecked(x + 1);
+                }
+
+                [Verified]
+                public static int Asserts(int x)
+                {
+                    Spec.Assert(unchecked(x + 1) == x + 1);
+                    return x;
+                }
+            }
+            """);
+        const string next = "M:S.Next(System.Int32)";
+        Assert.NotNull(ExprOps.Find(Definition(translation, next).Value, (e, _) => e is ConstExpr { Name: var n } && n == N("Warrant.Int32.addImplicit")));
+        Assert.True(Runs(env, translation, next, Int32T, Ok(Int32T, I(42)), I(41)));
+        Assert.True(Runs(env, translation, next, Int32T, Error(Int32T, Exn("assertFailed")), I(int.MaxValue)));
+        Assert.True(Runs(env, translation, "M:S.Wraps(System.Int32)", Int32T, Ok(Int32T, I(int.MinValue)), I(int.MaxValue)));
+        Assert.Null(ExprOps.Find(Definition(translation, "M:S.Asserts(System.Int32)").Value, (e, _) => e is ConstExpr { Name: var n } && n == N("Warrant.Int32.addImplicit")));
+        Assert.True(Runs(env, translation, "M:S.Asserts(System.Int32)", Int32T, Ok(Int32T, I(int.MaxValue)), I(int.MaxValue)));
+    }
+
     // ---- Pure units keep their translation ----
 
     [Fact]
@@ -377,7 +419,7 @@ public sealed class MonadicTranslationTests(SemanticsBundleFixture bundle) : ICl
                 public static int Pick(int x, int y)
                 {
                     var r = 0;
-                    switch (x + 1)
+                    switch (unchecked(x + 1))
                     {
                         case 1:
                             r = 10 / y;
@@ -386,7 +428,7 @@ public sealed class MonadicTranslationTests(SemanticsBundleFixture bundle) : ICl
                             r = 20;
                             break;
                     }
-                    return r + 1;
+                    return unchecked(r + 1);
                 }
 
                 [Verified]
@@ -403,7 +445,8 @@ public sealed class MonadicTranslationTests(SemanticsBundleFixture bundle) : ICl
             """);
         const string pick = "M:S.Pick(System.Int32,System.Int32)";
         var body = ((LamExpr)((LamExpr)((LamExpr)Definition(translation, pick).Value).Body).Body).Body;
-        // let r := 0; let x := x + 1; let jp := fun r => pure (r + 1); ite (x = 1) (bind (div σ 10 y) (fun r => jp r)) (jp 20)
+        // let r := 0; let x := x + 1; let jp := fun r => pure (r + 1); ite (x = 1) (bind (div σ 10 y) (fun r => jp r)) (jp 20),
+        // with the arithmetic unchecked, since default-context + would be a site of its own (#244)
         var r = Assert.IsType<LetExpr>(body);
         var discriminant = Assert.IsType<LetExpr>(r.Body);
         Assert.Equal(N("x"), discriminant.BinderName);

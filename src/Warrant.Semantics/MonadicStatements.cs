@@ -90,6 +90,28 @@ internal static class Monadic
         };
         return Expr.App(model, sigma, a, b);
     }
+
+    /// <summary>
+    /// The model of default-context <c>+</c>, <c>-</c> or <c>*</c> on <c>int</c> or <c>long</c> in a method that can raise
+    /// (#244): <c>Warrant.Int32.addImplicit σ a b</c> and likewise, which is the wrapped value where the exact one is in
+    /// range and fails as a <c>Spec.Assert</c> does (<c>assertFailed</c>) where the CLR would wrap.
+    /// </summary>
+    public static Expr Implicit(BinaryOp op, VirPrimitive type, Expr sigma, Expr a, Expr b)
+    {
+        bool is32 = type == VirPrimitive.Int32;
+        var model = op switch
+        {
+            BinaryOp.Add => is32 ? Init.Int32AddImplicit : Init.Int64AddImplicit,
+            BinaryOp.Sub => is32 ? Init.Int32SubImplicit : Init.Int64SubImplicit,
+            BinaryOp.Mul => is32 ? Init.Int32MulImplicit : Init.Int64MulImplicit,
+            _ => throw new ArgumentOutOfRangeException(nameof(op)),
+        };
+        return Expr.App(model, sigma, a, b);
+    }
+
+    /// <summary>The model of default-context unary <c>-</c> on <c>int</c> or <c>long</c> in a method that can raise (#244).</summary>
+    public static Expr NegImplicit(VirPrimitive type, Expr sigma, Expr a) =>
+        Expr.App(type == VirPrimitive.Int32 ? Init.Int32NegImplicit : Init.Int64NegImplicit, sigma, a);
 }
 
 /// <summary>Nullable values as <c>Option</c> (plan M6 KTD5, <c>lean/Warrant/Nullable.lean</c>).</summary>
@@ -136,6 +158,10 @@ internal static class Nullables
 /// program (U19, <c>Dependencies.cs</c>).</item>
 /// <item><c>Spec.Assert(c)</c> is <c>if c then pure () else throw assertFailed</c> (KTD16), and a nullable value used where
 /// a non-nullable one is required is <c>Warrant.Nullable.nonNull</c>, which throws <c>nullReference</c> on null (#163).</item>
+/// <item>Default-context <c>+</c>, <c>-</c>, <c>*</c> and unary <c>-</c> on <c>int</c> and <c>long</c> is a site, its model
+/// <c>Warrant.Int32.addImplicit</c> and likewise, which fails as a <c>Spec.Assert</c> does where the CLR would wrap, so the
+/// VC walker proves it does not overflow with everything it knows there (#244); not in a <c>Spec.Assert</c>'s condition,
+/// which the CLR compiles out and whose arithmetic has obligations of its own (#235).</item>
 /// </list>
 /// Expressions are translated in continuation-passing style: <see cref="Bound"/> hands the expression's value to a
 /// continuation exactly once, so no continuation is ever copied.
@@ -168,11 +194,27 @@ internal sealed partial class BodyTranslator
     /// <summary>The number of the contract's own well-definedness obligations, which the <c>Spec.Assert</c>s' come after.</summary>
     private int _assertFirst;
 
+    /// <summary>
+    /// Whether a pure method's body is being translated for the obligations of its implicit arithmetic (#244,
+    /// <see cref="OverflowObligations"/>): the whole body is then translated as a <c>Spec</c> expression is, with
+    /// <see cref="_facts"/> kept.
+    /// </summary>
+    private bool _overflowObligations;
+
     /// <summary>The state the <c>Spec.Assert</c>s' conditions are translated in, while <see cref="_facts"/> is set.</summary>
     private SpecState? _assertSpec;
 
     /// <summary>The unit whose <c>Spec.Assert</c>s' obligations are being stated, while <see cref="_facts"/> is set.</summary>
     private VirUnit? _assertSpecUnit;
+
+    /// <summary>Whether a <c>Spec.Assert</c>'s condition is being translated, whose arithmetic is not a site (#235, #244).</summary>
+    private bool _inAssertCondition;
+
+    /// <summary>
+    /// Whether <paramref name="node"/> is default-context arithmetic that is a site of the program (#244): in a method that
+    /// can raise, outside a <c>Spec</c> expression and a <c>Spec.Assert</c>'s condition.
+    /// </summary>
+    private bool IsImplicitSite(VirNode node) => _sigma is not null && _spec is null && !_inAssertCondition && node is VirExpr e && SpecOverflows(e);
 
     /// <summary>Translates with <paramref name="entries"/> in scope, while <see cref="_facts"/> is kept.</summary>
     private T WithFacts<T>(IEnumerable<(Expr Value, bool IsFact)> entries, Func<T> translate)
@@ -276,7 +318,7 @@ internal sealed partial class BodyTranslator
     private bool IsPure(VirNode node) => !Nodes(node).Any(Raises);
 
     private bool Raises(VirNode node) =>
-        Effects.Construct(node) is not null || (node is CallExpr call && (IsRaisingCallee(call.Target) || HasRequires(call.Target)));
+        Effects.Construct(node) is not null || (node is CallExpr call && (IsRaisingCallee(call.Target) || HasRequires(call.Target))) || IsImplicitSite(node);
 
     private bool IsRaisingCallee(string key) => _callees is { } c && c.Analysis.IsRaising(key);
 
@@ -327,6 +369,10 @@ internal sealed partial class BodyTranslator
                     var prim = _types.Underlying(u.Type);
                     return Bound(u.Operand, env, Then(a =>
                     {
+                        if (IsImplicitSite(u))
+                        {
+                            return Emit(Site(u, Monadic.NegImplicit(prim, _sigma!, a)), u.Type, k);
+                        }
                         if (Effects.Construct(u) is null)
                         {
                             RecordOverflow(u, sigma => Expr.App(NegChecked(prim), sigma, a));
@@ -340,6 +386,10 @@ internal sealed partial class BodyTranslator
                     var prim = _types.Underlying(b.Type);
                     return Bound(b.L, env, Then(l => Bound(b.R, env, Then(r =>
                     {
+                        if (IsImplicitSite(b))
+                        {
+                            return Emit(Site(b, Monadic.Implicit(b.Op, prim, _sigma!, l, r)), b.Type, k);
+                        }
                         if (Effects.Construct(b) is null)
                         {
                             RecordOverflow(b, sigma => Monadic.Binary(b.Op, prim, sigma, l, r));
@@ -511,12 +561,14 @@ internal sealed partial class BodyTranslator
     {
         var outer = _spec;
         _spec = _assertSpec;
+        _inAssertCondition = true;
         try
         {
             return CondBound(a.Condition, env, k.ResultType, c =>
             {
                 var inner = _spec;
                 _spec = outer;
+                _inAssertCondition = false;
                 try
                 {
                     var sigma = _sigma!;
@@ -530,12 +582,14 @@ internal sealed partial class BodyTranslator
                 finally
                 {
                     _spec = inner;
+                    _inAssertCondition = true;
                 }
             });
         }
         finally
         {
             _spec = outer;
+            _inAssertCondition = false;
         }
     }
 

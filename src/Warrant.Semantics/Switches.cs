@@ -40,8 +40,11 @@ internal sealed partial class BodyTranslator
         var prim = _types.Underlying(s.Scrutinee.Type);
         var tests = s.Arms.Take(discard).Select(a => Matches(a.Pattern, scrutinee, prim, env)).ToList();
         var hyps = ChainHypotheses(tests);
-        var arms = tests.Select((_, i) => InScope(ChainScope(hyps, i), () => arm(s.Arms[i].Value))).ToList();
-        var fallback = InScope(ChainScope(hyps, discard), () => arm(s.Arms[discard].Value));
+        // In a Spec expression, and in a pure body whose obligations are stated (#244), an arm is evaluated only when its
+        // test holds and the ones before it do not, which guards its obligations.
+        T Arm<T>(int i, Func<T> translate) => _spec is null ? translate() : InGuards(ChainFacts(tests, i), translate);
+        var arms = tests.Select((_, i) => InScope(ChainScope(hyps, i), () => Arm(i, () => arm(s.Arms[i].Value)))).ToList();
+        var fallback = InScope(ChainScope(hyps, discard), () => Arm(discard, () => arm(s.Arms[discard].Value)));
         return Chain(type, tests, arms, fallback, hyps);
     }
 
@@ -97,8 +100,16 @@ internal sealed partial class BodyTranslator
             hyps is null ? null : scopes,
             (terms, type) => Chain(type, tests, [.. tested.Select(i => terms[i])], terms[fallback], hyps),
             env,
-            k);
+            k,
+            [.. branches.Select((_, i) => ChainFacts(tests, tested.IndexOf(i) is >= 0 and var j ? j : tested.Count))]);
     }
+
+    /// <summary>
+    /// What is known in the <paramref name="i"/>-th branch of a chain of tests, or in its fallback when i is the length:
+    /// each test before it is false, and its own is true (#235, #244).
+    /// </summary>
+    private static List<Expr> ChainFacts(IReadOnlyList<Condition> tests, int i) =>
+        [.. tests.Take(i).Select(t => Expr.App(Init.Not, t.Prop)), .. i < tests.Count ? [tests[i].Prop] : Array.Empty<Expr>()];
 
     /// <summary>
     /// The recursor over a closed type for a switch statement, whose branch terms are statements and their continuations: a

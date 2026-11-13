@@ -337,9 +337,9 @@ public static partial class Pipeline
 
         /// <summary>
         /// One well-definedness obligation (KTD26): a callee's precondition is a plain proposition, proved as a decrease
-        /// obligation is, by its binders introduced and omega; that a partial operation does not raise is a triple over its
-        /// model, proved by the default procedure (KTD13, KTD14) and reported at the operation. Null when it was admitted,
-        /// else the unit's outcome.
+        /// obligation is, by its binders introduced and omega; that a partial operation does not raise, or that a pure
+        /// body's implicit arithmetic does not overflow (#244), is a triple over its model, proved by the default procedure
+        /// (KTD13, KTD14) and reported at the operation. Null when it was admitted, else the unit's outcome.
         /// </summary>
         private UnitOutcome? ProveWellDefined(
             EngineUnit unit, SpecObligation wd, string display, ImmutableArray<UnitAssumption> assumptions,
@@ -350,8 +350,9 @@ public static partial class Pipeline
             if (wd.Kind != SpecObligationKind.CalleePrecondition)
             {
                 var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = run.Names };
+                var vc = wd.Kind == SpecObligationKind.NoOverflow ? VcKind.ArithmeticOverflow : VcKind.WellDefinedness;
                 var failure = Default(
-                    unit, wd.Theorem, wd.Binders, [], at, () => new VcWalker(meta, Attributes, unit.Unit, VcKind.WellDefinedness, at, null),
+                    unit, wd.Theorem, wd.Binders, [], at, () => new VcWalker(meta, Attributes, unit.Unit, vc, at, null),
                     (walker, g) => walker.WellDefined(g), display, assumptions, admitted, budget, meta, new GoalPrinter(Env, run.Names));
                 // Its walk relies on nothing the method's report lists: the operation is not run.
                 _contractAssumptions.Clear();

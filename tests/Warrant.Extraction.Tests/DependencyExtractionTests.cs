@@ -854,7 +854,7 @@ public class DependencyExtractionTests
         Assert.Empty(result.Diagnostics);
         var early = Assert.IsType<BlockStmt>(Unit(result, "M:Service.Early(System.Int32)").Body);
         var then = Assert.IsType<IfStmt>(early.Stmts[0]).Then;
-        Assert.Equal(new ReturnStmt(LitExpr.Unit), Assert.Single(Assert.IsType<BlockStmt>(then).Stmts));
+        Assert.Equal(new ReturnStmt(new LitExpr(VirType.Unit, 0)), Assert.Single(Assert.IsType<BlockStmt>(then).Stmts));
         Assert.Equal(VirType.Unit, Unit(result, "M:Service.Logged(System.Int32)").Returns);
     }
 

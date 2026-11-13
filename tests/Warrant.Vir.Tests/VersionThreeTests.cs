@@ -136,7 +136,7 @@ public class VersionThreeTests
             "M:C.Early(System.Threading.CancellationToken)",
             VirList.Of(new VirParam("ct", VirType.Opaque(token))),
             VirType.Task(VirType.Unit),
-            new BlockStmt(VirList.Of<VirStmt>(new ReturnStmt(LitExpr.Unit))),
+            new BlockStmt(VirList.Of<VirStmt>(new ReturnStmt(new LitExpr(VirType.Unit, 0)))),
             VirList<VirAssumption>.Empty,
             Samples.Facts,
             VirList<string>.Empty);

@@ -275,6 +275,10 @@ internal sealed partial class BodyTranslator
         bool noThrow = raising && stmts.Any(s => s is NoThrowStmt);
         // #244: a pure method's own implicit arithmetic must not overflow; a raising method's is a site of its program.
         bool overflows = !raising && unit.Body is { } code && BodyNodes(code).Any(n => n is VirExpr e && SpecOverflows(e));
+        // #256: a recursive method's calls to itself must be within its Spec.Requires, which its body assumes; they are
+        // recorded by the same translation of the body.
+        bool recursesWithin = !raising && requires.Count > 0 && unit.Body is { } called
+            && BodyNodes(called).Any(n => n is CallExpr c && string.Equals(c.Target, unit.Key, StringComparison.Ordinal));
         if (!raising && requires.Count == 0 && ensures.Count == 0 && !overflows)
         {
             return null;
@@ -344,7 +348,19 @@ internal sealed partial class BodyTranslator
 
         // #235: a Spec.Assert's condition is a Spec expression, but it sits inside the program.
         var asserts = raising && unit.Body is { } body && Nodes(body).Any(n => n is AssertStmt) ? AssertObligations(unit, spec.WellDefinedness.Count) : [];
-        var arithmetic = overflows ? OverflowObligations(unit, spec.WellDefinedness.Count) : [];
+        var arithmetic = overflows || recursesWithin ? OverflowObligations(unit, spec.WellDefinedness.Count) : [];
+        if (recursesWithin)
+        {
+            // Fail closed (#256): the body assumes the Spec.Requires, so every call to itself must have been checked. This is
+            // defence only: no translation path now drops a call (Branches keeps every branch with one, and extraction
+            // rejects a dropped call to itself), so no test reaches it except by undoing that rule (done by hand for PR #265).
+            var checkedCalls = arithmetic.Where(o => o.Kind == SpecObligationKind.CalleePrecondition).Select(o => o.Node).ToHashSet(ReferenceEqualityComparer.Instance);
+            int missed = BodyNodes(unit.Body!).Count(n => n is CallExpr c && string.Equals(c.Target, unit.Key, StringComparison.Ordinal) && !checkedCalls.Contains(n));
+            if (missed > 0)
+            {
+                throw new TranslationException(null, $"{missed} of the method's calls to itself were not checked against its Spec.Requires.");
+            }
+        }
         return new ContractObligation(
             theorem, all.Count, [.. all.Select(x => _lctx.Get(x).UserName)], operations.Count, unit.Script, specLemma, specBinders,
             [.. spec.WellDefinedness, .. asserts, .. arithmetic], [.. vacuity], raising);
@@ -738,6 +754,7 @@ internal sealed partial class BodyTranslator
             if (Guards.Count == 0 && t._facts is { } kept)
             {
                 kept.Add((fact, true));
+                t._exactFacts.Add(fact);
                 return;
             }
             Guards.Add(fact);

@@ -232,8 +232,8 @@ public static partial class Pipeline
             {
                 RecordWithoutAProof(unit, contract, function, budget, WalkerIn);
             }
-            return AdmitProof(unit, shell, VcWalker.Strip(found.Proof!), $"the kernel rejected the proof Warrant built for the contract obligation {shell.Name}", display, assumptions, admitted, budget)
-                ?? (ProofTerms.IsAdmittedAs(Env, shell) ? null : new FailedOutcome(key, kind, display, assumptions, $"the kernel admitted {shell.Name} with a type other than its statement."));
+            return AdmitProof(unit, shell, VcWalker.Strip(found.Proof!), $"the kernel rejected the proof Warrant built for {Shown(shell.Name)}", display, assumptions, admitted, budget)
+                ?? (ProofTerms.IsAdmittedAs(Env, shell) ? null : new FailedOutcome(key, kind, display, assumptions, $"the kernel admitted {Shown(shell.Name)} with a type other than its statement."));
         }
 
         /// <summary>
@@ -338,15 +338,15 @@ public static partial class Pipeline
             }
             if (proof.HasExprMVar || proof.HasLevelMVar || proof.HasFVar)
             {
-                return new InternalErrorOutcome(key, kind, display, assumptions, $"the default procedure closed {shell.Name}, but the proof term still has a hole.");
+                return new InternalErrorOutcome(key, kind, display, assumptions, $"the default procedure closed {Shown(shell.Name)}, but the proof term still has a hole.");
             }
             Record(unit, walker);
-            return AdmitProof(unit, shell, proof, $"the kernel rejected the proof Warrant built for {shell.Name}", display, assumptions, admitted, budget);
+            return AdmitProof(unit, shell, proof, $"the kernel rejected the proof Warrant built for {Shown(shell.Name)}", display, assumptions, admitted, budget);
         }
 
         /// <summary>
         /// One well-definedness obligation (KTD26): a callee's precondition is a plain proposition, proved as a decrease
-        /// obligation is, by its binders introduced and omega; that a partial operation does not raise, or that a pure
+        /// obligation is, by its binders introduced and omega (and, where omega fails, the VC simp set then omega); that a partial operation does not raise, or that a pure
         /// body's implicit arithmetic does not overflow (#244), is a triple over its model, proved by the default procedure
         /// (KTD13, KTD14) and reported at the operation. Null when it was admitted, else the unit's outcome.
         /// </summary>
@@ -371,7 +371,11 @@ public static partial class Pipeline
                 _contractAssumptions.AddRange(recorded.Where(a => a.Assumption.Kind == VirAssumptionKind.CalleeContract));
                 return failure;
             }
-            return Omega(unit, wd.Theorem, wd.Binders, at, "the precondition of a method called in a Spec expression", display, assumptions, admitted, budget);
+            // #256: a recursive method's call to itself must be within its own Spec.Requires.
+            var what = wd.Node is CallExpr { Target: var target } && string.Equals(target, unit.Unit.Key, StringComparison.Ordinal)
+                ? "the precondition of the method's recursive call"
+                : "the precondition of a method called in a Spec expression";
+            return Omega(unit, wd.Theorem, wd.Binders, at, what, display, assumptions, admitted, budget);
         }
 
         /// <summary>
@@ -443,7 +447,7 @@ public static partial class Pipeline
             {
                 proof = Expr.Lam(binders[i].Name, binders[i].Type, proof);
             }
-            return AdmitProof(unit, spec, proof, $"the kernel rejected the derivation of {spec.Name} from {contract.Theorem.Name}", display, assumptions, admitted, budget);
+            return AdmitProof(unit, spec, proof, $"the kernel rejected the derivation of {Shown(spec.Name)} from {Shown(contract.Theorem.Name)}", display, assumptions, admitted, budget);
         }
 
         private static readonly Expr SpecWorld = Expr.Const(Name.Parse("Unit"));
@@ -452,7 +456,7 @@ public static partial class Pipeline
 
         /// <summary>
         /// A proposition proved as a decrease obligation is (M5a KTD15): its binders introduced, then <c>Tactic.Omega()</c>'s
-        /// pipeline, and the proof admitted. Null when it was admitted, else the unit's outcome, WRT0001 at
+        /// pipeline (and, where that fails, the VC simp set then omega), and the proof admitted. Null when it was admitted, else the unit's outcome, WRT0001 at
         /// <paramref name="at"/> with the goal.
         /// </summary>
         private UnitOutcome? Omega(
@@ -464,11 +468,29 @@ public static partial class Pipeline
             var meta = new MetaM(Env, budget.Meta) { KernelLimits = budget.Kernel, Attributes = Attributes, DisplayNames = run.Names };
             var goal = meta.MkFreshExprSyntheticOpaqueMVar(shell.Type);
             MVarId? current = null;
+            MVarId? stated = null;
             Expr proof;
             try
             {
-                current = meta.IntroN(goal.Id, binders).Goal;
-                meta.OmegaTactic(current.Value);
+                current = stated = meta.IntroN(goal.Id, binders).Goal;
+                // omega alone first; where it fails, the VC simp set, as the default procedure's leftovers get it, then
+                // omega again: the simp set decides a conjunct about constants only, such as `7 ≤ 1000` in a recursive
+                // call's precondition, which omega alone does not (#256). The simp set is used only where needed: it
+                // costs fuel and time on every other precondition (#272).
+                var saved = meta.SaveState();
+                try
+                {
+                    meta.OmegaTactic(current.Value);
+                }
+                catch (MetaException ex) when (ex is not MetaResourceException)
+                {
+                    meta.Restore(saved);
+                    if (meta.SimpAll(current.Value, VcSimpSet.Context(meta)) is { } rest)
+                    {
+                        current = rest.Goal;
+                        meta.OmegaTactic(current.Value);
+                    }
+                }
                 proof = meta.InstantiateMVars(goal);
                 TacticFuelUsed = Math.Max(TacticFuelUsed, meta.Budget.FuelUsed);
             }
@@ -482,7 +504,8 @@ public static partial class Pipeline
             }
             catch (MetaException ex)
             {
-                var failed = ex is TacticException { Goal: { } g } && meta.MCtx.FindDecl(g) is not null ? g : current ?? goal.Id;
+                // The proposition as stated, not what the VC simp set left of it, which can be `⊢ False` (PR #265).
+                var failed = stated ?? (ex is TacticException { Goal: { } g } && meta.MCtx.FindDecl(g) is not null ? g : current ?? goal.Id);
                 return new NotProvedOutcome(key, kind, display, assumptions, ex.Message, new GoalPrinter(Env, run.Names).PpGoals(meta.MCtx, [failed]), at, []);
             }
 #pragma warning disable CA1031 // KTD19: an unexpected failure in Meta ends this unit as Warrant's bug, not the whole run.
@@ -493,10 +516,16 @@ public static partial class Pipeline
             }
             if (proof.HasExprMVar || proof.HasLevelMVar || proof.HasFVar)
             {
-                return new InternalErrorOutcome(key, kind, display, assumptions, $"omega closed {shell.Name}, but the proof term still has a hole.");
+                return new InternalErrorOutcome(key, kind, display, assumptions, $"omega closed {Shown(shell.Name)}, but the proof term still has a hole.");
             }
-            return AdmitProof(unit, shell, proof, $"the kernel rejected the proof Warrant built for {shell.Name}", display, assumptions, admitted, budget);
+            return AdmitProof(unit, shell, proof, $"the kernel rejected the proof Warrant built for {Shown(shell.Name)}", display, assumptions, admitted, budget);
         }
+
+        /// <summary>
+        /// A generated declaration as messages name it (#272): its display name, such as <c>F (well-definedness 1)</c>,
+        /// never its Lean constant.
+        /// </summary>
+        private string Shown(Name name) => run.Shown(name);
 
         /// <summary>Admits a proved obligation into the run's fork. Null when it was admitted, else the unit's outcome.</summary>
         private UnitOutcome? AdmitProof(
@@ -510,7 +539,7 @@ public static partial class Pipeline
             }
             catch (KernelResourceException ex)
             {
-                return budget.Undecided(unit.Unit.Key, unit.Unit.Kind, display, assumptions, ex, $"the kernel checked {shell.Name}");
+                return budget.Undecided(unit.Unit.Key, unit.Unit.Kind, display, assumptions, ex, $"the kernel checked {Shown(shell.Name)}");
             }
             catch (KernelException ex)
             {

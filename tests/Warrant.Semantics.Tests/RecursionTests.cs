@@ -138,7 +138,8 @@ public sealed class RecursionTests(SemanticsBundleFixture bundle) : IClassFixtur
         var unit = Corpus.Value.Find(key)!.Unit;
         var recursion = Recursion(Translate(), key);
         Assert.Equal($"{LeanNames.ForKey(key)}.$eq_def", recursion.Equation.Name.ToString());
-        var (_, m4) = new BodyTranslator(new TypeTable([unit])).Function(unit);
+        // Contracted: a recursive method may state Spec.Requires (#256), which neither term runs.
+        var (_, m4) = new BodyTranslator(new TypeTable([unit])) { Contracted = true }.Function(unit);
         var statement = recursion.Equation.Type;
         var binders = 0;
         var lambda = m4;

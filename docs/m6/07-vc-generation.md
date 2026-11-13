@@ -172,8 +172,13 @@ In a theorem's script it is `unsupported script argument`.
   the default procedure only, before the contract obligation the script proves
   (`AProductWhoseFactorHasNoLiteralBoundFailsEvenWithAProofForScript`). In a method that can raise the operation is a
   site of the contract obligation, so a script reaches it, but the script's tactics have nothing beyond `Tactic.Omega()`
-  for a product either. A pure method's join point parameter (a local
-  merged after branches that change two locals, or after a `switch` with a `return`) carries no value into the
-  obligations after it (#255), a recursive call's result is unknown and a recursive method has no `Spec.Requires`
-  (#256), and closed-enum arms give no facts (#258) (chapter 6). These are checker gaps: `unchecked` is only for an
-  intended wrap, since it removes the check.
+  for a product either. A recursive call's result is unknown, since a recursive method has no `Spec.Ensures` yet
+  (chapter 6). These are checker gaps: `unchecked` is only for an intended wrap, since it removes the check. (Fixed: a
+  join point's parameters, #255, closed-enum arms, #258, and `Spec.Requires` on a recursive method, #256.)
+- #258: a closed-enum section or arm that covers several members knows `s = A ∨ s = B`. Before the VC simp set, the
+  default procedure splits such a hypothesis, an equation of a variable with a closed term on each side, with `cases`,
+  one goal per member, so that each equation substitutes; `omega` alone does not read `Nat.beq` on member indices.
+- #251: a `Spec.Assert` over two implicit locals can run out of tactic fuel. The fuel goes to `omega`, not to the
+  walk: each implicit local adds `v = a op b` and `v.toInt = …` to every later `$wd` obligation, the VC simp set
+  substitutes the first into the others, and `omega` then expands every nested `toInt` of wrapped arithmetic through
+  `Int.bmod`. The main contract's last VC, `-a * 2 + a = -a`, costs as much on its own.

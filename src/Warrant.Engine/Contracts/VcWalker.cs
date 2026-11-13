@@ -950,7 +950,10 @@ internal sealed class VcWalker
     /// The VC simp set at the goal and every hypothesis, each rewriting the others (Lean's <c>simp_all</c>), so a path
     /// condition such as <c>p = none</c> meets the guard <c>¬p.isNone</c>; then omega. Throws when they do not prove it.
     /// </summary>
-    /// <returns>The goal omega was given, or null when simp closed it.</returns>
+    /// <returns>
+    /// The goal omega was given, or null when simp closed it or the goal was split into closed-enum member cases (#258),
+    /// each then discharged on its own.
+    /// </returns>
     private MVarId? Discharge(MVarId g, SimpContext simp) => Discharge(g, simp, []);
 
     /// <summary>How many <c>Bool</c> case splits one VC may take (#227, #245): at most 2^3 cases.</summary>
@@ -964,6 +967,16 @@ internal sealed class VcWalker
     /// </summary>
     private MVarId? Discharge(MVarId g, SimpContext simp, ImmutableHashSet<Expr> split)
     {
+        // A closed-enum switch arm that covers several members knows `s = A ∨ s = B` (#258): one case per member, so each
+        // equation substitutes below. Every case is discharged, so the goal is closed.
+        if (AtomCases(g) is { } major)
+        {
+            foreach (var c in _m.Cases(g, major))
+            {
+                Discharge(c.MVarId, simp, split);
+            }
+            return null;
+        }
         if (_m.SimpAll(g, simp) is not { } rest)
         {
             return null;
@@ -1144,6 +1157,29 @@ internal sealed class VcWalker
     /// of a record's nullable field, #218).
     /// </summary>
     private static bool IsAtom(Expr e) => e is FVarExpr || (e is ProjExpr p && IsAtom(p.Struct));
+
+    /// <summary>
+    /// A hypothesis <c>x = c₁ ∨ x = c₂ ∨ …</c>, each side an equation of a variable (<see cref="IsAtom"/>) with a closed
+    /// term, which <c>cases</c> splits into one goal per equation (#258); null when there is none.
+    /// </summary>
+    private FVarId? AtomCases(MVarId g) => _m.WithContext(g, () =>
+    {
+        foreach (var d in (_m.MCtx.FindDecl(g)?.LCtx.Decls ?? []).Where(d => !d.IsImplementationDetail))
+        {
+            if (_m.InstantiateMVars(d.Type) is var t && t.HeadIs(OrName) && t.GetAppArgs() is [var a, var b] && IsAtomEquation(a) && IsAtomEquations(b))
+            {
+                return (FVarId?)d.FVarId;
+            }
+        }
+        return null;
+    });
+
+    private static bool IsAtomEquations(Expr e) =>
+        IsAtomEquation(e) || (e.HeadIs(OrName) && e.GetAppArgs() is [var a, var b] && IsAtomEquation(a) && IsAtomEquations(b));
+
+    private static bool IsAtomEquation(Expr e) => e.HeadIs(EqName) && e.GetAppArgs() is [_, var x, var c] && IsAtom(x) && !c.HasFVar;
+
+    private static readonly Name OrName = Name.Parse("Or");
 
     private static string FirstLine(string text) => text.IndexOf('\n', StringComparison.Ordinal) is var i and >= 0 ? text[..i] : text;
 }

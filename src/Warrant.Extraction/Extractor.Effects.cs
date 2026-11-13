@@ -73,14 +73,41 @@ public static partial class Extractor
         private Rejection? RaisingFunction(Candidate c, EffectAnalysis analysis)
         {
             var name = Symbols.Display(c.Symbol);
-            var contract = c.Body is BlockStmt block ? block.Stmts.FirstOrDefault(s => s is RequiresStmt or EnsuresStmt) : null;
+            // A Spec.Requires is allowed (#256): each recursive call is checked against it. A Spec.Ensures is not yet.
+            var contract = c.Body is BlockStmt block ? block.Stmts.FirstOrDefault(s => s is EnsuresStmt) : null;
             if (analysis.IsRecursive(c.Key) && contract is not null)
             {
                 return new Rejection(
                     DiagnosticIds.Unsupported,
                     "contract on a recursive method",
                     At(c, contract, c.Symbol),
-                    $"{name}: a recursive method takes no Spec.Requires or Spec.Ensures in M6, because its recursive call cannot use its own contract before it is proved.");
+                    $"{name}: a recursive method takes no Spec.Ensures, because its recursive call cannot use its own contract before it is proved; a Spec.Requires is allowed.");
+            }
+            if (analysis.IsRecursive(c.Key) && analysis.CauseOf(c.Key) is null && c.Body is BlockStmt body)
+            {
+                // A Spec.Requires that calls its own method has no meaning, and a call to itself whose value is dropped
+                // has no value for its precondition to be checked at in the pure translation (#256).
+                var selfInRequires = body.Stmts.OfType<RequiresStmt>()
+                    .SelectMany(r => Descendants(r.Condition)).OfType<CallExpr>()
+                    .FirstOrDefault(call => string.Equals(call.Target, c.Key, StringComparison.Ordinal));
+                if (selfInRequires is not null)
+                {
+                    return new Rejection(
+                        DiagnosticIds.Unsupported,
+                        "Spec.Requires calling its own method",
+                        At(c, selfInRequires, c.Symbol),
+                        $"{name}: its Spec.Requires calls {name} again, so the precondition has no meaning.");
+                }
+                var dropped = Descendants(body).OfType<EvalStmt>()
+                    .FirstOrDefault(e => Descendants(e.Value).Any(n => n is CallExpr call && string.Equals(call.Target, c.Key, StringComparison.Ordinal)));
+                if (dropped is not null)
+                {
+                    return new Rejection(
+                        DiagnosticIds.Unsupported,
+                        "recursive call as a statement",
+                        At(c, dropped, c.Symbol),
+                        $"{name}: a statement whose result is dropped calls the method itself, which computes nothing in a method that cannot raise; use the result or remove the call.");
+                }
             }
             if (analysis.IsRecursive(c.Key) && analysis.CauseOf(c.Key) is { } cause)
             {

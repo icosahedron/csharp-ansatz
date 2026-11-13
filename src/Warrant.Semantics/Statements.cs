@@ -133,7 +133,8 @@ internal sealed partial class BodyTranslator
     ///    <c>let x := combine(x after each branch); k</c>;
     /// 4. neither contains a <c>return</c> or a call of the recursive method being translated, and they change no local
     ///    <paramref name="k"/> reads: <paramref name="k"/> alone (a skipped call would leave its decrease unchecked; nor,
-    ///    while a pure body's obligations are stated, implicit arithmetic, which must not overflow even unread, #244);
+    ///    while a pure body's obligations are stated, implicit arithmetic, which must not overflow even unread, #244, or a
+    ///    call to a method with <c>Spec.Requires</c>, whose precondition must hold even unread, #256);
     /// 5. otherwise a join point over the locals <paramref name="k"/> reads and some branch changes.
     /// Each branch is translated with its <paramref name="hypotheses"/> in scope, when there are any. In a method that can
     /// raise, rules 3 and 4 do not apply: a branch that can raise can be neither dropped nor reduced to a value, so the
@@ -164,10 +165,13 @@ internal sealed partial class BodyTranslator
             .Order()
             .ToList();
         // A branch that must be translated even when nothing it assigns is read after it: one with a recursive call, whose
-        // decrease obligation needs it (M5a), or one with implicit arithmetic, whose overflow obligation needs it (#244).
+        // decrease obligation needs it (M5a); and, while a pure body's obligations are stated, one with implicit arithmetic,
+        // whose overflow obligation needs it (#244), or with a call to a method with Spec.Requires, which in a pure method
+        // can only be its call to itself, whose precondition obligation needs it (#256).
         bool recurses = _selfKey is { } selfKey && branches.Any(b => Nodes(b).Any(n => n is CallExpr c && string.Equals(c.Target, selfKey, StringComparison.Ordinal)));
-        bool overflows = _overflowObligations && branches.Any(b => BodyNodes(b).Any(n => n is VirExpr e && SpecOverflows(e)));
-        bool hasObligation = recurses || overflows;
+        bool obligated = _overflowObligations && branches.Any(b => BodyNodes(b).Any(n =>
+            (n is VirExpr e && SpecOverflows(e)) || (n is CallExpr c && HasRequires(c.Target))));
+        bool hasObligation = recurses || obligated;
         if (_sigma is not null)
         {
             return JoinPoint(branches, Branch, combine, live, env, k);
@@ -203,12 +207,119 @@ internal sealed partial class BodyTranslator
         {
             inner = inner.Set(live[i], parameters[i]);
         }
+        if (_overflowObligations)
+        {
+            return KnownJoinPoint(branches, branch, combine, live, parameters, inner, k);
+        }
         var body = _lctx.MkLambda(parameters, InScope(parameters, () => WithFacts(parameters.Select(p => (p, false)), () => k.Invoke(inner))));
         var jp = _lctx.MkLetDecl(_ngen, JoinPointName, _lctx.MkPi(parameters, k.ResultType), body);
         var jump = new Jump(jp, live, k.ResultType);
         var unreachable = new Unreachable(k.ResultType);
         var term = InScope(jp, () => combine([.. Enumerable.Range(0, branches.Count).Select(i => branch(i, FallsThrough(branches[i]) ? jump : unreachable))], k.ResultType));
         return _lctx.MkLambda([jp], term);
+    }
+
+    /// <summary>
+    /// Rule 5 while a pure body's obligations are stated (#244, #255): the branches first, each jump recording what its path
+    /// knows, then <paramref name="k"/>, whose obligations know that one of the incoming paths was taken, with its values.
+    /// Each path gives <c>∃ ys, facts ∧ x₁ = v₁ ∧ … ∧ xₙ = vₙ</c> over the facts added on it since the branch point and
+    /// the values its jump passes, an <c>int</c> or <c>long</c> compared by <c>toInt</c>; <c>ys</c> are the parameters of
+    /// join points inside the branch, out of scope at this one. The parameters are bound with their disjunction as a fact.
+    /// The term is <c>(fun jp =&gt; combine(branches)) (fun x₁ … xₙ =&gt; k)</c>, which only the obligations read.
+    /// </summary>
+    private Expr KnownJoinPoint(
+        IReadOnlyList<VirStmt> branches,
+        Func<int, Continuation, Expr> branch,
+        Func<IReadOnlyList<Expr>, Expr, Expr> combine,
+        List<int> live,
+        List<Expr> parameters,
+        Env inner,
+        Continuation k)
+    {
+        var jp = _lctx.MkLocalDecl(_ngen, JoinPointName, _lctx.MkPi(parameters, k.ResultType));
+        var paths = new List<Expr>();
+        var jump = new KnownJump(this, jp, live, parameters, _facts!.Count, paths, k.ResultType);
+        var unreachable = new Unreachable(k.ResultType);
+        var term = combine([.. Enumerable.Range(0, branches.Count).Select(i => branch(i, FallsThrough(branches[i]) ? jump : unreachable))], k.ResultType);
+        IEnumerable<(Expr, bool)> known = parameters.Select(p => (p, false));
+        if (paths.Count > 0)
+        {
+            known = [.. known, (paths.Skip(1).Aggregate(paths[0], (a, b) => Expr.App(Init.Or, a, b)), true)];
+        }
+        var body = _lctx.MkLambda(parameters, WithFacts(known, () => k.Invoke(inner)));
+        return Expr.App(_lctx.MkLambda([jp], term), body);
+    }
+
+    /// <summary>
+    /// What one path knows where it jumps to a join point (#255): <c>∃ ys, facts ∧ x₁ = v₁ ∧ …</c>, as
+    /// <see cref="KnownJoinPoint"/> states it, from the facts after the first <paramref name="from"/>.
+    /// </summary>
+    private Expr PathFact(List<int> live, List<Expr> parameters, Env env, int from)
+    {
+        var entries = _facts!.Skip(from).ToList();
+        var parts = new List<Expr>();
+        // The exact values this path's implicit operations were found to have (`(a + 15).toInt = a.toInt + 15`, #244): an
+        // int parameter's value is stated through them, `x.toInt = a.toInt + 15`, so omega need not read the operation
+        // through the wrap-around (#272), and such a fact is kept only where something else still mentions its operation.
+        // Exact-value facts are told apart by where they came from (SpecState.Known), never by their shape.
+        var exact = new Dictionary<Expr, Expr>();
+        foreach (var entry in entries.Where(e => e.IsFact))
+        {
+            var known = Zeta(entry.Value);
+            if (_exactFacts.Contains(entry.Value) && known.GetAppArgs() is [_, var lhs, var rhs])
+            {
+                exact.TryAdd(lhs, rhs);
+            }
+            else
+            {
+                parts.Add(known);
+            }
+        }
+        Expr Exactly(Expr e) => Warrant.Kernel.ExprOps.Replace(e, (x, _) => exact.TryGetValue(x, out var v) ? Exactly(v) : null);
+        for (int i = 0; i < live.Count; i++)
+        {
+            var type = Local(live[i]).Init.Type;
+            var value = Zeta(env.Get(live[i]));
+            parts.Add(type == VirType.Int32 || type == VirType.Int64
+                ? Expr.App(Init.Eq, Init.Int, ToInt(_types.Underlying(type), parameters[i]), Exactly(ToInt(_types.Underlying(type), value)))
+                : Expr.App(Init.Eq, _types.Cic(type), parameters[i], value));
+        }
+        // Kept: every exact-value fact whose operation something kept still mentions, to a fixpoint, so a kept fact's own
+        // operands keep theirs.
+        var kept = new List<KeyValuePair<Expr, Expr>>();
+        bool Mentions(Expr p, Expr lhs) => Warrant.Kernel.ExprOps.Find(p, (y, _) => y == lhs.GetAppArgs()[0]) is not null;
+        for (bool grew = true; grew;)
+        {
+            grew = false;
+            foreach (var x in exact.Where(x => !kept.Contains(x)).ToList())
+            {
+                if (parts.Any(p => Mentions(p, x.Key)) || kept.Any(k => Mentions(k.Value, x.Key)))
+                {
+                    kept.Add(x);
+                    grew = true;
+                }
+            }
+        }
+        parts.InsertRange(0, kept.Select(x => Expr.App(Init.Eq, Init.Int, x.Key, x.Value)));
+        var fact = parts.Count == 0 ? Init.PropTrue : parts.SkipLast(1).Reverse().Aggregate(parts[^1], (acc, p) => Expr.App(Init.And, p, acc));
+        foreach (var y in entries.Where(e => !e.IsFact).Select(e => e.Value).Reverse())
+        {
+            fact = Expr.App(Init.Exists, _lctx.Get(y).Type, _lctx.MkLambda([y], fact));
+        }
+        return fact;
+    }
+
+    /// <summary>A jump to a join point whose incoming paths are recorded (#255): <c>jp</c> applied, as <see cref="Jump"/>.</summary>
+    private sealed class KnownJump(BodyTranslator owner, Expr joinPoint, List<int> locals, List<Expr> parameters, int from, List<Expr> paths, Expr type)
+        : Continuation(type)
+    {
+        public override IReadOnlySet<int> Reads { get; } = locals.ToHashSet();
+
+        public override Expr Invoke(Env env)
+        {
+            paths.Add(owner.PathFact(locals, parameters, env, from));
+            return Expr.App(joinPoint, [.. locals.Select(env.Get)]);
+        }
     }
 
     private static readonly Name JoinPointName = Name.From("jp");

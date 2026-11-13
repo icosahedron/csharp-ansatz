@@ -150,6 +150,10 @@ Translation threads an environment `ρ` that maps each C# local and parameter to
   4. **Both fall through, neither contains a `return`, and they change no local that `rest` reads**: `rest`, as if the `if` were absent.
      The guard matters: in `if (c) { if (d) return 1; } else { … } return 2;` both branches can fall through and neither changes a local, but dropping the `if` would lose `return 1`.
      The corpus and the translation tests include exactly this shape (plan, U5 and U7).
+     Since M6 two more guards apply while a pure method's no-overflow obligations are stated (docs/m6/06): a branch with
+     default-context `int` or `long` arithmetic (#244) or a call to a method with `Spec.Requires`, which in a pure method
+     is only the method's call to itself (#256), is never dropped, since each has an obligation even when `rest` does
+     not read its result. A recursive method's call to itself is never dropped either (M5a), for its decrease proof.
   5. **Otherwise**: a join point.
      `let jp := fun (x₁ … xₙ) => rest; ite c A' B'`, where `x₁ … xₙ` are the locals that `rest` reads and some branch changes, in declaration order, and every point where `A` or `B` falls through becomes `jp` applied to the current values.
      When no such local exists (the nested-`return` shape above), the join point has no parameters and is simply `let jp := rest`.

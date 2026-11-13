@@ -191,6 +191,12 @@ internal sealed partial class BodyTranslator
     /// </summary>
     private List<(Expr Value, bool IsFact)>? _facts;
 
+    /// <summary>
+    /// The entries of <see cref="_facts"/> that are an implicit operation's exact value (#244), recorded where they are
+    /// added (<c>SpecState.Known</c>), by reference, so a join point's path fact can tell them apart (#255, #272).
+    /// </summary>
+    private readonly HashSet<Expr> _exactFacts = new(ReferenceEqualityComparer.Instance);
+
     /// <summary>The number of the contract's own well-definedness obligations, which the <c>Spec.Assert</c>s' come after.</summary>
     private int _assertFirst;
 

@@ -143,8 +143,9 @@ public class CorpusTests
         }
     }
 
-    // Re-pinned for #244, whose corpus edits (Spec.Requires bounds and unchecked arithmetic) change the members' VIR.
-    private const string M4VirAtVersion1 = "971b127ea74263115059c8ed53b06b22c9ff0775be27b06b1714245f8c95cf0a";
+    // Re-pinned for #244, whose corpus edits (Spec.Requires bounds and unchecked arithmetic) change the members' VIR, and
+    // for #255, which removes Locals.Shipping's and Locals.Bucket's unchecked.
+    private const string M4VirAtVersion1 = "bd3939dfa6e051550806590f5344107c9ffefd8ea2ab8e76cc75fed0a5d5fad9";
 
     [Fact]
     public void EveryM4UnitsVirIsUnchangedApartFromTheVersion()
@@ -163,8 +164,9 @@ public class CorpusTests
     }
 
     // The M5a corpus's VIR at version 2 (M5a), pinned before VIR version 3 (M6 U6, KTD19) so a change shows here; re-pinned
-    // for #244, whose corpus edits (a Spec.Requires bound and unchecked arithmetic) change the members' VIR.
-    private const string M5aVirAtVersion2 = "ed714fa22d324188a9b5577117d742f38eed8e03dcbf23ed1ccd239e3e5062ba";
+    // for #244, whose corpus edits (a Spec.Requires bound and unchecked arithmetic) change the members' VIR, and for #256,
+    // which gives Recursion.Add a Spec.Requires in place of its unchecked.
+    private const string M5aVirAtVersion2 = "17bc03ae70853bc268013558eaddf5153d6a4f5cc73299afa98643800fa2861a";
 
     [Fact]
     public void EveryM5aUnitsVirIsUnchangedApartFromTheVersion()

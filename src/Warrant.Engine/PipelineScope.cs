@@ -225,11 +225,11 @@ public static partial class Pipeline
                 }
                 catch (KernelResourceException ex)
                 {
-                    return budget.Undecided(key, kind, display, assumptions, ex, $"the kernel checked the equation lemma {recursion.Equation.Name}");
+                    return budget.Undecided(key, kind, display, assumptions, ex, $"the kernel checked the equation lemma {Shown(recursion.Equation.Name)}");
                 }
                 catch (KernelException ex)
                 {
-                    return new FailedOutcome(key, kind, display, assumptions, $"the kernel rejected the equation lemma {recursion.Equation.Name}: {ex.Message}");
+                    return new FailedOutcome(key, kind, display, assumptions, $"the kernel rejected the equation lemma {Shown(recursion.Equation.Name)}: {ex.Message}");
                 }
             }
 
@@ -299,7 +299,7 @@ public static partial class Pipeline
             }
             if (proof.HasExprMVar || proof.HasLevelMVar || proof.HasFVar)
             {
-                return new InternalErrorOutcome(key, kind, display, assumptions, $"omega closed the decrease obligation {shell.Name}, but the proof term still has a hole.");
+                return new InternalErrorOutcome(key, kind, display, assumptions, $"omega closed the decrease obligation {Shown(shell.Name)}, but the proof term still has a hole.");
             }
             try
             {
@@ -311,7 +311,7 @@ public static partial class Pipeline
             }
             catch (KernelException ex)
             {
-                return new InternalErrorOutcome(key, kind, display, assumptions, $"the kernel rejected the decrease proof Warrant built for {shell.Name}: {ex.Message}");
+                return new InternalErrorOutcome(key, kind, display, assumptions, $"the kernel rejected the decrease proof Warrant built for {Shown(shell.Name)}: {ex.Message}");
             }
             return null;
         }
@@ -373,7 +373,7 @@ public static partial class Pipeline
                 }
                 if (!ProofTerms.IsAdmittedAs(Env, shell))
                 {
-                    return new FailedOutcome(key, unit.Unit.Kind, display, assumptions, $"the kernel admitted {shell.Name} with a type other than its statement.");
+                    return new FailedOutcome(key, unit.Unit.Kind, display, assumptions, $"the kernel admitted {Shown(shell.Name)} with a type other than its statement.");
                 }
                 return new ProvedOutcome(key, unit.Unit.Kind, display, assumptions, kind, declaration);
             }
@@ -457,7 +457,7 @@ public static partial class Pipeline
             }
             if (!ProofTerms.IsAdmittedAs(Env, shell))
             {
-                return new FailedOutcome(key, kind, display, assumptions, $"the kernel admitted {shell.Name} with a type other than its statement.");
+                return new FailedOutcome(key, kind, display, assumptions, $"the kernel admitted {Shown(shell.Name)} with a type other than its statement.");
             }
             return new ProvedOutcome(key, kind, display, assumptions, ProofKind.Script, declaration);
         }

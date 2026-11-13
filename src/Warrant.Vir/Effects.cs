@@ -53,7 +53,8 @@ public sealed class EffectAnalysis
 /// than 0 and -1; checked <c>+</c>, <c>-</c>, <c>*</c> or unary <c>-</c>; a checked conversion other than a widening; any
 /// arithmetic on <c>decimal</c> but unary minus; a nullable read or non-null unwrap; a modelled member that throws
 /// (<see cref="ThrowingModelledMembers"/>); an external call; <c>await</c>; <c>Spec.Assert</c>; and, in a function, a call to
-/// a function that has <c>Spec.Requires</c>, so the walker sees the call and its precondition. A theorem's statement is
+/// a function that has <c>Spec.Requires</c>, so the walker sees the call and its precondition (but a call to itself, whose
+/// precondition the body's own obligations check, #256). A theorem's statement is
 /// scanned the same way (KTD11's third rejection), apart from that last rule. The conditions of <c>Spec.Requires</c> and
 /// <c>Spec.Ensures</c> are claims, never run, so they are not scanned; their partial operations get well-definedness
 /// obligations instead (KTD26).
@@ -147,7 +148,10 @@ public static class Effects
             {
                 return new RaiseCause(construct, unit.Key, node, null);
             }
-            if (unit.Kind == VirUnitKind.Function && node is CallExpr call && requires.Contains(call.Target))
+            // A method's call to itself is checked against its own Spec.Requires by its body's obligations (#256), not by the
+            // walker, so it does not make the method raise.
+            if (unit.Kind == VirUnitKind.Function && node is CallExpr call && requires.Contains(call.Target)
+                && !string.Equals(call.Target, unit.Key, StringComparison.Ordinal))
             {
                 return new RaiseCause("call to a method with Spec.Requires", unit.Key, node, call.Target);
             }

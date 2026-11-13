@@ -325,7 +325,7 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
         Assert.Equal(OutcomeKind.Failed, rejected.Outcome.Kind);
         Assert.Equal(InternalErrorOutcome.Code, rejected.Outcome.Code);
         Assert.StartsWith("cached certificate for 'S.Bounded(int)' was rejected by the kernel: ", rejected.Outcome.Message, StringComparison.Ordinal);
-        Assert.Contains("it holds no proof of Cs.S.«Bounded(System.Int32)».$wd_1", rejected.Outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("it holds no proof of Bounded (well-definedness 1)", rejected.Outcome.Message, StringComparison.Ordinal);
         Assert.False(rejected.FromCache);
         Assert.False(rejected.Rechecked);
         Assert.Equal(0, recheck.Counters.TacticRuns);
@@ -460,7 +460,7 @@ public sealed class RecheckTests(EngineFixture engine) : IClassFixture<EngineFix
 
         var recheck = NewService().Run(Request(units, tiny) with { Recheck = true });
 
-        foreach (var (key, activity) in new[] { (Sum, "the kernel checked the cached proof of Cs.S.«Sum(System.Int32)».$dec_1"), (Lemma, "the kernel checked the cached proof") })
+        foreach (var (key, activity) in new[] { (Sum, "the kernel checked the cached proof of Sum (decrease 1)"), (Lemma, "the kernel checked the cached proof") })
         {
             var undecided = Assert.IsType<UndecidedOutcome>(recheck.Result.Find(key)); // WRT0006, not WRT0010
             Assert.Equal(ExhaustedBudget.KernelFuel, undecided.Exhausted);

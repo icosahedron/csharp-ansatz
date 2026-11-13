@@ -296,8 +296,10 @@ public class ContractExtractionTests
     }
 
     [Fact]
-    public void AContractOnARecursiveMethodIsRejected()
+    public void AnEnsuresOnARecursiveMethodIsRejectedAndARequiresIsNot()
     {
+        // #256: a recursive method's Spec.Requires is checked at each recursive call, so it is allowed; its Spec.Ensures
+        // would be used by the recursive call before it is proved.
         var result = Members("""
                 [Verified]
                 public static int Down(int n)
@@ -316,8 +318,46 @@ public class ContractExtractionTests
                 }
             """);
 
-        Assert.Equal("WRT0002 | contract on a recursive method", Only(result, "M:C.Down(System.Int32)"));
+        Assert.Empty(result.DiagnosticsFor("M:C.Down(System.Int32)"));
         Assert.Equal("WRT0002 | contract on a recursive method", Only(result, "M:C.Up(System.Int32)"));
+    }
+
+    [Fact]
+    public void ARecursiveMethodsRequiresCallingItselfAndADroppedCallToItselfAreRejected()
+    {
+        // #256, PR #265 review: neither has a precondition the pure translation can check.
+        var result = Members("""
+                [Verified]
+                public static int Down(int n)
+                {
+                    Spec.Decreases(n);
+                    Spec.Requires(Down(0) == 0);
+                    return n <= 0 ? 0 : Down(n - 1);
+                }
+
+                [Verified]
+                public static int Ev(int n)
+                {
+                    Spec.Decreases(n);
+                    if (n > 0) { Ev(n / 2); }
+                    return 0;
+                }
+
+                [Verified]
+                public static int Id(int x) => x;
+
+                [Verified]
+                public static int Inside(int n)
+                {
+                    Spec.Decreases(n);
+                    if (n > 0) { Id(Inside(n / 2)); }
+                    return 0;
+                }
+            """);
+
+        Assert.Equal("WRT0002 | Spec.Requires calling its own method", Only(result, "M:C.Down(System.Int32)"));
+        Assert.Equal("WRT0002 | recursive call as a statement", Only(result, "M:C.Ev(System.Int32)"));
+        Assert.Equal("WRT0002 | recursive call as a statement", Only(result, "M:C.Inside(System.Int32)"));
     }
 
     [Fact]

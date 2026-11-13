@@ -113,7 +113,7 @@ What is missing is the effect model, the contract surface, the statement shape, 
 - `try`/`catch`: no requirement or exit criterion needs catching, and matching a catch against modelled, thrown and external exceptions needs the CLR exception hierarchy in the trusted translator. `try` stays WRT0002. Revisit when a surveyed method or contract needs to handle an exception.
 - Spec sidecar files (design Q19): the contract surface lands in source first. Contracts put `Spec` calls in method bodies, so a team that can't reference `Warrant` pays that cost; see Open Questions.
 - Lifted arithmetic and lifted comparisons on nullable values (`a + b`, `x > 0` with nullable operands): their null semantics differ from `Option` order, and neither the exit criterion nor the surveyed methods need them. Rejected with a named construct. Revisit on the first real use.
-- Recursion with effects, contracts on recursive methods, and `[Theorem]` statements that call a raising method (KTD11): decrease obligations don't see through `bind`, and a recursive call can't use its own unproved triple. Each is rejected with a named construct. Revisit with M7's loops and invariants.
+- Recursion with effects, contracts on recursive methods, and `[Theorem]` statements that call a raising method (KTD11): decrease obligations don't see through `bind`, and a recursive call can't use its own unproved triple. Each is rejected with a named construct. Revisit with M7's loops and invariants. (Narrowed 2026-11-13, #256, owner to confirm in PR #265: `Spec.Requires` on a recursive method is allowed, each recursive call checked against it; `Spec.Ensures` is still rejected.)
 - Records and open enums from referenced projects in a dependency's signatures: the M5a type rule still applies (KTD9). Revisit with #32's referenced-source path.
 - A non-exhaustive switch over an open enum, a default proof pipeline for `Prove.That`, and the store as the proof environment: the proving guide dates these to M6, but this plan doesn't build them; U15 re-dates them.
 - Collections, `Guid` and strings (design Q14, Q18, Q20): the payment example needs none. Q18's point that the most valuable real specs need them stands, and it is recorded for M7 planning.
@@ -157,7 +157,7 @@ What is missing is the effect model, the contract surface, the statement shape, 
   - a raising unit in a recursive component ("recursion with effects"), because its recursive call sits inside a `bind` and the decrease obligations (M5a) don't see through it;
   - a `[Theorem]` whose statement calls a raising unit, with a message that says to state the property as a `Spec.Ensures` on the method instead;
   - a `[Theorem]` whose statement itself contains a raising operation (a `/` or `%` whose divisor isn't a constant other than 0 and -1, checked arithmetic or narrowing, decimal `+` or `-`, a nullable read or unwrap, a modelled member that throws), naming the operation, with the same advice. A theorem is a `Prop`, not a `ClrM` program, and Lean's total operations would make `a / 0 == 0` provable. Theorems share the extraction walker, so without this rule U7 would hand them the new nodes;
-  - a `Requires` or `Ensures` on a unit in a recursive component ("contract on a recursive method"), because its recursive call can't use its own unproved triple.
+  - a `Requires` or `Ensures` on a unit in a recursive component ("contract on a recursive method"), because its recursive call can't use its own unproved triple. (Narrowed 2026-11-13, #256, owner to confirm in PR #265: only `Ensures` is rejected; a `Requires` is allowed, assumed by the body and checked at each recursive call, which does not make the method raise.)
 
 **Contracts and statements**
 
@@ -584,7 +584,7 @@ flowchart TB
   4. Call U6's `Effects` and report KTD11's rejections as WRT0002, naming the construct and callee that made the unit raising. This includes a theorem whose own statement contains a raising operation.
 - **Patterns to follow:** `IsDecreases`/`DecreasesNotFirst` in `Walker.Scripts.cs`. `ForAllExpr` for the lambda in `Ensures<T>(r => ...)`. The existing recursion rejections in `Extractor.cs`.
 - **Test scenarios:**
-  - `Spec.Decreases(n); Spec.Requires(n >= 0);` on a recursive method is rejected as a contract on a recursive method, and `Spec.Requires(...)` before `Spec.Decreases(...)` is rejected as out of order. M5a's `Countdown` rejection stays.
+  - `Spec.Decreases(n); Spec.Requires(n >= 0);` on a recursive method is rejected as a contract on a recursive method, and `Spec.Requires(...)` before `Spec.Decreases(...)` is rejected as out of order. M5a's `Countdown` rejection stays. (Narrowed 2026-11-13, #256, owner to confirm in PR #265: `Spec.Decreases(n); Spec.Requires(n >= 0);` is accepted; `Spec.Ensures` on a recursive method is still rejected.)
   - `Spec.Ensures` after another statement is rejected with "must lead the body".
   - `Spec.Ensures<long>` on an `int` method is rejected, naming `int`.
   - `Spec.Ensures<int>(r => r == Scale(x))` where `Scale` divides by a variable is rejected, naming `Scale` and its division.

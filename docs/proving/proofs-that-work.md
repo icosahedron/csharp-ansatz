@@ -192,12 +192,12 @@ public static int Sum(int n)
 ```
 
 `Sum` becomes a well-founded definition over `Int.toNat n`. Its `n + Sum(n - 1)` is `unchecked`: nothing is known of
-a recursive call's result where the no-overflow obligation is stated, a recursive method has no `Spec.Requires` yet
-(GitHub #256, a checker gap), and the sum does overflow for large `n`. Without `unchecked` the method fails at that `+` with `arithmetic overflow`
+a recursive call's result where the no-overflow obligation is stated, since a recursive method has no `Spec.Ensures`
+yet (a checker gap), and the sum does overflow for large `n`. Without `unchecked` the method fails at that `+` with `arithmetic overflow`
 (`ARecursiveMethodsArithmeticHasObligationsAndItsRecursiveResultIsUnknown`); `n - 1` alone, under `n > 0`, is proved. Warrant proves the decrease obligation
-`Sum.$dec_1` with `omega`, and derives the equation lemma `Sum.$eq_def` that `Unfold` uses. `Add(a, b)` (measure:
-the second parameter) and `SumLong(long n)` are proved terminating the same way. A call that does not decrease
-is reported at the call (`tests/corpus/m5a/refuted/Recursion.cs`):
+`Sum.$dec_1` with `omega`, and derives the equation lemma `Sum.$eq_def` that `Unfold` uses. `SumLong(long n)` is
+proved terminating the same way. A call that does not decrease is reported at the call
+(`tests/corpus/m5a/refuted/Recursion.cs`):
 
 ```text
 error WRT0001: The recursive call 'Bad(n - 1)' could not be shown to decrease 'n': omega could not prove the goal.
@@ -206,6 +206,65 @@ error WRT0001: The recursive call 'Bad(n - 1)' could not be shown to decrease 'n
 ```
 
 `Bad` steps from `int.MinValue` to `int.MaxValue`, so it need not terminate.
+
+### A recursive method with `Spec.Requires`
+
+```csharp
+[Verified]
+public static int Add(int a, int b)
+{
+    Spec.Decreases(b);
+    Spec.Requires(b >= 0 && a <= int.MaxValue - b);
+    if (b <= 0) return a;
+    return Add(a + 1, b - 1);
+}
+```
+
+Proved (`tests/corpus/m5a/accepted/Recursion.cs`): `a + 1` is in range because the body assumes the `Spec.Requires`,
+and the recursive call `Add(a + 1, b - 1)` is checked against it, as a call from any other method is (GitHub #256).
+`Spec.Decreases` comes first, then `Spec.Requires`. With `Spec.Requires(a >= 0 && a <= 1000)` instead, `a + 1` is
+still in range but the call fails, since the next `a` may be 1001
+(`ARecursiveMethodsRequiresIsAssumedByItsBodyAndCheckedAtEachRecursiveCall`). A recursive method cannot state
+`Spec.Ensures` yet, so a recursive call's result is still unknown.
+
+### Locals merged after branches, and a closed-enum section
+
+```csharp
+[Closed] public enum Size { Small, Medium, Big }
+
+[Verified]
+public static int Shipping(int weight, bool express, bool member)
+{
+    Spec.Requires(weight >= 0 && weight <= 1000000);
+    var cost = weight * 2;
+    var bonus = 0;
+    if (express)
+    {
+        cost = cost + 15;
+        bonus = 1;
+    }
+    if (member) return cost - 5;
+    return cost + bonus;
+}
+
+[Verified]
+public static int Section(Size s, int x)
+{
+    Spec.Requires(s != Size.Small || (x >= 0 && x <= 1000));
+    switch (s)
+    {
+        case Size.Small:
+            return x * 2;
+        default:
+            return 0;
+    }
+}
+```
+
+Proved (`Shipping` in `tests/corpus/m4/accepted/Locals.cs`, `Section` in `OverflowGapTests`): after the `if`, `cost`
+and `bonus` are known by their value on each path, `weight * 2` with `bonus = 0` or `weight * 2 + 15` with
+`bonus = 1` (GitHub #255), and inside `case Size.Small` the obligation knows `s = Size.Small` (GitHub #258), so the
+`Spec.Requires` bounds `x`. A section or `_` arm that takes several members knows the scrutinee is one of them.
 
 ## Division by a constant and `Math.Max` (M6)
 

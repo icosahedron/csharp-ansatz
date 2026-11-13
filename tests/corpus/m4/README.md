@@ -78,9 +78,9 @@ the arithmetic (the wrapped value, whose term is the same with or without `unche
 | `Payout` | `Spec.Requires(deductible >= 0)` | `loss - deductible` overflows for a negative deductible. |
 | `Discounted` | `Spec.Requires(discount >= 0)` | `price - discount` likewise. |
 | `Locals.Fee` | `Spec.Requires(price <= 1000000)` | `price + fee`. |
-| `Locals.Shipping` | `Spec.Requires(weight >= 0 && weight <= 1000000)`; the last two operations `unchecked` | `weight * 2` and `cost + 15` are bounded; after the join point `cost` and `bonus` are its parameters, which carry no value into an obligation. |
+| `Locals.Shipping` | `Spec.Requires(weight >= 0 && weight <= 1000000)` | `weight * 2` and `cost + 15` are bounded, and after the join point `cost` and `bonus` are known by their value on each path into it (#255), so `cost - 5` and `cost + bonus` are too. |
 | `Locals.Steps` | `unchecked { }` around the steps | `StepsAddThree` is about the wrap at `int.MaxValue`. |
-| `Locals.Bucket` | `unchecked(result + 1)` | `result` reaches the `+` through a join point. |
+| `Locals.Bucket` | none | `result` reaches the `+` through a join point, which knows it is 0 or 10 (#255; it was `unchecked` before). |
 | `Operators.LongSubtract`, `LongMultiply` | `unchecked` | Operator wiring over the whole range; a product of two variables is beyond `omega`. |
 | `Records.Move`, `Records.Distance` | `Spec.Requires` bounds on the coordinates (and `dx`) | `p.X + dx`; `-p.X` overflows at `int.MinValue`, and the sum. |
 | `Increments.Increment`, `IncrementLong` (accepted and refuted) | `unchecked(x + 1)` | They are about the wrap (`WrapsAtMax`, `NeverWraps`). |

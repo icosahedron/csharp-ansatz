@@ -35,7 +35,7 @@ public static class Contracts
     public static int Countdown(int n)
     {
         Spec.Decreases(n);
-        Spec.Requires(n >= 0);
+        Spec.Ensures<int>(r => r >= 0);
         return n <= 0 ? 0 : Countdown(n - 1);
     }
 

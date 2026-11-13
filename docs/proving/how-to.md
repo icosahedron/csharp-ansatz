@@ -458,12 +458,16 @@ factors: `Spec.Requires(0 <= price && price <= 10000 && 0 <= quantity &&
 quantity <= 1000)` proves `price * quantity` (GitHub #257), but a factor
 bounded only by another variable (`b <= a`) is not, so bound each factor by a
 literal. The default procedure also knows nothing of a recursive call's result
-(a recursive method has no `Spec.Requires`, #256), nor of a local whose value
-is merged from two branches that each change two locals (#255). These are gaps
-in the checker, not in your code. A `[ProofFor]` script does not help a pure
-method here: it proves the contract obligation, and the no-overflow obligations
-are the default procedure's alone. Write `unchecked` only where wrapping is
-what the code means; it removes the check.
+(a recursive method has no `Spec.Ensures` yet). These are gaps in the checker,
+not in your code. A `[ProofFor]` script does not help a pure method here: it
+proves the contract obligation, and the no-overflow obligations are the
+default procedure's alone. Write `unchecked` only where wrapping is what the
+code means; it removes the check.
+
+What it does know: a local merged from branches keeps the value each branch
+gave it (#255), a `switch` section over a `[Closed]` enum knows which members
+it takes (#258), and a recursive method may bound its parameters with
+`Spec.Requires`, which each recursive call must then satisfy (#256).
 
 In a project with `<CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>`,
 all arithmetic is checked, and Warrant follows the project setting.

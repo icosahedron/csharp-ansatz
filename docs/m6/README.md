@@ -132,8 +132,10 @@ These are the plan's Scope Boundaries as built; each is a named rejection, never
 
 - `try`/`catch` and `finally` (`try`, WRT0002): matching a catch against modelled, thrown and external exceptions needs
   the CLR's exception hierarchy in the trusted translator. No milestone schedules it.
-- Recursion with effects and contracts on recursive methods (KTD11): decrease obligations don't see through `bind`.
-  Revisit with M7's loops and invariants.
+- Recursion with effects and `Spec.Ensures` on recursive methods (KTD11): decrease obligations don't see through
+  `bind`, and a recursive call cannot use its own unproved triple. Revisit with M7's loops and invariants. KTD11 was
+  narrowed on 2026-11-13 (#256, owner to confirm in PR #265): a recursive method may state `Spec.Requires`, which its
+  body assumes and each recursive call is checked against (chapter 6).
 - Lifted arithmetic and comparisons on nullable values (`a + b`, `x > 0` with `int?` operands).
 - A trace of external calls (design Q5): two calls are related only by their contracts.
 - Spec sidecar files (design Q19), collections, `Guid` and strings (Q14, Q18, Q20), a standard logging contract (Q20).

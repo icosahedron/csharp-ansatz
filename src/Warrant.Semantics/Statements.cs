@@ -133,7 +133,8 @@ internal sealed partial class BodyTranslator
     ///    <c>let x := combine(x after each branch); k</c>;
     /// 4. neither contains a <c>return</c> or a call of the recursive method being translated, and they change no local
     ///    <paramref name="k"/> reads: <paramref name="k"/> alone (a skipped call would leave its decrease unchecked; nor,
-    ///    while a pure body's obligations are stated, implicit arithmetic, which must not overflow even unread, #244);
+    ///    while a pure body's obligations are stated, implicit arithmetic, which must not overflow even unread, #244, or a
+    ///    call to a method with <c>Spec.Requires</c>, whose precondition must hold even unread, #256);
     /// 5. otherwise a join point over the locals <paramref name="k"/> reads and some branch changes.
     /// Each branch is translated with its <paramref name="hypotheses"/> in scope, when there are any. In a method that can
     /// raise, rules 3 and 4 do not apply: a branch that can raise can be neither dropped nor reduced to a value, so the
@@ -164,7 +165,10 @@ internal sealed partial class BodyTranslator
             .Order()
             .ToList();
         bool recurses = _selfKey is { } selfKey && branches.Any(b => Nodes(b).Any(n => n is CallExpr c && string.Equals(c.Target, selfKey, StringComparison.Ordinal)));
-        recurses |= _overflowObligations && branches.Any(b => BodyNodes(b).Any(n => n is VirExpr e && SpecOverflows(e)));
+        // While a pure body's obligations are stated, a branch is never dropped while it has implicit arithmetic (#244) or a
+        // call to a method with Spec.Requires, which can only be the method's call to itself (#256): each has an obligation.
+        recurses |= _overflowObligations && branches.Any(b => BodyNodes(b).Any(n =>
+            (n is VirExpr e && SpecOverflows(e)) || (n is CallExpr c && HasRequires(c.Target))));
         if (_sigma is not null)
         {
             return JoinPoint(branches, Branch, combine, live, env, k);

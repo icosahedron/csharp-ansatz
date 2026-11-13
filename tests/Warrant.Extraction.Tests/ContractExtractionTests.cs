@@ -323,6 +323,32 @@ public class ContractExtractionTests
     }
 
     [Fact]
+    public void ARecursiveMethodsRequiresCallingItselfAndADroppedCallToItselfAreRejected()
+    {
+        // #256, PR #265 review: neither has a precondition the pure translation can check.
+        var result = Members("""
+                [Verified]
+                public static int Down(int n)
+                {
+                    Spec.Decreases(n);
+                    Spec.Requires(Down(0) == 0);
+                    return n <= 0 ? 0 : Down(n - 1);
+                }
+
+                [Verified]
+                public static int Ev(int n)
+                {
+                    Spec.Decreases(n);
+                    if (n > 0) { Ev(n / 2); }
+                    return 0;
+                }
+            """);
+
+        Assert.Equal("WRT0002 | Spec.Requires calling its own method", Only(result, "M:C.Down(System.Int32)"));
+        Assert.Equal("WRT0002 | recursive call as a statement", Only(result, "M:C.Ev(System.Int32)"));
+    }
+
+    [Fact]
     public void EnsuresOfAnotherTypeThanTheReturnTypeIsRejectedNamingTheReturnType()
     {
         var result = Members("""

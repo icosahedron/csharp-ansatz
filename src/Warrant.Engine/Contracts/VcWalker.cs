@@ -951,27 +951,25 @@ internal sealed class VcWalker
     /// The VC simp set at the goal and every hypothesis, each rewriting the others (Lean's <c>simp_all</c>), so a path
     /// condition such as <c>p = none</c> meets the guard <c>¬p.isNone</c>; then omega. Throws when they do not prove it.
     /// </summary>
-    /// <returns>The goal omega was given, or null when simp closed it.</returns>
-    private MVarId? Discharge(MVarId g, SimpContext simp)
+    private void Discharge(MVarId g, SimpContext simp)
     {
         // A closed-enum switch arm that covers several members knows `s = A ∨ s = B` (#258): one case per member, so each
         // equation substitutes below.
         if (AtomCases(g) is { } major)
         {
-            MVarId? last = null;
             foreach (var c in _m.Cases(g, major))
             {
-                last = Discharge(c.MVarId, simp);
+                Discharge(c.MVarId, simp);
             }
-            return last;
+            return;
         }
         if (_m.SimpAll(g, simp) is not { } rest)
         {
-            return null;
+            return;
         }
         if (Substitute(rest.Goal, simp) is not { } substituted)
         {
-            return null;
+            return;
         }
         // Two reads of one nullable value are two cases of it, `r = some v₁` and `r = some v₂`, which substitution turns
         // into `some v₁ = some v₂`; `v₁ = v₂` then makes a fact about v₁ one about v₂ (#226).
@@ -979,12 +977,11 @@ internal sealed class VcWalker
         {
             if (Substitute(injected, simp, values) is not { } again)
             {
-                return null;
+                return;
             }
             substituted = again;
         }
         _m.OmegaTactic(substituted);
-        return substituted;
     }
 
     /// <summary>

@@ -234,7 +234,12 @@ the wrap never happens. A failure is WRT0001 at the operation, `arithmetic overf
   makes it raise, KTD11), and a call to itself does not make the method raise. So by well-founded induction on the
   `Spec.Decreases` measure every execution that starts within the `Spec.Requires` stays within it, and the body's
   obligations hold of each. These obligations are stated whenever the method calls itself, even with no implicit
-  arithmetic. Once an operation's obligation holds, its exact value
+  arithmetic, and no branch that calls a method with `Spec.Requires` is dropped while they are (rule 4 of chapter 5's
+  placement rules keeps it, as it keeps one with implicit arithmetic). The translation fails closed: if some call of
+  the method to itself in its body has no such obligation, the unit is a translation error, not a proof. Extraction
+  rejects the two shapes with no value to check at: a `Spec.Requires` that calls its own method, and a call to itself
+  as a statement, whose result is dropped (`Spec.Requires calling its own method`, `recursive call as a statement`).
+  Once an operation's obligation holds, its exact value
   `(a op b).toInt = a.toInt op b.toInt` is a fact for the obligations after it on the same path, inside the guard it
   was under; `omega` reasons through the wrap-around's `Int.bmod` only by its real shadow, which cannot close nested
   arithmetic such as `a * 3 - b` even under tight bounds (`ANestedProductIsBoundedThroughItsExactValueNotItsWrapAround`).

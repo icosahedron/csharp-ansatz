@@ -29,6 +29,13 @@ public sealed class OverflowGapTests(EngineFixture engine) : IClassFixture<Engin
     private static string Describe(UnitOutcome? outcome) =>
         outcome is NotProvedOutcome n ? string.Join("\n----\n", n.Vcs.Select(v => $"{v.Kind}: {v.Message}\n{v.Goals}").Prepend(n.Message + "\n" + n.Goals)) : $"{outcome}";
 
+    /// <summary>The node a not-proved outcome is reported at.</summary>
+    private static int? NotProvedAt(UnitOutcome? outcome)
+    {
+        Assert.True(outcome is NotProvedOutcome, Describe(outcome));
+        return ((NotProvedOutcome)outcome!).TacticNode;
+    }
+
     private static (VcKind Kind, string Text) Failure(string source, string key, UnitOutcome? outcome)
     {
         var notProved = Assert.IsType<NotProvedOutcome>(outcome);
@@ -238,6 +245,48 @@ public sealed class OverflowGapTests(EngineFixture engine) : IClassFixture<Engin
         // a + 1 is in range, but the recursive call's a may pass 1000.
         const string grow = "M:S.Grow(System.Int32,System.Int32)";
         Assert.Equal("Grow(a + 1, b - 1)", Text(source, grow, Assert.IsType<NotProvedOutcome>(result.Find(grow)).TacticNode));
-        Assert.IsNotType<TranslatedOutcome>(result.Find("M:S.CallsAddBadly(System.Int32)"));
+        const string badly = "M:S.CallsAddBadly(System.Int32)";
+        Assert.Equal((VcKind.CalleePrecondition, "Add(a, 2)"), Failure(source, badly, result.Find(badly)));
+    }
+
+    [Fact]
+    public void ARecursiveCallInABranchThatChangesNothingTheRestReadsIsStillCheckedAgainstTheRequires()
+    {
+        // #256, PR #265 review: a branch whose only effect is a recursive call (no return, no implicit arithmetic, no local
+        // the rest reads) must not be skipped while the obligations are stated, or its call's precondition goes unchecked
+        // while the body assumes it, and a caller relying on the contract proves something false.
+        var source = Wrap("""
+            [Verified]
+            public static int Drop1(int n, int k)
+            {
+                Spec.Decreases(n);
+                Spec.Requires(k <= 1000);
+                if (n > 0) { var x = Drop1(n / 2, int.MaxValue); }
+                return k + 1;
+            }
+
+            [Verified]
+            public static int Drop2(int n, int k)
+            {
+                Spec.Decreases(n);
+                Spec.Requires(k <= 1000);
+                var x = 0;
+                if (n > 0) { x = Drop2(unchecked(n - 1), int.MaxValue); }
+                return k + 1;
+            }
+
+            [Verified]
+            public static int CallsDrop1()
+            {
+                Spec.NoThrow();
+                return Drop1(3, 0);
+            }
+            """);
+        var result = Run(source);
+        const string drop1 = "M:S.Drop1(System.Int32,System.Int32)";
+        Assert.Equal("Drop1(n / 2, int.MaxValue)", Text(source, drop1, NotProvedAt(result.Find(drop1))));
+        const string drop2 = "M:S.Drop2(System.Int32,System.Int32)";
+        Assert.Equal("Drop2(unchecked(n - 1), int.MaxValue)", Text(source, drop2, NotProvedAt(result.Find(drop2))));
+        Assert.IsType<SkippedOutcome>(result.Find("M:S.CallsDrop1"));
     }
 }

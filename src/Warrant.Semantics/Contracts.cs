@@ -349,6 +349,16 @@ internal sealed partial class BodyTranslator
         // #235: a Spec.Assert's condition is a Spec expression, but it sits inside the program.
         var asserts = raising && unit.Body is { } body && Nodes(body).Any(n => n is AssertStmt) ? AssertObligations(unit, spec.WellDefinedness.Count) : [];
         var arithmetic = overflows || recursesWithin ? OverflowObligations(unit, spec.WellDefinedness.Count) : [];
+        if (recursesWithin)
+        {
+            // Fail closed (#256): the body assumes the Spec.Requires, so every call to itself must have been checked.
+            var checkedCalls = arithmetic.Where(o => o.Kind == SpecObligationKind.CalleePrecondition).Select(o => o.Node).ToHashSet(ReferenceEqualityComparer.Instance);
+            int missed = BodyNodes(unit.Body!).Count(n => n is CallExpr c && string.Equals(c.Target, unit.Key, StringComparison.Ordinal) && !checkedCalls.Contains(n));
+            if (missed > 0)
+            {
+                throw new TranslationException(null, $"{missed} of the method's calls to itself were not checked against its Spec.Requires.");
+            }
+        }
         return new ContractObligation(
             theorem, all.Count, [.. all.Select(x => _lctx.Get(x).UserName)], operations.Count, unit.Script, specLemma, specBinders,
             [.. spec.WellDefinedness, .. asserts, .. arithmetic], [.. vacuity], raising);

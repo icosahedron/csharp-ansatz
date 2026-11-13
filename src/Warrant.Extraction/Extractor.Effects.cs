@@ -83,6 +83,32 @@ public static partial class Extractor
                     At(c, contract, c.Symbol),
                     $"{name}: a recursive method takes no Spec.Ensures, because its recursive call cannot use its own contract before it is proved; a Spec.Requires is allowed.");
             }
+            if (analysis.IsRecursive(c.Key) && analysis.CauseOf(c.Key) is null && c.Body is BlockStmt body)
+            {
+                // A Spec.Requires that calls its own method has no meaning, and a call to itself whose value is dropped
+                // has no value for its precondition to be checked at in the pure translation (#256).
+                var selfInRequires = body.Stmts.OfType<RequiresStmt>()
+                    .SelectMany(r => Descendants(r.Condition)).OfType<CallExpr>()
+                    .FirstOrDefault(call => string.Equals(call.Target, c.Key, StringComparison.Ordinal));
+                if (selfInRequires is not null)
+                {
+                    return new Rejection(
+                        DiagnosticIds.Unsupported,
+                        "Spec.Requires calling its own method",
+                        At(c, selfInRequires, c.Symbol),
+                        $"{name}: its Spec.Requires calls {name} again, so the precondition has no meaning.");
+                }
+                var dropped = Descendants(body).OfType<EvalStmt>()
+                    .FirstOrDefault(e => e.Value is CallExpr call && string.Equals(call.Target, c.Key, StringComparison.Ordinal));
+                if (dropped is not null)
+                {
+                    return new Rejection(
+                        DiagnosticIds.Unsupported,
+                        "recursive call as a statement",
+                        At(c, dropped, c.Symbol),
+                        $"{name}: a call to itself whose result is dropped computes nothing in a method that cannot raise; use its result or remove it.");
+                }
+            }
             if (analysis.IsRecursive(c.Key) && analysis.CauseOf(c.Key) is { } cause)
             {
                 bool own = string.Equals(cause.Unit, c.Key, StringComparison.Ordinal);

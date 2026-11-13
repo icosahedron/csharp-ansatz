@@ -151,8 +151,10 @@ false one pass.
 
 | Ticket | Gap |
 |---|---|
-| #216 | Theorems over `decimal` `Math.Max`/`Min` with parameters do not prove: nothing splits the `if` (chapter 3). |
-| #217 | `simp` does not compute a `decimal` literal's `units`, so `omega` cannot use it (chapter 3). |
+| #216 | Theorems over `decimal` `Math.Max`/`Min` with parameters did not prove: nothing split the `if` (chapter 3). Fixed after M6: the omega-prep set moves `units` inside the `if`. |
+| #217 | `simp` did not compute a `decimal` literal's `units`, so `omega` could not use it (chapter 3). Fixed after M6: `Tactic.Omega()` states each literal's value. |
+| #227, #245 | A `bool` `Spec.Ensures` needing a case split on a `bool` parameter, or a conditional one over a null test, was left to `omega`, which does not split a `Bool` (chapter 7). Fixed after M6: the default procedure splits it. |
+| #237, #257 | `omega` could not rule out a product's wrap-around under bounds (`x * 3`), nor bound a product of two variables (chapter 6). Fixed after M6 for literal bounds on each factor: `Tactic.Omega()` proves the exact value in range and adds the product's bounds. |
 | #220 | `warrant translate` passes no attribute sidecar, so it cannot prove contracts (chapter 7). Fixed after M6: it loads the sidecar as `verify` does. |
 | #225 | The CLI summary counts only theorems as "not proved" (chapter 8). Fixed after M6: other units not verified are counted. |
 

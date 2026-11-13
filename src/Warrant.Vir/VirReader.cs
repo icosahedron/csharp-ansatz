@@ -117,7 +117,11 @@ public static class VirReader
             "ref" => new RefType(value.GetString()!),
             "nullable" => new NullableType(Type(value)),
             "task" => new TaskType(Type(value)),
-            "opaque" => new OpaqueType(value.GetString() ?? throw new FormatException("An opaque type names its key.")),
+            // CancellationToken is the one opaque type (#215, #253): the translation's Unit for it is sound only for a
+            // value the method passes on and never reads, which is what extraction checks of a token.
+            "opaque" => value.GetString() is VirType.CancellationTokenKey
+                ? new OpaqueType(VirType.CancellationTokenKey)
+                : throw new FormatException($"An opaque type is {VirType.CancellationTokenKey}, not '{value.GetString()}'."),
             _ => throw new FormatException($"Unknown VIR type '{name}'."),
         };
     }
@@ -197,17 +201,8 @@ public static class VirReader
             "param" => new ParamExpr(type, v.GetProperty("index").GetInt32()),
             "local" => new LocalExpr(type, v.GetProperty("id").GetInt32()),
             "self" => new SelfExpr(type),
-            "unary" => new UnaryExpr(
-                type,
-                Parse<UnaryOp>(Str(v, "op"), VirSpelling.Of),
-                Overflow(v),
-                Expr(v.GetProperty("operand"))),
-            "binary" => new BinaryExpr(
-                type,
-                Parse<BinaryOp>(Str(v, "op"), VirSpelling.Of),
-                Overflow(v),
-                Expr(v.GetProperty("l")),
-                Expr(v.GetProperty("r"))),
+            "unary" => Unary(type, v),
+            "binary" => Binary(type, v),
             "logical" => Typed(type, new LogicalExpr(
                 Parse<LogicalOp>(Str(v, "op"), VirSpelling.Of),
                 Expr(v.GetProperty("l")),
@@ -218,11 +213,7 @@ public static class VirReader
                 Parse<CompareKind>(Str(v, "kind"), VirSpelling.Of),
                 Expr(v.GetProperty("l")),
                 Expr(v.GetProperty("r")))),
-            "convert" => Typed(type, new ConvertExpr(
-                Type(v.GetProperty("from")),
-                Type(v.GetProperty("to")),
-                Overflow(v),
-                Expr(v.GetProperty("operand")))),
+            "convert" => Typed(type, Convert(v)),
             "cond" => new CondExpr(type, Expr(v.GetProperty("c")), Expr(v.GetProperty("then")), Expr(v.GetProperty("else"))),
             "call" => new CallExpr(type, Str(v, "target"), List(v.GetProperty("args"), Expr)),
             "new" => new NewExpr(type, List(v.GetProperty("args"), Expr)),
@@ -288,7 +279,40 @@ public static class VirReader
         return literal.IsValid ? literal : throw new FormatException($"Not a decimal: mantissa {literal.Mantissa}, scale {literal.Scale}.");
     }
 
-    private static VirOverflow Overflow(JsonElement e) => Parse<VirOverflow>(Str(e, "overflow"), VirSpelling.Of);
+    private static UnaryExpr Unary(VirType type, JsonElement v)
+    {
+        var op = Parse<UnaryOp>(Str(v, "op"), VirSpelling.Of);
+        return new UnaryExpr(type, op, Overflow(v, op == UnaryOp.Neg && IsInteger(type)), Expr(v.GetProperty("operand")));
+    }
+
+    private static BinaryExpr Binary(VirType type, JsonElement v)
+    {
+        var op = Parse<BinaryOp>(Str(v, "op"), VirSpelling.Of);
+        return new BinaryExpr(
+            type,
+            op,
+            Overflow(v, op is BinaryOp.Add or BinaryOp.Sub or BinaryOp.Mul && IsInteger(type)),
+            Expr(v.GetProperty("l")),
+            Expr(v.GetProperty("r")));
+    }
+
+    private static ConvertExpr Convert(JsonElement v)
+    {
+        var from = Type(v.GetProperty("from"));
+        var to = Type(v.GetProperty("to"));
+        return new ConvertExpr(from, to, Overflow(v, from == VirType.Int64 && to == VirType.Int32), Expr(v.GetProperty("operand")));
+    }
+
+    private static bool IsInteger(VirType type) => type == VirType.Int32 || type == VirType.Int64;
+
+    /// <summary>
+    /// A node's overflow field; <c>unchecked</c> only where <see cref="VirOverflow.Unchecked"/> says it can be
+    /// (<paramref name="canWrap"/>): integer <c>+</c>, <c>-</c>, <c>*</c> and unary <c>-</c>, and narrowing (#249).
+    /// </summary>
+    private static VirOverflow Overflow(JsonElement e, bool canWrap) =>
+        Parse<VirOverflow>(Str(e, "overflow"), VirSpelling.Of) is var overflow && (overflow != VirOverflow.Unchecked || canWrap)
+            ? overflow
+            : throw new FormatException("'unchecked' is only on integer +, -, * and unary -, and on narrowing from int64 to int32.");
 
     private static long LitValue(VirType type, string text)
     {

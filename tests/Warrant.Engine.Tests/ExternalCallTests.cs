@@ -148,6 +148,39 @@ public sealed class ExternalCallTests(EngineFixture engine) : IClassFixture<Engi
         Proved(result.Find("M:S.IdAfterAmount(System.Int32)"));
     }
 
+    /// <summary>
+    /// #226, #253: only two reads of one value are related. Two awaits of the same member with the same argument are two
+    /// values (KTD4), and two record parameters are two values, so a proof that their fields agree fails.
+    /// </summary>
+    [Fact]
+    public void FieldsOfTwoAwaitsOrTwoParametersAreNotRelated()
+    {
+        var source = WithStore("""
+            [Verified]
+            public async Task<bool> SameAmountTwice(int id)
+            {
+                Spec.Ensures<bool>(r => r);
+                var a = await store.GetPayment(id);
+                var b = await store.GetPayment(id);
+                if (a is null || b is null) return true;
+                return a.Amount == b.Amount;
+            }
+
+            [Verified]
+            public static bool SameAmount(Payment? p, Payment? q)
+            {
+                Spec.Ensures<bool>(r => r);
+                if (p is null || q is null) return true;
+                return p.Amount == q.Amount;
+            }
+            """);
+        var result = Run(source);
+        const string Twice = "M:S.SameAmountTwice(System.Int32)";
+        Assert.Equal((VcKind.Postcondition, "Spec.Ensures<bool>(r => r);"), Failure(source, Twice, result.Find(Twice)));
+        const string Parameters = "M:S.SameAmount(Payment,Payment)";
+        Assert.Equal((VcKind.Postcondition, "Spec.Ensures<bool>(r => r);"), Failure(source, Parameters, result.Find(Parameters)));
+    }
+
     [Fact]
     public void AFieldOfANullableResultThatNothingBoundsStillFails()
     {

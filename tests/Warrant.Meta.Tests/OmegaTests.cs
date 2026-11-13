@@ -349,7 +349,8 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
         // #244: -1000 < a < 1000 → (a * 3).toInt - 5 is in int's range. Through the wrap-around alone (toInt_mul's
         // Int.bmod) omega's real shadow, Lean's omega having no dark or grey shadow, leaves a possible counterexample; the
         // product's exact value (a * 3).toInt = a.toInt * 3, which the obligations after it assume once its own holds,
-        // closes it.
+        // closes it. Since #237 Tactic.Omega() finds that exact value itself when omega alone fails: it proves
+        // a.toInt * 3 in range under the bounds and rewrites with Warrant.Int32.toInt_mul_of_range.
         const string t = "Int32";
         Expr ToInt(Expr x) => Expr.App(C(t + ".toInt"), x);
         Expr Product(Expr a) => Op(t, "HMul.hMul", "instHMul", "instMul", a, Lit(t, 3));
@@ -364,10 +365,57 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
                 ? IntTerms.Arrow(IntTerms.Eq(IntT, ToInt(Product(a)), IntTerms.Mul(ToInt(a), IntTerms.Lit(3))), overflow)
                 : overflow);
         }
-        var m = fixture.NewMeta();
-        var goal = m.MkFreshExprSyntheticOpaqueMVar(IntTerms.ForallN(C(t), ["a"], v => Claim(v[0], exact: false)));
-        var ex = Assert.Throws<TacticException>(() => m.OmegaTactic(goal.Id));
-        Assert.StartsWith("omega could not prove the goal:\na possible counterexample may satisfy the constraints\n", ex.Message, StringComparison.Ordinal);
+        PrepProves(IntTerms.ForallN(C(t), ["a"], v => Claim(v[0], exact: false)));
         PrepProves(IntTerms.ForallN(C(t), ["a"], v => Claim(v[0], exact: true)));
+    }
+
+    [Fact]
+    public void AProductOfTwoBoundedTermsIsBoundedByTheProductStep()
+    {
+        // #257: x * y is an atom to omega; from -5 ≤ x ≤ 10 and 0 ≤ y ≤ 7 the step adds Warrant.Int.mul_*'s linear
+        // bounds, which give -35 ≤ x * y ≤ 70. A tighter bound on either side is not proved.
+        static Expr Neg(BigInteger n) => Expr.App(C("Neg.neg", Level.Zero), IntT, C("Int.instNegInt"), IntTerms.Lit(n));
+        static Expr Claim(Expr x, Expr y, BigInteger below, BigInteger above)
+        {
+            var bounds = Expr.App(C("And"), Expr.App(C("And"), IntTerms.Le(Neg(5), x), IntTerms.Le(x, IntTerms.Lit(10))),
+                Expr.App(C("And"), IntTerms.Le(IntTerms.Lit(0), y), IntTerms.Le(y, IntTerms.Lit(7))));
+            var product = IntTerms.Mul(x, y);
+            return IntTerms.Arrow(bounds, Expr.App(C("And"), IntTerms.Le(Neg(below), product), IntTerms.Le(product, IntTerms.Lit(above))));
+        }
+        PrepProves(IntTerms.ForallN(IntT, ["x", "y"], v => Claim(v[0], v[1], 35, 70)));
+        foreach (var (below, above) in new (BigInteger, BigInteger)[] { (34, 70), (35, 69) })
+        {
+            var m = fixture.NewMeta();
+            var goal = m.MkFreshExprSyntheticOpaqueMVar(IntTerms.ForallN(IntT, ["x", "y"], v => Claim(v[0], v[1], below, above)));
+            Assert.Throws<TacticException>(() => m.OmegaTactic(goal.Id));
+        }
+    }
+
+    [Theory]
+    // Both factors negative, -5 ≤ x, y ≤ -1: 1 ≤ x * y needs mul_ge_of_le_of_le (the upper corner), x * y ≤ 25 either
+    // upper-bound lemma.
+    [InlineData(-5, -1, -5, -1, 1, 25)]
+    // 0 ≤ x ≤ 10, -3 ≤ y ≤ 5: x * y ≤ 50 needs mul_le_of_ge_of_le (lower x, upper y; the other corner gives 80), and
+    // -30 ≤ x * y needs mul_ge_of_ge_of_ge.
+    [InlineData(0, 10, -3, 5, -30, 50)]
+    // -10 ≤ x ≤ 0, 0 ≤ y ≤ 5: x * y ≤ 0 needs mul_le_of_le_of_ge (upper x, lower y; the other corner gives 50).
+    [InlineData(-10, 0, 0, 5, -50, 0)]
+    public void EachCornerOfTheProductBoxIsUsed(int lx, int ux, int ly, int uy, int low, int high)
+    {
+        static Expr Lit(BigInteger n) => n.Sign < 0 ? Expr.App(C("Neg.neg", Level.Zero), IntT, C("Int.instNegInt"), IntTerms.Lit(-n)) : IntTerms.Lit(n);
+        Expr Claim(Expr x, Expr y, BigInteger below, BigInteger above)
+        {
+            var bounds = Expr.App(C("And"), Expr.App(C("And"), IntTerms.Le(Lit(lx), x), IntTerms.Le(x, Lit(ux))),
+                Expr.App(C("And"), IntTerms.Le(Lit(ly), y), IntTerms.Le(y, Lit(uy))));
+            var product = IntTerms.Mul(x, y);
+            return IntTerms.Arrow(bounds, Expr.App(C("And"), IntTerms.Le(Lit(below), product), IntTerms.Le(product, Lit(above))));
+        }
+        PrepProves(IntTerms.ForallN(IntT, ["x", "y"], v => Claim(v[0], v[1], low, high)));
+        foreach (var (below, above) in new (BigInteger, BigInteger)[] { (low + 1, high), (low, high - 1) })
+        {
+            var m = fixture.NewMeta();
+            var goal = m.MkFreshExprSyntheticOpaqueMVar(IntTerms.ForallN(IntT, ["x", "y"], v => Claim(v[0], v[1], below, above)));
+            Assert.Throws<TacticException>(() => m.OmegaTactic(goal.Id));
+        }
     }
 }

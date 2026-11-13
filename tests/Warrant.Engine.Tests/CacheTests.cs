@@ -254,6 +254,61 @@ public sealed class CacheTests(EngineFixture engine) : IClassFixture<EngineFixtu
         Assert.NotNull(new FileResultCache().Read(Dir, KeyOf(units, DecSubtractsOne)));
     }
 
+    /// <summary>
+    /// An entry of format 1, written before a proved theorem's certificate held its well-definedness theorems (#236), is a
+    /// miss and is deleted, though its hash, toolchain and key are sound (#249).
+    /// </summary>
+    [Fact]
+    public void AnEntryOfAnOlderFormatIsAMissAndIsDeleted()
+    {
+        Assert.Equal(2, CacheEntry.FormatVersion);
+        var units = Units(Increments);
+        NewService().Verify(Request(units));
+        var key = KeyOf(units, IncAddsOne);
+        var path = FileResultCache.PathOf(Dir, key);
+        var body = JsonNode.Parse(File.ReadAllBytes(path))!["body"]!.DeepClone();
+        Assert.Equal(CacheEntry.FormatVersion, body["format"]!.GetValue<int>());
+        body["format"] = 1;
+        var bytes = Encoding.UTF8.GetBytes(body.ToJsonString());
+        File.WriteAllText(path, $"{{\"sha256\":\"{Convert.ToHexStringLower(SHA256.HashData(bytes))}\",\"body\":{Encoding.UTF8.GetString(bytes)}}}");
+
+        var refused = Assert.Throws<FormatException>(() => CacheEntry.FromFile(File.ReadAllBytes(path), key, Toolchain.Identity));
+        Assert.Equal("The entry has format 1; this toolchain reads 2.", refused.Message);
+        Assert.Null(new FileResultCache().Read(Dir, key));
+        Assert.False(File.Exists(path));
+        Assert.False(Result(NewService().Verify(Request(units)), IncAddsOne).FromCache);
+    }
+
+    /// <summary>
+    /// A proved outcome is rebuilt from its certificate (#236, #249): the last declaration is the theorem and only the ones
+    /// before it are its well-definedness theorems; a certificate that is empty or holds anything but theorems is malformed.
+    /// </summary>
+    [Fact]
+    public void AProvedCertificateIsTheWellDefinednessTheoremsThenTheTheorem()
+    {
+        static TheoremDecl Theorem(string name) => new(new Cic.TheoremInfo(
+            Cic.Name.Parse(name), Cic.EquatableArray<Cic.Name>.Empty, Cic.Expr.Const(Cic.Name.Parse("True")),
+            Cic.Expr.Const(Cic.Name.Parse("True.intro")), Cic.EquatableArray.Create(Cic.Name.Parse(name))));
+        var dto = new OutcomeDto(OutcomeKind.Proved, "M:S.T", VirUnitKind.Theorem, "S.T", []) { By = ProofKind.Script };
+        TheoremDecl wd1 = Theorem("Cs.S.T.$wd_1"), wd2 = Theorem("Cs.S.T.$wd_2"), theorem = Theorem("Cs.S.T");
+
+        var proved = Assert.IsType<ProvedOutcome>(dto.ToOutcome([wd1, wd2, theorem]));
+        Assert.Same(theorem, proved.Certificate);
+        Assert.Equal([wd1, wd2], proved.WellDefinedness.AsEnumerable());
+        Assert.Equal([wd1, wd2, theorem], proved.Declarations.AsEnumerable());
+        Assert.Empty(Assert.IsType<ProvedOutcome>(dto.ToOutcome([theorem])).WellDefinedness);
+
+        var definition = new DefinitionDecl(new Cic.DefinitionInfo(
+            Cic.Name.Parse("Cs.S.f"), Cic.EquatableArray<Cic.Name>.Empty, Cic.Expr.Const(Cic.Name.Parse("Bool")), Cic.Expr.Const(Cic.Name.Parse("Bool.true")),
+            Cic.ReducibilityHints.Abbrev, Cic.DefinitionSafety.Safe, Cic.EquatableArray.Create(Cic.Name.Parse("Cs.S.f"))));
+        foreach (var malformed in new KernelDeclaration[][] { [], [wd1, definition], [definition, theorem] })
+        {
+            var e = Assert.Throws<FormatException>(() => dto.ToOutcome([.. malformed]));
+            Assert.Equal("The certificate of M:S.T does not hold only theorems, the last its own.", e.Message);
+        }
+        Assert.Throws<FormatException>(() => (dto with { By = null }).ToOutcome([theorem]));
+    }
+
     [Fact]
     public void ANotProvedEntryHoldsOnlyUnderTheBudgetsItRanWith()
     {

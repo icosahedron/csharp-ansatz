@@ -164,16 +164,19 @@ internal sealed partial class BodyTranslator
             .Distinct()
             .Order()
             .ToList();
+        // A branch that must be translated even when nothing it assigns is read after it: one with a recursive call, whose
+        // decrease obligation needs it (M5a), or one with implicit arithmetic, whose overflow obligation needs it (#244).
         bool recurses = _selfKey is { } selfKey && branches.Any(b => Nodes(b).Any(n => n is CallExpr c && string.Equals(c.Target, selfKey, StringComparison.Ordinal)));
         // While a pure body's obligations are stated, a branch is never dropped while it has implicit arithmetic (#244) or a
         // call to a method with Spec.Requires, which can only be the method's call to itself (#256): each has an obligation.
-        recurses |= _overflowObligations && branches.Any(b => BodyNodes(b).Any(n =>
+        bool overflows = _overflowObligations && branches.Any(b => BodyNodes(b).Any(n =>
             (n is VirExpr e && SpecOverflows(e)) || (n is CallExpr c && HasRequires(c.Target))));
+        bool hasObligation = recurses || overflows;
         if (_sigma is not null)
         {
             return JoinPoint(branches, Branch, combine, live, env, k);
         }
-        if (!returns && !recurses && live.Count == 0)
+        if (!returns && !hasObligation && live.Count == 0)
         {
             return k.Invoke(env);
         }

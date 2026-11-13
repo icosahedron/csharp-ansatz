@@ -950,7 +950,10 @@ internal sealed class VcWalker
     /// The VC simp set at the goal and every hypothesis, each rewriting the others (Lean's <c>simp_all</c>), so a path
     /// condition such as <c>p = none</c> meets the guard <c>¬p.isNone</c>; then omega. Throws when they do not prove it.
     /// </summary>
-    /// <returns>The goal omega was given, or null when simp closed it.</returns>
+    /// <returns>
+    /// The goal omega was given, or null when simp closed it or the goal was split into closed-enum member cases (#258),
+    /// each then discharged on its own.
+    /// </returns>
     private MVarId? Discharge(MVarId g, SimpContext simp) => Discharge(g, simp, []);
 
     /// <summary>How many <c>Bool</c> case splits one VC may take (#227, #245): at most 2^3 cases.</summary>

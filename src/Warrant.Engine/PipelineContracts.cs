@@ -473,12 +473,23 @@ public static partial class Pipeline
             try
             {
                 current = stated = meta.IntroN(goal.Id, binders).Goal;
-                // The VC simp set first, as the default procedure's leftovers get it: it decides a conjunct about constants
-                // only, such as `7 ≤ 1000` in a recursive call's precondition, which omega alone does not (#256).
-                if (meta.SimpAll(current.Value, VcSimpSet.Context(meta)) is { } rest)
+                // omega alone first; where it fails, the VC simp set, as the default procedure's leftovers get it, then
+                // omega again: the simp set decides a conjunct about constants only, such as `7 ≤ 1000` in a recursive
+                // call's precondition, which omega alone does not (#256). The simp set is used only where needed: it
+                // costs fuel and time on every other precondition (#272).
+                var saved = meta.SaveState();
+                try
                 {
-                    current = rest.Goal;
                     meta.OmegaTactic(current.Value);
+                }
+                catch (MetaException ex) when (ex is not MetaResourceException)
+                {
+                    meta.Restore(saved);
+                    if (meta.SimpAll(current.Value, VcSimpSet.Context(meta)) is { } rest)
+                    {
+                        current = rest.Goal;
+                        meta.OmegaTactic(current.Value);
+                    }
                 }
                 proof = meta.InstantiateMVars(goal);
                 TacticFuelUsed = Math.Max(TacticFuelUsed, meta.Budget.FuelUsed);

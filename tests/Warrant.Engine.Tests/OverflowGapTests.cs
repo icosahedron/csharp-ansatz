@@ -167,6 +167,22 @@ public sealed class OverflowGapTests(EngineFixture engine) : IClassFixture<Engin
                 }
 
                 [Verified]
+                public static int Both(Size s, bool wide, int x)
+                {
+                    // The section takes two members, and the bound on x depends on wide: the member cases (#258) and
+                    // a Bool case split (#263) together.
+                    Spec.Requires(x >= 0 && (s == Size.Big || wide || x <= 10) && (s == Size.Big || !wide || x <= 1000));
+                    switch (s)
+                    {
+                        case Size.Small:
+                        case Size.Medium:
+                            return x * 2;
+                        default:
+                            return 0;
+                    }
+                }
+
+                [Verified]
                 public static int WrongArm(Size s, int x)
                 {
                     Spec.Requires(s != Size.Small || (x >= 0 && x <= 1000));
@@ -191,6 +207,7 @@ public sealed class OverflowGapTests(EngineFixture engine) : IClassFixture<Engin
         Proved(result.Find("M:S.Section(Size,System.Int32)"));
         Proved(result.Find("M:S.Arm(Size,System.Int32)"));
         Proved(result.Find("M:S.Shared(Size,System.Int32)"));
+        Proved(result.Find("M:S.Both(Size,System.Boolean,System.Int32)"));
         const string wrongArm = "M:S.WrongArm(Size,System.Int32)";
         Assert.Equal((VcKind.ArithmeticOverflow, "x + 1"), Failure(source, wrongArm, result.Find(wrongArm)));
         const string wrong = "M:S.Wrong(Size,System.Int32)";

@@ -42,7 +42,8 @@ expression or `unchecked { }` block, the nearest such context deciding (an `unch
 reverse raises).
 `wrap` is now only C#'s default context, which must not overflow where Warrant proves something (#183, #236; method
 bodies are #244); `unchecked` wraps on purpose, with no obligation; a unit's `facts` stay `wrap` or `checked`, and a
-reader rejects `unchecked` there.
+reader rejects `unchecked` there, and on any node other than an `int32` or `int64` `add`, `sub`, `mul` or unary `neg`
+and an `int64` to `int32` `convert` (#249).
 A unit that uses no version-3 form encodes as in version 2 apart from its `vir` field, which every unit's bytes contain,
 so every unit and closure hash changed once and every M5b cache entry was invalidated, as U1's new bundle hash did
 anyway.
@@ -202,6 +203,7 @@ member, and named arguments out of order around a dependency or awaited call (th
 A `CancellationToken` parameter of a verified method or a contract member is `opaque{T:System.Threading.CancellationToken}`,
 as KTD22 calls tokens opaque parameters, and its only use is to be passed on unchanged as an argument, to a dependency
 member or a verified method.
+It is the one opaque type: the VIR reader rejects `opaque` with any other key (#253).
 Anything else that has a token type is `cancellation token other than a parameter`: `default`, `CancellationToken.None`,
 an optional token argument left out, a local, a field of a record, a theorem's parameter, a `Spec.ForAll` over tokens.
 Reading one (`ct.IsCancellationRequested`, `ct.ThrowIfCancellationRequested()`) calls an unverified member (WRT0005).

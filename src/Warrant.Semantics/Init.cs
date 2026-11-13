@@ -98,15 +98,12 @@ internal static class Init
     // exceptions and throw, and the raising integer models, which the monadic translation (M6 U9) emits. None is universe
     // polymorphic: the world and every value live in Type.
     public static readonly Expr ClrM = C("Warrant.ClrM");
-    public static readonly Expr ClrExn = C("Warrant.ClrExn");
+    // The ClrExn names come from ClrExnNames, which the VC walker shares (#232); only the constructors translation emits
+    // have a constant here (overflow, divideByZero, nullReference and invalidOperation are raised inside the Lean models).
+    public static readonly Expr ClrExn = Expr.Const(ClrExnNames.Type);
     public static readonly Expr ClrMThrow = C("Warrant.ClrM.throw");
-    public static readonly Expr ClrExnOverflow = C("Warrant.ClrExn.overflow");
-    public static readonly Expr ClrExnDivideByZero = C("Warrant.ClrExn.divideByZero");
-    public static readonly Expr ClrExnNullReference = C("Warrant.ClrExn.nullReference");
-    public static readonly Expr ClrExnInvalidOperation = C("Warrant.ClrExn.invalidOperation");
-    public static readonly Expr ClrExnAssertFailed = C("Warrant.ClrExn.assertFailed");
-    public static readonly Expr ClrExnThrown = C("Warrant.ClrExn.thrown");
-    public static readonly Expr ClrExnExternal = C("Warrant.ClrExn.external");
+    public static readonly Expr ClrExnAssertFailed = Expr.Const(ClrExnNames.AssertFailed);
+    public static readonly Expr ClrExnThrown = Expr.Const(ClrExnNames.Thrown);
     public static readonly Expr Int32AddChecked = C("Warrant.Int32.addChecked");
     public static readonly Expr Int32SubChecked = C("Warrant.Int32.subChecked");
     public static readonly Expr Int32MulChecked = C("Warrant.Int32.mulChecked");
@@ -213,13 +210,13 @@ internal static class Init
     public static readonly Expr ExceptConds = C("Std.Do.ExceptConds", Level.Zero);
     public static readonly Expr ProdMk = C("Prod.mk", Level.Zero, Level.Zero);
     public static readonly Expr PUnitUnit = C("PUnit.unit", Level.One);
-    public static readonly Expr ClrExnAllowed = C("Warrant.ClrExn.Allowed");
+    public static readonly Expr ClrExnAllowed = Expr.Const(ClrExnNames.Allowed);
     public static readonly Expr PropTrue = C("True");
     public static readonly Expr PropFalse = C("False");
 
     // The exception half of a Spec.NoThrow contract in place of ClrExn.Allowed (#182): only an exception propagated from a
     // dependency.
-    public static readonly Expr ClrExnIsExternal = C("Warrant.ClrExn.External");
+    public static readonly Expr ClrExnIsExternal = Expr.Const(ClrExnNames.External);
 
     /// <summary>The binder name of a constant function's or an implication's unused argument.</summary>
     public static readonly Name Unused = Name.From("x");

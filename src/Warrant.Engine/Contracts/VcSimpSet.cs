@@ -1,5 +1,6 @@
 using Warrant.Cic;
 using Warrant.Meta;
+using Warrant.Semantics;
 
 namespace Warrant.Engine.Contracts;
 
@@ -22,13 +23,12 @@ internal static class VcSimpSet
             "Std.Do.PredTrans.apply_bind", "Std.Do.PredTrans.apply_Bind_bind", "Std.Do.PredTrans.apply_Seq_seq",
             "Std.Do.PredTrans.apply_const", "Std.Do.PredTrans.apply_throw", "Std.Do.PredTrans.apply_pushArg",
             "Std.Do.PredTrans.apply_pushExcept", "Std.Do.PredTrans.apply_dite", "Std.Do.PredTrans.apply_ite",
-            "Warrant.ClrExn.allowed_overflow", "Warrant.ClrExn.allowed_divideByZero", "Warrant.ClrExn.allowed_nullReference",
-            "Warrant.ClrExn.allowed_invalidOperation", "Warrant.ClrExn.allowed_assertFailed", "Warrant.ClrExn.allowed_thrown",
-            "Warrant.ClrExn.allowed_external",
-            // ClrExn.External, Spec.NoThrow's exception postcondition (#182).
-            "Warrant.ClrExn.external_overflow", "Warrant.ClrExn.external_divideByZero", "Warrant.ClrExn.external_nullReference",
-            "Warrant.ClrExn.external_invalidOperation", "Warrant.ClrExn.external_assertFailed", "Warrant.ClrExn.external_thrown",
-            "Warrant.ClrExn.external_external",
+        }.Select(Name.Parse),
+        // ClrExn.Allowed, and ClrExn.External, Spec.NoThrow's exception postcondition (#182), at each constructor.
+        .. ClrExnNames.Constructors.Select(c => ClrExnNames.Equation(ClrExnNames.Allowed, c)),
+        .. ClrExnNames.Constructors.Select(c => ClrExnNames.Equation(ClrExnNames.External, c)),
+        .. new[]
+        {
             // A dependency's Spec.Ensures over a nullable result (M6 U20) meets the walk's case `r = some v`: a null test
             // and ?? on a constructor, and the impossible case `some v = none`.
             "Option.isNone_some", "Option.isNone_none", "Warrant.Nullable.some_eq_none", "Bool.false_eq_true", "Bool.true_eq_false",

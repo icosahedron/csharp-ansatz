@@ -382,6 +382,62 @@ public sealed class ProcedureStrengthTests(EngineFixture engine) : IClassFixture
         Proved(result.Find("M:S.OnB(System.Int32,System.Int32)"));
     }
 
+    [Theory]
+    // Review of #263, round 4: a case hypothesis that is an equation must not become a rewrite rule (`a = a + b` would
+    // rewrite a to a + b without end); only the condition itself is rewritten, to True or False.
+    [InlineData("a == a + b")]
+    [InlineData("a == a * b")]
+    [InlineData("a == -a")]
+    public void AnIfWhoseConditionIsAnEquationIsSplitWithoutLooping(string condition)
+    {
+        var source = Wrap($$"""
+            [Verified]
+            public static int Branch(int a, int b)
+            {
+                Spec.Requires(0 <= a && a <= 10 && 0 <= b && b <= 10);
+                Spec.Ensures<int>(r => r >= 0);
+                if ({{condition}}) { return 0; }
+                return a * b;
+            }
+            """);
+        Proved(Run(source).Find("M:S.Branch(System.Int32,System.Int32)"));
+    }
+
+    [Fact]
+    public void AFalseClaimBehindAnEquationConditionIsNotProvedRatherThanUndecided()
+    {
+        var source = Wrap("""
+            [Verified]
+            public static int Branch(int a, int b)
+            {
+                Spec.Requires(0 <= a && a <= 10 && 0 <= b && b <= 10);
+                Spec.Ensures<int>(r => r > 0);
+                if (a == a + b) { return 0; }
+                return a * b;
+            }
+            """);
+        var outcome = Assert.IsType<NotProvedOutcome>(Run(source).Find("M:S.Branch(System.Int32,System.Int32)"));
+        Assert.Equal(VcKind.Postcondition, Assert.Single(outcome.Vcs).Kind);
+    }
+
+    [Fact]
+    public void TwoIfsOverAProductAreBothSplit()
+    {
+        // Review of #263, round 4: the second split, on b, inside each case of the first, on a.
+        var source = Wrap("""
+            [Verified]
+            public static int BothGuarded(int a, int b)
+            {
+                Spec.Requires(-10 <= a && a <= 10 && -10 <= b && b <= 10);
+                Spec.Ensures<int>(r => r >= 0);
+                if (a < 0) { return 0; }
+                if (b < 0) { return 0; }
+                return a * b;
+            }
+            """);
+        Proved(Run(source).Find("M:S.BothGuarded(System.Int32,System.Int32)"));
+    }
+
     [Fact]
     public void TheComplementOfABranchNotTakenBoundsAFactor()
     {

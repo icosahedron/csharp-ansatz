@@ -87,9 +87,11 @@ first attempt's goal and constraints.
 In this order, after the goal's premises become hypotheses:
 
 - **`if`s over a product.** An `if` whose branches mention `*` (a pure method's `if (a < 0) return 0; return a * b;`
-  becomes `0 ≤ if a < 0 then 0 else a * b`) is split on its condition with `dite`, at most two deep, and each case
-  rewritten with the condition or its negation, so the next step sees it as a fact. `omega` splits such an `if` too, but
-  inside its own search, where no bound can be read.
+  becomes `0 ≤ if a < 0 then 0 else a * b`) is split on its condition with `dite`, at most two deep. In each case the
+  condition itself is rewritten to `True` or `False` (`eq_true`, `eq_false`; the case hypothesis is not a rewrite rule,
+  which for `a = a + b` would not terminate), and the case keeps it as a hypothesis, so the next step sees it as a
+  fact. Each case reruns the rest of the step on its own goal, so two `if`s cost up to four runs. `omega` splits such an
+  `if` too, but inside its own search, where no bound can be read.
 - **Products.** `omega` reads linear arithmetic only, so `x * y` of two non-literal terms is an atom. For each such
   product, the step reads literal bounds on each side of `x` and `y` from the hypotheses (`c ≤ x`, `x < c`, after the
   prep step, which a trial run of it shows and then undoes) and uses one per side: the tightest fact, what a
@@ -102,7 +104,10 @@ In this order, after the goal's premises become hypotheses:
   and discharges, so no bound needs a proof of its own. From `0 ≤ x ≤ 10000` and `0 ≤ y ≤ 1000` they give
   `0 ≤ x * y ≤ 10000000` (#257); from `-5 ≤ x, y ≤ -1`, `1 ≤ x * y ≤ 25`. A factor whose bound is not a literal
   (`b ≤ a`) gets none, and neither does the outer product of `a * b * c`, whose factor `a * b` has no literal bound,
-  nor a sum of products (GitHub #271). These facts come first, so the next step's range proofs have them.
+  nor a sum of products (GitHub #271). A bound tighter than a fact that holds only through a disjunction
+  (`Spec.Requires(a >= 0 || a >= 1)` beside `-10 <= a`) or a condition outside an `if` over the product
+  (`(a < 0 ? 1 : 0) + a * b`) is not used: the fact is. These facts come first, so the next step's range proofs have
+  them.
 - **Exact values.** For each `int`/`long` `a + b`, `a - b`, `a * b` or `-a` in the goal that is not an operation on
   literals (`-5` is a literal to the prep step), a nested `Tactic.Omega()`
   tries to prove the exact result in range, `¬(a.toInt * b.toInt < -2^31 ∨ 2^31 - 1 < a.toInt * b.toInt)`; where it
@@ -118,7 +123,9 @@ The nested range proofs are plain `Tactic.Omega()` runs, never strengthened agai
 (products, operations, literals) are taken, so the step costs a bounded number of `omega` runs. They are charged to the
 unit's tactic fuel: a product bounded on both sides with both bounds used (`1 <= a <= 99`, `1 <= b <= 99`,
 `Spec.Ensures(r => r >= 1 && r <= 9801)`) needs about 113,000 of the default 171,970 steps, and `-5 <= a, b <= -1`
-with `1 <= r <= 25` about 123,000; a bound from a branch, `if (a > 5) return 0;`, about 66,000. A goal with no `*` skips the product part and its trial prep step.
+with `1 <= r <= 25` about 123,000; a bound from a branch, `if (a > 5) return 0;`, about 66,000; two branches,
+`if (a < 0) return 0; if (b < 0) return 0;` under `-99 <= a, b <= 99` with `0 <= r <= 9801`, about 147,000; and
+`if (a == a + b) return 0;` about 107,000. A goal with no `*` skips the product part and its trial prep step.
 
 ## The true example
 

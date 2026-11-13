@@ -82,11 +82,14 @@ public sealed partial class MetaM
             Assign(g, Expr.App(Expr.Const(DiteName, Level.Zero), target, c, instance, onTrue, onFalse));
             return new[] { onTrue.Id, onFalse.Id };
         });
-        foreach (var branch in cases)
+        for (int i = 0; i < cases.Length; i++)
         {
-            var (fvars, goal) = IntroN(branch, 1, [Name.From("h")]);
+            var (fvars, goal) = IntroN(cases[i], 1, [Name.From("h")]);
+            // Only the condition is rewritten, to True (`eq_true c h`) or False (`eq_false c h`): the case hypothesis
+            // itself as a rule would rewrite an equation's left side, `a = a + b` turning a into a + b without end.
             var condition = new SimpTheorems();
-            WithContext(goal, () => { condition.AddRange(MkSimpTheoremsFromProof(Expr.FVar(fvars[0]))); return 0; });
+            var rule = Expr.App(Expr.Const(i == 0 ? SimpNames.EqTrue : SimpNames.EqFalse), c, Expr.FVar(fvars[0]));
+            WithContext(goal, () => { condition.AddRange(MkSimpTheoremsFromProof(rule)); return 0; });
             var context = new SimpContext(SimpConfig.Default with { FailIfUnchanged = false }, [condition], SimpContext.CongrTheoremsOf(Attributes));
             var others = WithContext(goal, () => LCtx.Decls.Where(d => !d.IsImplementationDetail && d.FVarId != fvars[0] && IsProp(d.Type)).Select(d => d.FVarId).ToList());
             if (SimpGoal(goal, context, simplifyTarget: true, others) is { } rest)

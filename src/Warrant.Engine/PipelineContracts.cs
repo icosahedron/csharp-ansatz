@@ -359,7 +359,7 @@ public static partial class Pipeline
                 var shown = meta.MkFreshExprMVarAt(decl.LCtx, decl.LocalInstances, meta.InstantiateMVars(decl.Type), MetavarKind.SyntheticOpaque, decl.UserName).Id;
                 foreach (var local in decl.LCtx.Decls.ToList())
                 {
-                    if (!local.IsImplementationDetail && meta.InstantiateMVars(local.Type) is ConstExpr { Name: var n } && n == TrueName)
+                    if (!local.IsImplementationDetail && VcWalker.IsTrue(meta.InstantiateMVars(local.Type)))
                     {
                         shown = meta.TryClear(shown, local.FVarId);
                     }
@@ -371,8 +371,6 @@ public static partial class Pipeline
                 meta.Restore(saved);
             }
         }
-
-        private static readonly Name TrueName = Name.Parse("True");
 
         /// <summary>
         /// One well-definedness obligation (KTD26): a callee's precondition is a plain proposition, proved as a decrease

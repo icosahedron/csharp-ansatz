@@ -79,8 +79,15 @@ fails the build at the `throw` (chapter 7) instead of being listed as a `MayThro
   The caller knows the callee through its contract only (KTD12), and a contract without `Spec.NoThrow` allows an
   explicit throw whatever the arguments, so nothing short of the callee's body could tell the two apart. The message
   names the callee and the way out: give it `Spec.NoThrow`, with a `Spec.Requires` that rules its throws out and that
-  the call meets. Lifting this soundly needs either the callee's body at the call (no longer modular) or a new contract
-  form that states when the callee does not throw; both are the owner's decision.
+  the call meets; that `Spec.Requires` then binds every other caller of the callee too. Ways to lift this soundly,
+  each the owner's decision:
+  (a) walk the callee's body at the call, so the caller's proof depends on the body and is no longer modular;
+  (b) a new contract form that states when the callee does not throw, such as an exception postcondition
+  `ClrExn.Allowed e ∧ (e is thrown → cond)` (a change to the trusted statement);
+  (c) a second lemma per raising callee, `f.$nothrow_when`, whose precondition is generated from its throw paths;
+  (d) the engine infers NoThrow: it tries to prove the callee's contract once more with `ClrExn.External` under its
+  own `Spec.Requires`, caches that second lemma, and uses it at calls whose callee has no `Spec.NoThrow` (which
+  removes the need for the annotation, not the need for a `Spec.Requires` that rules the throws out).
 - `Spec.NoThrow` in a `[ContractFor]` class member is rejected: it is for a verified method's own body, and a
   dependency's exceptions are always allowed.
 

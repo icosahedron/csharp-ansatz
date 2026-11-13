@@ -45,8 +45,10 @@ program's head:
 The walker picks `Vc.call` or `Vc.callExternal` from the contract's type, not by trying one and then the other:
 `Apply` may unify `Vc.call`'s premise with a NoThrow callee's contract when the call's arguments let the callee's body
 reduce to `pure v`, since unfolding `Std.Do.Triple` and the program then makes the two triples definitionally equal
-(the kernel admits that proof), and the callee's `Ensures` then reaches the rest of the walk only as `r = r` (#241;
-`VcCallUnificationTests` in `Warrant.Meta.Tests`). This is Lean's lazy delta reduction, not a unifier bug.
+(the kernel admits that proof). When `v` is a variable `a` and the callee's `Ensures` is `r = a`, the result
+postcondition is solved as `r = r`, which says nothing, the weak postcondition #241 reported
+(`VcCallUnificationTests` in `Warrant.Meta.Tests` reproduces it). The assignment is a correct solution found by
+unfolding definitions, not a unifier bug.
 
 Between rules the walker does a light reduction: β, projections, `let`s (a join point among them) and
 `(⌜p⌝ s).down` to `p`, as Lean's `dsimp only` would (#212); nothing of the default simp set, so the next rule still

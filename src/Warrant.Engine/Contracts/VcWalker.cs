@@ -900,13 +900,16 @@ internal sealed class VcWalker
         foreach (var d in decls)
         {
             var type = _m.InstantiateMVars(d.Type);
-            if (type.HeadIs(TrueName) && type.GetAppNumArgs() == 0 || d.UserName == S || d.UserName == Sigma)
+            if (IsTrue(type) || d.UserName == S || d.UserName == Sigma)
             {
                 g = _m.TryClear(g, d.FVarId);
             }
         }
         return g;
     }
+
+    /// <summary>Whether a hypothesis's type is the proposition <c>True</c>, which says nothing in a goal shown (#240).</summary>
+    public static bool IsTrue(Expr type) => type.HeadIs(TrueName) && type.GetAppNumArgs() == 0;
 
     private static int Arity(Expr type)
     {

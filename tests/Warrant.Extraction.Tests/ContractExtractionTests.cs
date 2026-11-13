@@ -269,6 +269,23 @@ public class ContractExtractionTests
                     Spec.NoThrow();
                     return Guard(b);
                 }
+
+                [Verified]
+                public static int Loose(int b)
+                {
+                    if (b == 0)
+                    {
+                        throw new ArgumentException("b");
+                    }
+                    return b;
+                }
+
+                [Verified]
+                public static int CallsLoose(int b)
+                {
+                    Spec.NoThrow();
+                    return Loose(b);
+                }
             """);
 
         var d = Single(result, "M:C.Half(System.Int32)");
@@ -281,9 +298,106 @@ public class ContractExtractionTests
             d.Message);
         Assert.NotNull(d.Location);
         Assert.NotNull(Unit(result, "M:C.Half(System.Int32)"));
-        // A method that can raise, by its own throw or through a callee, gets none.
+        // A method that can raise, by its own throw, a call to a method with Spec.Requires, or a callee that throws, gets none.
         Assert.Empty(result.DiagnosticsFor("M:C.Guard(System.Int32)"));
         Assert.Empty(result.DiagnosticsFor("M:C.Caller(System.Int32)"));
+        Assert.Empty(result.DiagnosticsFor("M:C.CallsLoose(System.Int32)"));
+    }
+
+    [Fact]
+    public void NoThrowOnAMethodThatCallsADependencyOrAwaitsGetsNoWarning()
+    {
+        // A dependency call and an await can raise (ClrExn.external), so Spec.NoThrow means something there (#239).
+        var result = Extract("""
+            using System.Threading.Tasks;
+
+            public interface IStore
+            {
+                int Get(int id);
+                Task<int> Load(int id);
+            }
+
+            [ContractFor(typeof(IStore))]
+            internal abstract class StoreContract : IStore
+            {
+                public int Get(int id) => default!;
+                public Task<int> Load(int id) => default!;
+            }
+
+            public sealed class Uses(IStore store)
+            {
+                [Verified]
+                public int Read(int id)
+                {
+                    Spec.NoThrow();
+                    return store.Get(id);
+                }
+
+                [Verified]
+                public async Task<int> Fetch(int id)
+                {
+                    Spec.NoThrow();
+                    return await store.Load(id);
+                }
+            }
+            """);
+
+        Assert.NotNull(Unit(result, "M:Uses.Read(System.Int32)"));
+        Assert.NotNull(Unit(result, "M:Uses.Fetch(System.Int32)"));
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == DiagnosticIds.IneffectiveSpec);
+    }
+
+    [Fact]
+    public void NoThrowOnAMethodRejectedLaterGetsNoWarning()
+    {
+        // WRT0013 is about a method that is translated (#239 review): not one rejected for a rejected callee, nor one
+        // whose #if variants translate differently, though one variant cannot raise.
+        var result = Members("""
+                [Verified]
+                public static int Tried(int x)
+                {
+                    try { return x; } finally { }
+                }
+
+                [Verified]
+                public static int CallsTried(int x)
+                {
+                    Spec.NoThrow();
+                    return Tried(x);
+                }
+            """);
+        Assert.Null(result.Find("M:C.CallsTried(System.Int32)"));
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == DiagnosticIds.IneffectiveSpec);
+
+        result = Members("""
+                [Verified]
+                public static int Debugged(int x)
+                {
+                    Spec.NoThrow();
+            #if DEBUG
+                    if (x < 0)
+                    {
+                        throw new ArgumentException("x");
+                    }
+            #endif
+                    return x;
+                }
+            """);
+
+        Assert.Null(result.Find("M:C.Debugged(System.Int32)"));
+        Assert.Equal("WRT0002 | preprocessor conditional", Only(result, "M:C.Debugged(System.Int32)"));
+        Assert.DoesNotContain(result.Diagnostics, d => d.Id == DiagnosticIds.IneffectiveSpec);
+
+        // The analyzer's per-member check (ExecuteFor) agrees for the rejected caller.
+        var compilation = Warrant.Frontend.CompilationFactory.Create(
+            [new Warrant.Frontend.SourceFile("Test.cs", "using Warrant;\nusing System;\npublic static class C\n{\n"
+                + "[Verified] public static int Tried(int x) { try { return x; } finally { } }\n"
+                + "[Verified] public static int CallsTried(int x) { Spec.NoThrow(); return Tried(x); }\n}\n")],
+            checkOverflow: false);
+        var member = compilation.GetTypeByMetadataName("C")!.GetMembers("CallsTried").Single();
+        var diagnostics = new Diagnoser(compilation).Member(member);
+        Assert.NotEmpty(diagnostics);
+        Assert.DoesNotContain(diagnostics, d => d.Id == DiagnosticIds.IneffectiveSpec);
     }
 
     [Theory]

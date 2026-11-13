@@ -32,7 +32,26 @@ public static partial class Extractor
                     VirUnitKind.Contract => RaisingClaim(c, analysis),
                     _ => RaisingFunction(c, analysis),
                 };
-                if (c.Rejection is null && c.Kind == VirUnitKind.Function && IneffectiveNoThrow(c, analysis) is { } warning)
+            }
+            _effects = analysis;
+        }
+
+        /// <summary>The effect inference <see cref="RejectEffects"/> made, which <see cref="WarnIneffectiveSpecs"/> reads.</summary>
+        private EffectAnalysis? _effects;
+
+        /// <summary>
+        /// WRT0013 for every function still accepted once every rejection is made (after <c>RejectDependents</c>), so a
+        /// method rejected for a rejected callee gets none (#239).
+        /// </summary>
+        private void WarnIneffectiveSpecs()
+        {
+            if (_effects is not { } analysis)
+            {
+                return;
+            }
+            foreach (var c in _candidates.Values.Where(c => c.Kind == VirUnitKind.Function && c.Rejection is null).OrderBy(c => c.Key, StringComparer.Ordinal))
+            {
+                if (IneffectiveNoThrow(c, analysis) is { } warning)
                 {
                     _diagnostics.Add(warning);
                 }

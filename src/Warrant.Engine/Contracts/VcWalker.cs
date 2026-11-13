@@ -686,9 +686,11 @@ internal sealed class VcWalker
         }
         if (_noThrow)
         {
-            // The callee's contract allows an explicit throw, which this method's does not.
+            // The callee's contract allows an explicit throw, which this method's does not. Only the contract is known here,
+            // not the body, so a throw the arguments rule out cannot be told from one they do not (#238).
+            var callee = NodeAt(node) is CallExpr site ? Reports.OutcomeText.ShortName(site.Target) : what;
             Leftovers.Add(new(allowed, VcKind.CalleeMayThrow, node,
-                $"the contract of {what} allows an explicit throw, which this method's Spec.NoThrow does not; give the callee Spec.NoThrow too"));
+                $"the contract of {callee} allows an explicit throw whatever the arguments, since a caller sees only the callee's contract, not its body; add Spec.NoThrow to {callee}, with a Spec.Requires that rules its throws out and that this call meets"));
             return;
         }
         Unsupported(allowed, node);

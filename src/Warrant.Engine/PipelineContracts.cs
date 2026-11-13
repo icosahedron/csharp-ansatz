@@ -313,7 +313,7 @@ public static partial class Pipeline
                 walker = newWalker();
                 var root = meta.MkFreshExprSyntheticOpaqueMVar(shell.Type);
                 walk(walker, meta.IntroN(root.Id, binders, names).Goal);
-                failures = walker.Close(g => printer.PpGoals(meta.MCtx, [g]));
+                failures = walker.Close(g => PrintFailure(meta, printer, g));
                 proof = VcWalker.Strip(meta.InstantiateMVars(root));
                 TacticFuelUsed = Math.Max(TacticFuelUsed, meta.Budget.FuelUsed);
             }
@@ -343,6 +343,36 @@ public static partial class Pipeline
             Record(unit, walker);
             return AdmitProof(unit, shell, proof, $"the kernel rejected the proof Warrant built for {shell.Name}", display, assumptions, admitted, budget);
         }
+
+        /// <summary>
+        /// A failing VC's goal as the report shows it, without the hypotheses whose type is <c>True</c> (#240): a path
+        /// condition the VC simp set rewrote to <c>True</c>, such as a <c>Spec.Requires</c> under the branch that refutes
+        /// it, says nothing. Display only: they are cleared from a fresh copy of the goal (the failing goal may already be
+        /// assigned, as omega's is), and the Meta state is restored afterwards.
+        /// </summary>
+        private static string PrintFailure(MetaM meta, GoalPrinter printer, MVarId goal)
+        {
+            var saved = meta.SaveState();
+            try
+            {
+                var decl = meta.GetMVarDecl(goal);
+                var shown = meta.MkFreshExprMVarAt(decl.LCtx, decl.LocalInstances, meta.InstantiateMVars(decl.Type), MetavarKind.SyntheticOpaque, decl.UserName).Id;
+                foreach (var local in decl.LCtx.Decls.ToList())
+                {
+                    if (!local.IsImplementationDetail && meta.InstantiateMVars(local.Type) is ConstExpr { Name: var n } && n == TrueName)
+                    {
+                        shown = meta.TryClear(shown, local.FVarId);
+                    }
+                }
+                return printer.PpGoals(meta.MCtx, [shown]);
+            }
+            finally
+            {
+                meta.Restore(saved);
+            }
+        }
+
+        private static readonly Name TrueName = Name.Parse("True");
 
         /// <summary>
         /// One well-definedness obligation (KTD26): a callee's precondition is a plain proposition, proved as a decrease

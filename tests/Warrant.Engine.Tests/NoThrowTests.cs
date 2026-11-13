@@ -127,6 +127,31 @@ public sealed class NoThrowTests(EngineFixture engine) : IClassFixture<EngineFix
     }
 
     [Fact]
+    public void AReachableThrowsGoalShowsNoHypothesisTheRequiresSimplifiedToTrue()
+    {
+        // #240: under b = 0 the Requires b != -1 simplifies to True, which says nothing and is not shown.
+        var source = Wrap("""
+            [Verified]
+            public static int QuotientOfAny(int a, int b)
+            {
+                Spec.Requires(b != -1);
+                Spec.NoThrow();
+                if (b == 0)
+                {
+                    throw new System.ArgumentException("b");
+                }
+                return a / b;
+            }
+            """);
+        const string key = "M:S.QuotientOfAny(System.Int32,System.Int32)";
+        var notProved = Assert.IsType<NotProvedOutcome>(Run(source).Find(key));
+        var (kind, _, _) = Failure(source, key, notProved);
+        Assert.Equal(VcKind.ReachableThrow, kind);
+        Assert.Equal("case ht\na b : Int32\nh : b = 0\n⊢ False", notProved.Vcs[0].Goals);
+        Assert.Equal(notProved.Vcs[0].Goals, notProved.Goals);
+    }
+
+    [Fact]
     public void AThrowExpressionIsAnExplicitThrowToo()
     {
         var source = "#nullable enable\n" + Wrap("""
@@ -261,7 +286,12 @@ public sealed class NoThrowTests(EngineFixture engine) : IClassFixture<EngineFix
         var (kind, text, message) = Failure(source, loose, result.Find(loose));
         Assert.Equal(VcKind.CalleeMayThrow, kind);
         Assert.Equal("Loose(a, 2)", text);
-        Assert.Contains("Spec.NoThrow", message, StringComparison.Ordinal);
+        // #238: the caller sees only the callee's contract, so the message names the callee and the workaround.
+        Assert.Equal(
+            "a callee without Spec.NoThrow may throw explicitly at this call (Spec.NoThrow): the contract of Loose allows an "
+            + "explicit throw whatever the arguments, since a caller sees only the callee's contract, not its body; add "
+            + "Spec.NoThrow to Loose, with a Spec.Requires that rules its throws out and that this call meets",
+            message.Split('\n')[0]);
     }
 
     [Fact]

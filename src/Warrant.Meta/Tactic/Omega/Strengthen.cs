@@ -163,17 +163,25 @@ public sealed partial class MetaM
             {
                 return null;
             }
-            var lemma = Name.Parse($"Warrant.{type}.toInt_{op}_of_range");
-            return op == "neg" ? (lemma, [args[2]]) : (lemma, [args[4], args[5]]);
+            // A literal's negation (`-5`), or an operation on literals, is a literal to the prep step's lemmas.
+            Expr[] operands = op == "neg" ? [args[2]] : [args[4], args[5]];
+            if (operands.All(x => OmegaExprs.Nat(x) is not null || OmegaExprs.AppOf(x, OmegaNames.NegNeg, 3) is [_, _, var n] && OmegaExprs.Nat(n) is not null))
+            {
+                return null;
+            }
+            return (Name.Parse($"Warrant.{type}.toInt_{op}_of_range"), operands);
         }
     }
 
     /// <summary>
     /// For each product <c>x * y</c> of two non-literal integer terms, at most <see cref="StrengthenLimit"/> of them, the
-    /// four lemmas of <see cref="ProductBounds"/> at the tightest literal bound the hypotheses state on each side of
-    /// <c>x</c> and <c>y</c>, as hypotheses <c>a ≤ x → b ≤ y → a * y + b * x - a * b ≤ x * y</c> and so on: <c>omega</c>
-    /// reads an implication as a disjunction, so it uses a corner whose bounds hold and drops one whose bounds it cannot
-    /// show, and no bound needs a proof of its own. The products and the bounds are read from the goal as the omega-prep
+    /// four lemmas of <see cref="ProductBounds"/> at one literal bound on each side of <c>x</c> and <c>y</c> (see
+    /// <c>Bound</c>). A bound stated as a fact (a hypothesis or one of its top-level conjuncts) needs no proof: the lemma
+    /// is added as an implication from it, <c>a ≤ x → b ≤ y → a * y + b * x - a * b ≤ x * y</c>, which <c>omega</c> reads
+    /// as a disjunction and discharges. A tighter comparison found elsewhere, or the complement of one (an <c>if</c>'s
+    /// condition, a side of <c>||</c>: the path may make it true), is used instead when a plain <c>omega</c> proves it from
+    /// the linear hypotheses, and its proof is applied; when a side has no fact, its tightest candidate is used as an
+    /// implication too (an <c>if</c> in the goal that <c>omega</c> splits). The products and the bounds are read from the goal as the omega-prep
     /// step leaves it (where <c>(a * b).toInt</c> is <c>a.toInt * b.toInt</c> under its <c>bmod</c>, and <c>0 ≤ a</c> is
     /// <c>0 ≤ a.toInt</c>), in a trial run that is then undone; the facts are added to <paramref name="g"/> itself, before
     /// the prep step, so later proofs in the goal have them. A product of three factors, <c>(x * y) * z</c>, gets no bound
@@ -183,8 +191,13 @@ public sealed partial class MetaM
     {
         var known = WithContext(g, () => LCtx.Decls.Select(d => d.FVarId).ToHashSet());
         var products = new List<(Expr X, Expr Y)>();
-        var lower = new Dictionary<Expr, SortedSet<BigInteger>>();
-        var upper = new Dictionary<Expr, SortedSet<BigInteger>>();
+        var lower = new Dictionary<Expr, Candidates>();
+        var upper = new Dictionary<Expr, Candidates>();
+        // No product, no trial prep step: `(a * b).toInt` and `a.toInt * b.toInt` both have a `*` before it.
+        if (Terms(g).All(t => ExprOps.Find(t, (e, _) => e is ConstExpr { Name: var n } && n == OmegaNames.HMul) is null))
+        {
+            return g;
+        }
         var saved = SaveState();
         try
         {
@@ -207,19 +220,34 @@ public sealed partial class MetaM
         var facts = new List<(Name, Expr, Expr)>();
         foreach (var (x, y) in products)
         {
-            var lx = Bound(lower, x, tightest: v => v.Max);
-            var ux = Bound(upper, x, tightest: v => v.Min);
-            var ly = Bound(lower, y, tightest: v => v.Max);
-            var uy = Bound(upper, y, tightest: v => v.Min);
+            var lx = Bound(x, lowerSide: true);
+            var ux = Bound(x, lowerSide: false);
+            var ly = Bound(y, lowerSide: true);
+            var uy = Bound(y, lowerSide: false);
             // mul_ge_of_ge_of_ge, mul_ge_of_le_of_le, mul_le_of_ge_of_le, mul_le_of_le_of_ge: the bounds on x, then on y.
-            (int Lemma, BigInteger? Bx, BigInteger? By)[] corners = [(0, lx, ly), (1, ux, uy), (2, lx, uy), (3, ux, ly)];
-            foreach (var (lemma, bx, by) in corners)
+            ((BigInteger, Expr?)? Bx, (BigInteger, Expr?)? By)[] corners = [(lx, ly), (ux, uy), (lx, uy), (ux, ly)];
+            for (int lemma = 0; lemma < corners.Length; lemma++)
             {
-                if (bx is { } a && by is { } b && Env.Find(ProductBounds[lemma]) is not null)
+                if (corners[lemma] is not ((var a, var hx), (var b, var hy)) || Env.Find(ProductBounds[lemma]) is null)
                 {
-                    var fact = Expr.App(Expr.Const(ProductBounds[lemma]), x, y, OmegaExprs.IntLit(a), OmegaExprs.IntLit(b));
-                    facts.Add((Name.From("hmul"), WithContext(g, () => InferType(fact)), fact));
+                    continue;
                 }
+                Expr fact = Expr.App(Expr.Const(ProductBounds[lemma]), x, y, OmegaExprs.IntLit(a), OmegaExprs.IntLit(b));
+                if (hx is not null)
+                {
+                    fact = hy is not null ? Expr.App(fact, hx, hy) : Expr.App(fact, hx);
+                }
+                else if (hy is not null)
+                {
+                    // fun h : (bound on x) => lemma x y a b h hy
+                    var premise = WithContext(g, () => WhnfR(InferType(fact))) is ForallExpr f ? f.BinderType : null;
+                    if (premise is null)
+                    {
+                        continue;
+                    }
+                    fact = Expr.Lam(Name.From("h"), premise, Expr.App(fact, Expr.BVar(0), hy));
+                }
+                facts.Add((Name.From("hmul"), WithContext(g, () => InferType(fact)), fact));
             }
         }
         return facts.Count == 0 ? g : AssertHypotheses(g, facts).Goal;
@@ -228,8 +256,12 @@ public sealed partial class MetaM
         {
             var hyps = WithContext(prepped, () => LCtx.Decls.Where(d => !d.IsImplementationDetail && IsProp(d.Type)).Select(d => this.InstantiateMVars(d.Type)).ToList());
             var seen = new HashSet<Expr>();
+            var facts = new HashSet<Expr>();
             foreach (var hyp in hyps)
             {
+                // A hypothesis and its top-level conjuncts are facts; a comparison anywhere else (an `if`'s condition, a side
+                // of `∨`, under `¬`) is only a candidate, and so is the complement of each comparison.
+                Facts(hyp, facts);
                 ExprOps.ForEach(hyp, (e, _) =>
                 {
                     if (e.HasLooseBVars)
@@ -241,36 +273,90 @@ public sealed partial class MetaM
                     {
                         products.Add((x, y));
                     }
-                    if (Comparison(e) is var (strict, a, b))
+                    if (!facts.Contains(e))
                     {
-                        // a ≤ b, or a < b, that is a + 1 ≤ b.
-                        if (Ground(a) is { } c)
-                        {
-                            Add(lower, b, strict ? c + 1 : c);
-                        }
-                        else if (Ground(b) is { } d)
-                        {
-                            Add(upper, a, strict ? d - 1 : d);
-                        }
+                        Candidate(e, fact: false);
                     }
                     return true;
                 });
             }
         }
 
+        void Facts(Expr e, HashSet<Expr> facts)
+        {
+            if (OmegaExprs.AppOf(e, OmegaNames.And, 2) is [var p, var q])
+            {
+                Facts(p, facts);
+                Facts(q, facts);
+                return;
+            }
+            if (facts.Add(e))
+            {
+                Candidate(e, fact: true);
+            }
+        }
+
+        void Candidate(Expr e, bool fact)
+        {
+            if (Comparison(e) is not var (strict, a, b))
+            {
+                return;
+            }
+            // a ≤ b, or a < b, that is a + 1 ≤ b. Unless it is a fact, its complement b < a, or b ≤ a, is a candidate on
+            // the other side (a branch not taken: `¬(a < 0)`).
+            if (Ground(a) is { } c)
+            {
+                Add(lower, b, strict ? c + 1 : c, fact);
+                if (!fact)
+                {
+                    Add(upper, b, strict ? c : c - 1, fact: false);
+                }
+            }
+            else if (Ground(b) is { } d)
+            {
+                Add(upper, a, strict ? d - 1 : d, fact);
+                if (!fact)
+                {
+                    Add(lower, a, strict ? d : d + 1, fact: false);
+                }
+            }
+        }
+
         // Whether every free variable of e is one of g's: a term the trial prep step made up cannot be used in g.
         bool OnlyKnown(Expr e) => ExprOps.Find(e, (y, _) => y is FVarExpr f && !known.Contains(f.Id)) is null;
 
-        static BigInteger? Bound(Dictionary<Expr, SortedSet<BigInteger>> bounds, Expr x, Func<SortedSet<BigInteger>, BigInteger> tightest) =>
-            bounds.TryGetValue(x, out var set) ? tightest(set) : null;
-
-        static void Add(Dictionary<Expr, SortedSet<BigInteger>> bounds, Expr term, BigInteger value)
+        // The bounds a corner is stated at: the tightest fact, and the tightest candidate tighter than it (or the two
+        // tightest candidates when no fact bounds this side). omega drops the corners whose premises it cannot show.
+        // The bound used on one side of a factor: the tightest tighter-than-fact candidate a plain omega proves from the
+        // linear hypotheses (at most two are tried), with its proof; else the tightest fact, with none; else the tightest
+        // candidate, with none, for a condition the goal itself splits (`if (a < 0) … else a * b`: `0 ≤ a` in one branch).
+        (BigInteger, Expr?)? Bound(Expr x, bool lowerSide)
         {
-            if (!bounds.TryGetValue(term, out var set))
+            if (!(lowerSide ? lower : upper).TryGetValue(x, out var c))
             {
-                bounds[term] = set = [];
+                return null;
             }
-            set.Add(value);
+            // Tightest first: the largest lower bound, the smallest upper bound.
+            IEnumerable<BigInteger> Tightest(SortedSet<BigInteger> set) => lowerSide ? set.Reverse() : set;
+            BigInteger? fact = c.Facts.Count > 0 ? Tightest(c.Facts).First() : null;
+            foreach (var v in Tightest(c.Others).Where(v => fact is not { } f || (lowerSide ? v > f : v < f)).Take(2))
+            {
+                var literal = OmegaExprs.IntLit(v);
+                if (ProveByOmega(g, lowerSide ? IntLe(literal, x) : IntLe(x, literal), linearOnly: true) is { } proof)
+                {
+                    return (v, proof);
+                }
+            }
+            return fact is { } b ? (b, null) : c.Others.Count > 0 ? (Tightest(c.Others).First(), null) : null;
+        }
+
+        static void Add(Dictionary<Expr, Candidates> bounds, Expr term, BigInteger value, bool fact)
+        {
+            if (!bounds.TryGetValue(term, out var c))
+            {
+                bounds[term] = c = new Candidates([], []);
+            }
+            (fact ? c.Facts : c.Others).Add(value);
         }
 
         static (bool Strict, Expr A, Expr B)? Comparison(Expr e) =>
@@ -285,16 +371,39 @@ public sealed partial class MetaM
         static bool IsInt(Expr t) => t is ConstExpr { Name: var n } && n == OmegaNames.Int;
     }
 
+    /// <summary>The literal bounds read for one side of a factor: from facts, and from other comparisons.</summary>
+    private sealed record Candidates(SortedSet<BigInteger> Facts, SortedSet<BigInteger> Others);
+
+    /// <summary>The heads <see cref="ProveByOmega"/>'s <c>linearOnly</c> drops hypotheses for.</summary>
+    private static readonly HashSet<Name> NonLinear = [OmegaNames.HMul, OmegaNames.HDiv, OmegaNames.HMod, OmegaNames.Ite, Name.Parse("dite")];
+
     private static Expr IntLe(Expr a, Expr b) => Expr.App(Expr.Const(OmegaNames.LE, Level.Zero), OmegaExprs.IntType, Expr.Const(IntInstLE), a, b);
 
     /// <summary>A proof of <paramref name="prop"/> in <paramref name="g"/>'s context by a plain <c>Tactic.Omega()</c>, or null.</summary>
-    private Expr? ProveByOmega(MVarId g, Expr prop)
+    /// <param name="g">The goal whose context the proof is in.</param>
+    /// <param name="prop">The proposition.</param>
+    /// <param name="linearOnly">
+    /// Whether to drop the hypotheses that mention <c>*</c>, <c>/</c>, <c>%</c> or an <c>if</c> first: a factor's literal
+    /// bound follows from the linear ones, and the others only make the proof cost more (case splits on a wrap-around).
+    /// </param>
+    private Expr? ProveByOmega(MVarId g, Expr prop, bool linearOnly = false)
     {
         var saved = SaveState();
         try
         {
             var goal = WithContext(g, () => MkFreshExprSyntheticOpaqueMVar(prop));
-            OmegaPlain(goal.Id);
+            var target = goal.Id;
+            if (linearOnly)
+            {
+                var heavy = WithContext(g, () => LCtx.Decls.Where(d => !d.IsImplementationDetail && IsProp(d.Type)
+                    && ExprOps.Find(this.InstantiateMVars(d.Type), (e, _) => e is ConstExpr { Name: var n } && NonLinear.Contains(n)) is not null)
+                    .Select(d => d.FVarId).ToList());
+                foreach (var fvar in heavy)
+                {
+                    target = TryClear(target, fvar);
+                }
+            }
+            OmegaPlain(target);
             var proof = this.InstantiateMVars(goal);
             if (proof.HasExprMVar)
             {

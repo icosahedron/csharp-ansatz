@@ -398,6 +398,8 @@ public sealed class OmegaTests(AttributeSidecarFixture fixture) : IClassFixture<
     // 0 ≤ x ≤ 10, -3 ≤ y ≤ 5: x * y ≤ 50 needs mul_le_of_ge_of_le (lower x, upper y; the other corner gives 80), and
     // -30 ≤ x * y needs mul_ge_of_ge_of_ge.
     [InlineData(0, 10, -3, 5, -30, 50)]
+    // -10 ≤ x ≤ 0, 0 ≤ y ≤ 5: x * y ≤ 0 needs mul_le_of_le_of_ge (upper x, lower y; the other corner gives 50).
+    [InlineData(-10, 0, 0, 5, -50, 0)]
     public void EachCornerOfTheProductBoxIsUsed(int lx, int ux, int ly, int uy, int low, int high)
     {
         static Expr Lit(BigInteger n) => n.Sign < 0 ? Expr.App(C("Neg.neg", Level.Zero), IntT, C("Int.instNegInt"), IntTerms.Lit(-n)) : IntTerms.Lit(n);

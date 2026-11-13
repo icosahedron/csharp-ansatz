@@ -179,6 +179,17 @@ public sealed class ProcedureStrengthTests(EngineFixture engine) : IClassFixture
 
             [ProofFor(nameof(Area))]
             static Proof AreaProof() => Prove.Contract().By(Tactic.VcGen(), Tactic.Omega());
+
+            [Verified]
+            public static int Bounded(int a, int b)
+            {
+                Spec.Requires(0 <= a && a <= 1000 && 0 <= b && b <= 1000);
+                Spec.Ensures<int>(r => r <= 1000000);
+                return a * b;
+            }
+
+            [ProofFor(nameof(Bounded))]
+            static Proof BoundedProof() => Prove.Contract().By(Tactic.VcGen(), Tactic.Omega());
             """);
         // The trace records every script that runs: the script is never reached, so its strength does not matter.
         var ran = new System.Collections.Concurrent.ConcurrentBag<string>();
@@ -187,6 +198,8 @@ public sealed class ProcedureStrengthTests(EngineFixture engine) : IClassFixture
         var outcome = Assert.IsType<NotProvedOutcome>(result.Find("M:S.Area(System.Int32,System.Int32)"));
         Assert.Equal(VcKind.ArithmeticOverflow, Assert.Single(outcome.Vcs).Kind);
         Assert.DoesNotContain("M:S.Area(System.Int32,System.Int32)", ran);
+        // The control: where the no-overflow obligation holds, the script runs and the trace has it under the method's key.
+        Assert.Contains("M:S.Bounded(System.Int32,System.Int32)", ran);
     }
 
     [Fact]
@@ -254,6 +267,71 @@ public sealed class ProcedureStrengthTests(EngineFixture engine) : IClassFixture
         Proved(result.Find("M:S.FirstOrSecond(System.Nullable{System.Int32},System.Nullable{System.Int32})"));
         Proved(result.Find("M:S.FlaggedNull(System.Boolean,System.Nullable{System.Int32})"));
         Proved(result.Find("M:S.SameOrLarger(System.Int32,System.Int32,System.Boolean,System.Boolean)"));
+    }
+
+    [Fact]
+    public void AComparisonThatIsNotAFactDoesNotDisplaceAFactorsBound()
+    {
+        // Review of #263, round 2: a comparison inside a condition (an `if`, a `||`) is a candidate bound but not a fact,
+        // and must not take the place of the Spec.Requires bound it is tighter than.
+        var source = Wrap("""
+            [Verified]
+            public static int GuardedAbove(int a, int b)
+            {
+                Spec.Requires(0 <= a && a <= 10 && 0 <= b && b <= 10);
+                Spec.Ensures<int>(r => r <= 50);
+                if (a > 5) { return 0; }
+                return a * b;
+            }
+
+            [Verified]
+            public static int GuardedBelow(int a, int b)
+            {
+                Spec.Requires(-10 <= a && a <= 0 && -10 <= b && b <= 0);
+                Spec.Ensures<int>(r => r >= 0);
+                if (a <= -5) { return 0; }
+                return a * b;
+            }
+
+            [Verified]
+            public static int InADisjunction(int a, int b)
+            {
+                Spec.Requires(0 <= a && a <= 10 && 0 <= b && b <= 10);
+                Spec.Ensures<int>(r => a > 3 || r <= 30);
+                return a * b;
+            }
+
+            [Verified]
+            public static int InAConjunctOfADisjunction(int a, int b)
+            {
+                Spec.Requires(0 <= a && a <= 10 && 0 <= b && b <= 10);
+                Spec.Ensures<int>(r => (a > 3 || r <= 30) && r <= 100);
+                return a * b;
+            }
+            """);
+        var result = Run(source);
+        foreach (var name in new[] { "GuardedAbove", "GuardedBelow", "InADisjunction", "InAConjunctOfADisjunction" })
+        {
+            Proved(result.Find($"M:S.{name}(System.Int32,System.Int32)"));
+        }
+    }
+
+    [Fact]
+    public void TheComplementOfABranchNotTakenBoundsAFactor()
+    {
+        // Review of #263, round 2: after `if (a < 0) return 0;` the path knows `!(a < 0)`, whose complement `0 <= a` is the
+        // lower bound the product needs. On its own: its proof is the heaviest of these for the kernel (about 2.5 s).
+        var source = Wrap("""
+            [Verified]
+            public static int ByTheComplement(int a, int b)
+            {
+                Spec.Requires(a <= 10 && 0 <= b && b <= 10);
+                Spec.Ensures<int>(r => r >= 0);
+                if (a < 0) { return 0; }
+                return a * b;
+            }
+            """);
+        Proved(Run(source).Find("M:S.ByTheComplement(System.Int32,System.Int32)"));
     }
 
     [Fact]

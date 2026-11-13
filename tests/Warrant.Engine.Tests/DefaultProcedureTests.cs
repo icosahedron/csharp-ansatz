@@ -326,7 +326,7 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
             public static int Wrong(int x)
             {
                 Spec.Ensures<int>(r => Spec.Implies(x > 0, r > 0));
-                return x - 1;
+                return unchecked(x - 1);
             }
             """);
         var result = Run(source);
@@ -400,7 +400,7 @@ public sealed class DefaultProcedureTests(EngineFixture engine) : IClassFixture<
             }
 
             [Verified]
-            public static int Fine() => Small(50) + Small(-500);
+            public static int Fine() => unchecked(Small(50) + Small(-500));
 
             [Verified]
             public static int TooBig() => Small(500);
